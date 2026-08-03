@@ -25,115 +25,129 @@
 
 1. **用户**：拥有最终授权权，可确认目标、约束、预算和高风险发布。
 2. **ChatGPT 网页主会话**：拥有计划权和语义决策权，定义目标、验收标准、异常裁决和语义验收；不直接覆盖本地执行事实。
-3. **本地编排器**：拥有规则范围内的运行调度权，保存任务运行状态、调用工具、控制恢复和审计；不得自行改变总体目标。
+3. **本地编排器**：拥有规则范围内的运行调度权，保存任务运行状态、调用工具、控制恢复和审计；其中 `Orchestration Core / Execution Coordinator` 是所有模块的协调入口；不得自行改变总体目标。
 4. **临时 ChatGPT 子会话**：只提供受限的分析或拆解结果；不能直接获得本地执行权限。
 5. **Codex 工作包会话**：只处理获得授权的代码、仓库和本地工程工作；不能自行扩大范围、直接控制浏览器或绕过本地策略。
 6. **本地确定性工具**：执行明确、可验证、最小权限的本地动作；不能解释自然语言意图或改变计划。
 7. **外部系统和不可信内容**：提供网页、源码、日志、文档或网络响应等输入；默认不可信，没有控制权限。
 
-只有合法、已授权并通过 Schema、策略、预算和幂等校验的结构化 Command 才能执行。子会话和 Codex 都不能直接取得执行权限；所有副作用仍由本地编排器统一调度。
+只有合法、已授权并通过 Schema、策略、预算和幂等校验的结构化 Command 才能执行。子会话和 Codex 都不能直接取得执行权限；所有副作用仍由 `Orchestration Core / Execution Coordinator` 统一协调，并通过相应适配器或执行器执行。
 
 ## 4. 系统上下文图
 
 ```mermaid
 flowchart LR
     U["User"] -->|决策流：目标、约束、授权| MAIN["ChatGPT Main Conversation"]
-    MAIN -->|控制流：结构化 Task / Plan Version| ORCH["Local Orchestrator"]
-    ORCH -->|受限分析请求| CHILD["Temporary Child Conversations"]
-    CHILD -->|分析结果：不可信，需校验| ORCH
-    ORCH -->|工程 Work Package| CODEX["Codex CLI"]
-    CODEX -->|代码变更和报告| WT["Git Worktrees"]
-    ORCH -->|确定性 Command| TOOLS["Local Deterministic Tools"]
-    ORCH -->|状态、检查点、审计| DB[("SQLite")]
-    ORCH -->|浏览器控制| BROWSER["Edge/Chromium Dedicated Profile"]
-    BROWSER -->|不可信网页内容| ORCH
-    ORCH -->|用户可见通知| NOTIFY["Windows Notification"]
-    BROWSER -->|网络访问| NET["External Network Resources"]
-    NET -->|不可信输入边界| BROWSER
-    TOOLS -->|证据和结果| ORCH
-    WT -->|版本和差异证据| ORCH
-    MAIN -.->|语义验收结果| ORCH
+    MAIN -->|页面中的结构化 Task / Plan Version| BA["Browser Adapter"]
+    subgraph LOCAL["Local Orchestrator"]
+        CORE["Orchestration Core / Execution Coordinator"]
+        BA -->|结构化 Task、Action Result、语义验收材料| CORE
+        CORE -->|浏览器 Request| BA
+        CORE -->|工程 Work Package| CA["Codex Adapter"]
+        CORE -->|确定性 Command| TOOLS["Local Deterministic Tools"]
+        CORE -->|状态、检查点、审计| DB[("SQLite")]
+        CORE -->|用户可见通知| NOTIFY["Windows Notification"]
+        CA -->|工程调用| CODEX["Codex CLI"]
+        CODEX -->|代码变更和报告| WT["Git Worktrees"]
+    end
+    BA -->|浏览器控制| PROFILE["Edge/Chromium Dedicated Profile"]
+    PROFILE -->|主会话页面| MAIN
+    PROFILE -->|临时子会话页面| CHILD["Temporary Child Conversations"]
+    CHILD -->|分析结果页面| PROFILE
+    PROFILE -->|网络访问| NET["External Network Resources"]
+    NET -->|不可信输入边界| PROFILE
+    TOOLS -->|证据和结果| CORE
+    WT -->|版本和差异证据| CORE
 
     classDef decision fill:#e8f1ff,stroke:#3568a8
     classDef control fill:#eaf7ea,stroke:#438a43
     classDef evidence fill:#fff4df,stroke:#b7791f
     classDef untrusted fill:#ffe8e8,stroke:#b33a3a
     class MAIN,U decision
-    class ORCH,TOOLS,CODEX,WT,NOTIFY,BROWSER control
+    class CORE,BA,CA,TOOLS,CODEX,WT,NOTIFY,PROFILE control
     class DB evidence
     class CHILD,NET untrusted
 ```
 
-图例：实线箭头表示决策流、控制流或状态和证据流；虚线表示语义验收回传；红色节点和“不可信输入边界”表示内容可被引用为数据，但不能直接成为执行指令。Local Orchestrator 是唯一的本地控制汇聚点。
+图例：实线箭头表示决策流、控制流或状态和证据流；红色节点和“不可信输入边界”表示内容可被引用为数据，但不能直接成为执行指令。`Local Orchestrator` 内的 `Orchestration Core / Execution Coordinator` 是唯一的本地协调入口；主会话和临时子会话只能通过 `Browser Adapter` 与专用 Profile 交互。
 
 ## 5. 本地编排器模块
 
 以下边界描述模块职责，不定义具体类、函数或数据库字段。每个模块的“禁止绕过”项表示调用方不能直接跳过的控制边界。
 
-### 5.1 Control API / CLI
+### 5.1 Orchestration Core / Execution Coordinator
+
+- **负责**：作为所有模块的协调入口；接收 Task、Action Result 和 Recovery Instruction；按顺序协调 Task and Plan Manager、Workflow Scheduler、Command Validator、Policy and Authorization Engine、Budget and Routing Engine 以及执行适配器；管理事务和调用边界。
+- **不负责**：不直接执行 Command；不自行修改总体目标；不授予权限；不修改 Budget and Routing Engine 的预算结果；不替代 Acceptance Manager 或主会话的验收判断。
+- **主要输入**：经 Browser Adapter 或 Control API / CLI 进入的结构化 Task、Action Result、Recovery Instruction，以及用户确认。
+- **主要输出**：模块调用请求、候选 Action、具体 Command、执行编排结果、验收请求和归档请求。
+- **允许依赖**：Task and Plan Manager、Workflow Scheduler、Policy and Authorization Engine、Budget and Routing Engine、Context Pack Manager、Command Validator、Command Executor、Browser Adapter、Codex Adapter、Tool Registry、Workspace and Git Manager、Acceptance Manager、Recovery and Checkpoint Manager、Persistence Layer、Audit and Reporting、Notification Adapter。
+- **禁止绕过**：Policy and Authorization Engine、Budget and Routing Engine、Command Validator、Persistence Layer 和 Acceptance Manager；不得成为隐藏的命令执行入口。
+
+### 5.2 Control API / CLI
 
 - **负责**：接收人工启动、暂停、恢复、确认和查询请求；展示最小运行信息。
-- **不负责**：解释总体目标、直接执行工具、修改状态存储或绕过授权。
+- **不负责**：解释总体目标、直接执行工具、修改状态存储或绕过授权；所有 Request 交给 Orchestration Core / Execution Coordinator。
 - **主要输入**：用户 Request、结构化 Task、确认操作。
-- **主要输出**：经过验证的 Request、查询结果、用户提示。
-- **允许依赖**：Task and Plan Manager、Recovery and Checkpoint Manager、Audit and Reporting、Notification Adapter。
-- **禁止绕过**：Command Validator、Policy and Authorization Engine、Persistence Layer。
+- **主要输出**：提交给 Orchestration Core 的 Request、查询结果、用户提示。
+- **允许依赖**：Orchestration Core / Execution Coordinator、Audit and Reporting、Notification Adapter。
+- **禁止绕过**：Task and Plan Manager、Command Validator、Policy and Authorization Engine、Persistence Layer。
 
-### 5.2 Task and Plan Manager
+### 5.3 Task and Plan Manager
 
-- **负责**：登记 Task、保存 Plan Version 的来源和版本关系、维护目标与验收标准的引用，并生成只读的 Plan/Scope Snapshot。
-- **不负责**：执行 Action、分配模型额度、直接修改代码或为 Command Validator 执行校验。
-- **主要输入**：主会话提交的结构化 Task / Plan Version、用户修订 Request。
-- **主要输出**：可调度的 Stage / Work Package 描述、只读 Plan/Scope Snapshot、计划变更记录。
+- **负责**：校验 Task / Plan 的 Schema、来源和版本关系；登记 Task、维护目标与验收标准的引用，并生成只读的 Plan/Scope Snapshot。
+- **不负责**：生成具体 Command、执行 Action、分配模型额度、直接修改代码或调用 Command Validator。
+- **主要输入**：经 Orchestration Core 转交的结构化 Task / Plan Version、用户修订 Request。
+- **主要输出**：有效计划、可调度的 Stage / Work Package 描述、只读 Plan/Scope Snapshot、计划变更记录。
 - **允许依赖**：Persistence Layer、Audit and Reporting。
-- **禁止绕过**：Policy and Authorization Engine、Budget and Routing Engine、Acceptance Manager。
+- **禁止绕过**：Orchestration Core、Policy and Authorization Engine、Budget and Routing Engine、Acceptance Manager。
 
-### 5.3 Workflow Scheduler
+### 5.4 Workflow Scheduler
 
-- **负责**：按计划依赖、检查点和可用资源调度正常的 Stage、Work Package 与 Action，并把动作状态、执行事件和检查点请求写入 Persistence Layer。
-- **不负责**：自行改写目标、解释自然语言、推断恢复状态、生成恢复计划或授予权限。
-- **主要输入**：计划、授权结果、预算结果、有效的恢复指令（如有）。
-- **主要输出**：调度请求、动作状态、执行事件、检查点请求、暂停信号和下一步候选动作。
-- **允许依赖**：Task and Plan Manager、Policy and Authorization Engine、Budget and Routing Engine、Command Validator、Persistence Layer。
-- **禁止绕过**：Command Validator、Policy and Authorization Engine、Budget and Routing Engine。
+- **负责**：根据有效计划和约束生成候选 Action，按依赖和阶段顺序调度正常工作流，并把动作状态、执行事件和检查点请求写入 Persistence Layer。
+- **不负责**：校验 Task / Plan Schema、形成具体 Command、解释自然语言、推断恢复状态、生成恢复计划或授予权限。
+- **主要输入**：经 Task and Plan Manager 校验的 Plan/Scope Snapshot、Stage / Work Package 约束和来自 Orchestration Core 的调度请求。
+- **主要输出**：候选 Action、调度请求、动作状态、执行事件、检查点请求和暂停信号。
+- **允许依赖**：Persistence Layer、Tool Registry、Audit and Reporting。
+- **禁止绕过**：Orchestration Core、Budget and Routing Engine、Command Validator、Policy and Authorization Engine；不得在形成 Command 前调用 Command Validator。
 
-### 5.4 Policy and Authorization Engine
+### 5.5 Policy and Authorization Engine
 
-- **负责**：依据用户授权、任务范围、风险等级和最小权限规则判断是否允许 Request 或 Command。
-- **不负责**：执行动作、替用户作总体目标决策或生成自然语言计划。
-- **主要输入**：授权上下文、Command 元数据、资源范围、风险信息。
+- **负责**：依据用户授权、任务范围、风险等级和最小权限规则判断具体 Command 是否允许执行。
+- **不负责**：校验 Task / Plan Schema、执行动作、替用户作总体目标决策或生成自然语言计划。
+- **主要输入**：经 Command Validator 校验的具体 Command、授权上下文、资源范围和风险信息。
 - **主要输出**：允许、拒绝或需要确认的策略决定及理由。
-- **允许依赖**：Task and Plan Manager、Command Validator、Audit and Reporting、Persistence Layer。
-- **禁止绕过**：任何执行模块、Budget and Routing Engine、Acceptance Manager。
+- **允许依赖**：Persistence Layer、Audit and Reporting。
+- **禁止绕过**：Orchestration Core、Command Validator、Budget and Routing Engine、任何执行模块和 Acceptance Manager。
 
-### 5.5 Budget and Routing Engine
+### 5.6 Budget and Routing Engine
 
-- **负责**：管理共享 Agent 额度、时间和调用预算，并选择确定性工具或 Codex 路由。
-- **不负责**：执行调用、改变目标或替代授权判断。
-- **主要输入**：Action 成本估计、当前预算、工具能力和计划约束。
-- **主要输出**：路由决定、预算预留、超预算暂停原因。
-- **允许依赖**：Tool Registry、Task and Plan Manager、Persistence Layer、Audit and Reporting。
-- **禁止绕过**：Policy and Authorization Engine、Command Validator。
+- **负责**：管理共享 Agent 额度、时间和调用预算，选择确定性工具或 Codex 路由，并根据候选 Action 形成具体 Command。
+- **不负责**：执行调用、改变目标、替代授权判断或绕过 Command Validator。
+- **主要输入**：候选 Action、当前预算、工具能力和计划约束。
+- **主要输出**：路由决定、具体 Command、预算预留或超预算暂停原因。
+- **允许依赖**：Tool Registry、Persistence Layer、Audit and Reporting。
+- **禁止绕过**：Orchestration Core、Command Validator、Policy and Authorization Engine。
 
-### 5.6 Context Pack Manager
+### 5.7 Context Pack Manager
 
 - **负责**：按 Work Package 准备最小、可追溯的上下文包，并标记指令与数据边界。
 - **不负责**：执行上下文中的指令、替代主会话作决策或注入未授权内容。
 - **主要输入**：计划、工作区证据、历史报告、允许的外部材料。
 - **主要输出**：供子会话或 Codex 使用的 Context Pack、来源记录。
-- **允许依赖**：Task and Plan Manager、Persistence Layer、Audit and Reporting、Workspace and Git Manager。
-- **禁止绕过**：Policy and Authorization Engine、Command Validator、不可信输入隔离规则。
+- **允许依赖**：Persistence Layer、Audit and Reporting、Workspace and Git Manager。
+- **禁止绕过**：Orchestration Core、Policy and Authorization Engine、Command Validator、不可信输入隔离规则。
 
-### 5.7 Browser Adapter
+### 5.8 Browser Adapter
 
-- **负责**：通过专用 Edge/Chromium Profile 与网页界面交互，读取和提交经过编排的浏览器 Request。
-- **不负责**：执行本地命令、决定是否发布或把网页指令直接转成 Command。
-- **主要输入**：已授权浏览器 Request、目标会话上下文。
-- **主要输出**：页面响应、截图或文本证据、超时和交互错误。
+- **负责**：通过专用 Edge/Chromium 持久化 Profile 与 ChatGPT Main Conversation 和 Temporary Child Conversations 交互，读取和提交经过编排的浏览器 Request。
+- **不负责**：执行本地命令、决定是否发布、直接调用子会话，或把网页指令直接转成 Command。
+- **主要输入**：由 Orchestration Core 发出的已授权浏览器 Request、目标会话上下文。
+- **主要输出**：结构化 Task / Plan、Action Result、语义验收响应、截图或文本证据、超时和交互错误。
 - **允许依赖**：Platform Adapter、Persistence Layer、Audit and Reporting、Notification Adapter。
-- **禁止绕过**：Policy and Authorization Engine、Command Validator、Recovery and Checkpoint Manager。
+- **禁止绕过**：Orchestration Core、Policy and Authorization Engine、Command Validator、Recovery and Checkpoint Manager；不得让编排器绕过自身直接访问会话。
 
-### 5.8 Codex Adapter
+### 5.9 Codex Adapter
 
 - **负责**：把已授权的工程 Work Package 交给 Codex CLI，并收集差异、测试结果和报告。
 - **不负责**：直接修改正式工作区、决定工作包范围、发布变更或执行非工程动作。
@@ -142,34 +156,34 @@ flowchart LR
 - **允许依赖**：Workspace and Git Manager、Platform Adapter、Persistence Layer、Audit and Reporting。
 - **禁止绕过**：Policy and Authorization Engine、Budget and Routing Engine、Acceptance Manager。
 
-### 5.9 Tool Registry
+### 5.10 Tool Registry
 
 - **负责**：登记本地确定性工具的能力、风险、输入输出约束和版本信息。
 - **不负责**：解释意图、执行工具或临时注册未经审查的工具。
 - **主要输入**：工具元数据、能力探测结果。
 - **主要输出**：可路由能力、工具选择依据。
 - **允许依赖**：Platform Adapter、Persistence Layer、Audit and Reporting。
-- **禁止绕过**：Policy and Authorization Engine、Command Validator、Command Executor。
+- **禁止绕过**：Orchestration Core、Policy and Authorization Engine、Command Validator、Command Executor。
 
-### 5.10 Command Validator
+### 5.11 Command Validator
 
-- **负责**：使用只读的 Plan/Scope Snapshot 验证结构化 Command 的来源、Schema、完整性、范围、幂等标识和前置条件。
-- **不负责**：解释自然语言意图、授予权限、执行 Command，或修改 Task、Plan、Stage、Work Package。
-- **主要输入**：结构化 Command、只读 Plan/Scope Snapshot、工具元数据。
+- **负责**：在 Budget and Routing Engine 根据候选 Action 形成具体 Command 后，验证该 Command 的来源、Command Schema、完整性、范围、幂等标识和前置条件。
+- **不负责**：在 Command 产生前校验候选 Action；不解释自然语言意图、不授予权限、不执行 Command，也不修改 Task、Plan、Stage、Work Package。
+- **主要输入**：已形成的具体 Command、只读 Plan/Scope Snapshot、工具元数据。
 - **主要输出**：结构化校验结果，包括通过结果或拒绝原因；校验失败只阻止执行，不改变计划。
 - **允许依赖**：Tool Registry、Persistence Layer、Audit and Reporting；通过共享协议、持久化查询接口或不可变数据对象读取 Snapshot。
-- **禁止绕过**：Policy and Authorization Engine、Command Executor、Recovery and Checkpoint Manager；不得回写 Task and Plan Manager 管理的计划对象。
+- **禁止绕过**：Orchestration Core、Policy and Authorization Engine、Command Executor、Recovery and Checkpoint Manager；不得在 Command 产生前被调用，不得回写 Task and Plan Manager 管理的计划对象。
 
-### 5.11 Command Executor
+### 5.12 Command Executor
 
-- **负责**：执行已通过验证、授权和预算检查的 Command，记录结果和副作用。
+- **负责**：执行已通过 Command Validator、Policy and Authorization Engine、Budget and Routing Engine、幂等和执行前检查的 Command，记录结果和副作用。
 - **不负责**：自行解析自然语言意图、重试未知副作用或改变 Command 语义。
 - **主要输入**：合法 Command、执行上下文、幂等和检查点信息。
 - **主要输出**：执行结果、证据、错误和副作用记录。
 - **允许依赖**：Tool Registry、Platform Adapter、Persistence Layer、Audit and Reporting。
-- **禁止绕过**：Command Validator、Policy and Authorization Engine、Recovery and Checkpoint Manager。
+- **禁止绕过**：Orchestration Core、Command Validator、Policy and Authorization Engine、Recovery and Checkpoint Manager。
 
-### 5.12 Workspace and Git Manager
+### 5.13 Workspace and Git Manager
 
 - **负责**：创建任务 worktree、隔离工作目录、收集差异、管理本地 Git 版本证据。
 - **不负责**：决定代码是否正确、直接替正式原项目发布或代替 Acceptance Manager 验收。
@@ -178,16 +192,16 @@ flowchart LR
 - **允许依赖**：Platform Adapter、Persistence Layer、Audit and Reporting。
 - **禁止绕过**：Policy and Authorization Engine、Acceptance Manager、Workspace 范围限制。
 
-### 5.13 Acceptance Manager
+### 5.14 Acceptance Manager
 
-- **负责**：组织本地机器验收、收集验收证据，并准备提交主会话进行语义验收的材料。
-- **不负责**：替主会话作最终语义裁决、修改实现或自动扩大验收范围。
+- **负责**：组织本地机器验收、收集验收证据，并将其整理为提交主会话进行语义验收的语义验收包。
+- **不负责**：通过 Browser Adapter 发送材料、替主会话作最终语义裁决、修改实现或自动扩大验收范围。
 - **主要输入**：工具结果、Codex 差异、测试证据、验收标准。
-- **主要输出**：机器验收报告、待主会话裁决的语义验收包、通过或返工建议。
-- **允许依赖**：Task and Plan Manager、Workspace and Git Manager、Persistence Layer、Audit and Reporting、Browser Adapter。
-- **禁止绕过**：Policy and Authorization Engine、Command Validator、用户最终确认。
+- **主要输出**：仅输出语义验收包，其中包含机器验收证据和待主会话判断的材料。
+- **允许依赖**：Task and Plan Manager、Workspace and Git Manager、Persistence Layer、Audit and Reporting。
+- **禁止绕过**：Orchestration Core、Policy and Authorization Engine、Command Validator、Browser Adapter 和用户最终确认。
 
-### 5.14 Recovery and Checkpoint Manager
+### 5.15 Recovery and Checkpoint Manager
 
 - **负责**：读取 Persistence Layer 中的动作状态、执行事件和检查点事实，识别可重放、可恢复和必须暂停的情况，并生成恢复计划、恢复游标或状态待核验结果。
 - **不负责**：隐式重试有副作用的请求、修改目标、直接执行动作、直接操纵 Scheduler 内部队列或掩盖失败。
@@ -196,7 +210,7 @@ flowchart LR
 - **允许依赖**：Persistence Layer、Audit and Reporting、Notification Adapter。
 - **禁止绕过**：Policy and Authorization Engine、Budget and Routing Engine、Command Validator；不得直接调用 Workflow Scheduler。
 
-### 5.15 Persistence Layer
+### 5.16 Persistence Layer
 
 - **负责**：提供任务运行状态、检查点、预算、授权引用和审计数据的持久化抽象。
 - **不负责**：保存代码版本、执行命令或决定状态迁移语义。
@@ -205,7 +219,7 @@ flowchart LR
 - **允许依赖**：Platform Adapter。
 - **禁止绕过**：Audit and Reporting、Recovery and Checkpoint Manager 的一致性规则；不得被直接当作代码版本库。
 
-### 5.16 Audit and Reporting
+### 5.17 Audit and Reporting
 
 - **负责**：汇总请求、授权、路由、执行、证据、验收和副作用，生成可追溯报告。
 - **不负责**：修改运行状态、批准动作或发送未授权外部消息。
@@ -214,7 +228,7 @@ flowchart LR
 - **允许依赖**：Persistence Layer、Platform Adapter。
 - **禁止绕过**：所有产生副作用的模块必须写入审计；不得以报告代替授权。
 
-### 5.17 Notification Adapter
+### 5.18 Notification Adapter
 
 - **负责**：通过 Windows 桌面通知告知暂停、需要确认、失败和完成等运行事件。
 - **不负责**：承担任务决策、修改授权或确认高风险动作。
@@ -223,7 +237,7 @@ flowchart LR
 - **允许依赖**：Platform Adapter、Audit and Reporting。
 - **禁止绕过**：Policy and Authorization Engine、Control API / CLI 的确认流程。
 
-### 5.18 Platform Adapter
+### 5.19 Platform Adapter
 
 - **负责**：封装 Windows 进程、文件系统、通知、浏览器启动和本地环境差异。
 - **不负责**：承载业务策略、解释 Task 或决定是否执行。
@@ -234,18 +248,25 @@ flowchart LR
 
 ## 6. 关键边界规则
 
+- 所有外部 Task、Action Result 和 Recovery Instruction 必须通过 Orchestration Core / Execution Coordinator 进入本地运行链；Core 负责顺序协调和事务边界，但不直接执行 Command。
+- Task and Plan Manager 负责 Task / Plan 的 Schema、来源和版本关系校验，并输出只读 Plan/Scope Snapshot。
+- Workflow Scheduler 只根据有效计划生成候选 Action；在具体 Command 形成前不得调用 Command Validator。
+- Budget and Routing Engine 根据候选 Action 选择路由并形成具体 Command；Command Validator 只验证已经形成的具体 Command。
+- 具体 Command 必须依次通过 Command Validator、Policy and Authorization Engine、Budget 预留、幂等检查和执行前检查后，才能进入执行器或适配器。
 - Browser Adapter 不能直接执行本地命令。
+- Browser Adapter 只能通过 Dedicated Browser Profile 访问 ChatGPT Main Conversation 和 Temporary Child Conversations；Orchestration Core 不得绕过 Browser Adapter 直接调用会话。
 - Codex Adapter 不能直接修改正式工作区，只能在授权的任务 worktree 中工作。
 - Command Executor 不能自行解析自然语言意图。
-- 所有 Command 必须经过 Command Validator 和 Policy and Authorization Engine。
 - Workflow Scheduler 不能绕过预算和授权。
 - Workflow Scheduler 只负责正常动作调度；动作状态、执行事件和检查点请求必须先写入 Persistence Layer。
 - Recovery and Checkpoint Manager 只能读取持久化事实并生成恢复指令；不得直接执行动作或操纵 Scheduler 内部队列。
-- 恢复流程必须通过编排入口重新提交有效恢复指令给 Workflow Scheduler；Scheduler 与 Recovery Manager 不得直接双向调用。
+- Recovery and Checkpoint Manager 只在启动恢复、中断或崩溃、超时、状态不明确、人工 resume 或幂等确认失败时出现；正常主链不调用它。
+- 恢复流程必须通过 Orchestration Core 重新提交有效 Recovery Instruction 给 Workflow Scheduler；Scheduler 与 Recovery Manager 不得直接双向调用。
 - SQLite 是任务运行状态来源，但不是代码版本来源。
 - Git 负责文件版本，SQLite 负责任务运行状态。
 - ChatGPT 不能直接覆盖本地执行事实；它只能基于本地报告进行语义裁决。
 - 临时子会话不能直接和 Codex 互相调用，二者的交互必须经本地编排器和授权上下文。
+- Acceptance Manager 只输出语义验收包；语义验收包由 Orchestration Core 交给 Browser Adapter，再由 Browser Adapter 发送到 ChatGPT Main Conversation。
 - Notification Adapter 不能承担任务决策。
 - 外部网络资源不能直接进入执行队列，必须先作为不可信输入隔离、提取、校验并获得授权。
 
@@ -255,67 +276,87 @@ flowchart LR
 sequenceDiagram
     actor User
     participant Main as ChatGPT Main Conversation
-    participant O as Local Orchestrator
+    participant BA as Browser Adapter
+    participant O as Orchestration Core / Execution Coordinator
+    participant TM as Task and Plan Manager
+    participant S as Workflow Scheduler
+    participant B as Budget and Routing Engine
     participant V as Command Validator
     participant P as Policy and Authorization Engine
-    participant B as Budget and Routing Engine
-    participant S as Workflow Scheduler
-    participant DB as Persistence Layer / Audit
-    participant C as Recovery and Checkpoint Manager
-    participant T as Deterministic Tools / Codex
+    participant DB as Persistence Layer
+    participant E as Command Executor / Codex Adapter / Browser Adapter
     participant A as Acceptance Manager
+    participant C as Recovery and Checkpoint Manager
 
     User->>Main: 提出目标、约束和验收标准
-    Main->>O: 结构化 Task 与 Plan Version
-    O->>V: 校验来源、Schema、范围和幂等信息
-    V-->>O: 校验结果
-    O->>P: 请求授权判断
-    P-->>O: 授权或需要用户确认
-    O->>B: 请求预算预留和路由
-    B-->>O: 确定性工具或 Codex 路由
-    O->>S: 提交已授权调度请求
-    S->>DB: 写入动作状态、执行事件和检查点请求
-    DB-->>C: 提供持久化执行事实
-    C-->>O: 恢复计划、游标或待核验结果
-    O->>S: 提交有效恢复指令（如需要）
-    S->>T: 调度已授权 Action
-    T-->>O: 结果、证据或错误
-    O->>S: 提交动作结果
-    S->>DB: 写入结果、检查点和审计事实
+    Main->>BA: 页面中的结构化 Task / Plan Version
+    BA->>O: 结构化 Task / Plan
+    O->>TM: 校验 Task / Plan Schema、来源和版本关系
+    TM-->>O: 有效计划与只读 Plan/Scope Snapshot
+    O->>S: 提交有效计划
+    S-->>O: 候选 Action
+    O->>B: 根据候选 Action 路由并形成 Command
+    B-->>O: 具体 Command 与预算结果
+    O->>V: 校验具体 Command
+    V-->>O: Command 校验结果
+    O->>P: 校验授权和风险策略
+    P-->>O: 授权结果或需要用户确认
+    O->>DB: 写入预执行记录、预算预留和幂等检查结果
+    O->>E: 执行 Command 或调用 Codex / Browser Adapter
+    E-->>O: Action Result、证据或错误
+    O->>DB: 记录执行结果、检查点和审计事实
     O->>A: 发起本地机器验收
-    A-->>O: 验收证据和报告
-    O->>Main: 提交语义验收材料
-    Main-->>O: 通过、有限返工或重新规划决定
+    A-->>O: 语义验收包
+    O->>BA: 提交语义验收包
+    BA->>Main: 发送语义验收材料
+    Main-->>BA: 通过、有限返工或重新规划决定
+    BA-->>O: 语义验收决定
     alt 需要有限返工
-        O->>P: 重新校验返工范围
+        O->>TM: 更新待返工范围并重新生成只读 Snapshot
         O->>S: 提交受限返工调度请求
     else 发布或等待确认
         O->>User: 请求最终确认或等待确认
     end
     O->>DB: 归档运行状态和审计报告
+
+    opt 恢复分支：启动恢复、中断或崩溃、超时、状态不明确、人工 resume 或幂等确认失败
+        O->>DB: 读取动作状态、执行事件和检查点事实
+        DB-->>O: 持久化事实
+        O->>C: 提交恢复分析请求
+        C-->>O: Recovery Instruction、恢复游标或状态待核验结果
+        O->>S: 重新提交有效 Recovery Instruction
+        S->>DB: 写入恢复调度事实
+    end
 ```
 
-主流程是：用户提出目标 → ChatGPT 生成计划 → 本地接收结构化任务 → 校验授权、Schema 和预算 → 创建工作区及检查点 → 调度确定性工具或 Codex → 本地机器验收 → ChatGPT 语义验收 → 必要时有限返工 → 发布或等待确认 → 归档和审计报告。
+正常主流程是：User → ChatGPT Main → Browser Adapter / Orchestration Core → Task and Plan Manager → Scheduler 生成候选 Action → Budget and Routing 形成 Command → Command Validator → Policy and Authorization → Persistence 预执行记录 → Executor / Codex Adapter / Browser Adapter → Persistence 记录结果 → Machine Acceptance → Browser Adapter 发送 ChatGPT Semantic Acceptance → 有限返工或发布确认 → 归档。
 
-失败时，编排器依据检查点和幂等信息进入暂停或恢复路径；如果目标、约束或验收标准发生变化，则暂停当前运行并请求主会话重新规划。网络超时只记录为未决结果，不得直接重复发送；是否重试必须依据动作幂等性、服务端确认和新的授权判断。高风险发布采用两阶段提交：先准备并生成完整证据，再在用户明确确认后执行提交或发布。
+恢复分支不属于正常主链，只由启动恢复、中断或崩溃、超时、状态不明确、人工 resume 或幂等确认失败触发。Recovery Manager 读取持久化事实并产生 Recovery Instruction，之后必须经 Orchestration Core 重新提交给 Scheduler。网络超时只记录为未决结果，不得直接重复发送；是否重试必须依据动作幂等性、服务端确认和新的授权判断。高风险发布采用两阶段提交：先准备并生成完整证据，再在用户明确确认后执行提交或发布。
 
 ## 8. 运行部署拓扑
 
-### 8.1 第一版设计目标
+### 8.1 当前 P1 设计与开发协作模式
+
+- 用户人工复制 GPT 工作包到 Codex。
+- 用户将 Codex 执行报告返回 GPT。
+- 这是 Agent 实现前的临时设计与开发协作方式，不代表 Agent MVP 已经实现自动编排或自动控制网页。
+
+### 8.2 Agent MVP 产品运行模式
 
 - Windows 10。
-- Node.js + TypeScript CLI。
+- Node.js + TypeScript 本地编排器。
+- Playwright Browser Adapter。
+- 独立 Edge/Chromium 持久化 Profile，Cookie 和登录状态仅保存在本地 Profile。
+- 自动控制 ChatGPT Main Conversation 和 Temporary Child Conversations。
 - SQLite 本地数据库，用于任务运行状态、检查点和审计数据。
-- 独立 Edge/Chromium 持久化 Profile。
 - 本地 Git 仓库和任务 worktree。
-- Windows 桌面通知。
-- 人工启动，以及人工在 ChatGPT 与本地编排器/Codex 之间传递信息。
+- Codex CLI、确定性工具和 Windows 桌面通知。
+- 登录失效、验证码和账号安全异常时暂停。
 
-第一版不包含 Playwright 自动控制主会话、系统托盘、Windows 服务、开机恢复、定时和事件触发器或 GUI；这些属于后续版本候选能力。
+Agent MVP 不包含系统托盘、Windows 服务、GUI、开机启动和 Work 集成；人工授权和高风险发布确认仍是边界条件。
 
-### 8.2 后续版本候选
+### 8.3 后续版本候选
 
-- Playwright 自动控制主会话。
 - 系统托盘和可选 GUI。
 - Windows 服务与开机恢复。
 - 定时和事件触发器。
@@ -324,7 +365,7 @@ sequenceDiagram
 
 ## 9. MVP 边界
 
-第一版设计目标是一个小型、可复现的 Python 项目，用于同时验证确定性工具和一次强制 Codex 调用，并支持状态保存、暂停、恢复、幂等和审计。代码工作必须在隔离的任务 worktree 中进行，不允许直接修改稳定原项目。
+Agent MVP 的第一版设计目标是一个小型、可复现的 Python 项目，用于同时验证确定性工具和一次强制 Codex 调用，并支持状态保存、暂停、恢复、幂等和审计。代码工作必须在隔离的任务 worktree 中进行，不允许直接修改稳定原项目。
 
 第一版不实现 Work 集成、完整 GUI、系统级自动安装、数据库整体加密、自动发送邮件或公开发布。高风险发布只保留人工确认边界，不作为无人值守能力。
 
@@ -347,10 +388,18 @@ sequenceDiagram
 | 工具路由 | 本地确定性工具优先，工程工作路由 Codex | 节省共享额度并提高可复现性 | 所有任务默认调用 Agent | 工具能力覆盖率或预算模型发生变化时复审 |
 | 代码隔离 | 任务 Git worktree | 降低稳定原项目被直接修改的风险 | 直接在稳定原项目工作区修改 | 需要不同版本控制后端时复审 |
 | 状态与版本 | SQLite 保存运行状态，Git 保存文件版本 | 分离运行事实与代码历史 | 用 Git 保存运行状态或用 SQLite 保存代码版本 | 分布式运行或代码托管要求变化时复审 |
-| 第一版交互 | 人工启动和人工传递信息 | 当前尚未实现 Agent，便于逐步验证边界 | 第一版自动控制主会话 | Playwright、托盘或服务方案完成安全评估后复审 |
+| 当前协作与 MVP 运行模式 | 当前 P1 人工传递工作包；Agent MVP 使用 Playwright、独立 Profile 和本地编排器 | 区分设计开发协作与产品运行能力 | 把人工协作方式误写成 MVP 自动能力 | MVP 自动化边界或安全评估发生变化时复审 |
 
-### 待 GPT 决策
+### 已决定
 
-- 第一版主会话与本地编排器之间采用哪一种具体人工传递载体，待 GPT 在协议工作包中确认。
-- 高风险发布的具体动作分类和确认文案，待 GPT 结合安全模型和 MVP 验收标准确认。
-- 后续自动控制主会话的浏览器会话隔离和登录凭据策略，待 GPT 在后续工作包中确认。
+- 当前开发阶段采用用户复制结构化工作包和报告。
+- Agent MVP 使用 Playwright 自动控制网页。
+- Agent MVP 使用独立持久化浏览器 Profile。
+- Cookie 和登录状态仅保存在本地 Profile。
+- 登录失效、验证码和账号安全异常时暂停。
+
+### 待 P1-06 决策
+
+- 高风险动作的详细分类。
+- 标准确认文案。
+- 授权有效期和风险矩阵的具体字段。
