@@ -81,20 +81,20 @@ flowchart LR
 
 ### 5.2 Task and Plan Manager
 
-- **负责**：登记 Task、保存 Plan Version 的来源和版本关系、维护目标与验收标准的引用。
-- **不负责**：执行 Action、分配模型额度或直接修改代码。
+- **负责**：登记 Task、保存 Plan Version 的来源和版本关系、维护目标与验收标准的引用，并生成只读的 Plan/Scope Snapshot。
+- **不负责**：执行 Action、分配模型额度、直接修改代码或为 Command Validator 执行校验。
 - **主要输入**：主会话提交的结构化 Task / Plan Version、用户修订 Request。
-- **主要输出**：可调度的 Stage / Work Package 描述、计划变更记录。
-- **允许依赖**：Persistence Layer、Command Validator、Audit and Reporting。
+- **主要输出**：可调度的 Stage / Work Package 描述、只读 Plan/Scope Snapshot、计划变更记录。
+- **允许依赖**：Persistence Layer、Audit and Reporting。
 - **禁止绕过**：Policy and Authorization Engine、Budget and Routing Engine、Acceptance Manager。
 
 ### 5.3 Workflow Scheduler
 
-- **负责**：按计划依赖、检查点和可用资源调度 Stage、Work Package 与 Action。
-- **不负责**：自行改写目标、解释自然语言或授予权限。
-- **主要输入**：计划、授权结果、预算结果、恢复上下文。
-- **主要输出**：调度请求、暂停信号、下一步候选动作。
-- **允许依赖**：Task and Plan Manager、Policy and Authorization Engine、Budget and Routing Engine、Recovery and Checkpoint Manager、Persistence Layer。
+- **负责**：按计划依赖、检查点和可用资源调度正常的 Stage、Work Package 与 Action，并把动作状态、执行事件和检查点请求写入 Persistence Layer。
+- **不负责**：自行改写目标、解释自然语言、推断恢复状态、生成恢复计划或授予权限。
+- **主要输入**：计划、授权结果、预算结果、有效的恢复指令（如有）。
+- **主要输出**：调度请求、动作状态、执行事件、检查点请求、暂停信号和下一步候选动作。
+- **允许依赖**：Task and Plan Manager、Policy and Authorization Engine、Budget and Routing Engine、Command Validator、Persistence Layer。
 - **禁止绕过**：Command Validator、Policy and Authorization Engine、Budget and Routing Engine。
 
 ### 5.4 Policy and Authorization Engine
@@ -153,12 +153,12 @@ flowchart LR
 
 ### 5.10 Command Validator
 
-- **负责**：验证结构化 Command 的来源、Schema、完整性、范围、幂等标识和前置条件。
-- **不负责**：解释自然语言意图、授予权限或执行 Command。
-- **主要输入**：结构化 Command、计划上下文、工具元数据。
-- **主要输出**：验证通过的 Command 或拒绝原因。
-- **允许依赖**：Tool Registry、Task and Plan Manager、Persistence Layer、Audit and Reporting。
-- **禁止绕过**：Policy and Authorization Engine、Command Executor、Recovery and Checkpoint Manager。
+- **负责**：使用只读的 Plan/Scope Snapshot 验证结构化 Command 的来源、Schema、完整性、范围、幂等标识和前置条件。
+- **不负责**：解释自然语言意图、授予权限、执行 Command，或修改 Task、Plan、Stage、Work Package。
+- **主要输入**：结构化 Command、只读 Plan/Scope Snapshot、工具元数据。
+- **主要输出**：结构化校验结果，包括通过结果或拒绝原因；校验失败只阻止执行，不改变计划。
+- **允许依赖**：Tool Registry、Persistence Layer、Audit and Reporting；通过共享协议、持久化查询接口或不可变数据对象读取 Snapshot。
+- **禁止绕过**：Policy and Authorization Engine、Command Executor、Recovery and Checkpoint Manager；不得回写 Task and Plan Manager 管理的计划对象。
 
 ### 5.11 Command Executor
 
@@ -189,12 +189,12 @@ flowchart LR
 
 ### 5.14 Recovery and Checkpoint Manager
 
-- **负责**：在阶段边界保存检查点，识别可重放、可恢复和必须暂停的情况。
-- **不负责**：隐式重试有副作用的请求、修改目标或掩盖失败。
-- **主要输入**：执行结果、超时、进程状态、幂等信息和人工恢复 Request。
-- **主要输出**：暂停、恢复、重新规划建议和检查点上下文。
-- **允许依赖**：Persistence Layer、Workflow Scheduler、Audit and Reporting、Notification Adapter。
-- **禁止绕过**：Policy and Authorization Engine、Budget and Routing Engine、Command Validator。
+- **负责**：读取 Persistence Layer 中的动作状态、执行事件和检查点事实，识别可重放、可恢复和必须暂停的情况，并生成恢复计划、恢复游标或状态待核验结果。
+- **不负责**：隐式重试有副作用的请求、修改目标、直接执行动作、直接操纵 Scheduler 内部队列或掩盖失败。
+- **主要输入**：持久化的执行事实、超时、进程状态、幂等信息和人工恢复 Request。
+- **主要输出**：暂停结果、恢复计划、恢复游标、状态待核验结果和提交给编排入口的恢复指令。
+- **允许依赖**：Persistence Layer、Audit and Reporting、Notification Adapter。
+- **禁止绕过**：Policy and Authorization Engine、Budget and Routing Engine、Command Validator；不得直接调用 Workflow Scheduler。
 
 ### 5.15 Persistence Layer
 
@@ -239,6 +239,9 @@ flowchart LR
 - Command Executor 不能自行解析自然语言意图。
 - 所有 Command 必须经过 Command Validator 和 Policy and Authorization Engine。
 - Workflow Scheduler 不能绕过预算和授权。
+- Workflow Scheduler 只负责正常动作调度；动作状态、执行事件和检查点请求必须先写入 Persistence Layer。
+- Recovery and Checkpoint Manager 只能读取持久化事实并生成恢复指令；不得直接执行动作或操纵 Scheduler 内部队列。
+- 恢复流程必须通过编排入口重新提交有效恢复指令给 Workflow Scheduler；Scheduler 与 Recovery Manager 不得直接双向调用。
 - SQLite 是任务运行状态来源，但不是代码版本来源。
 - Git 负责文件版本，SQLite 负责任务运行状态。
 - ChatGPT 不能直接覆盖本地执行事实；它只能基于本地报告进行语义裁决。
@@ -256,10 +259,11 @@ sequenceDiagram
     participant V as Command Validator
     participant P as Policy and Authorization Engine
     participant B as Budget and Routing Engine
-    participant C as Checkpoint Manager
+    participant S as Workflow Scheduler
+    participant DB as Persistence Layer / Audit
+    participant C as Recovery and Checkpoint Manager
     participant T as Deterministic Tools / Codex
     participant A as Acceptance Manager
-    participant DB as SQLite / Audit
 
     User->>Main: 提出目标、约束和验收标准
     Main->>O: 结构化 Task 与 Plan Version
@@ -269,19 +273,22 @@ sequenceDiagram
     P-->>O: 授权或需要用户确认
     O->>B: 请求预算预留和路由
     B-->>O: 确定性工具或 Codex 路由
-    O->>C: 创建工作区及检查点
-    C->>DB: 保存运行上下文
-    O->>T: 调度已授权 Action
+    O->>S: 提交已授权调度请求
+    S->>DB: 写入动作状态、执行事件和检查点请求
+    DB-->>C: 提供持久化执行事实
+    C-->>O: 恢复计划、游标或待核验结果
+    O->>S: 提交有效恢复指令（如需要）
+    S->>T: 调度已授权 Action
     T-->>O: 结果、证据或错误
-    O->>C: 保存结果和恢复信息
-    C->>DB: 持久化检查点与审计
+    O->>S: 提交动作结果
+    S->>DB: 写入结果、检查点和审计事实
     O->>A: 发起本地机器验收
     A-->>O: 验收证据和报告
     O->>Main: 提交语义验收材料
     Main-->>O: 通过、有限返工或重新规划决定
     alt 需要有限返工
         O->>P: 重新校验返工范围
-        O->>T: 调度受限返工 Action
+        O->>S: 提交受限返工调度请求
     else 发布或等待确认
         O->>User: 请求最终确认或等待确认
     end
