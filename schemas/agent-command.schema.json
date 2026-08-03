@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/agent-command.schema.json",
+  "title": "Agent Command",
+  "type": "object",
+  "additionalProperties": false
+}
