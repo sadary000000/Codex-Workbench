@@ -175,10 +175,12 @@ Active Turn 重启目前不会伪造继续结果，而是进入 `ACTIVE_TURN_REC
 
 ```text
 npm run check  PASS
-npm test       5 passed / 0 failed
+npm test       7 passed / 0 failed
 npm run build  BUILD PASS
 npm audit --omit=dev  0 vulnerabilities
 ```
+
+单元测试还覆盖了有界 request timeout，以及损坏 binding 时拒绝创建替代 Thread。
 
 真实 App Server：
 

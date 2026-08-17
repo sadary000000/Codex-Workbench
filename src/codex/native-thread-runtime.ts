@@ -283,9 +283,7 @@ export class NativeThreadRuntime {
         threadId: this.nativeThreadIdValue,
         input: [{ type: "text", text }],
       }, this.timeoutMs);
-      turnId = threadIdFrom(response) === this.nativeThreadIdValue
-        ? idFrom(object(response)?.turn, "id")
-        : idFrom(object(response)?.turn, "id");
+      turnId = idFrom(object(response)?.turn, "id");
       if (!turnId) throw this.fail("TURN_ID_MISSING", "turn/start did not return a Turn ID.");
       this.activeTurnValue = { localRunId, turnId };
       const terminal = await this.client.waitForNotification(

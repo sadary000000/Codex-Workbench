@@ -32,6 +32,9 @@ input.on("line", (line) => {
   if (mode === "exit" && message.method === "initialize") {
     process.exit(23);
   }
+  if (mode === "hang" && message.method === "initialize") {
+    return;
+  }
   if (message.id === 700 && waitingServerRequest) {
     const turn = waitingServerRequest;
     waitingServerRequest = null;

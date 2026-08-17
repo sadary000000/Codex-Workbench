@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -187,4 +187,11 @@ test("rejects a silently replaced nativeThreadId on resume", async () => {
     clientFactory: (_options) => new FakeClient(first.state, true),
   });
   await assert.rejects(resumed.start(), (error: any) => error?.code === "THREAD_ID_MISMATCH");
+});
+
+test("refuses to create a replacement Thread for an invalid persisted binding", async () => {
+  const harness = await createRuntime();
+  await writeFile(harness.stateFile, "{\"nativeThreadId\":\"broken\"}\n", "utf8");
+  await assert.rejects(harness.runtime.start(), (error: any) => error?.code === "THREAD_BINDING_INVALID");
+  assert.equal(harness.state.startCalls, 0);
 });

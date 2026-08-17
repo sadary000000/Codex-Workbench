@@ -67,3 +67,16 @@ test("distinguishes invalid JSON from process exit", async () => {
     await exited.close();
   }
 });
+
+test("reports a bounded request timeout", async () => {
+  const hanging = create("hang");
+  try {
+    await hanging.start();
+    await assert.rejects(
+      hanging.request("initialize", {}, 25),
+      (error: unknown) => error instanceof AppServerClientError && error.code === "APP_SERVER_TIMEOUT",
+    );
+  } finally {
+    await hanging.close();
+  }
+});
