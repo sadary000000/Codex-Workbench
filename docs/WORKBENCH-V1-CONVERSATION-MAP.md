@@ -1,20 +1,20 @@
 # Codex Workbench V1：Conversation Map 初始化
 
 日期：2026-08-17
-阶段：Phase 4 之后、Phase 5 之前
-状态：人工可读 Map 已初始化，待 GPT 审查
+阶段：Phase 5 筛选完成，待 GPT Gate
+状态：人工可读 Map 已 PASS；Phase 5 Legacy 筛选已完成
 范围：当前 Codex Workbench V1 开发对话
 
 ## 1. 文档定位
 
 本文件是当前开发对话的第一版人工可读 Conversation Map。它用于把已经完成的工作、正在进行的工作、后续路线和历史决策放在同一张可追溯的工作地图中，不替代原始 Codex 对话，也不是产品运行时的 Map 数据文件。
 
-本阶段只完成一次初始化和人工可读呈现：
+Map 初始化阶段只完成一次人工可读呈现；后续阶段状态追加在同一张地图中：
 
 - 不实现 Map Schema、JSON Patch、Full Rebuild 协议或持久化格式；
 - 不新增 Map UI、右侧 Panel 或 Project Map 维护 Thread；
 - 不扫描或复制 Codex 的完整 Conversation / Transcript / Context；
-- 不进入 Phase 5 Legacy 能力筛选；
+- 初始化阶段不进入 Phase 5 Legacy 能力筛选；Phase 5 结果已在本文后续节点登记；
 - 不修改产品代码，也不修改只读 donor 项目。
 
 Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备增量材料、记录同步位置、校验返回格式、保存和展示结果。
@@ -51,19 +51,21 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 │   └── Native Thread → Native Turn → Native Item、事件流、Composer、Stop、Approval、恢复状态
 ├── ● Phase 4 Gate：GPT 审查通过
 │   └── commit c322b97；Phase 4 PASS；允许进行当前开发对话的 Map 初始化
-├── ◉ Conversation Map：首次人工可读初始化（本文件）
+├── ● Conversation Map：首次人工可读初始化（本文件）
 │   ├── ● 已读取 V1 Scope Freeze、Map 产品对齐、重建路线和 Phase 0–4 证据
 │   ├── ● 已整理当前路径、历史替代路线、来源和边界
-│   └── ◉ 提交本初始化结果给 GPT 审查
-├── ○ Phase 5：Legacy 能力筛选
-│   └── 仅在 Conversation Map 审查通过并收到唯一执行指令后开始
+│   └── ● GPT 审查通过，并给出 Phase 5 唯一执行指令
+├── ● Phase 5：Legacy 能力筛选
+│   ├── ● 四项只读 donor 审计已完成并交叉复核
+│   ├── ● Legacy capability matrix 完成，实际代码迁移 0 项
+│   └── ◉ 提交 Phase 5 结果给 GPT 审查
 ├── ○ Phase 6：Map 产品技术实现
 │   └── 设计 Schema / Prompt / Patch Protocol / 按需 Panel / Conversation Map / Project Map
 └── ○ Phase 7：真实使用后的增强
     └── 只有真实缺口证明必要时再讨论 Workflow、Review、Git 等扩展
 ```
 
-当前主路径是“Phase 4 已完成 → Conversation Map 初始化待审查”。Phase 5 和 Phase 6 都是未来计划，不表示已经开始。
+当前主路径是“Phase 4 PASS → Conversation Map PASS → Phase 5 筛选完成 → GPT 审查 Phase 5”。Phase 6 仍未开始。
 
 ## 4. 节点详情与来源
 
@@ -76,8 +78,8 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | Codex 式导航 | ● | Pinned / Projects / Recent 围绕 ThreadProjection；Project Thread 不重复进入 Recent | `docs\PHASE-03-CODEX-SHAPED-LEFT-NAVIGATION.md` |
 | Codex Thread Workspace | ● | Native read model、事件归一化、Turn/Item 流、Composer、Stop、Approval broker、恢复状态已实现 | `docs\PHASE-04-CODEX-THREAD-WORKSPACE.md` |
 | Phase 4 Gate | ● | GPT 已明确给出 PASS；附件、设置 UI、compaction 展示等限制不构成 blocker | GPT 审查对话（2026-08-17） |
-| Conversation Map 初始化 | ◉ | 本文件形成第一版人工可读工作地图，等待 GPT 审查 | 本文件 |
-| Phase 5 Legacy 筛选 | ○ | 尚未开始；需等待 Map 审查和唯一执行指令 | `指导文档\Workbench_V1_重建路线规划_2026-08-17.docx` |
+| Conversation Map 初始化 | ● | 本文件形成第一版人工可读工作地图；GPT 已 PASS 并给出 Phase 5 唯一执行指令 | 本文件、GPT Map 审查 |
+| Phase 5 Legacy 筛选 | ● | 四项只读审计完成；分类矩阵完成；实际 donor code migration 为 0；待 GPT Gate | `docs\PHASE-05-LEGACY-CAPABILITY-MATRIX.md`、`docs\PHASE-05-LEGACY-CAPABILITY-SCREENING.md` |
 | Phase 6 Map 技术实现 | ○ | 尚未开始；不得在本阶段提前设计 Schema/Patch/UI | Scope Freeze、Map 产品对齐记录 |
 
 ## 5. Phase 0–4 阶段证据摘要
@@ -146,7 +148,7 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 - Gate / 测试：`npm run check` PASS；`npm test` 32/32 PASS；`npm run build` PASS；`npm audit --omit=dev` 0 vulnerabilities；secret scan PASS。
 - 真实 App Server：`npm run test:real`、`npm run test:real:navigation`、`npm run test:real:workspace`（隔离状态目录）均 PASS；workspace smoke 验证 interrupt → continue → restart 后保持同一 `nativeThreadId`。
 - 已知限制：未做人工 GUI 测试；read-only/never 策略下真实 Approval 未稳定触发，仅有 fake JSON-RPC contract/validator/IPC 证据；无附件和伪造的 model/reasoning/permission UI；第一次未隔离 real smoke 的 active writer 冲突不作为产品失败证据。
-- blocker：none。下一步：Conversation Map 人工可读初始化；不直接进入 Phase 5。
+- blocker：none。Phase 4 Gate 后先完成 Conversation Map；该 Map 已 PASS，随后进入 Phase 5 Legacy 筛选。
 - 来源：`docs\PHASE-04-CODEX-THREAD-WORKSPACE.md`、`scripts\real-thread-workspace-smoke.ts`、GPT Phase 4 审查对话、`git log`。
 
 ## 6. 当前工作路径
@@ -157,27 +159,27 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 2. 新 V1 以 Codex App Server 的 Native Thread → Native Turn → Native Item 为运行事实。
 3. 先建立可靠性，再建立 Codex 式导航，再实现 Native Thread Workspace。
 4. Phase 4 已通过命令行、单元测试、构建、审计和真实 App Server smoke 验证。
-5. GPT 已审查通过 Phase 4 Gate；当前只进行 Conversation Map 的人工可读初始化。
+5. GPT 已审查通过 Phase 4 Gate 和 Conversation Map；Phase 5 已完成只读筛选，当前提交 Phase 5 Gate。
 
 ### 6.2 当前进行中的工作
 
-当前只剩本初始化结果的阶段审查：
+当前只剩 Phase 5 筛选结果的阶段审查：
 
 - 校验地图是否覆盖已完成阶段、当前阶段、下一阶段和历史路径；
 - 校验每个重要节点是否能回到原始报告或冻结资料；
-- 校验没有把 Map 技术实现、Phase 5 或 Legacy 迁移提前写成已开始；
-- 将 `[CODEX_WORKBENCH_CONVERSATION_MAP_REVIEW]` 结果提交给 GPT。
+- 校验四项 donor 审计、分类、0 项代码迁移和 Native truth 边界；
+- 将 `[CODEX_WORKBENCH_STAGE_REVIEW]` Phase 5 结果提交给 GPT。
 
 ### 6.3 下一步计划
 
 | 顺序 | 状态 | 动作 |
 | --- | --- | --- |
-| 1 | ◉ | GPT 审查本初始化文档 |
-| 2 | ○ | 若 GPT PASS，接收 Phase 5 唯一执行指令 |
-| 3 | ○ | 依照新指令审查 Legacy 能力并形成筛选计划 |
-| 4 | ○ | Legacy 筛选通过后，才进入 Phase 6 Map 技术实现 |
+| 1 | ● | GPT 审查 Conversation Map 初始化并返回 PASS |
+| 2 | ● | 接收 Phase 5 唯一执行指令 |
+| 3 | ● | 完成 Legacy 能力审计、分类和 0 项代码迁移决策 |
+| 4 | ◉ | 提交 Phase 5 Gate；仅在 GPT PASS 后进入 Phase 6 |
 
-若 GPT 返回 FIX 或 REDESIGN，只修订本 Map 文档，不启动 Phase 5。
+若 Phase 5 GPT Gate 返回 FIX 或 REDESIGN，只修订 Phase 5 文档，不启动 Phase 6。
 
 ## 7. 已冻结的产品规则
 
@@ -285,7 +287,7 @@ Phase 5 只筛选真正需要的 Legacy 安全底座、诊断和边界清晰的�
 
 “不影响主线推进”只表示主 Agent 不必停下等待，不表示可以丢弃子代理结果。阶段 Gate 前必须满足 `running subagents = 0`；不能因为主线已经完成、结果暂时用不上或等待时间较长而提前关闭。
 
-本次初始化使用的子代理审计结果已补入本节，记录：子代理任务、读取范围、返回结论、主 Agent 是否采用、关闭状态。
+各阶段使用的子代理审计结果已补入本节，记录：子代理任务、读取范围、返回结论、主 Agent 是否采用、关闭状态。
 
 ### 11.1 本次子代理审计记录
 
@@ -296,7 +298,18 @@ Phase 5 只筛选真正需要的 Legacy 安全底座、诊断和边界清晰的�
 
 两个子代理均未修改 V1 文件，也未触碰旧 donor。主 Agent 在审阅本表后关闭它们；阶段 Gate 不保留运行中的子代理。
 
-### 11.2 架构审计文件证据
+### 11.2 Phase 5 子代理审计记录
+
+| 子代理 | 任务 | 最终返回与采用情况 | 状态 |
+| --- | --- | --- | --- |
+| Planck (`01a00fc6-b682-78a0-912f-315808fd3013`) | Runtime Donor Audit | 确认 V1 Runtime 主链保留；lifecycle/no-orphan、timeout cleanup、reconnect/reconcile、dedupe、capability preflight 作为后置 REWORK 候选；主 Agent 已采用 | 已完成，已关闭 |
+| Nietzsche (`01a00fc6-b71c-7f50-a075-38989bca89b5`) | Security / IPC / Path Audit | 确认窄 IPC、Native identity、approval、persistence 基础；发现 cwd、sender/sandbox、strict reject、bounds、redaction 缺口；主 Agent 已采用为后置 hardening，不迁 donor | 已完成，已关闭 |
+| Kepler (`01a00fc6-b7ee-7000-bccf-99705f7bc18d`) | Diagnostics / Git Safety Audit | 确认旧 logger/support/Git safety 有参考价值但绑定旧产品；V1 当前不添加 support/Git 产品；主 Agent 已采用 | 已完成，已关闭 |
+| Archimedes (`01a00fc6-b8c8-7393-a4fe-863c826b34ca`) | Legacy Contamination Audit | 确认旧 donor 是 Conversation→Transcript→Task/Exec→Workflow/Review/Context/Renderer 整体产品系统；主 Agent 已采用旧产品层 LEGACY/REMOVE 边界 | 已完成，已关闭 |
+
+四个 Phase 5 子代理均在返回最终结果并由主 Agent 审阅后关闭；没有未返回即关闭的情况，Phase 5 Gate 的 running subagents 为 0。
+
+### 11.3 架构审计文件证据
 
 以下路径是子代理实际核对的当前代码证据；它们只用于说明当前基线，不表示 Map 能力已存在：
 
@@ -306,7 +319,7 @@ Phase 5 只筛选真正需要的 Legacy 安全底座、诊断和边界清晰的�
 - Prompt Recovery 与 Renderer 草稿：`src/shared/runtime-types.ts`、`src/codex/native-thread-runtime.ts`、`src/renderer/renderer.ts`、`tests/native-thread-runtime.test.ts`。
 - 真实验证脚本与阶段证据：`scripts/real-navigation-smoke.ts`、`scripts/real-thread-workspace-smoke.ts`、`docs/PHASE-04-CODEX-THREAD-WORKSPACE.md`。
 
-审计还确认：当前没有 Map snapshot、node、source reference、dirty、processed cursor、patch log、`mapThreadId`、隐藏维护 Thread、创建 API、调度或 Map 测试。审计使用的 Phase 4 源码基线是 `c322b97`；本文件是本阶段唯一新增内容，且不包含产品代码修改。
+审计还确认：当前没有 Map snapshot、node、source reference、dirty、processed cursor、patch log、`mapThreadId`、隐藏维护 Thread、创建 API、调度或 Map 测试。Phase 5 另以 `docs/PHASE-05-LEGACY-CAPABILITY-MATRIX.md` 和 `docs/PHASE-05-LEGACY-CAPABILITY-SCREENING.md` 记录 donor 筛选；本文件和两份 Phase 5 文档均不包含产品代码修改。
 
 ## 12. 来源索引
 
@@ -335,31 +348,42 @@ Phase 5 只筛选真正需要的 Legacy 安全底座、诊断和边界清晰的�
 ## 13. 阶段审查请求
 
 ```text
-[CODEX_WORKBENCH_CONVERSATION_MAP_REVIEW]
-stage: Conversation Map initialization after Phase 4
-status: human-readable initial map complete; pending GPT review
-map_file: D:\办公\AI\Codex_Workbench_V1\docs\WORKBENCH-V1-CONVERSATION-MAP.md
-scope: current Codex Workbench V1 development conversation
-current_path: Phase 4 PASS → Conversation Map initialization → GPT review → Phase 5 instruction
-completed_phases: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4
-active_phase: Conversation Map human-readable document initialization
-next_planned_phase: Phase 5 — Legacy capability screening, only after GPT PASS and the unique execution instruction
+[CODEX_WORKBENCH_STAGE_REVIEW]
+stage: Phase 5 — Legacy Capability Screening
+status: completed; donor audit and classification matrix complete; waiting GPT Gate
+commit: docs-only commit containing the Phase 5 documents; final hash is recorded in the stage review
+matrix_file: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-05-LEGACY-CAPABILITY-MATRIX.md
+report_file: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-05-LEGACY-CAPABILITY-SCREENING.md
+current_path: Phase 4 PASS → Conversation Map PASS → Phase 5 audit/classification → GPT Phase 5 Gate
+completed_phases: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Conversation Map initialization, Phase 5 screening
+active_phase: Phase 5 Gate review
+next_planned_phase: Phase 6 — Map product technical implementation, only after Phase 5 PASS
 map_statuses: ○ planned / ◉ in_progress / ● completed / ! blocked
 frozen_principles_confirmed: Native Thread is the only conversation identity; Native Turn/Item are runtime facts; Codex owns Agent/Reasoning/Context/Tool semantics; Workbench is a thin product shell/projection/recovery adapter
 product_rules: Codex owns semantic understanding; Workbench only orchestrates, validates, stores minimal sync state, and presents
-map_rules_confirmed: optional Conversation Map; one necessary initial history read; daily Patch; exceptional Full Rebuild; dirty/pause/resume; source traceability; major route changes require normal-chat confirmation; Project Map is a future hidden/weak maintenance Thread
-initialization: one human-readable initial map; no runtime schema, patch protocol, persistence, UI, or maintenance thread
-evidence: Scope Freeze, Map Product Alignment, V1 Roadmap, Phase 0–4 reports, Phase 4 commit c322b97
-historical_routes_recorded: old Workbench in-place rewrite, Workbench Conversation/Transcript/Task truth, Multi-Agent orchestration, Exec primary runtime, Git/Keep/Revert core product, early Map technology; each is recorded as historical/replaced with reasons
-sources_used: three V1 guidance DOCX files; docs/PHASE-01 through docs/PHASE-04; current V1 src/tests/scripts; git history; visible GPT review context
-legacy_boundary: old D:\办公\AI\Codex_Workbench remains read-only donor; no legacy migration started
-phase_boundary: Phase 5 and Phase 6 remain planned, not started
-subagents: Parfit=product/rules audit, completed and adopted; Singer=source/evidence audit, completed and adopted; both final results reviewed and closed after result; validation=read-only file/Git checks; final_status=completed; closed_after_result=true
-unknown_or_unverified_items: final Map Schema, node IDs, Patch schema, Prompt protocol, sync cursor fields, triggers, UI placement details and App Server Map methods remain Phase 6 design items; no stable deep link is invented
-scope_boundary: only a human-readable current-development map and evidence; no Runtime/Sidebar/Workspace change, no Phase 5/6 implementation, no Map UI/Schema/Patch/automatic maintenance, no new product requirement
-legacy_project_status: old donor unchanged with its pre-existing intentional dirty state; V1 product code unchanged
+phase5_scope: read-only donor inventory, KEEP/REUSE/REWORK/REFERENCE/LEGACY/REMOVE classification, no legacy product resurrection
+inventory_summary: four read-only audits across Runtime, Security/IPC/Path, Diagnostics/Git Safety, and Legacy Contamination
+classification_summary: KEEP V1 native baseline; REUSE immediate 0; REWORK deferred native/security/diagnostics hardening; REFERENCE historical utilities; LEGACY/REMOVE old product truth
+KEEP: V1 App Server/JSON-RPC, Native Thread runtime, identity/persistence/recovery, approval broker, fixed IPC boundary, bounded event normalization, process environment
+REUSE: none confirmed as currently required and safely portable
+REWORK: native reconnect/reconcile/lifecycle cleanup; cwd/path canonicalization; IPC sender/strict payload/sandbox hardening; secret-safe logging/error diagnostics; optional support bundle
+REFERENCE: old session/capability probe/lifecycle ideas, logger/support/Git safety tests, pure prompt-template algorithm for a future requirement
+LEGACY: old adapters, Exec runner, Task/Workflow/Review/Prompt/Project Context/complex Renderer systems
+REMOVE_DO_NOT_MIGRATE: Conversation, Transcript, Context Trace truth, runtime gateway, old IPC namespace, Git Keep/Revert, Multi-Agent product main path
+actual_migrations: 0
+v1_existing_capabilities_preserved: Native Thread/Turn/Item truth, App Server runtime, persistence/recovery, approval, fixed IPC, renderer projection
+legacy_dependencies_removed: 0; no donor dependency was introduced
+native_truth_audit: no Conversation/Transcript/Task/Agent/Context truth, old persistence schema, old IPC namespace, or Exec/Workflow/Review main path entered V1
+tests: pending final verification; historical Phase 1–4 evidence remains source-scoped and is not re-reported as Phase 5 rerun
+real_appserver_smoke: not rerun; no Runtime code migrated or changed, so expensive smoke is not required by this docs-only phase
+conversation_map_update: Conversation Map initialization ●; Phase 5 screening ●; Phase 6 remains ○
+subagents: Planck/Nietzsche/Kepler/Archimedes completed, returned, reviewed/adopted, and closed after result
 running_subagents_at_gate: 0
+legacy_project_status: old donor unchanged with pre-existing intentional dirty baseline; V1 product code unchanged
+scope_boundary: no Phase 6 Map Schema/Prompt/Patch/UI/Project Map, no Workflow/Review/Task/Multi-Agent/Exec/Git resurrection, no product code migration
+known_limitations: security/diagnostics/reconnect hardening candidates are recorded but not implemented; GPT must decide the next phase boundary
 blockers: none
+gate: pending GPT review
 
-请审查当前 Conversation Map 初始化是否覆盖已完成工作、当前路径、历史替代路线、来源和范围边界。若 PASS，请给出 Phase 5 唯一执行指令；若 FIX/REDESIGN，请列出必须修改项。审查通过前不进入 Phase 5。
+请审查 Phase 5 Legacy 能力筛选、分类矩阵、0 项代码迁移决策、Native truth 边界和子代理生命周期。若 PASS，请给出 Phase 6 唯一执行指令；若 FIX/REDESIGN，请列出必须修改项。审查通过前不进入 Phase 6。
 ```
