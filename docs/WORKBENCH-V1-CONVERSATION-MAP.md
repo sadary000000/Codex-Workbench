@@ -406,7 +406,7 @@ gate: PASS; Phase 6 instruction received
 [CODEX_WORKBENCH_STAGE_REVIEW]
 stage: Phase 6 — Map product technical implementation
 status: implementation and command-line verification complete; waiting GPT Gate
-commit: 672c530 feat: implement codex-driven work maps
+implementation_commit: 98f80c23c0f41a5ce386732f54a012ecb768eb27 (feat: implement codex-driven work maps)
 capability_audit: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-06-MAP-RUNTIME-CAPABILITY-AUDIT.md
 technical_design: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-06-MAP-TECHNICAL-DESIGN.md
 implementation_report: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-06-MAP-PRODUCT-IMPLEMENTATION.md
