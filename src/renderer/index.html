@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Codex Workbench V1 · Native Thread Foundation</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #111318; color: #f1f3f5; }
+      body { margin: 0; min-height: 100vh; background: #111318; }
+      main { max-width: 1180px; margin: 0 auto; padding: 28px; }
+      h1, h2, p { margin-top: 0; }
+      h1 { font-size: 24px; margin-bottom: 6px; }
+      h2 { font-size: 15px; margin-bottom: 12px; color: #d9dee7; }
+      .muted { color: #9da6b5; }
+      .grid { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 16px; }
+      .card { border: 1px solid #2c313b; border-radius: 12px; background: #181b22; padding: 16px; }
+      .stack { display: grid; gap: 10px; }
+      .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      button { border: 1px solid #485268; border-radius: 7px; padding: 8px 12px; color: #f1f3f5; background: #252b37; cursor: pointer; }
+      button:hover { background: #30394a; }
+      button:disabled { opacity: .45; cursor: not-allowed; }
+      textarea, input { box-sizing: border-box; width: 100%; border: 1px solid #3a4250; border-radius: 7px; background: #0f1116; color: #f1f3f5; padding: 10px; font: inherit; }
+      textarea { min-height: 150px; resize: vertical; }
+      pre { box-sizing: border-box; min-height: 420px; max-height: 620px; overflow: auto; white-space: pre-wrap; word-break: break-word; border-radius: 8px; padding: 12px; background: #0c0e12; color: #c7d4e8; font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .value { color: #8fd3ff; word-break: break-all; }
+      .status { border-radius: 999px; padding: 3px 9px; background: #263b31; color: #a9efc0; font-size: 12px; }
+      .error { color: #ffaaa8; }
+      @media (max-width: 820px) { main { padding: 16px; } .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Codex Workbench V1 · Native Thread Foundation</h1>
+      <p class="muted">Phase 0/1 调试界面：Native Thread 是唯一运行事实源。本界面不创建 Workbench Conversation、Task 或 Transcript。</p>
+      <div class="grid">
+        <section class="card stack" aria-labelledby="runtime-heading">
+          <h2 id="runtime-heading">Native Runtime</h2>
+          <div>状态：<span id="runtime-state" class="status">IDLE</span></div>
+          <div>nativeThreadId：<span id="thread-id" class="value">—</span></div>
+          <div>activeTurnId：<span id="turn-id" class="value">—</span></div>
+          <div>localRunId：<span id="run-id" class="value">—</span></div>
+          <div>cwd：<span id="runtime-cwd" class="value">—</span></div>
+          <div class="row">
+            <button id="start-thread" type="button">启动 / 恢复 Thread</button>
+            <button id="read-thread" type="button">thread/read</button>
+            <button id="interrupt-turn" type="button">interrupt</button>
+          </div>
+          <label for="resume-id">显式 resume 的 nativeThreadId</label>
+          <input id="resume-id" autocomplete="off" placeholder="留空则使用本地恢复绑定">
+          <button id="resume-thread" type="button">thread/resume</button>
+          <p id="operation-status" class="muted" role="status">等待启动 App Server。</p>
+        </section>
+        <section class="card stack" aria-labelledby="turn-heading">
+          <h2 id="turn-heading">Native Turn</h2>
+          <textarea id="prompt" placeholder="输入一个最小测试 Prompt。失败时输入内容会保留，不会被 Runtime 清空。"></textarea>
+          <div class="row">
+            <button id="start-turn" type="button">turn/start</button>
+            <button id="clear-events" type="button">清空调试输出</button>
+          </div>
+          <p class="muted">Prompt 草稿保存在 Renderer localStorage，仅用于防止失败时丢失；不是 Transcript。</p>
+        </section>
+      </div>
+      <section class="card" style="margin-top: 16px" aria-labelledby="events-heading">
+        <h2 id="events-heading">Native notifications / 调试结果</h2>
+        <pre id="events" aria-live="polite"></pre>
+      </section>
+    </main>
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>
