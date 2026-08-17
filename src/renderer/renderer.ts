@@ -1,7 +1,9 @@
 import type {
   NativeEvent,
+  ProjectRecord,
   RuntimeErrorInfo,
   RuntimeSnapshot,
+  ThreadProjection,
   ThreadReadView,
   TurnResult,
 } from "../shared/runtime-types.ts";
@@ -14,6 +16,11 @@ interface IpcEnvelope<T = unknown> {
 
 interface V1Api {
   getState(): Promise<IpcEnvelope<RuntimeSnapshot>>;
+  inspectPersistence(): Promise<IpcEnvelope<unknown>>;
+  listProjects(): Promise<IpcEnvelope<ProjectRecord[]>>;
+  createProject(input: unknown): Promise<IpcEnvelope<ProjectRecord>>;
+  listThreads(projectId?: string | null): Promise<IpcEnvelope<ThreadProjection[]>>;
+  bindThreadToProject(nativeThreadId: string, projectId: string | null): Promise<IpcEnvelope<ThreadProjection>>;
   startThread(): Promise<IpcEnvelope<RuntimeSnapshot>>;
   resumeThread(nativeThreadId: string): Promise<IpcEnvelope<RuntimeSnapshot>>;
   readThread(): Promise<IpcEnvelope<ThreadReadView>>;

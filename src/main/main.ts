@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
 import { errorInfo } from "../shared/error-info.ts";
 import { createLogger, logError, type Logger } from "../shared/logger.ts";
+import { V1PersistenceStore } from "../shared/persistence-store.ts";
 import type { JsonRpcMessage } from "../shared/runtime-types.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,12 +17,18 @@ const IPC = Object.freeze({
   turn: "native-runtime:turn",
   interrupt: "native-runtime:interrupt",
   close: "native-runtime:close",
+  persistenceInspect: "persistence:inspect",
+  projectList: "persistence:projects:list",
+  projectCreate: "persistence:projects:create",
+  threadList: "persistence:threads:list",
+  threadBind: "persistence:threads:bind",
   event: "native-runtime:event",
   serverRequest: "native-runtime:server-request",
 });
 
 let mainWindow: BrowserWindow | null = null;
 let runtime: NativeThreadRuntime | null = null;
+let persistence: V1PersistenceStore | null = null;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
 
 function send(channel: string, payload: unknown): void {
@@ -39,6 +46,7 @@ function getRuntime(): NativeThreadRuntime {
   runtime = new NativeThreadRuntime({
     cwd: runtimeCwd(),
     stateFile: join(userData, "native-thread-binding.json"),
+    persistence: getPersistence(),
     onEvent: (event) => {
       logger.info("native_event", { method: event.method, threadId: event.threadId, turnId: event.turnId, itemId: event.itemId });
       send(IPC.event, event);
@@ -61,6 +69,12 @@ function getRuntime(): NativeThreadRuntime {
   return runtime;
 }
 
+function getPersistence(): V1PersistenceStore {
+  if (persistence) return persistence;
+  persistence = new V1PersistenceStore(join(app.getPath("userData"), "workbench-state.json"));
+  return persistence;
+}
+
 function ok(result: unknown): { ok: true; result: unknown } {
   return { ok: true, result };
 }
@@ -73,6 +87,49 @@ function fail(error: unknown): { ok: false; error: ReturnType<typeof errorInfo> 
 
 function registerIpc(): void {
   ipcMain.handle(IPC.state, () => ok(getRuntime().snapshot()));
+  ipcMain.handle(IPC.persistenceInspect, async () => {
+    try {
+      return ok(await getPersistence().inspect());
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectList, async () => {
+    try {
+      return ok(await getPersistence().listProjects());
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectCreate, async (_event, input: unknown) => {
+    try {
+      const value = input !== null && typeof input === "object" ? input as Record<string, unknown> : {};
+      return ok(await getPersistence().createProject({
+        projectId: typeof value.projectId === "string" ? value.projectId : undefined,
+        name: typeof value.name === "string" ? value.name : "",
+        cwd: typeof value.cwd === "string" ? value.cwd : "",
+        metadata: value.metadata as Record<string, string> | undefined,
+      }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.threadList, async (_event, projectId: unknown) => {
+    try {
+      if (projectId !== undefined && projectId !== null && typeof projectId !== "string") throw new Error("Project ID is invalid.");
+      return ok(await getPersistence().listThreads(projectId as string | null | undefined));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.threadBind, async (_event, nativeThreadId: unknown, projectId: unknown) => {
+    try {
+      if (typeof nativeThreadId !== "string" || (projectId !== null && typeof projectId !== "string")) throw new Error("Thread binding input is invalid.");
+      return ok(await getPersistence().bindThreadToProject(nativeThreadId, projectId as string | null));
+    } catch (error) {
+      return fail(error);
+    }
+  });
   ipcMain.handle(IPC.start, async () => {
     try {
       return ok(await getRuntime().start());

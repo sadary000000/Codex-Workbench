@@ -8,10 +8,12 @@ import {
 } from "./app-server-client.ts";
 import { validateInitializeResult } from "./app-server-capabilities.ts";
 import { asError, errorInfo } from "../shared/error-info.ts";
+import { V1PersistenceStore, type PromptRecoveryPatch, type ThreadProjectionPatch } from "../shared/persistence-store.ts";
 import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
 import type {
   JsonRpcMessage,
   NativeEvent,
+  PromptRecoveryStatus,
   RuntimeErrorInfo,
   RuntimeSnapshot,
   RuntimeState,
@@ -32,6 +34,8 @@ export interface NativeThreadRuntimeOptions {
   onEvent?: (event: NativeEvent) => void;
   onServerRequest?: (message: JsonRpcMessage) => Promise<unknown> | unknown;
   onProcessExit?: (exitCode: number | null, stderr: string) => void;
+  persistence?: V1PersistenceStore;
+  projectId?: string | null;
 }
 
 interface ActiveTurn {
@@ -104,6 +108,19 @@ function resultStatus(status: string | null): TurnResult["status"] {
   return "unknown";
 }
 
+function transportRecovery(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "APP_SERVER_TIMEOUT"
+    || code === "APP_SERVER_PROCESS_EXIT"
+    || code === "APP_SERVER_CONNECTION_LOST"
+    || code === "APP_SERVER_CLIENT_CLOSED";
+}
+
+function turnError(value: unknown): RuntimeErrorInfo | null {
+  if (value === null || value === undefined) return null;
+  return errorInfo(value);
+}
+
 export class NativeThreadRuntime {
   private readonly cwd: string;
   private readonly stateFile: string;
@@ -113,6 +130,8 @@ export class NativeThreadRuntime {
   private readonly onEvent: NativeThreadRuntimeOptions["onEvent"];
   private readonly onServerRequest: NativeThreadRuntimeOptions["onServerRequest"];
   private readonly onProcessExit: NativeThreadRuntimeOptions["onProcessExit"];
+  private readonly persistence: V1PersistenceStore | null;
+  private readonly projectId: string | null | undefined;
   private client: AppServerClientPort | null = null;
   private unsubscribe = (): void => undefined;
   private stateValue: RuntimeState = "IDLE";
@@ -133,6 +152,8 @@ export class NativeThreadRuntime {
     this.onEvent = options.onEvent;
     this.onServerRequest = options.onServerRequest;
     this.onProcessExit = options.onProcessExit;
+    this.persistence = options.persistence ?? null;
+    this.projectId = options.projectId;
   }
 
   get nativeThreadId(): string | null { return this.nativeThreadIdValue; }
@@ -155,46 +176,63 @@ export class NativeThreadRuntime {
   }
 
   async start(resumeThreadId?: string): Promise<RuntimeSnapshot> {
+    return this.startInternal(resumeThreadId, false);
+  }
+
+  private async startInternal(resumeThreadId: string | undefined, explicitResume: boolean): Promise<RuntimeSnapshot> {
     if (this.stateValue === "READY" || this.stateValue === "TURN_RUNNING") return this.snapshot();
-    if (this.stateValue !== "IDLE" && this.stateValue !== "DISCONNECTED" && this.stateValue !== "FAILED") {
+    if (this.stateValue !== "IDLE" && this.stateValue !== "DISCONNECTED" && this.stateValue !== "FAILED" && this.stateValue !== "RECOVERY_REQUIRED") {
       throw this.fail("RUNTIME_STATE_INVALID", `Runtime cannot start from ${this.stateValue}.`);
     }
     this.stateValue = "STARTING";
     this.lastErrorValue = null;
     this.closing = false;
-    const bindingState = await inspectThreadBinding(this.stateFile);
-    if (bindingState.invalid) throw this.fail("THREAD_BINDING_INVALID", "Persisted Native Thread binding is invalid; no replacement Thread will be created.");
-    const persisted = bindingState.binding;
-    const persistedId = persisted?.nativeThreadId ?? null;
-    if (resumeThreadId && persistedId && resumeThreadId !== persistedId) {
-      throw this.fail("THREAD_ID_CONFLICT", "Requested nativeThreadId differs from the persisted binding.");
-    }
-    const requestedId = resumeThreadId ?? persistedId;
-    if (persisted && persisted.cwd !== this.cwd) {
-      throw this.fail("THREAD_CWD_MISMATCH", "Persisted Native Thread belongs to a different cwd.");
-    }
-    const client = this.clientFactory({
-      command: this.command,
-      cwd: this.cwd,
-      onServerRequest: async (message) => {
-        return this.onServerRequest?.(message);
-      },
-      onProcessExit: (exitCode, stderr) => {
-        if (this.closing) return;
-        this.stateValue = "DISCONNECTED";
-        this.lastErrorValue = {
-          name: "AppServerProcessExit",
-          code: "APP_SERVER_PROCESS_EXIT",
-          message: `Codex App Server exited with code ${exitCode ?? "unknown"}.`,
-          exitCode,
-          stderr: stderr.slice(-8_000),
-        };
-        this.onProcessExit?.(exitCode, stderr);
-      },
-    });
-    this.client = client;
-    this.unsubscribe = client.onMessage((message) => this.emitMessage(message));
     try {
+      const persistenceInspection = await this.persistence?.inspect();
+      if (persistenceInspection?.status === "invalid") {
+        throw this.fail(persistenceInspection.code ?? "PERSISTENCE_INVALID", persistenceInspection.message ?? "Workbench persistence is invalid.");
+      }
+      const bindingState = await inspectThreadBinding(this.stateFile);
+      if (bindingState.invalid) throw this.fail("THREAD_BINDING_INVALID", "Persisted Native Thread binding is invalid; no replacement Thread will be created.");
+      const persisted = bindingState.binding;
+      const persistedId = persisted?.nativeThreadId ?? null;
+      const requestedId = resumeThreadId ?? persistedId;
+      if (!explicitResume && !requestedId && persistenceInspection?.document?.threads.length) {
+        throw this.fail("THREAD_BINDING_MISSING", "Thread projections exist but the active Native Thread binding is missing; explicit resume is required.");
+      }
+      if (!explicitResume && persisted && persisted.cwd !== this.cwd) {
+        throw this.fail("THREAD_CWD_MISMATCH", "Persisted Native Thread belongs to a different cwd.");
+      }
+      if (explicitResume && persisted && persistedId === requestedId && persisted.cwd !== this.cwd) {
+        throw this.fail("THREAD_CWD_MISMATCH", "Persisted Native Thread belongs to a different cwd.");
+      }
+      if (this.client) {
+        this.closing = true;
+        await this.closeClient();
+        this.closing = false;
+      }
+      const client = this.clientFactory({
+        command: this.command,
+        cwd: this.cwd,
+        onServerRequest: async (message) => {
+          return this.onServerRequest?.(message);
+        },
+        onProcessExit: (exitCode, stderr) => {
+          if (this.closing) return;
+          this.stateValue = "DISCONNECTED";
+          this.lastErrorValue = {
+            name: "AppServerProcessExit",
+            code: "APP_SERVER_PROCESS_EXIT",
+            message: `Codex App Server exited with code ${exitCode ?? "unknown"}.`,
+            exitCode,
+            stderr: stderr.slice(-8_000),
+          };
+          void this.persistProcessFailure(this.lastErrorValue);
+          this.onProcessExit?.(exitCode, stderr);
+        },
+      });
+      this.client = client;
+      this.unsubscribe = client.onMessage((message) => this.emitMessage(message));
       await client.start();
       const initialized = validateInitializeResult(await client.request("initialize", {
         clientInfo: {
@@ -211,11 +249,20 @@ export class NativeThreadRuntime {
         const response = await client.request("thread/resume", { threadId: requestedId }, this.timeoutMs);
         this.assertThreadId(response, requestedId);
         const read = await this.readThreadInternal(requestedId);
-        if (read.turns.some((turn) => activeStatus(turn.status))) {
+        const activeTurn = read.turns.find((turn) => activeStatus(turn.status));
+        if (activeTurn) {
           this.stateValue = "RECOVERY_REQUIRED";
+          const recoveryError = errorInfo(this.fail("ACTIVE_TURN_RECOVERY_REQUIRED", "Persisted Thread has an active Turn; no continuation was fabricated."));
+          await this.persistRecovery(activeTurn.id, recoveryError);
           throw this.fail("ACTIVE_TURN_RECOVERY_REQUIRED", "Persisted Thread has an active Turn; Phase 1 will not fabricate recovery.");
         }
-        if (!persisted) {
+        await this.reconcilePromptRecovery(read);
+        await this.persistProjection({
+          lastKnownState: "ready",
+          lastKnownTurnId: read.turns.at(-1)?.id ?? null,
+          lastError: null,
+        });
+        if (!persisted || (explicitResume && persistedId !== requestedId)) {
           await saveThreadBinding(this.stateFile, {
             version: 1,
             nativeThreadId: requestedId,
@@ -240,16 +287,24 @@ export class NativeThreadRuntime {
           nativeThreadId,
           cwd: this.cwd,
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
         });
+        await this.persistProjection({ lastKnownState: "ready", lastError: null });
         this.stateValue = "READY";
       }
       void initialized;
       return this.snapshot();
     } catch (error) {
       const normalized = asError(error);
-      this.lastErrorValue = errorInfo(normalized);
-      if (this.stateValue !== "RECOVERY_REQUIRED") this.stateValue = "FAILED";
+      const details = errorInfo(normalized);
+      this.lastErrorValue = details;
+      const previousState = this.stateValue as RuntimeState;
+      if (previousState !== "RECOVERY_REQUIRED" && previousState !== "DISCONNECTED") this.stateValue = "FAILED";
+      const failureState = this.stateValue as RuntimeState;
+      await this.safePersistProjection({
+        lastKnownState: failureState === "DISCONNECTED" ? "disconnected" : failureState === "RECOVERY_REQUIRED" ? "recovery_required" : "failed",
+        lastError: details,
+      });
       this.closing = true;
       await this.closeClient();
       throw normalized;
@@ -259,14 +314,33 @@ export class NativeThreadRuntime {
   async resume(nativeThreadId: string): Promise<RuntimeSnapshot> {
     const id = nativeThreadId.trim();
     if (!id) throw this.fail("THREAD_ID_REQUIRED", "nativeThreadId is required for resume.");
-    return this.start(id);
+    return this.startInternal(id, true);
   }
 
   async readThread(): Promise<ThreadReadView> {
     if (!this.client || !this.nativeThreadIdValue || !this.initialized) {
       throw this.fail("THREAD_NOT_READY", "Native Thread is not ready.");
     }
-    return this.readThreadInternal(this.nativeThreadIdValue);
+    try {
+      const read = await this.readThreadInternal(this.nativeThreadIdValue);
+      await this.persistProjection({
+        lastKnownState: "ready",
+        lastKnownTurnId: read.turns.at(-1)?.id ?? null,
+        lastError: null,
+      });
+      return read;
+    } catch (error) {
+      const normalized = asError(error);
+      const details = errorInfo(normalized);
+      this.lastErrorValue = details;
+      const recoveryRequired = transportRecovery(normalized);
+      this.stateValue = recoveryRequired ? "RECOVERY_REQUIRED" : "FAILED";
+      await this.safePersistProjection({
+        lastKnownState: recoveryRequired ? "recovery_required" : "failed",
+        lastError: details,
+      });
+      throw normalized;
+    }
   }
 
   async startTurn(prompt: string): Promise<TurnResult> {
@@ -276,40 +350,79 @@ export class NativeThreadRuntime {
     if (!this.client || !this.nativeThreadIdValue || !this.initialized) throw this.fail("THREAD_NOT_READY", "Native Thread is not ready.");
     if (this.activeTurnValue) throw this.fail("TURN_BUSY", "A Native Turn is already running.");
     const localRunId = randomUUID();
-    this.stateValue = "TURN_RUNNING";
+    const nativeThreadId = this.nativeThreadIdValue;
     let turnId: string | null = null;
     try {
+      if (this.persistence) {
+        await this.persistence.beginPrompt({ localRunId, nativeThreadId, prompt: text });
+      }
+      this.stateValue = "TURN_RUNNING";
       const response = await this.client.request("turn/start", {
-        threadId: this.nativeThreadIdValue,
+        threadId: nativeThreadId,
         input: [{ type: "text", text }],
       }, this.timeoutMs);
       turnId = idFrom(object(response)?.turn, "id");
       if (!turnId) throw this.fail("TURN_ID_MISSING", "turn/start did not return a Turn ID.");
       this.activeTurnValue = { localRunId, turnId };
+      if (this.persistence) {
+        await this.persistence.updatePrompt(localRunId, { status: "running", turnId });
+      }
       const terminal = await this.client.waitForNotification(
         "turn/completed",
-        (message) => messageIds(message).threadId === this.nativeThreadIdValue && messageIds(message).turnId === turnId,
+        (message) => messageIds(message).threadId === nativeThreadId && messageIds(message).turnId === turnId,
         this.timeoutMs,
       );
       const params = object(terminal.params) ?? {};
       const turn = object(params.turn);
       const status = statusFromTurn(turn ?? params);
+      const terminalError = turnError(turn?.error);
+      const resultStatusValue = resultStatus(status);
       const result: TurnResult = {
         localRunId,
-        nativeThreadId: this.nativeThreadIdValue,
+        nativeThreadId,
         turnId,
-        status: resultStatus(status),
+        status: resultStatusValue,
         terminalStatus: status,
         finalMessage: finalMessage(turn),
+        error: terminalError,
       };
       this.activeTurnValue = null;
-      this.stateValue = result.status === "unknown" ? "FAILED" : "READY";
+      if (resultStatusValue === "completed" || resultStatusValue === "interrupted") {
+        if (this.persistence) await this.persistence.clearPrompt(localRunId);
+        this.stateValue = "READY";
+        await this.persistProjection({ lastKnownState: "ready", lastKnownTurnId: turnId, lastError: null });
+      } else if (resultStatusValue === "failed") {
+        const failure = terminalError ?? errorInfo(this.fail("TURN_FAILED", "Native Turn failed without an error payload."));
+        this.lastErrorValue = failure;
+        if (this.persistence) await this.persistence.updatePrompt(localRunId, { status: "failed", turnId, lastError: failure });
+        this.stateValue = "FAILED";
+        await this.persistProjection({ lastKnownState: "failed", lastKnownTurnId: turnId, lastError: failure });
+      } else {
+        const recovery = terminalError ?? errorInfo(this.fail("TURN_STATUS_UNKNOWN", "Native Turn completed with an unknown status."));
+        this.lastErrorValue = recovery;
+        if (this.persistence) await this.persistence.updatePrompt(localRunId, { status: "recovery_required", turnId, lastError: recovery });
+        this.stateValue = "RECOVERY_REQUIRED";
+        await this.persistProjection({ lastKnownState: "recovery_required", lastKnownTurnId: turnId, lastError: recovery });
+      }
       return result;
     } catch (error) {
       this.activeTurnValue = null;
-      if ((this.stateValue as RuntimeState) !== "DISCONNECTED") this.stateValue = "FAILED";
-      this.lastErrorValue = errorInfo(error);
-      throw error;
+      const normalized = asError(error);
+      const details = errorInfo(normalized);
+      const recoveryRequired = transportRecovery(normalized) || this.stateValue === "DISCONNECTED" || this.closing;
+      const promptStatus: PromptRecoveryStatus = recoveryRequired ? "recovery_required" : "failed";
+      await this.safeUpdatePrompt(localRunId, { status: promptStatus, turnId, lastError: details });
+      if (this.stateValue !== "DISCONNECTED" && this.stateValue !== "RECOVERY_REQUIRED") {
+        this.stateValue = recoveryRequired ? "RECOVERY_REQUIRED" : "FAILED";
+      }
+      this.lastErrorValue = details;
+      const failureState: RuntimeState = this.stateValue;
+      await this.safePersistProjection({
+        lastKnownState: failureState === "DISCONNECTED" ? "disconnected" : recoveryRequired ? "recovery_required" : "failed",
+        lastKnownTurnId: turnId,
+        lastError: details,
+      });
+      throw normalized;
     }
   }
 
@@ -318,17 +431,138 @@ export class NativeThreadRuntime {
       throw this.fail("TURN_NOT_RUNNING", "No Native Turn is running.");
     }
     const turnId = this.activeTurnValue.turnId;
-    await this.client.request("turn/interrupt", {
-      threadId: this.nativeThreadIdValue,
-      turnId,
-    }, 5_000);
-    return { ok: true, turnId };
+    try {
+      await this.client.request("turn/interrupt", {
+        threadId: this.nativeThreadIdValue,
+        turnId,
+      }, 5_000);
+      return { ok: true, turnId };
+    } catch (error) {
+      const normalized = asError(error);
+      const details = errorInfo(normalized);
+      this.lastErrorValue = details;
+      if (transportRecovery(normalized)) this.stateValue = "RECOVERY_REQUIRED";
+      await this.safeUpdatePrompt(this.activeTurnValue.localRunId, {
+        status: transportRecovery(normalized) ? "recovery_required" : "failed",
+        turnId,
+        lastError: details,
+      });
+      await this.safePersistProjection({
+        lastKnownState: transportRecovery(normalized) ? "recovery_required" : "failed",
+        lastKnownTurnId: turnId,
+        lastError: details,
+      });
+      throw normalized;
+    }
   }
 
   async close(): Promise<void> {
+    const active = this.activeTurnValue;
+    const nativeThreadId = this.nativeThreadIdValue;
     this.closing = true;
+    if (nativeThreadId && (active || this.persistence)) {
+      const details = errorInfo(this.fail("RUNTIME_CLOSED_DURING_TURN", "Runtime closed while a Prompt may still be in flight."));
+      if (active) await this.safeUpdatePrompt(active.localRunId, { status: "recovery_required", turnId: active.turnId, lastError: details });
+      if (this.persistence) {
+        await this.safeMarkPrompts(nativeThreadId, "recovery_required", details);
+      }
+      if (active) this.stateValue = "RECOVERY_REQUIRED";
+      const closeProjectionState = this.stateValue === "DISCONNECTED"
+        ? "disconnected"
+        : this.stateValue === "FAILED"
+          ? "failed"
+          : this.stateValue === "RECOVERY_REQUIRED" || active
+            ? "recovery_required"
+            : "ready";
+      await this.safePersistProjection({
+        lastKnownState: closeProjectionState,
+        lastKnownTurnId: active?.turnId ?? null,
+        ...(active ? { lastError: details } : {}),
+      });
+    }
     await this.closeClient();
-    this.stateValue = "CLOSED";
+    if (!active) this.stateValue = "CLOSED";
+  }
+
+  private async persistProjection(patch: ThreadProjectionPatch = {}): Promise<void> {
+    if (!this.persistence || !this.nativeThreadIdValue) return;
+    await this.persistence.ensureThreadProjection({
+      nativeThreadId: this.nativeThreadIdValue,
+      cwd: this.cwd,
+      ...(this.projectId === undefined ? {} : { projectId: this.projectId }),
+      ...patch,
+    });
+  }
+
+  private async safePersistProjection(patch: ThreadProjectionPatch): Promise<void> {
+    try {
+      await this.persistProjection(patch);
+    } catch (error) {
+      this.rememberPersistenceFailure(error);
+    }
+  }
+
+  private async safeUpdatePrompt(localRunId: string, patch: PromptRecoveryPatch): Promise<void> {
+    if (!this.persistence) return;
+    try {
+      await this.persistence.updatePrompt(localRunId, patch);
+    } catch (error) {
+      this.rememberPersistenceFailure(error);
+    }
+  }
+
+  private async safeMarkPrompts(nativeThreadId: string, status: PromptRecoveryStatus, lastError: RuntimeErrorInfo | null): Promise<void> {
+    if (!this.persistence) return;
+    try {
+      await this.persistence.markPromptsForThread(nativeThreadId, status, lastError);
+    } catch (error) {
+      this.rememberPersistenceFailure(error);
+    }
+  }
+
+  private async persistProcessFailure(details: RuntimeErrorInfo): Promise<void> {
+    const nativeThreadId = this.nativeThreadIdValue;
+    if (!nativeThreadId) return;
+    await this.safePersistProjection({ lastKnownState: "disconnected", lastError: details });
+    await this.safeMarkPrompts(nativeThreadId, "recovery_required", details);
+  }
+
+  private async persistRecovery(turnId: string | null, details: RuntimeErrorInfo): Promise<void> {
+    const nativeThreadId = this.nativeThreadIdValue;
+    if (!nativeThreadId) return;
+    await this.safePersistProjection({ lastKnownState: "recovery_required", lastKnownTurnId: turnId, lastError: details });
+    await this.safeMarkPrompts(nativeThreadId, "recovery_required", details);
+  }
+
+  private async reconcilePromptRecovery(read: ThreadReadView): Promise<void> {
+    if (!this.persistence || !this.nativeThreadIdValue) return;
+    const recoverable = await this.persistence.listRecoverablePrompts(this.nativeThreadIdValue);
+    for (const prompt of recoverable) {
+      const turn = prompt.turnId ? read.turns.find((candidate) => candidate.id === prompt.turnId) : undefined;
+      if (turn && /^(completed|interrupted|cancelled)$/i.test(turn.status)) {
+        await this.persistence.clearPrompt(prompt.localRunId);
+        continue;
+      }
+      if (prompt.status === "pending" || prompt.status === "running" || (turn && activeStatus(turn.status))) {
+        await this.persistence.updatePrompt(prompt.localRunId, {
+          status: "recovery_required",
+          turnId: prompt.turnId,
+          lastError: prompt.lastError,
+        });
+      }
+    }
+  }
+
+  private rememberPersistenceFailure(error: unknown): void {
+    const details = errorInfo(error);
+    if (this.lastErrorValue) {
+      this.lastErrorValue = {
+        ...this.lastErrorValue,
+        cause: `persistence ${details.code ?? details.name}: ${details.message}`.slice(0, 1_000),
+      };
+    } else {
+      this.lastErrorValue = details;
+    }
   }
 
   private async readThreadInternal(expectedId: string): Promise<ThreadReadView> {

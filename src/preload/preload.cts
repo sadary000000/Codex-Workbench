@@ -8,6 +8,11 @@ const channels = Object.freeze({
   turn: "native-runtime:turn",
   interrupt: "native-runtime:interrupt",
   close: "native-runtime:close",
+  persistenceInspect: "persistence:inspect",
+  projectList: "persistence:projects:list",
+  projectCreate: "persistence:projects:create",
+  threadList: "persistence:threads:list",
+  threadBind: "persistence:threads:bind",
   event: "native-runtime:event",
   serverRequest: "native-runtime:server-request",
 });
@@ -20,6 +25,11 @@ function listen(channel: string, listener: (payload: unknown) => void): () => vo
 
 contextBridge.exposeInMainWorld("codexWorkbenchV1", Object.freeze({
   getState: () => ipcRenderer.invoke(channels.state),
+  inspectPersistence: () => ipcRenderer.invoke(channels.persistenceInspect),
+  listProjects: () => ipcRenderer.invoke(channels.projectList),
+  createProject: (input: unknown) => ipcRenderer.invoke(channels.projectCreate, input),
+  listThreads: (projectId?: string | null) => ipcRenderer.invoke(channels.threadList, projectId),
+  bindThreadToProject: (nativeThreadId: string, projectId: string | null) => ipcRenderer.invoke(channels.threadBind, String(nativeThreadId ?? "").slice(0, 256), projectId),
   startThread: () => ipcRenderer.invoke(channels.start),
   resumeThread: (nativeThreadId: string) => ipcRenderer.invoke(channels.resume, String(nativeThreadId ?? "").slice(0, 256)),
   readThread: () => ipcRenderer.invoke(channels.read),

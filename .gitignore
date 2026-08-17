@@ -5,4 +5,4 @@ coverage/
 *.log
 *.tmp
 user-data/
-.real-smoke/
+.real-smoke*/

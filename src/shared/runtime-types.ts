@@ -44,6 +44,61 @@ export interface NativeThreadBinding {
   updatedAt: string;
 }
 
+export type ThreadProjectionState =
+  | "unknown"
+  | "ready"
+  | "disconnected"
+  | "recovery_required"
+  | "failed";
+
+export interface ProjectRecord {
+  projectId: string;
+  name: string;
+  cwd: string;
+  createdAt: string;
+  updatedAt: string;
+  metadata: Record<string, string>;
+}
+
+export interface ThreadProjection {
+  nativeThreadId: string;
+  projectId: string | null;
+  cwd: string;
+  pinned: boolean;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastKnownState: ThreadProjectionState;
+  lastKnownTurnId: string | null;
+  lastError: RuntimeErrorInfo | null;
+}
+
+export type PromptRecoveryStatus =
+  | "pending"
+  | "running"
+  | "failed"
+  | "recovery_required"
+  | "interrupted";
+
+export interface PromptRecoveryRecord {
+  localRunId: string;
+  nativeThreadId: string;
+  turnId: string | null;
+  prompt: string;
+  status: PromptRecoveryStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastError: RuntimeErrorInfo | null;
+}
+
+export interface WorkbenchPersistenceDocument {
+  version: 1;
+  updatedAt: string;
+  projects: ProjectRecord[];
+  threads: ThreadProjection[];
+  prompts: PromptRecoveryRecord[];
+}
+
 export interface ThreadReadView {
   nativeThreadId: string;
   status: string | null;
@@ -74,6 +129,7 @@ export interface TurnResult {
   status: "completed" | "interrupted" | "failed" | "unknown";
   terminalStatus: string | null;
   finalMessage: string | null;
+  error: RuntimeErrorInfo | null;
 }
 
 export interface RuntimeErrorInfo {
