@@ -3,6 +3,7 @@
 日期：2026-08-18
 
 状态：`V1 RC / Awaiting User Manual Acceptance`
+GPT RC Gate：`PASS`
 
 本报告遵循 GPT 的 Phase 6 PASS 后唯一指令：只做 Phase 0–6 集成验收、边界审计、真实 CLI smoke、文档和人工验收入口，不进入 Phase 7，不新增产品功能。
 
@@ -76,8 +77,8 @@ Navigation 曾有一次外部 websocket/TLS stream disconnected 导致超时，s
 用户完成 [V1-MANUAL-ACCEPTANCE-CHECKLIST.md](V1-MANUAL-ACCEPTANCE-CHECKLIST.md) 后，再根据真实结果判断是否达到最终发布状态。没有经过用户实际使用，不自动进入 Phase 7，也不把 UI 人工验收标成 PASS。
 
 [CODEX_WORKBENCH_V1_ACCEPTANCE_REVIEW]
-status: automated_acceptance_complete_awaiting_user_manual
-commits: phase6_fix=5c1fed7; phase6_evidence=4e8c42e; rc_commit=pending
+status: gpt_rc_gate_pass_awaiting_user_manual
+commits: phase6_fix=5c1fed7; phase6_evidence=4e8c42e; rc_commit=48c5862
 phase_status: phase0=PASS; phase1=PASS; phase2=PASS; phase3=PASS; phase4=PASS; phase5=PASS; phase6=PASS
 runtime_integration: PASS
 navigation_integration: PASS
@@ -96,3 +97,4 @@ running_subagents_at_gate: 0
 legacy_project_status: old donor unchanged with pre-existing intentional dirty baseline
 phase7_status: NOT_STARTED
 gate_recommendation: V1 RC / Awaiting User Manual Acceptance
+gpt_rc_gate: PASS

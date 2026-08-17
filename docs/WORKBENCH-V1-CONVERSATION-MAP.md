@@ -2,7 +2,7 @@
 
 日期：2026-08-17
 阶段：V1 总体验收与 Release Candidate Freeze
-状态：Phase 6 Gate 已获 GPT PASS；V1 RC 自动化验收完成，等待用户人工 GUI 验收
+状态：Phase 6 Gate 与 V1 RC 自动化 Gate 均获 GPT PASS；等待用户人工 GUI 验收
 范围：当前 Codex Workbench V1 开发对话
 
 ## 1. 文档定位
