@@ -102,6 +102,13 @@ const resumeProjectMapButton = document.querySelector<HTMLButtonElement>("#resum
 const maintenanceDialog = document.querySelector<HTMLDialogElement>("#project-maintenance-dialog")!;
 const maintenanceDialogBody = document.querySelector<HTMLElement>("#project-maintenance-body")!;
 const closeMaintenanceDialogButton = document.querySelector<HTMLButtonElement>("#close-project-maintenance")!;
+const projectCreateDialog = document.querySelector<HTMLDialogElement>("#project-create-dialog")!;
+const projectCreateForm = document.querySelector<HTMLFormElement>("#project-create-form")!;
+const projectNameElement = document.querySelector<HTMLInputElement>("#project-name")!;
+const projectCwdElement = document.querySelector<HTMLInputElement>("#project-cwd")!;
+const projectCreateErrorElement = document.querySelector<HTMLElement>("#project-create-error")!;
+const projectCreateCancelButton = document.querySelector<HTMLButtonElement>("#project-create-cancel")!;
+const projectCreateSubmitButton = document.querySelector<HTMLButtonElement>("#project-create-submit")!;
 
 const DRAFT_KEY_PREFIX = "codex-workbench-v1-native-thread-draft:";
 const LEGACY_DRAFT_KEY = "codex-workbench-v1-native-thread-draft";
@@ -502,6 +509,7 @@ function eventLabel(kind: NativeVisibleEventKind): string {
     file: "File Change",
     web: "Web / Search",
     approval: "Approval",
+    system: "Native Status",
     unknown: "Native Item",
   }[kind];
 }
@@ -800,13 +808,38 @@ async function togglePinned(thread: ThreadProjection): Promise<void> {
   if (result) await refreshNavigation();
 }
 
-async function createProject(): Promise<void> {
-  const name = window.prompt("Project 名称", "新项目")?.trim();
-  if (!name) return;
-  const cwd = window.prompt("Project 工作目录", latestState?.cwd ?? "")?.trim();
-  if (!cwd) return;
+function openProjectCreateDialog(): void {
+  projectNameElement.value = "新项目";
+  projectCwdElement.value = latestState?.cwd ?? "";
+  projectCreateErrorElement.hidden = true;
+  projectCreateErrorElement.textContent = "";
+  projectCreateSubmitButton.disabled = false;
+  projectCreateCancelButton.disabled = false;
+  projectCreateDialog.showModal();
+  projectNameElement.focus();
+  projectNameElement.select();
+}
+
+async function submitProjectCreate(): Promise<void> {
+  const name = projectNameElement.value.trim();
+  const cwd = projectCwdElement.value.trim();
+  if (!name || !cwd) {
+    projectCreateErrorElement.textContent = "Project 名称和工作目录都不能为空。";
+    projectCreateErrorElement.hidden = false;
+    return;
+  }
+  projectCreateSubmitButton.disabled = true;
+  projectCreateCancelButton.disabled = true;
   const result = await consume("project.create", api.createProject({ name, cwd }));
-  if (result) await refreshNavigation();
+  if (result) {
+    projectCreateDialog.close();
+    await refreshNavigation();
+  } else {
+    projectCreateErrorElement.textContent = "Project 创建失败，请检查上方错误提示后重试。";
+    projectCreateErrorElement.hidden = false;
+    projectCreateSubmitButton.disabled = false;
+    projectCreateCancelButton.disabled = false;
+  }
 }
 
 function addLiveEvent(event: NativeEvent): void {
@@ -848,7 +881,12 @@ jumpLatestButton.addEventListener("click", () => {
   jumpLatestButton.hidden = true;
 });
 document.querySelector<HTMLButtonElement>("#new-standalone-thread")!.addEventListener("click", () => { void createNativeThread(null); });
-document.querySelector<HTMLButtonElement>("#new-project")!.addEventListener("click", () => { void createProject(); });
+document.querySelector<HTMLButtonElement>("#new-project")!.addEventListener("click", openProjectCreateDialog);
+projectCreateForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitProjectCreate();
+});
+projectCreateCancelButton.addEventListener("click", () => projectCreateDialog.close());
 startThreadButton.addEventListener("click", async () => {
   const result = await consume("runtime.start", api.startThread());
   if (result) {

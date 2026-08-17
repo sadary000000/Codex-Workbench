@@ -136,7 +136,7 @@ function transportRecovery(error: unknown): boolean {
 
 function isUnmaterializedThreadRead(error: unknown): boolean {
   if (!isAppServerClientError(error) || error.code !== "APP_SERVER_PROTOCOL_REJECTED") return false;
-  return /not materialized yet; includeTurns is unavailable before first user message/i.test(error.message);
+  return /not materialized yet; includeTurns is unavailable before first user message|no rollout found for thread id/i.test(error.message);
 }
 
 function turnError(value: unknown): RuntimeErrorInfo | null {
@@ -163,6 +163,7 @@ export class NativeThreadRuntime {
   private activeTurnValue: ActiveTurn | null = null;
   private initialized = false;
   private dynamicToolsRegisteredValue = false;
+  private emptyThreadReadAllowedValue = false;
   private lastErrorValue: RuntimeErrorInfo | null = null;
   private closing = false;
   private sequence = 0;
@@ -236,6 +237,7 @@ export class NativeThreadRuntime {
     this.lastErrorValue = null;
     this.closing = false;
     this.dynamicToolsRegisteredValue = false;
+    this.emptyThreadReadAllowedValue = false;
     try {
       const persistenceInspection = await this.persistence?.inspect();
       if (persistenceInspection?.status === "invalid") {
@@ -246,6 +248,16 @@ export class NativeThreadRuntime {
       const persisted = bindingState.binding;
       const persistedId = persisted?.nativeThreadId ?? null;
       const requestedId = forceNew ? undefined : resumeThreadId ?? persistedId;
+      const persistedProjection = requestedId
+        ? persistenceInspection?.document?.threads.find((thread) => thread.nativeThreadId === requestedId) ?? null
+        : null;
+      this.emptyThreadReadAllowedValue = !requestedId || Boolean(
+        persistedProjection
+        && persistedProjection.lastKnownState !== "failed"
+        && persistedProjection.lastKnownState !== "recovery_required"
+        && persistedProjection.lastKnownState !== "disconnected"
+        && persistedProjection.lastError === null,
+      );
       if (!forceNew && !explicitResume && !requestedId && persistenceInspection?.document?.threads.length) {
         throw this.fail("THREAD_BINDING_MISSING", "Thread projections exist but the active Native Thread binding is missing; explicit resume is required.");
       }
@@ -423,9 +435,10 @@ export class NativeThreadRuntime {
     if (!this.client || !this.nativeThreadIdValue || !this.initialized) throw this.fail("THREAD_NOT_READY", "Native Thread is not ready.");
     if (this.activeTurnValue) throw this.fail("TURN_BUSY", "A Native Turn is already running.");
     const localRunId = randomUUID();
-    const nativeThreadId = this.nativeThreadIdValue;
+      const nativeThreadId = this.nativeThreadIdValue;
     let turnId: string | null = null;
     try {
+      this.emptyThreadReadAllowedValue = false;
       if (this.persistence) {
         await this.persistence.beginPrompt({ localRunId, nativeThreadId, prompt: text });
       }
@@ -651,7 +664,7 @@ export class NativeThreadRuntime {
       // Codex App Server creates the persistent Thread before it materializes its
       // first user Turn. Until then `thread/read(includeTurns)` is a server-defined
       // JSON-RPC rejection, not a failed or disconnected Workbench runtime.
-      if (isUnmaterializedThreadRead(error)) {
+      if (this.emptyThreadReadAllowedValue && isUnmaterializedThreadRead(error)) {
         return {
           nativeThreadId: expectedId,
           status: null,
@@ -666,6 +679,7 @@ export class NativeThreadRuntime {
     }
     this.assertThreadId(response, expectedId);
     const model = parseThreadReadResponse(response);
+    if (model.turns.length > 0) this.emptyThreadReadAllowedValue = false;
     const rawThread = object(model.raw);
     const nativeTitle = string(rawThread?.title) ?? string(rawThread?.name);
     const nativeCwd = string(rawThread?.cwd) ?? string(rawThread?.workingDirectory);

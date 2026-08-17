@@ -114,6 +114,18 @@ test("maps command, file, web, approval, and turn status events by Native protoc
     params: { threadId: "native-thread-1", turnId: "turn-1", status: "inProgress", reason: "native" },
   }), "processing");
   assert.equal(compaction.status, "inProgress");
+
+  const mcpStatus = assertKind(event({
+    method: "mcpServer/startupStatus/updated",
+    params: { threadId: "native-thread-1", serverName: "example" },
+  }), "system");
+  assert.equal(mcpStatus.text, "MCP Server 启动状态已更新");
+
+  const skillsChanged = assertKind(event({
+    method: "skills/changed",
+    params: { threadId: "native-thread-1" },
+  }), "system");
+  assert.equal(skillsChanged.text, "Skills 列表已更新");
 });
 
 test("returns unknown safely for unknown or incomplete structures", () => {

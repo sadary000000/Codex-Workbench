@@ -5,10 +5,10 @@ import { execFileSync } from "node:child_process";
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const tsc = join(projectRoot, "node_modules", "typescript", "bin", "tsc");
-const distRoot = join(projectRoot, "dist");
+const distRoot = resolve(process.env.CODEX_WORKBENCH_DIST ?? join(projectRoot, "dist"));
 
 await rm(distRoot, { recursive: true, force: true });
-execFileSync(process.execPath, [tsc, "-p", join(projectRoot, "tsconfig.json")], {
+execFileSync(process.execPath, [tsc, "-p", join(projectRoot, "tsconfig.json"), "--outDir", distRoot], {
   cwd: projectRoot,
   stdio: "inherit",
 });

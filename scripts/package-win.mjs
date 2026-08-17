@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const compiledRoot = join(projectRoot, "dist");
+const compiledRoot = resolve(process.env.CODEX_WORKBENCH_DIST ?? join(projectRoot, "dist"));
 const electronRoot = join(projectRoot, "node_modules", "electron", "dist");
 const packageRoot = join(compiledRoot, "package");
 const appRoot = join(packageRoot, "resources", "app");

@@ -89,6 +89,7 @@
       .event-processing { background: #292827; border-color: #554a39; }
       .event-command_tool, .event-file, .event-web { background: #27272a; }
       .event-approval { background: #302b22; border-color: #7d6536; }
+      .event-system { background: #25282a; border-color: #3d464b; }
       .event-unknown { background: #282828; border-style: dashed; }
       .event-muted { padding: 5px 14px 0; color: #999; font-size: 11px; word-break: break-word; }
       .event-raw { margin: 0 13px 12px; color: #999; font-size: 11px; }
@@ -134,6 +135,11 @@
       .maintenance-dialog { display: grid; gap: 10px; min-width: min(620px, 82vw); }
       .maintenance-dialog h2 { margin: 0; font-size: 15px; }
       .maintenance-dialog pre { max-height: 55vh; overflow: auto; padding: 10px; border-radius: 7px; background: #141414; color: #c8c8c8; font-size: 11px; white-space: pre-wrap; }
+      .project-create-form { display: grid; gap: 12px; min-width: min(560px, 82vw); }
+      .project-create-form label { display: grid; gap: 6px; }
+      .project-create-form input { box-sizing: border-box; }
+      .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+      .dialog-error { margin: 0; color: var(--danger); font-size: 12px; line-height: 1.45; }
       .map-node { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; width: 100%; padding: 8px 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #d5d5d5; text-align: left; }
       .map-node:hover, .map-node:focus-visible { border-color: #415f53; background: #26342f; outline: none; }
       .map-node-marker { color: #9bd0b8; font-size: 12px; }
@@ -227,6 +233,7 @@
         <ul id="map-tree" class="map-tree" role="tree" aria-label="Conversation Map 节点"></ul>
       </aside>
       <dialog id="project-maintenance-dialog" aria-labelledby="project-maintenance-title"><form method="dialog" class="maintenance-dialog"><h2 id="project-maintenance-title">Project Map 维护对话</h2><p class="muted">只读 Native Thread 视图；此 Thread 不会进入普通导航、最近列表或项目 Thread 列表。</p><pre id="project-maintenance-body"></pre><button id="close-project-maintenance" class="debug-button" type="submit">关闭</button></form></dialog>
+      <dialog id="project-create-dialog" aria-labelledby="project-create-title"><form id="project-create-form" class="project-create-form"><h2 id="project-create-title">新建 Project</h2><p class="muted">Project 只登记名称和工作目录，不会自动创建文件夹。</p><label for="project-name">Project 名称<input id="project-name" name="name" maxlength="256" autocomplete="off" required></label><label for="project-cwd">工作目录<input id="project-cwd" name="cwd" maxlength="4096" autocomplete="off" required></label><p id="project-create-error" class="dialog-error" hidden></p><div class="dialog-actions"><button id="project-create-cancel" class="debug-button" type="button">取消</button><button id="project-create-submit" class="debug-button send-button" type="submit">创建</button></div></form></dialog>
     </div>
     <script type="module" src="./renderer.js"></script>
   </body>

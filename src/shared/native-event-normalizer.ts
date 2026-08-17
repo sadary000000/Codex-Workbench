@@ -7,6 +7,14 @@ const MAX_PARAM_KEY_LENGTH = 128;
 
 export const MAX_NORMALIZED_TEXT_LENGTH = MAX_PARAM_STRING_LENGTH;
 
+const SYSTEM_METHODS = new Set([
+  "mcpserver/startupstatus/updated",
+  "skills/changed",
+  "remotecontrol/status/changed",
+  "thread/tokenusage/updated",
+  "thread/goal/cleared",
+]);
+
 export type NativeVisibleEventKind =
   | "user"
   | "assistant"
@@ -15,6 +23,7 @@ export type NativeVisibleEventKind =
   | "file"
   | "web"
   | "approval"
+  | "system"
   | "unknown";
 
 export interface NormalizedNativeEvent {
@@ -220,6 +229,10 @@ function isProcessingType(value: string | null): boolean {
   return itemIs(value, "reasoning", "plan", "contextCompaction", "contextSummary", "processing");
 }
 
+function isSystemMethod(method: string): boolean {
+  return SYSTEM_METHODS.has(method.toLowerCase());
+}
+
 function isUserMethod(method: string): boolean {
   return /^item\/user[_-]?message(?:\/|$)/i.test(method)
     || /^item\/user[_-]?input(?:\/|$)/i.test(method);
@@ -265,6 +278,8 @@ function classify(
 ): NativeVisibleEventKind {
   const lowerMethod = method.toLowerCase();
   const itemText = messageText(params);
+
+  if (isSystemMethod(method)) return "system";
 
   if (isApprovalMethod(method)) {
     return params && (hasIdentity(ids) || hasAny(params, ["reason", "command", "fileChanges", "questions"]))
@@ -358,7 +373,7 @@ function classify(
   return "unknown";
 }
 
-function textForKind(kind: NativeVisibleEventKind, params: ObjectRecord | null): string | null {
+function textForKind(kind: NativeVisibleEventKind, method: string, params: ObjectRecord | null): string | null {
   if (kind === "user" || kind === "assistant") return messageText(params);
   if (kind === "command_tool") return commandOutputText(params);
   if (kind === "approval") {
@@ -368,6 +383,15 @@ function textForKind(kind: NativeVisibleEventKind, params: ObjectRecord | null):
       ?? contentText(params?.text);
   }
   if (kind === "web") return messageText(params);
+  if (kind === "system") {
+    return {
+      "mcpserver/startupstatus/updated": "MCP Server 启动状态已更新",
+      "skills/changed": "Skills 列表已更新",
+      "remotecontrol/status/changed": "Remote Control 状态已更新",
+      "thread/tokenusage/updated": "Thread Token 使用量已更新",
+      "thread/goal/cleared": "Thread Goal 已清除",
+    }[method.toLowerCase()] ?? "Native 系统状态已更新";
+  }
   return null;
 }
 
@@ -393,7 +417,7 @@ export function normalizeNativeEvent(input: unknown): NormalizedNativeEvent {
     itemType: itemType(boundedRecord),
     phase: itemPhase(boundedRecord),
     status: eventStatus(boundedRecord),
-    text: textForKind(kind, boundedRecord),
+    text: textForKind(kind, method, boundedRecord),
     params: boundedParams,
     rawParams,
     requestId: rpcId(record?.id),
