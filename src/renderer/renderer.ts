@@ -755,6 +755,13 @@ async function selectThread(nativeThreadId: string): Promise<void> {
   persistCurrentDraft(promptElement.value);
   threadTransitionInFlight = true;
   const generation = ++threadViewGeneration;
+  // A Thread switch is a navigation transition. Clear the previous Thread view
+  // before the IPC call so a failed switch can never display stale turns.
+  currentProjection = null;
+  threadView = null;
+  liveEvents = new Map();
+  pendingApprovals = new Map();
+  renderThreadWorkspace();
   try {
     const result = await consume("native-thread.switch", api.switchThread(nativeThreadId));
     if (result && generation === threadViewGeneration) {
@@ -785,6 +792,14 @@ async function createNativeThread(projectId: string | null): Promise<void> {
   persistCurrentDraft(promptElement.value);
   threadTransitionInFlight = true;
   const generation = ++threadViewGeneration;
+  // A new Thread is a navigation transition. Clear the previous Thread view
+  // before the IPC call so a failed creation can never display old turns under
+  // the new Thread's error banner.
+  currentProjection = null;
+  threadView = null;
+  liveEvents = new Map();
+  pendingApprovals = new Map();
+  renderThreadWorkspace();
   try {
     const result = await consume("native-thread.create", api.createThread(projectId));
     if (result && generation === threadViewGeneration) {

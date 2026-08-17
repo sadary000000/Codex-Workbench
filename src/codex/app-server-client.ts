@@ -290,7 +290,7 @@ export class AppServerProcessClient implements AppServerClientPort {
     if (message.error) {
       pending.reject(new AppServerClientError(
         "APP_SERVER_PROTOCOL_REJECTED",
-        `JSON-RPC ${message.error.code}: ${message.error.message}`,
+        `JSON-RPC ${message.error.code} during ${message.method ?? "unknown"}: ${message.error.message}`,
         { rpcError: message.error, stderr: this.stderrBuffer },
       ));
     } else {

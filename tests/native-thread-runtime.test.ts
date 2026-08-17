@@ -18,10 +18,12 @@ interface FakeState {
   turns: Array<{ id: string; status: string; items: unknown[] }>;
   startCalls: number;
   nextTurn: number;
+  requestMethods: string[];
   threadStartIds?: string[];
   threadStartIndex: number;
   activeThreadId: string;
   threadStartParams?: Record<string, unknown>;
+  threadStartNoRollout?: boolean;
   initializeParams?: Record<string, unknown>;
   turnStartErrorCode?: string;
   processExitOnTurnStart?: boolean;
@@ -53,6 +55,7 @@ class FakeClient implements AppServerClientPort {
 
   async request(method: string, params: any): Promise<unknown> {
     if (this.closed) throw new Error("fake client closed");
+    this.state.requestMethods.push(method);
     if (method === "initialize") {
       this.state.initializeParams = params;
       return { userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex" };
@@ -62,6 +65,13 @@ class FakeClient implements AppServerClientPort {
       this.state.startCalls += 1;
       const nativeThreadId = this.state.threadStartIds?.[this.state.threadStartIndex++] ?? "native-thread";
       this.state.activeThreadId = nativeThreadId;
+      if (this.state.threadStartNoRollout) {
+        this.emit({ method: "thread/started", params: { thread: { id: nativeThreadId } } });
+        throw new AppServerClientError(
+          "APP_SERVER_PROTOCOL_REJECTED",
+          `JSON-RPC -32600: no rollout found for thread id ${nativeThreadId}`,
+        );
+      }
       queueMicrotask(() => this.emit({ method: "thread/started", params: { thread: { id: nativeThreadId } } }));
       return { thread: { id: nativeThreadId } };
     }
@@ -169,13 +179,15 @@ class FakeClient implements AppServerClientPort {
   }
 }
 
-async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string; threadReadUnmaterialized?: boolean; threadReadNoRollout?: boolean } = {}) {
+async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string; threadReadUnmaterialized?: boolean; threadReadNoRollout?: boolean; threadStartNoRollout?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-test-"));
   const state: FakeState = {
     turns: [],
     startCalls: 0,
     nextTurn: 0,
+    requestMethods: [],
     threadStartIds: options.threadStartIds,
+    threadStartNoRollout: options.threadStartNoRollout,
     threadStartIndex: 0,
     activeThreadId: "native-thread",
     turnStartErrorCode: options.turnStartErrorCode,
@@ -268,6 +280,21 @@ test("treats the no-rollout empty Thread response as an empty ready view", async
   await harness.runtime.close();
 });
 
+test("keeps a new Thread when thread/start rejects after thread/started", async () => {
+  const harness = await createRuntime(false, { threadStartIds: ["native-start-notification"], threadStartNoRollout: true });
+
+  const started = await harness.runtime.startNewThread(null);
+
+  assert.equal(started.nativeThreadId, "native-start-notification");
+  assert.equal(harness.runtime.state, "READY");
+  assert.equal(harness.runtime.snapshot().lastError, null);
+  const read = await harness.runtime.readThread();
+  assert.equal(read.nativeThreadId, "native-start-notification");
+  assert.equal(read.cwd, null);
+  assert.deepEqual(read.turns, []);
+  await harness.runtime.close();
+});
+
 test("rejects a turn/start response that names another Native Thread", async () => {
   const harness = await createRuntime(false, { turnStartThreadId: "other-thread" });
   await harness.runtime.start();
@@ -280,7 +307,7 @@ test("rejects a turn/start response that names another Native Thread", async () 
 
 test("registers the Map dynamic tool only on Native Thread creation", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-map-tool-"));
-  const state: FakeState = { turns: [], startCalls: 0, nextTurn: 0, threadStartIndex: 0, activeThreadId: "native-thread" };
+  const state: FakeState = { turns: [], startCalls: 0, nextTurn: 0, requestMethods: [], threadStartIndex: 0, activeThreadId: "native-thread" };
   const persistence = new V1PersistenceStore(join(root, "workbench-state.json"));
   const runtime = new NativeThreadRuntime({
     cwd: "C:/fake/project",
@@ -412,6 +439,11 @@ test("creates multiple Native Threads with ownership, then switches back by nati
   await harness.persistence.createProject({ projectId: "project-a", name: "Alpha", cwd: "C:/fake/project" });
 
   const a1 = await harness.runtime.startNewThread("project-a");
+  const emptyProjectThread = await harness.runtime.readThread();
+  assert.equal(emptyProjectThread.nativeThreadId, "native-a1");
+  assert.deepEqual(emptyProjectThread.turns, []);
+  assert.equal(harness.runtime.state, "READY");
+  assert.deepEqual(harness.state.requestMethods.slice(0, 3), ["initialize", "thread/start", "thread/read"]);
   const a2 = await harness.runtime.startNewThread("project-a");
   const s1 = await harness.runtime.startNewThread(null);
   assert.equal(a1.nativeThreadId, "native-a1");

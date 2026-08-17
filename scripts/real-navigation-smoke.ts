@@ -54,6 +54,10 @@ try {
   const a1 = await runtime.startNewThread(project.projectId);
   assert.ok(a1.nativeThreadId);
   createdThreadIds.push(a1.nativeThreadId!);
+  const emptyProjectThread = await runtime.readThread();
+  assert.equal(emptyProjectThread.nativeThreadId, a1.nativeThreadId);
+  assert.deepEqual(emptyProjectThread.turns, []);
+  assert.equal(runtime.state, "READY");
   await runTurn("Reply with exactly PHASE3_NAV_A1.");
   const a2 = await runtime.startNewThread(project.projectId);
   assert.ok(a2.nativeThreadId);

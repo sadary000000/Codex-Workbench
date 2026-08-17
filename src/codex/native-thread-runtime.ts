@@ -134,9 +134,10 @@ function transportRecovery(error: unknown): boolean {
     || code === "APP_SERVER_CLIENT_CLOSED";
 }
 
-function isUnmaterializedThreadRead(error: unknown): boolean {
-  if (!isAppServerClientError(error) || error.code !== "APP_SERVER_PROTOCOL_REJECTED") return false;
-  return /not materialized yet; includeTurns is unavailable before first user message|no rollout found for thread id/i.test(error.message);
+function isUnmaterializedThreadLifecycleError(error: unknown): boolean {
+  const candidate = error as { code?: unknown; message?: unknown } | null;
+  if (candidate?.code !== "APP_SERVER_PROTOCOL_REJECTED" || typeof candidate.message !== "string") return false;
+  return /not materialized yet; includeTurns is unavailable before first user message|no rollout found for thread id/i.test(candidate.message);
 }
 
 function turnError(value: unknown): RuntimeErrorInfo | null {
@@ -163,7 +164,8 @@ export class NativeThreadRuntime {
   private activeTurnValue: ActiveTurn | null = null;
   private initialized = false;
   private dynamicToolsRegisteredValue = false;
-  private emptyThreadReadAllowedValue = false;
+  private newThreadReadFallbackAllowedValue = false;
+  private lastStartedThreadIdValue: string | null = null;
   private lastErrorValue: RuntimeErrorInfo | null = null;
   private closing = false;
   private sequence = 0;
@@ -237,7 +239,8 @@ export class NativeThreadRuntime {
     this.lastErrorValue = null;
     this.closing = false;
     this.dynamicToolsRegisteredValue = false;
-    this.emptyThreadReadAllowedValue = false;
+    this.newThreadReadFallbackAllowedValue = false;
+    this.lastStartedThreadIdValue = null;
     try {
       const persistenceInspection = await this.persistence?.inspect();
       if (persistenceInspection?.status === "invalid") {
@@ -248,16 +251,10 @@ export class NativeThreadRuntime {
       const persisted = bindingState.binding;
       const persistedId = persisted?.nativeThreadId ?? null;
       const requestedId = forceNew ? undefined : resumeThreadId ?? persistedId;
-      const persistedProjection = requestedId
-        ? persistenceInspection?.document?.threads.find((thread) => thread.nativeThreadId === requestedId) ?? null
-        : null;
-      this.emptyThreadReadAllowedValue = !requestedId || Boolean(
-        persistedProjection
-        && persistedProjection.lastKnownState !== "failed"
-        && persistedProjection.lastKnownState !== "recovery_required"
-        && persistedProjection.lastKnownState !== "disconnected"
-        && persistedProjection.lastError === null,
-      );
+      // Only the same in-process `thread/start` lifecycle may use the empty-read
+      // fallback. A resumed ID must go through the real `thread/resume` path and
+      // surface a missing rollout instead of being silently treated as empty.
+      this.newThreadReadFallbackAllowedValue = !requestedId;
       if (!forceNew && !explicitResume && !requestedId && persistenceInspection?.document?.threads.length) {
         throw this.fail("THREAD_BINDING_MISSING", "Thread projections exist but the active Native Thread binding is missing; explicit resume is required.");
       }
@@ -345,13 +342,24 @@ export class NativeThreadRuntime {
         }
         this.stateValue = "READY";
       } else {
-        const response = await client.request("thread/start", {
-          cwd: this.cwd,
-          approvalPolicy: "never",
-          ephemeral: false,
-          sandbox: "read-only",
-          ...(this.dynamicTools.length ? { dynamicTools: this.dynamicTools, developerInstructions: MAP_THREAD_START_HINT } : {}),
-        }, this.timeoutMs);
+        let response: unknown;
+        try {
+          response = await client.request("thread/start", {
+            cwd: this.cwd,
+            approvalPolicy: "never",
+            ephemeral: false,
+            sandbox: "read-only",
+            ...(this.dynamicTools.length ? { dynamicTools: this.dynamicTools, developerInstructions: MAP_THREAD_START_HINT } : {}),
+          }, this.timeoutMs);
+        } catch (error) {
+          // Some App Server versions emit `thread/started` and then reject the
+          // request while the first rollout is still being materialized. The
+          // notification is authoritative about the newly created identity; use
+          // it only for this new-thread request and only for the known lifecycle
+          // rejection. Resume errors must still surface normally.
+          if (!this.lastStartedThreadIdValue || !isUnmaterializedThreadLifecycleError(error)) throw error;
+          response = { thread: { id: this.lastStartedThreadIdValue } };
+        }
         const nativeThreadId = threadIdFrom(response);
         if (!nativeThreadId) throw this.fail("THREAD_ID_MISSING", "thread/start did not return nativeThreadId.");
         this.nativeThreadIdValue = nativeThreadId;
@@ -438,7 +446,7 @@ export class NativeThreadRuntime {
       const nativeThreadId = this.nativeThreadIdValue;
     let turnId: string | null = null;
     try {
-      this.emptyThreadReadAllowedValue = false;
+      this.newThreadReadFallbackAllowedValue = false;
       if (this.persistence) {
         await this.persistence.beginPrompt({ localRunId, nativeThreadId, prompt: text });
       }
@@ -664,7 +672,7 @@ export class NativeThreadRuntime {
       // Codex App Server creates the persistent Thread before it materializes its
       // first user Turn. Until then `thread/read(includeTurns)` is a server-defined
       // JSON-RPC rejection, not a failed or disconnected Workbench runtime.
-      if (this.emptyThreadReadAllowedValue && isUnmaterializedThreadRead(error)) {
+      if (this.newThreadReadFallbackAllowedValue && isUnmaterializedThreadLifecycleError(error)) {
         return {
           nativeThreadId: expectedId,
           status: null,
@@ -679,7 +687,7 @@ export class NativeThreadRuntime {
     }
     this.assertThreadId(response, expectedId);
     const model = parseThreadReadResponse(response);
-    if (model.turns.length > 0) this.emptyThreadReadAllowedValue = false;
+    if (model.turns.length > 0) this.newThreadReadFallbackAllowedValue = false;
     const rawThread = object(model.raw);
     const nativeTitle = string(rawThread?.title) ?? string(rawThread?.name);
     const nativeCwd = string(rawThread?.cwd) ?? string(rawThread?.workingDirectory);
@@ -719,6 +727,7 @@ export class NativeThreadRuntime {
   private emitMessage(message: JsonRpcMessage): void {
     if (!message.method) return;
     const ids = messageIds(message);
+    if (message.method === "thread/started" && ids.threadId) this.lastStartedThreadIdValue = ids.threadId;
     const event: NativeEvent = {
       sequence: ++this.sequence,
       timestamp: Date.now(),
