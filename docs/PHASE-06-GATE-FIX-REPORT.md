@@ -71,4 +71,4 @@
 stage: Phase 6 Gate Fix
 status: implementation_complete_awaiting_review
 request: PASS / FIX / REDESIGN / BLOCKED
-implementation_commit: 待最终提交后填入
+implementation_commit: `5c1fed7` (`fix: close phase 6 map gate gaps`)
