@@ -26,7 +26,8 @@
       button, input, textarea { font: inherit; }
       button { border: 0; color: inherit; cursor: pointer; }
       button:disabled { cursor: not-allowed; opacity: .45; }
-      .app-shell { display: grid; grid-template-columns: 276px minmax(0, 1fr); min-height: 100vh; }
+      .app-shell { display: grid; grid-template-columns: 276px minmax(0, 1fr) 0; min-height: 100vh; transition: grid-template-columns .16s ease; }
+      .app-shell.map-open { grid-template-columns: 276px minmax(0, 1fr) 328px; }
       .sidebar { display: flex; flex-direction: column; min-width: 0; padding: 12px 10px; background: var(--sidebar); border-right: 1px solid #292929; }
       .brand { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 0 10px 10px; font-size: 14px; font-weight: 650; }
       .brand-mark { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 6px; background: #ececec; color: #171717; font-size: 12px; font-weight: 800; }
@@ -116,6 +117,24 @@
       label { color: #b5b5b5; font-size: 12px; }
       .value { color: #9fd6c0; word-break: break-all; }
       pre#events { min-height: 160px; max-height: 330px; margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word; border-radius: 7px; padding: 11px; background: #1c1c1c; color: #c5d9d0; font: 11px/1.5 ui-monospace, Consolas, monospace; }
+      .map-panel { min-width: 0; overflow: hidden; padding: 14px 12px; border-left: 1px solid var(--border); background: #1b1b1b; }
+      .map-panel[hidden] { display: none; }
+      .map-panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+      .map-panel-title { margin: 0; color: #e4e4e4; font-size: 14px; font-weight: 650; }
+      .map-panel-subtitle { margin-top: 4px; color: #858585; font-size: 11px; line-height: 1.4; }
+      .map-panel-status { margin-bottom: 10px; padding: 8px 9px; border-radius: 7px; background: #262626; color: #a9a9a9; font-size: 11px; line-height: 1.45; }
+      .map-panel-status.error { color: var(--danger); }
+      .map-panel-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+      .map-tree { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+      .map-tree-item { display: grid; gap: 4px; }
+      .map-node { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; width: 100%; padding: 8px 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #d5d5d5; text-align: left; }
+      .map-node:hover, .map-node:focus-visible { border-color: #415f53; background: #26342f; outline: none; }
+      .map-node-marker { color: #9bd0b8; font-size: 12px; }
+      .map-node-content { min-width: 0; }
+      .map-node-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+      .map-node-meta { margin-top: 3px; color: #777; font-size: 10px; }
+      .map-node-children { display: grid; gap: 3px; margin-left: 16px; padding-left: 6px; border-left: 1px solid #333; }
+      .map-empty { padding: 18px 8px; color: #777; font-size: 12px; line-height: 1.5; }
       @media (max-width: 860px) {
         .app-shell { grid-template-columns: 236px minmax(0, 1fr); }
         .workspace-header, .status-banner, #thread-workspace, .debug-panel { padding-left: 16px; padding-right: 16px; margin-left: 16px; margin-right: 16px; }
@@ -129,11 +148,13 @@
         #navigation { max-height: 25vh; }
         .workspace-header { align-items: flex-start; flex-direction: column; gap: 10px; padding-top: 16px; padding-bottom: 16px; }
         .header-actions { width: 100%; justify-content: flex-end; }
+        .app-shell.map-open { grid-template-columns: 1fr; }
+        .map-panel { position: fixed; z-index: 4; inset: 0 0 0 auto; width: min(88vw, 328px); box-shadow: -14px 0 30px #0008; }
       }
     </style>
   </head>
   <body>
-    <div class="app-shell">
+    <div id="app-shell" class="app-shell">
       <aside class="sidebar" aria-label="Native Thread 导航">
         <div class="brand"><span class="brand-mark">C</span><span>Codex Workbench <span class="brand-subtitle">V1</span></span></div>
         <div class="sidebar-actions">
@@ -150,7 +171,7 @@
             <h1 id="selected-thread">未选择 Native Thread</h1>
             <div class="thread-meta"><span id="thread-kind">Native Thread</span><span>·</span><code id="thread-identifier">—</code></div>
           </div>
-          <div class="header-actions"><span id="runtime-state" class="runtime-pill">IDLE</span><button id="read-thread" class="icon-button" type="button" title="重新读取 Native Thread">↻</button></div>
+          <div class="header-actions"><span id="runtime-state" class="runtime-pill">IDLE</span><button id="toggle-map" class="icon-button" type="button" title="打开 Conversation Map" aria-expanded="false" aria-controls="map-panel">⌁</button><button id="read-thread" class="icon-button" type="button" title="重新读取 Native Thread">↻</button></div>
         </header>
         <div id="operation-status" class="status-banner" role="status">正在读取 Native Thread 导航。</div>
         <section id="thread-workspace" aria-label="Native Turn and Item stream" tabindex="0"></section>
@@ -181,6 +202,15 @@
           </section>
         </details>
       </main>
+      <aside id="map-panel" class="map-panel" aria-label="Conversation Map" hidden>
+        <div class="map-panel-header">
+          <div><h2 class="map-panel-title">Conversation Map</h2><div class="map-panel-subtitle">Map 是 Native Thread 的旁路投影，不替代 Turn / Item。</div></div>
+          <button id="close-map" class="icon-button" type="button" title="关闭 Conversation Map" aria-label="关闭 Conversation Map">×</button>
+        </div>
+        <div id="map-panel-status" class="map-panel-status" role="status">未启用 Map。</div>
+        <div class="map-panel-actions"><button id="enable-map" class="debug-button" type="button">启用</button><button id="pause-map" class="debug-button" type="button">暂停</button><button id="resume-map" class="debug-button" type="button">恢复</button></div>
+        <ul id="map-tree" class="map-tree" role="tree" aria-label="Conversation Map 节点"></ul>
+      </aside>
     </div>
     <script type="module" src="./renderer.js"></script>
   </body>

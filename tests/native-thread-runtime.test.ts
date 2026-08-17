@@ -9,6 +9,7 @@ import type {
   ClientSnapshot,
 } from "../src/codex/app-server-client.ts";
 import { NativeThreadRuntime } from "../src/codex/native-thread-runtime.ts";
+import { MAP_DYNAMIC_TOOL_SPEC } from "../src/codex/map-tool.ts";
 import { V1PersistenceStore } from "../src/shared/persistence-store.ts";
 import type { JsonRpcMessage } from "../src/shared/runtime-types.ts";
 
@@ -19,6 +20,8 @@ interface FakeState {
   threadStartIds?: string[];
   threadStartIndex: number;
   activeThreadId: string;
+  threadStartParams?: Record<string, unknown>;
+  initializeParams?: Record<string, unknown>;
   turnStartErrorCode?: string;
   processExitOnTurnStart?: boolean;
 }
@@ -46,8 +49,12 @@ class FakeClient implements AppServerClientPort {
 
   async request(method: string, params: any): Promise<unknown> {
     if (this.closed) throw new Error("fake client closed");
-    if (method === "initialize") return { userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex" };
+    if (method === "initialize") {
+      this.state.initializeParams = params;
+      return { userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex" };
+    }
     if (method === "thread/start") {
+      this.state.threadStartParams = params;
       this.state.startCalls += 1;
       const nativeThreadId = this.state.threadStartIds?.[this.state.threadStartIndex++] ?? "native-thread";
       this.state.activeThreadId = nativeThreadId;
@@ -210,6 +217,25 @@ test("starts one Native Thread, runs two Turns, reads it, and resumes without a 
   assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownState, "ready");
   assert.deepEqual(await first.persistence.listRecoverablePrompts("native-thread"), []);
   await second.close();
+});
+
+test("registers the Map dynamic tool only on Native Thread creation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-map-tool-"));
+  const state: FakeState = { turns: [], startCalls: 0, nextTurn: 0, threadStartIndex: 0, activeThreadId: "native-thread" };
+  const persistence = new V1PersistenceStore(join(root, "workbench-state.json"));
+  const runtime = new NativeThreadRuntime({
+    cwd: "C:/fake/project",
+    stateFile: join(root, "native-thread-binding.json"),
+    persistence,
+    clientFactory: (options) => new FakeClient(state, false, options.onProcessExit),
+    dynamicTools: [MAP_DYNAMIC_TOOL_SPEC],
+  });
+  await runtime.start();
+  const params = state.threadStartParams;
+  assert.equal((params?.dynamicTools as Array<{ name?: string }>)[0]?.name, "workbench_map_patch");
+  assert.match(String(params?.developerInstructions), /current delta/);
+  assert.equal(state.initializeParams?.capabilities && (state.initializeParams.capabilities as Record<string, unknown>).experimentalApi, true);
+  await runtime.close();
 });
 
 test("interrupts only the active Turn and preserves the Thread", async () => {

@@ -11,6 +11,8 @@ import { asError, errorInfo } from "../shared/error-info.ts";
 import { V1PersistenceStore, type PromptRecoveryPatch, type ThreadProjectionPatch } from "../shared/persistence-store.ts";
 import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
 import { parseThreadReadResponse } from "../shared/thread-read-model.ts";
+import type { DynamicToolSpec } from "./map-tool.ts";
+import { MAP_THREAD_START_HINT } from "./map-tool.ts";
 import type {
   JsonRpcMessage,
   NativeEvent,
@@ -34,6 +36,7 @@ export interface NativeThreadRuntimeOptions {
   clientFactory?: (options: AppServerClientOptions) => AppServerClientPort;
   onEvent?: (event: NativeEvent) => void;
   onServerRequest?: (message: JsonRpcMessage) => Promise<unknown> | unknown;
+  dynamicTools?: DynamicToolSpec[];
   onProcessExit?: (exitCode: number | null, stderr: string) => void;
   persistence?: V1PersistenceStore;
   projectId?: string | null;
@@ -138,6 +141,7 @@ export class NativeThreadRuntime {
   private readonly clientFactory: (options: AppServerClientOptions) => AppServerClientPort;
   private readonly onEvent: NativeThreadRuntimeOptions["onEvent"];
   private readonly onServerRequest: NativeThreadRuntimeOptions["onServerRequest"];
+  private readonly dynamicTools: DynamicToolSpec[];
   private readonly onProcessExit: NativeThreadRuntimeOptions["onProcessExit"];
   private readonly persistence: V1PersistenceStore | null;
   private projectIdValue: string | null | undefined;
@@ -160,6 +164,7 @@ export class NativeThreadRuntime {
     this.clientFactory = options.clientFactory ?? ((clientOptions) => new AppServerProcessClient(clientOptions));
     this.onEvent = options.onEvent;
     this.onServerRequest = options.onServerRequest;
+    this.dynamicTools = options.dynamicTools ? structuredClone(options.dynamicTools) : [];
     this.onProcessExit = options.onProcessExit;
     this.persistence = options.persistence ?? null;
     this.projectIdValue = options.projectId;
@@ -276,7 +281,9 @@ export class NativeThreadRuntime {
           title: "Codex Workbench V1",
           version: "0.1.0",
         },
-        capabilities: { experimentalApi: false },
+        // Codex CLI requires this capability before accepting thread/start.dynamicTools.
+        // Keep the baseline handshake narrow when Map is not registered.
+        capabilities: { experimentalApi: this.dynamicTools.length > 0 },
       }, this.timeoutMs));
       client.notify("initialized", {});
       this.initialized = true;
@@ -314,6 +321,7 @@ export class NativeThreadRuntime {
           approvalPolicy: "never",
           ephemeral: false,
           sandbox: "read-only",
+          ...(this.dynamicTools.length ? { dynamicTools: this.dynamicTools, developerInstructions: MAP_THREAD_START_HINT } : {}),
         }, this.timeoutMs);
         const nativeThreadId = threadIdFrom(response);
         if (!nativeThreadId) throw this.fail("THREAD_ID_MISSING", "thread/start did not return nativeThreadId.");

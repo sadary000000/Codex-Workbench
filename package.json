@@ -14,7 +14,8 @@
     "test:unit": "node --experimental-strip-types --test",
     "test:real": "node --experimental-strip-types scripts/real-app-server-smoke.ts",
     "test:real:navigation": "node --experimental-strip-types scripts/real-navigation-smoke.ts",
-    "test:real:workspace": "node --experimental-strip-types scripts/real-thread-workspace-smoke.ts"
+    "test:real:workspace": "node --experimental-strip-types scripts/real-thread-workspace-smoke.ts",
+    "test:real:map": "node --experimental-strip-types scripts/real-map-smoke.ts"
   },
   "devDependencies": {
     "@types/node": "22.10.2",

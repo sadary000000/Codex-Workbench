@@ -2,11 +2,14 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
+import { MAP_DYNAMIC_TOOL_SPEC, MAP_TOOL_CALL_METHOD } from "../codex/map-tool.ts";
 import { errorInfo } from "../shared/error-info.ts";
 import { createLogger, logError, type Logger } from "../shared/logger.ts";
 import { isNativeApprovalMethod, isValidNativeApprovalResponse, noAdditionalPermissions } from "../shared/native-approval.ts";
 import { PersistenceStoreError, V1PersistenceStore } from "../shared/persistence-store.ts";
 import type { JsonRpcMessage, ThreadNavigationResult } from "../shared/runtime-types.ts";
+import { ConversationMapCoordinator } from "./map-coordinator.ts";
+import { ProjectMapManager } from "./project-map-manager.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,11 +32,23 @@ const IPC = Object.freeze({
   event: "native-runtime:event",
   serverRequest: "native-runtime:server-request",
   serverRequestResponse: "native-runtime:server-request-response",
+  mapStatus: "map:status",
+  mapEnable: "map:enable",
+  mapPause: "map:pause",
+  mapResume: "map:resume",
+  mapState: "map:state",
+  projectMapStatus: "project-map:status",
+  projectMapEnable: "project-map:enable",
+  projectMapPause: "project-map:pause",
+  projectMapResume: "project-map:resume",
+  projectMapUpdate: "project-map:update",
 });
 
 let mainWindow: BrowserWindow | null = null;
 let runtime: NativeThreadRuntime | null = null;
 let persistence: V1PersistenceStore | null = null;
+let conversationMaps: ConversationMapCoordinator | null = null;
+let projectMaps: ProjectMapManager | null = null;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
 
 function send(channel: string, payload: unknown): void {
@@ -42,6 +57,21 @@ function send(channel: string, payload: unknown): void {
 
 function runtimeCwd(): string {
   return process.env.CODEX_WORKBENCH_CWD?.trim() || process.cwd();
+}
+
+function getConversationMaps(): ConversationMapCoordinator {
+  if (conversationMaps) return conversationMaps;
+  conversationMaps = new ConversationMapCoordinator({
+    userDataDirectory: app.getPath("userData"),
+    onChanged: (status) => send(IPC.mapState, status),
+  });
+  return conversationMaps;
+}
+
+function getProjectMaps(): ProjectMapManager {
+  if (projectMaps) return projectMaps;
+  projectMaps = new ProjectMapManager({ userDataDirectory: app.getPath("userData"), persistence: getPersistence() });
+  return projectMaps;
 }
 
 interface RuntimeTarget {
@@ -94,9 +124,16 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
     onEvent: (event) => {
       logger.info("native_event", { method: event.method, threadId: event.threadId, turnId: event.turnId, itemId: event.itemId });
       send(IPC.event, event);
+      if (event.method === "turn/completed" && event.threadId && event.turnId) {
+        void getConversationMaps().markTurnCompleted(event.threadId, event.turnId);
+      }
       if (runtime === createdRuntime && createdRuntime) send(IPC.state, createdRuntime.snapshot());
     },
+    dynamicTools: [MAP_DYNAMIC_TOOL_SPEC],
     onServerRequest: async (message: JsonRpcMessage) => {
+      if (message.method === MAP_TOOL_CALL_METHOD) {
+        return getConversationMaps().handleServerRequest(message);
+      }
       if (!message.method || (typeof message.id !== "string" && typeof message.id !== "number") || !isNativeApprovalMethod(message.method)) {
         return failClosedServerRequest(message);
       }
@@ -199,6 +236,7 @@ async function switchNativeThread(nativeThreadId: string): Promise<ThreadNavigat
   runtime = candidate;
   try {
     const snapshot = await candidate.resume(id);
+    getConversationMaps().markResumedThread(id);
     const currentProjection = await getPersistence().getThreadProjection(id);
     if (!currentProjection) throw projectionNotFound(id);
     return { snapshot, projection: currentProjection };
@@ -240,6 +278,78 @@ function registerIpc(): void {
   ipcMain.handle(IPC.persistenceInspect, async () => {
     try {
       return ok(await getPersistence().inspect());
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.mapStatus, async (_event, nativeThreadId: unknown) => {
+    try {
+      const id = typeof nativeThreadId === "string" ? nativeThreadId : getRuntime().nativeThreadId ?? "";
+      return ok(await getConversationMaps().status(id));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.mapEnable, async (_event, nativeThreadId: unknown) => {
+    try {
+      const id = typeof nativeThreadId === "string" ? nativeThreadId : getRuntime().nativeThreadId ?? "";
+      return ok(await getConversationMaps().enable(id));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.mapPause, async (_event, nativeThreadId: unknown) => {
+    try {
+      const id = typeof nativeThreadId === "string" ? nativeThreadId : getRuntime().nativeThreadId ?? "";
+      return ok(await getConversationMaps().pause(id));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.mapResume, async (_event, nativeThreadId: unknown) => {
+    try {
+      const id = typeof nativeThreadId === "string" ? nativeThreadId : getRuntime().nativeThreadId ?? "";
+      return ok(await getConversationMaps().resume(id));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectMapStatus, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string") throw new Error("Project ID is required.");
+      return ok(await getProjectMaps().status(projectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectMapEnable, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string") throw new Error("Project ID is required.");
+      return ok(await getProjectMaps().enable(projectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectMapPause, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string") throw new Error("Project ID is required.");
+      return ok(await getProjectMaps().pause(projectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectMapResume, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string") throw new Error("Project ID is required.");
+      return ok(await getProjectMaps().resume(projectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectMapUpdate, async (_event, projectId: unknown, delta: unknown) => {
+    try {
+      if (typeof projectId !== "string") throw new Error("Project ID is required.");
+      return ok(await getProjectMaps().updateFromDelta(projectId, delta));
     } catch (error) {
       return fail(error);
     }
@@ -416,6 +526,7 @@ app.whenReady().then(() => {
 app.on("before-quit", () => {
   cancelPendingNativeApprovals();
   if (runtime) void runtime.close().catch((error) => logError(logger, "runtime_close_failed", error));
+  if (projectMaps) void projectMaps.close().catch((error) => logError(logger, "project_map_runtime_close_failed", error));
 });
 
 app.on("window-all-closed", () => {
