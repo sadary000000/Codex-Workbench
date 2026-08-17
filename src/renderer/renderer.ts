@@ -103,7 +103,8 @@ const maintenanceDialog = document.querySelector<HTMLDialogElement>("#project-ma
 const maintenanceDialogBody = document.querySelector<HTMLElement>("#project-maintenance-body")!;
 const closeMaintenanceDialogButton = document.querySelector<HTMLButtonElement>("#close-project-maintenance")!;
 
-const DRAFT_KEY = "codex-workbench-v1-native-thread-draft";
+const DRAFT_KEY_PREFIX = "codex-workbench-v1-native-thread-draft:";
+const LEGACY_DRAFT_KEY = "codex-workbench-v1-native-thread-draft";
 let latestState: RuntimeSnapshot | null = null;
 let currentProjection: ThreadProjection | null = null;
 let threadView: ThreadReadView | null = null;
@@ -116,8 +117,39 @@ let mapStatus: ConversationMapStatus | null = null;
 let projectMapStatus: ProjectMapStatus | null = null;
 let mapOpen = false;
 let mapScope: "conversation" | "project" = "conversation";
+let draftThreadId: string | null | undefined;
+let threadTransitionInFlight = false;
+let threadViewGeneration = 0;
 
-promptElement.value = localStorage.getItem(DRAFT_KEY) ?? "";
+function draftKey(nativeThreadId: string | null): string {
+  return `${DRAFT_KEY_PREFIX}${nativeThreadId ?? "unselected"}`;
+}
+
+function syncDraftForThread(nativeThreadId: string | null): void {
+  if (draftThreadId === nativeThreadId) return;
+  draftThreadId = nativeThreadId;
+  const scoped = localStorage.getItem(draftKey(nativeThreadId));
+  if (scoped !== null) {
+    promptElement.value = scoped;
+    return;
+  }
+  const legacy = localStorage.getItem(LEGACY_DRAFT_KEY);
+  if (legacy !== null && nativeThreadId !== null) {
+    localStorage.setItem(draftKey(nativeThreadId), legacy);
+    localStorage.removeItem(LEGACY_DRAFT_KEY);
+    promptElement.value = legacy;
+    return;
+  }
+  promptElement.value = "";
+}
+
+function persistCurrentDraft(value: string): void {
+  localStorage.setItem(draftKey(draftThreadId ?? null), value);
+}
+
+function clearCurrentDraft(): void {
+  localStorage.removeItem(draftKey(draftThreadId ?? null));
+}
 
 function appendOutput(label: string, payload: unknown): void {
   let serialized: string;
@@ -251,8 +283,7 @@ function mapNodeMarker(status: MapNode["status"]): string {
 
 function mapNodeSources(node: MapNode): string {
   if (!node.sources.length) return "无 Native 来源";
-  const first = node.sources[0]!;
-  return `来源 ${first.turnId.slice(0, 10)}${first.itemId ? ` / ${first.itemId.slice(0, 10)}` : ""}`;
+  return `来源 ${node.sources.length} 个 Native 锚点`;
 }
 
 async function jumpToMapSource(source: MapSourceRef): Promise<void> {
@@ -261,15 +292,8 @@ async function jumpToMapSource(source: MapSourceRef): Promise<void> {
       showError({ name: "MapSourceScope", code: "THREAD_SWITCH_BUSY", message: "当前 Turn 运行中，不能跳转到另一个 Native Thread。", exitCode: null, stderr: "" });
       return;
     }
-    const result = await consume("map.source.switch", api.switchThread(source.nativeThreadId));
-    if (!result) return;
-    currentProjection = result.projection;
-    threadView = null;
-    liveEvents = new Map();
-    pendingApprovals = new Map();
-    renderState(result.snapshot);
-    await loadThreadView();
-    await refreshNavigation();
+    await selectThread(source.nativeThreadId);
+    if (latestState?.nativeThreadId !== source.nativeThreadId) return;
   }
   const candidates = [...threadWorkspaceElement.querySelectorAll<HTMLElement>("[data-native-turn-id]")];
   const target = candidates.find((element) => element.dataset.nativeTurnId === source.turnId && (!source.itemId || element.dataset.nativeItemId === source.itemId))
@@ -309,6 +333,22 @@ function createMapTreeItem(node: MapNode, nodes: MapNode[], level: number): HTML
     if (source) void jumpToMapSource(source);
   });
   wrapper.append(button);
+  if (node.sources.length) {
+    const sourceList = document.createElement("div");
+    sourceList.className = "map-node-sources";
+    node.sources.forEach((source, index) => {
+      const sourceButton = document.createElement("button");
+      sourceButton.type = "button";
+      sourceButton.className = "map-source";
+      sourceButton.textContent = `来源 ${index + 1}: ${source.turnId.slice(0, 10)}${source.itemId ? ` / ${source.itemId.slice(0, 10)}` : ""}`;
+      sourceButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void jumpToMapSource(source);
+      });
+      sourceList.append(sourceButton);
+    });
+    wrapper.append(sourceList);
+  }
   const children = nodes.filter((candidate) => candidate.parentId === node.nodeId).sort((left, right) => left.ordering - right.ordering);
   if (children.length) {
     const childList = document.createElement("ul");
@@ -389,16 +429,18 @@ function renderMapPanel(): void {
   if (root) mapTreeElement.append(createMapTreeItem(root, map.nodes, 1));
 }
 
-async function refreshMapStatus(): Promise<void> {
-  if (!latestState?.nativeThreadId) {
+async function refreshMapStatus(generation = threadViewGeneration, expectedThreadId = latestState?.nativeThreadId ?? null, expectedProjectId = currentProjection?.projectId ?? null): Promise<void> {
+  if (!expectedThreadId) {
     mapStatus = null;
     renderMapPanel();
     return;
   }
-  const result = await consume("map.status", api.getMapStatus(latestState.nativeThreadId));
+  const result = await consume("map.status", api.getMapStatus(expectedThreadId));
+  if (generation !== threadViewGeneration || latestState?.nativeThreadId !== expectedThreadId) return;
   if (result) mapStatus = result;
-  if (currentProjection?.projectId) {
-    const projectResult = await consume("project-map.status", api.getProjectMapStatus(currentProjection.projectId));
+  if (expectedProjectId && currentProjection?.projectId === expectedProjectId) {
+    const projectResult = await consume("project-map.status", api.getProjectMapStatus(expectedProjectId));
+    if (generation !== threadViewGeneration || latestState?.nativeThreadId !== expectedThreadId || currentProjection?.projectId !== expectedProjectId) return;
     if (projectResult) projectMapStatus = projectResult;
   } else {
     projectMapStatus = null;
@@ -629,6 +671,7 @@ function renderThreadWorkspace(): void {
 
 function renderState(state: RuntimeSnapshot): void {
   latestState = state;
+  syncDraftForThread(state.nativeThreadId);
   stateElement.textContent = state.state;
   threadElement.textContent = state.nativeThreadId ?? "—";
   turnElement.textContent = state.activeTurnId ?? "—";
@@ -679,51 +722,76 @@ async function refreshNavigation(): Promise<void> {
 }
 
 async function loadThreadView(clearLive = true): Promise<boolean> {
+  const generation = threadViewGeneration;
+  const expectedThreadId = latestState?.nativeThreadId ?? null;
   const result = await consume("thread.read", api.readThread());
   if (!result) return false;
+  if (generation !== threadViewGeneration || latestState?.nativeThreadId !== expectedThreadId) return false;
   threadView = result;
   if (clearLive) liveEvents = new Map();
   renderThreadWorkspace();
   if (latestState) renderState(latestState);
-  await refreshMapStatus();
+  await refreshMapStatus(generation, expectedThreadId, currentProjection?.projectId ?? null);
   return true;
 }
 
 async function selectThread(nativeThreadId: string): Promise<void> {
+  if (threadTransitionInFlight) {
+    showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换 Native Thread，请等待当前切换完成。", exitCode: null, stderr: "" });
+    return;
+  }
   if ((latestState?.activeTurnId || turnOperationInFlight) && latestState?.nativeThreadId !== nativeThreadId) {
     showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "当前 Turn 运行中，不能切换 Native Thread。", exitCode: null, stderr: "" });
     return;
   }
-  const result = await consume("native-thread.switch", api.switchThread(nativeThreadId));
-  if (result) {
-    currentProjection = result.projection;
-    threadView = null;
-    liveEvents = new Map();
-    pendingApprovals = new Map();
-    renderState(result.snapshot);
-    renderThreadWorkspace();
-    await loadThreadView();
-    await refreshNavigation();
-    await refreshMapStatus();
+  persistCurrentDraft(promptElement.value);
+  threadTransitionInFlight = true;
+  const generation = ++threadViewGeneration;
+  try {
+    const result = await consume("native-thread.switch", api.switchThread(nativeThreadId));
+    if (result && generation === threadViewGeneration) {
+      currentProjection = result.projection;
+      threadView = null;
+      liveEvents = new Map();
+      pendingApprovals = new Map();
+      renderState(result.snapshot);
+      renderThreadWorkspace();
+      await loadThreadView();
+      await refreshNavigation();
+      await refreshMapStatus(generation, result.snapshot.nativeThreadId, result.projection.projectId);
+    }
+  } finally {
+    threadTransitionInFlight = false;
   }
 }
 
 async function createNativeThread(projectId: string | null): Promise<void> {
+  if (threadTransitionInFlight) {
+    showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换 Native Thread，请等待当前切换完成。", exitCode: null, stderr: "" });
+    return;
+  }
   if (latestState?.activeTurnId || turnOperationInFlight) {
     showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "当前 Turn 运行中，不能创建 Native Thread。", exitCode: null, stderr: "" });
     return;
   }
-  const result = await consume("native-thread.create", api.createThread(projectId));
-  if (result) {
-    currentProjection = result.projection;
-    threadView = null;
-    liveEvents = new Map();
-    pendingApprovals = new Map();
-    renderState(result.snapshot);
-    renderThreadWorkspace();
-    await loadThreadView();
-    await refreshNavigation();
-    await refreshMapStatus();
+  persistCurrentDraft(promptElement.value);
+  threadTransitionInFlight = true;
+  const generation = ++threadViewGeneration;
+  try {
+    const result = await consume("native-thread.create", api.createThread(projectId));
+    if (result && generation === threadViewGeneration) {
+      currentProjection = result.projection;
+      threadView = null;
+      liveEvents = new Map();
+      pendingApprovals = new Map();
+      renderState(result.snapshot);
+      renderThreadWorkspace();
+      await loadThreadView();
+      await refreshNavigation();
+      await refreshMapStatus(generation, result.snapshot.nativeThreadId, result.projection.projectId);
+    }
+  } finally {
+    threadTransitionInFlight = false;
   }
 }
 
@@ -769,7 +837,7 @@ function handleServerRequest(event: NativeServerRequestEvent): void {
   renderThreadWorkspace();
 }
 
-promptElement.addEventListener("input", () => localStorage.setItem(DRAFT_KEY, promptElement.value));
+promptElement.addEventListener("input", () => persistCurrentDraft(promptElement.value));
 threadWorkspaceElement.addEventListener("scroll", () => {
   followLatest = threadWorkspaceElement.scrollTop + threadWorkspaceElement.clientHeight >= threadWorkspaceElement.scrollHeight - 80;
   jumpLatestButton.hidden = followLatest;
@@ -822,15 +890,15 @@ startTurnButton.addEventListener("click", async (event) => {
     const readOk = await loadThreadView();
     if (readOk) {
       promptElement.value = "";
-      localStorage.removeItem(DRAFT_KEY);
+      clearCurrentDraft();
     } else {
       promptElement.value = prompt;
-      localStorage.setItem(DRAFT_KEY, prompt);
+      persistCurrentDraft(prompt);
     }
     await consume("runtime.state", api.getState()).then((state) => { if (state) renderState(state); });
   } else {
     promptElement.value = prompt;
-    localStorage.setItem(DRAFT_KEY, prompt);
+    persistCurrentDraft(prompt);
     const state = await consume("runtime.state", api.getState());
     if (state) renderState(state);
   }

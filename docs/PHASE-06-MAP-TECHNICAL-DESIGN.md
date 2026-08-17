@@ -1,7 +1,7 @@
 # Phase 6：Map 技术设计
 
 日期：2026-08-17
-状态：Gate Fix 已实现，等待 GPT Gate 复审
+状态：Gate Fix 已实现并获 GPT Gate PASS；Phase 6 已冻结
 
 ## 1. 总体结构
 

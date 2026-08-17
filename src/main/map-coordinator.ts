@@ -59,6 +59,7 @@ export class ConversationMapCoordinator {
   private readonly resumedThreads = new Map<string, string>();
   private readonly fallbackScopes = new Map<string, { originalThreadId: string; originalTurnId: string }>();
   private readonly fallbackStarted = new Set<string>();
+  private readonly lastErrors = new Map<string, { code: string; message: string }>();
   private readonly command: string;
   private compatibilityFallbackToolCalls = 0;
 
@@ -94,8 +95,8 @@ export class ConversationMapCoordinator {
     if (!key) return { enabled: false, available: false, sameTurn: "registered_for_new_threads", map: null, error: { code: "MAP_THREAD_ID_REQUIRED", message: "Native Thread ID is required." } };
     const store = this.store(key);
     const inspection = await store.inspect();
-    if (inspection.status === "missing") return { enabled: false, available: true, sameTurn: this.sameTurnStatus(key), map: null, error: null };
-    if (inspection.document) return { enabled: inspection.document.sync.status !== "not_enabled", available: true, sameTurn: this.sameTurnStatus(key), map: inspection.document, error: null };
+    if (inspection.status === "missing") return { enabled: false, available: true, sameTurn: this.sameTurnStatus(key), map: null, error: this.lastErrors.get(key) ?? null };
+    if (inspection.document) return { enabled: inspection.document.sync.status !== "not_enabled", available: true, sameTurn: this.sameTurnStatus(key), map: inspection.document, error: this.lastErrors.get(key) ?? null };
     return { enabled: false, available: false, sameTurn: this.sameTurnStatus(key), map: null, error: { code: inspection.code ?? "MAP_CORRUPT", message: inspection.message ?? "Map persistence is invalid." } };
   }
 
@@ -104,6 +105,7 @@ export class ConversationMapCoordinator {
     const store = this.store(key);
     await store.ensure({ kind: "conversation", nativeThreadId: key });
     const map = await store.enable();
+    this.lastErrors.delete(key);
     const status = await this.statusFromMap(key, map);
     this.onChanged?.(status);
     return status;
@@ -112,6 +114,7 @@ export class ConversationMapCoordinator {
   async pause(nativeThreadId: string): Promise<ConversationMapStatus> {
     const store = this.store(nativeThreadId);
     const map = await store.pause();
+    this.lastErrors.delete(mapKey(nativeThreadId));
     const status = await this.statusFromMap(nativeThreadId, map);
     this.onChanged?.(status);
     return status;
@@ -120,6 +123,7 @@ export class ConversationMapCoordinator {
   async resume(nativeThreadId: string): Promise<ConversationMapStatus> {
     const store = this.store(nativeThreadId);
     const map = await store.resume();
+    this.lastErrors.delete(mapKey(nativeThreadId));
     const status = await this.statusFromMap(nativeThreadId, map);
     this.onChanged?.(status);
     return status;
@@ -130,6 +134,15 @@ export class ConversationMapCoordinator {
     const key = mapKey(nativeThreadId);
     const current = await this.status(key);
     if (!current.enabled || !current.map || this.patchedTurnIds.get(key) === turnId) return;
+    if (current.map.sync.paused) {
+      try {
+        const map = await this.store(key).updateSync({ dirty: true, status: "paused" });
+        this.onChanged?.(await this.statusFromMap(key, map));
+      } catch (error) {
+        this.onChanged?.({ ...current, available: false, error: errorMeta(error) });
+      }
+      return;
+    }
     if (this.resumedThreads.has(key) && !this.fallbackStarted.has(`${key}\u0000${turnId}`)) {
       this.fallbackStarted.add(`${key}\u0000${turnId}`);
       try {
@@ -149,7 +162,7 @@ export class ConversationMapCoordinator {
       }
     }
     try {
-      const map = await this.store(key).updateSync({ dirty: true, status: current.map.sync.paused ? "paused" : "dirty" });
+      const map = await this.store(key).updateSync({ dirty: true, status: "dirty" });
       this.onChanged?.(await this.statusFromMap(key, map));
     } catch (error) {
       this.onChanged?.({ ...current, available: false, error: errorMeta(error) });
@@ -185,6 +198,7 @@ export class ConversationMapCoordinator {
     }
     try {
       const result = await this.store(targetThreadId).applyPatch(patchArguments as never);
+      this.lastErrors.delete(targetThreadId);
       this.patchedTurnIds.set(targetThreadId, fallback?.originalTurnId ?? params.turnId);
       const next = await this.status(targetThreadId);
       this.onChanged?.(next);
@@ -192,6 +206,7 @@ export class ConversationMapCoordinator {
       return response;
     } catch (error) {
       const meta = errorMeta(error);
+      this.lastErrors.set(targetThreadId, meta);
       this.onChanged?.({ ...status, error: meta, available: meta.code !== "MAP_CORRUPT" });
       const response = dynamicToolResponse(false, `Map patch rejected (${meta.code}); keep the normal answer and do not retry the same invalid patch.`);
       return response;
@@ -220,7 +235,7 @@ export class ConversationMapCoordinator {
       available: true,
       sameTurn: this.sameTurnStatus(nativeThreadId),
       map,
-      error: null,
+      error: this.lastErrors.get(mapKey(nativeThreadId)) ?? null,
     };
   }
 

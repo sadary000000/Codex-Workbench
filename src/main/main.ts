@@ -52,6 +52,7 @@ let runtime: NativeThreadRuntime | null = null;
 let persistence: V1PersistenceStore | null = null;
 let conversationMaps: ConversationMapCoordinator | null = null;
 let projectMaps: ProjectMapManager | null = null;
+let quittingForExit = false;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
 
 function send(channel: string, payload: unknown): void {
@@ -551,10 +552,23 @@ app.whenReady().then(() => {
   });
 }).catch((error) => logError(logger, "app_start_failed", error));
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (quittingForExit) return;
+  event.preventDefault();
+  quittingForExit = true;
   cancelPendingNativeApprovals();
-  if (runtime) void runtime.close().catch((error) => logError(logger, "runtime_close_failed", error));
-  if (projectMaps) void projectMaps.close().catch((error) => logError(logger, "project_map_runtime_close_failed", error));
+  void (async () => {
+    try {
+      if (runtime) await runtime.close();
+      if (projectMaps) await projectMaps.close();
+    } catch (error) {
+      logError(logger, "runtime_shutdown_failed", error);
+    } finally {
+      // The second before-quit event is allowed through by quittingForExit;
+      // recovery writes have completed before Electron exits.
+      app.quit();
+    }
+  })();
 });
 
 app.on("window-all-closed", () => {

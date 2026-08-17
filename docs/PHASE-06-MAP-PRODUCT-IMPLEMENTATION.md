@@ -1,7 +1,7 @@
 # Phase 6：Map 产品实现记录
 
 日期：2026-08-17
-状态：Gate Fix 实现完成，等待 GPT Gate 复审
+状态：Gate Fix 实现完成并获 GPT Gate PASS；Phase 6 已冻结
 
 ## 用户可见能力
 
@@ -31,4 +31,4 @@ Gate Fix 已完成真实 CLI 验证：新 Thread Map、resumed Thread compatibil
 
 ## 下一步 Gate
 
-向 GPT 提交 `[CODEX_WORKBENCH_STAGE_REVIEW]`，附 commit、命令输出摘要、审计代理结果、已知限制和旧 donor 状态，请求 `PASS / FIX / REDESIGN / BLOCKED`。在收到审查结论前不进入 Phase 7。
+Phase 6 Gate 已获 GPT `PASS`。下一步只做 V1 总体验收与 Release Candidate Freeze；人工 GUI 验收完成前保持 `V1 RC / Awaiting User Manual Acceptance`，Phase 7 保持 `NOT_STARTED`。

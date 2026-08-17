@@ -1,7 +1,7 @@
 # Phase 6：Map Runtime 能力审计
 
 日期：2026-08-17
-状态：Gate Fix 已完成，等待 GPT Gate 复审
+状态：Gate Fix 已完成并获 GPT Gate PASS；Phase 6 已冻结
 范围：Codex CLI / App Server 0.147.0 与 Codex Workbench V1 的 Map 集成边界
 
 ## 1. 审计结论

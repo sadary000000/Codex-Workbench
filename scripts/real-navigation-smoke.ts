@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AppServerProcessClient } from "../src/codex/app-server-client.ts";
+import { resolveCodexCommand } from "../src/codex/codex-command.ts";
 import { NativeThreadRuntime } from "../src/codex/native-thread-runtime.ts";
 import { V1PersistenceStore } from "../src/shared/persistence-store.ts";
 
@@ -11,6 +13,7 @@ const stateFile = join(stateRoot, "native-thread-binding.json");
 const persistenceFile = join(stateRoot, "workbench-state.json");
 const persistence = new V1PersistenceStore(persistenceFile);
 const events: string[] = [];
+const createdThreadIds: string[] = [];
 const runtime = new NativeThreadRuntime({
   cwd,
   stateFile,
@@ -20,6 +23,21 @@ const runtime = new NativeThreadRuntime({
   },
   onProcessExit: (exitCode, stderr) => process.stderr.write(`APP_SERVER_EXIT ${exitCode ?? "unknown"} ${stderr}\n`),
 });
+
+async function deleteThread(nativeThreadId: string): Promise<void> {
+  const client = new AppServerProcessClient({ command: resolveCodexCommand(), cwd, args: ["app-server", "--stdio"] });
+  try {
+    await client.start();
+    await client.request("initialize", {
+      clientInfo: { name: "codex-workbench-v1-navigation-smoke-cleanup", title: "Navigation Smoke Cleanup", version: "0.1.0" },
+      capabilities: { experimentalApi: false },
+    }, 30_000);
+    client.notify("initialized", {});
+    await client.request("thread/delete", { threadId: nativeThreadId }, 30_000);
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
 
 async function runTurn(prompt: string): Promise<void> {
   const result = await runtime.startTurn(prompt);
@@ -35,12 +53,15 @@ try {
 
   const a1 = await runtime.startNewThread(project.projectId);
   assert.ok(a1.nativeThreadId);
+  createdThreadIds.push(a1.nativeThreadId!);
   await runTurn("Reply with exactly PHASE3_NAV_A1.");
   const a2 = await runtime.startNewThread(project.projectId);
   assert.ok(a2.nativeThreadId);
+  createdThreadIds.push(a2.nativeThreadId!);
   await runTurn("Reply with exactly PHASE3_NAV_A2.");
   const s1 = await runtime.startNewThread(null);
   assert.ok(s1.nativeThreadId);
+  createdThreadIds.push(s1.nativeThreadId!);
   await runTurn("Reply with exactly PHASE3_NAV_S1.");
 
   const firstIds = [a1.nativeThreadId, a2.nativeThreadId, s1.nativeThreadId];
@@ -78,5 +99,13 @@ try {
   })}\n`);
 } finally {
   await runtime.close().catch(() => undefined);
+  for (const nativeThreadId of createdThreadIds) {
+    try {
+      await deleteThread(nativeThreadId);
+    } catch (error) {
+      process.stderr.write(`NAVIGATION_SMOKE_CLEANUP_FAILED ${JSON.stringify({ nativeThreadId, error: error instanceof Error ? error.message : String(error) })}\n`);
+      process.exitCode = 1;
+    }
+  }
   await rm(stateRoot, { recursive: true, force: true });
 }

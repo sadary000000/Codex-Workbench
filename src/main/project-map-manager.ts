@@ -152,6 +152,7 @@ export class ProjectMapManager {
   private readonly contextStates = new Map<string, ContextTurnState>();
   private readonly fallbackScopes = new Map<string, string>();
   private readonly fallbackPatchedProjects = new Set<string>();
+  private readonly lastErrors = new Map<string, { code: string; message: string }>();
   private contextRequestCalls = 0;
 
   constructor(options: ProjectMapManagerOptions) {
@@ -202,7 +203,7 @@ export class ProjectMapManager {
       maintenanceThreadId: maintenanceId,
       maintenanceRunning,
       map: inspection.document,
-      error: null,
+      error: this.lastErrors.get(id) ?? null,
     };
     if (inspection.status === "missing") return { projectId: id, enabled: false, available: true, maintenanceThreadId: maintenanceId, maintenanceRunning, map: null, error: null };
     return { projectId: id, enabled: false, available: false, maintenanceThreadId: maintenanceId, maintenanceRunning, map: null, error: { code: inspection.code ?? "PROJECT_MAP_CORRUPT", message: inspection.message ?? "Project Map persistence is invalid." } };
@@ -214,17 +215,22 @@ export class ProjectMapManager {
     if (!project) throw new Error(`Project does not exist: ${id}`);
     await this.store(id).ensure({ kind: "project", projectId: id });
     await this.store(id).enable();
+    this.lastErrors.delete(id);
     return this.emitStatus(id);
   }
 
   async pause(projectId: string): Promise<ProjectMapStatus> {
-    await this.store(projectId).pause();
-    return this.emitStatus(projectId);
+    const id = projectId.trim();
+    await this.store(id).pause();
+    this.lastErrors.delete(id);
+    return this.emitStatus(id);
   }
 
   async resume(projectId: string): Promise<ProjectMapStatus> {
-    await this.store(projectId).resume();
-    return this.emitStatus(projectId);
+    const id = projectId.trim();
+    await this.store(id).resume();
+    this.lastErrors.delete(id);
+    return this.emitStatus(id);
   }
 
   async markThreadCompleted(projectId: string, nativeThreadId: string, turnId: string, _delta?: unknown): Promise<void> {
@@ -232,8 +238,11 @@ export class ProjectMapManager {
     const members = await this.persistence.listThreads(id);
     if (!members.some((thread) => thread.nativeThreadId === nativeThreadId)) return;
     const current = await this.status(id);
-    if (!current.enabled || !current.map || current.map.sync.paused) return;
-    const map = await this.store(id).updateSync({ lastProcessedTurnId: turnId, dirty: true, status: "dirty" });
+    if (!current.enabled || !current.map) return;
+    // A completed member Turn is only a dirty signal here. The source cursor
+    // advances after the hidden maintenance Thread successfully applies a
+    // Patch; advancing it before that would silently drop the delta.
+    const map = await this.store(id).updateSync({ dirty: true, status: current.map.sync.paused ? "paused" : "dirty" });
     this.onChanged?.(await this.statusFromMap(id, map));
   }
 
@@ -314,12 +323,14 @@ export class ProjectMapManager {
     }
     try {
       const result = await this.store(id).applyPatch(patchArguments as never);
+      this.lastErrors.delete(id);
       if (fallback) this.fallbackPatchedProjects.add(id);
       else this.patchedTurnIds.set(id, params.turnId);
       this.onChanged?.(await this.status(id));
       return dynamicToolResponse(true, result.idempotent ? "Project Map patch was already applied." : "Project Map patch accepted.");
     } catch (error) {
       const meta = errorMeta(error);
+      this.lastErrors.set(id, meta);
       this.onChanged?.({ ...status, error: meta, available: meta.code !== "MAP_CORRUPT" });
       return dynamicToolResponse(false, `Project Map patch rejected (${meta.code}); keep the previous route.`);
     }

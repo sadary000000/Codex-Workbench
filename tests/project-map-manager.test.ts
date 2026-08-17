@@ -21,8 +21,14 @@ test("keeps Project Map lifecycle independent from normal Thread projections", a
   assert.equal(enabled.maintenanceThreadId, null);
   const paused = await manager.pause("project-map-test");
   assert.equal(paused.map?.sync.paused, true);
+  await persistence.ensureThreadProjection({ nativeThreadId: "project-member", cwd: "C:/fake/project", projectId: "project-map-test" });
+  await manager.markThreadCompleted("project-map-test", "project-member", "paused-turn");
+  const dirtyWhilePaused = await manager.status("project-map-test");
+  assert.equal(dirtyWhilePaused.map?.sync.dirty, true);
+  assert.equal(dirtyWhilePaused.map?.sync.status, "paused");
+  assert.equal(dirtyWhilePaused.map?.sync.lastProcessedTurnId, null);
   const resumed = await manager.resume("project-map-test");
   assert.equal(resumed.map?.sync.paused, false);
-  assert.equal((await persistence.listThreads("project-map-test")).length, 0);
+  assert.equal((await persistence.listThreads("project-map-test")).length, 1);
   await manager.close();
 });

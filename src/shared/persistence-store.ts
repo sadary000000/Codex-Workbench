@@ -286,7 +286,10 @@ export function normalizePersistenceDocument(value: unknown): WorkbenchPersisten
   for (const value of candidate.threads) {
     const thread = normalizeThread(value);
     if (!thread || threadIds.has(thread.nativeThreadId)) return null;
-    if (thread.projectId !== null && !projectIds.has(thread.projectId)) return null;
+    if (thread.projectId !== null) {
+      const project = projects.find((candidateProject) => candidateProject.projectId === thread.projectId);
+      if (!project || pathKey(project.cwd) !== pathKey(thread.cwd)) return null;
+    }
     threads.push(thread);
     threadIds.add(thread.nativeThreadId);
   }
@@ -469,8 +472,12 @@ export class V1PersistenceStore {
     return this.mutate((document) => {
       const existing = document.threads.find((thread) => thread.nativeThreadId === normalized.nativeThreadId);
       const projectId = normalized.projectId === undefined ? existing?.projectId ?? null : normalized.projectId;
-      if (projectId !== null && !document.projects.some((project) => project.projectId === projectId)) {
-        throw new PersistenceStoreError("PROJECT_NOT_FOUND", "Project does not exist.", this.filePath);
+      if (projectId !== null) {
+        const project = document.projects.find((candidate) => candidate.projectId === projectId);
+        if (!project) throw new PersistenceStoreError("PROJECT_NOT_FOUND", "Project does not exist.", this.filePath);
+        if (pathKey(project.cwd) !== pathKey(normalized.cwd)) {
+          throw new PersistenceStoreError("THREAD_CWD_MISMATCH", "Thread cwd does not match the Project cwd.", this.filePath);
+        }
       }
       if (existing) {
         if (pathKey(existing.cwd) !== pathKey(normalized.cwd)) {
@@ -536,8 +543,12 @@ export class V1PersistenceStore {
       const thread = document.threads.find((candidate) => candidate.nativeThreadId === id);
       if (!thread) throw new PersistenceStoreError("THREAD_PROJECTION_NOT_FOUND", "Thread projection does not exist.", this.filePath);
       if (normalizedProjectId !== undefined) {
-        if (normalizedProjectId !== null && !document.projects.some((project) => project.projectId === normalizedProjectId)) {
-          throw new PersistenceStoreError("PROJECT_NOT_FOUND", "Project does not exist.", this.filePath);
+        if (normalizedProjectId !== null) {
+          const project = document.projects.find((candidate) => candidate.projectId === normalizedProjectId);
+          if (!project) throw new PersistenceStoreError("PROJECT_NOT_FOUND", "Project does not exist.", this.filePath);
+          if (pathKey(project.cwd) !== pathKey(thread.cwd)) {
+            throw new PersistenceStoreError("THREAD_CWD_MISMATCH", "Thread cwd does not match the Project cwd.", this.filePath);
+          }
         }
         thread.projectId = normalizedProjectId;
       }

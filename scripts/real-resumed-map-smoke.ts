@@ -75,15 +75,18 @@ try {
   await initialize(resumedClient);
   const resumed = object(await resumedClient.request("thread/resume", resumeParams, 120_000));
   assert.equal(text(object(resumed?.thread)?.id) ?? text(resumed?.threadId), originalThreadId);
-  coordinator.markResumedThread(originalThreadId, cwd);
-  const statusBefore = await coordinator.status(originalThreadId);
+  const restartedCoordinator = new ConversationMapCoordinator({ userDataDirectory: root, command: resolveCodexCommand() });
+  const statusAfterMapRestart = await restartedCoordinator.status(originalThreadId);
+  assert.equal(statusAfterMapRestart.map?.revision, 0, "Map sidecar did not survive coordinator restart");
+  restartedCoordinator.markResumedThread(originalThreadId, cwd);
+  const statusBefore = await restartedCoordinator.status(originalThreadId);
   assert.equal(statusBefore.sameTurn, "compatibility_fallback");
   const resumedTurnId = await runTurn(resumedClient, originalThreadId, "Reply exactly RESUMED_MAP_TURN_OK. This current bounded change is a real progress update; do not call tools and do not modify files.");
-  await coordinator.markTurnCompleted(originalThreadId, resumedTurnId, { turnId: resumedTurnId, status: "completed" });
-  const statusAfter = await coordinator.status(originalThreadId);
+  await restartedCoordinator.markTurnCompleted(originalThreadId, resumedTurnId, { turnId: resumedTurnId, status: "completed" });
+  const statusAfter = await restartedCoordinator.status(originalThreadId);
   assert.ok(statusAfter.map?.revision && statusAfter.map.revision >= 1, "compatibility fallback did not advance the Map revision");
   assert.equal(statusAfter.map?.sync.lastProcessedTurnId, resumedTurnId);
-  assert.ok(coordinator.compatibilityFallbackToolCallCount >= 1, "fallback did not receive a real dynamic tool call");
+  assert.ok(restartedCoordinator.compatibilityFallbackToolCallCount >= 1, "fallback did not receive a real dynamic tool call");
 
   try {
     await resumedClient.request("thread/delete", { threadId: originalThreadId }, 30_000);
@@ -95,9 +98,10 @@ try {
     nativeThreadId: originalThreadId,
     baselineTurnId: firstTurnId,
     resumedTurnId,
+    mapRevisionAfterCoordinatorRestart: statusAfterMapRestart.map?.revision ?? null,
     resumeParamsHadDynamicTools: Object.prototype.hasOwnProperty.call(resumeParams, "dynamicTools"),
     sameTurn: statusAfter.sameTurn,
-    compatibilityFallbackToolCallCount: coordinator.compatibilityFallbackToolCallCount,
+    compatibilityFallbackToolCallCount: restartedCoordinator.compatibilityFallbackToolCallCount,
     mapRevision: statusAfter.map?.revision ?? null,
     mapCursor: statusAfter.map?.sync.lastProcessedTurnId ?? null,
     mapSourceCursors: statusAfter.map?.sync.sourceCursors ?? {},
@@ -111,15 +115,19 @@ try {
     process.exitCode = 1;
   }
 } finally {
-  if (resumedClient && originalThreadId && cleanupResult === "not_attempted") {
+  await firstClient?.close().catch(() => undefined);
+  await resumedClient?.close().catch(() => undefined);
+  if (originalThreadId && cleanupResult === "not_attempted") {
+    const cleanupClient = new AppServerProcessClient({ command: resolveCodexCommand(), cwd, args: ["app-server", "--stdio"] });
     try {
-      await resumedClient.request("thread/delete", { threadId: originalThreadId }, 30_000);
+      await initialize(cleanupClient);
+      await cleanupClient.request("thread/delete", { threadId: originalThreadId }, 30_000);
       cleanupResult = "thread_deleted";
     } catch (error) {
       cleanupResult = cleanupClassification(error);
+    } finally {
+      await cleanupClient.close().catch(() => undefined);
     }
   }
-  await firstClient?.close().catch(() => undefined);
-  await resumedClient?.close().catch(() => undefined);
   await rm(root, { recursive: true, force: true });
 }

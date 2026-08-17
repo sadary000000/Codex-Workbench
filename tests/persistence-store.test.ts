@@ -42,11 +42,14 @@ test("persists Projects, multiple ThreadProjections, and Standalone Threads", as
 
   await assert.rejects(
     store.ensureThreadProjection({ nativeThreadId: "native-thread-1", cwd: "C:/demo", projectId: secondProject.projectId }),
-    (error: unknown) => error instanceof PersistenceStoreError && error.code === "THREAD_PROJECT_CONFLICT",
+    (error: unknown) => error instanceof PersistenceStoreError && error.code === "THREAD_CWD_MISMATCH",
   );
-  const rebound = await store.bindThreadToProject("native-thread-1", secondProject.projectId);
-  assert.equal(rebound.projectId, secondProject.projectId);
-  assert.equal((await store.listThreads(project.projectId)).length, 1);
+  await assert.rejects(
+    store.bindThreadToProject("native-thread-1", secondProject.projectId),
+    (error: unknown) => error instanceof PersistenceStoreError && error.code === "THREAD_CWD_MISMATCH",
+  );
+  assert.equal((await store.listThreads(project.projectId)).length, 2);
+  assert.equal((await store.listThreads(secondProject.projectId)).length, 0);
 });
 
 test("preserves Prompt recovery until an explicit clear", async () => {

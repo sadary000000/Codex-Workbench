@@ -81,7 +81,7 @@ try {
     "Reply with exactly PHASE6_MAP_SMOKE_OK.",
     "Before the normal answer, call the optional workbench_map_patch tool exactly once with this bounded patch.",
     `The conversation scope nativeThreadId is ${nativeThreadId}.`,
-    'Use schemaVersion 1, patchId "phase6-map-smoke-patch", baseRevision 0, sourceCursor {"lastProcessedTurnId":"current-turn","lastProcessedChangeId":null}, and one add operation.',
+    'Use schemaVersion 1, patchId "phase6-map-smoke-patch", baseRevision 0, sourceCursor {"lastProcessedTurnId":"current-turn","lastProcessedChangeId":null}, and operations exactly [{"op":"add","node":{...}}]. The operation key must be the literal "op"; never use "type" or "add_node".',
     'The add node must be {"nodeId":"smoke-node","parentId":"root","title":"Map smoke","status":"completed","details":"real dynamic tool smoke","history":[],"sources":[{"nativeThreadId":"' + nativeThreadId + '","turnId":"current-turn","itemId":null}],"ordering":1}.',
     "Do not modify files.",
   ].join(" ");

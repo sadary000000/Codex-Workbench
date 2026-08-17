@@ -24,6 +24,7 @@ interface FakeState {
   initializeParams?: Record<string, unknown>;
   turnStartErrorCode?: string;
   processExitOnTurnStart?: boolean;
+  turnStartThreadId?: string;
 }
 
 class FakeClient implements AppServerClientPort {
@@ -96,7 +97,7 @@ class FakeClient implements AppServerClientPort {
         this.emit({ method: "item/agentMessage/delta", params: { threadId: this.state.activeThreadId, turnId: turn.id, itemId: `item-${turn.id}`, delta: "FAKE_FINAL" } });
         this.emit({ method: "turn/completed", params: { threadId: this.state.activeThreadId, turn } });
       });
-      return { turn };
+      return { turn: { ...turn, ...(this.state.turnStartThreadId ? { threadId: this.state.turnStartThreadId } : {}) } };
     }
     if (method === "turn/interrupt") {
       const turn = this.state.turns.find((candidate) => candidate.id === params.turnId);
@@ -153,7 +154,7 @@ class FakeClient implements AppServerClientPort {
   }
 }
 
-async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[] } = {}) {
+async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string } = {}) {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-test-"));
   const state: FakeState = {
     turns: [],
@@ -164,6 +165,7 @@ async function createRuntime(mismatch = false, options: { turnStartErrorCode?: s
     activeThreadId: "native-thread",
     turnStartErrorCode: options.turnStartErrorCode,
     processExitOnTurnStart: options.processExitOnTurnStart,
+    turnStartThreadId: options.turnStartThreadId,
   };
   const events: JsonRpcMessage[] = [];
   const persistence = new V1PersistenceStore(join(root, "workbench-state.json"));
@@ -217,6 +219,16 @@ test("starts one Native Thread, runs two Turns, reads it, and resumes without a 
   assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownState, "ready");
   assert.deepEqual(await first.persistence.listRecoverablePrompts("native-thread"), []);
   await second.close();
+});
+
+test("rejects a turn/start response that names another Native Thread", async () => {
+  const harness = await createRuntime(false, { turnStartThreadId: "other-thread" });
+  await harness.runtime.start();
+  await assert.rejects(
+    harness.runtime.startTurn("identity mismatch"),
+    (error: unknown) => (error as { code?: string }).code === "TURN_THREAD_MISMATCH",
+  );
+  await harness.runtime.close();
 });
 
 test("registers the Map dynamic tool only on Native Thread creation", async () => {

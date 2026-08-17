@@ -1,8 +1,8 @@
 # Codex Workbench V1：Conversation Map 初始化
 
 日期：2026-08-17
-阶段：Phase 6 Map 技术实现收尾
-状态：Phase 6 Gate Fix 实现与命令行验证完成，等待 GPT Gate 复审
+阶段：V1 总体验收与 Release Candidate Freeze
+状态：Phase 6 Gate 已获 GPT PASS；V1 RC 自动化验收完成，等待用户人工 GUI 验收
 范围：当前 Codex Workbench V1 开发对话
 
 ## 1. 文档定位
@@ -59,17 +59,20 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 │   ├── ● 四项只读 donor 审计已完成并交叉复核
 │   ├── ● Legacy capability matrix 完成，实际代码迁移 0 项
 │   └── ● GPT 审查 PASS，允许进入 Phase 6
-├── ◉ Phase 6：Map 产品技术实现
+├── ● Phase 6：Map 产品技术实现
 │   ├── ● 真实 App Server Map / same-turn 能力审计完成
 │   ├── ● Schema / Prompt / Patch Protocol 与独立 MapStore 完成
 │   ├── ● Conversation Map coordinator、Project Map runtime 完成
 │   ├── ● 按需 Map Panel、source jump 与受限 IPC 完成
-│   └── ◉ Phase 6 Gate：等待 GPT 审查
-└── ○ Phase 7：真实使用后的增强
+│   └── ● Phase 6 Gate：GPT PASS，正式冻结
+├── ◉ V1 总体验收 / Release Candidate Freeze
+│   ├── ● 自动化集成验收与真实 CLI smoke
+│   └── ◉ 用户人工 GUI 验收待执行
+└── ○ Phase 7：真实使用后的增强（NOT_STARTED）
     └── 只有真实缺口证明必要时再讨论 Workflow、Review、Git 等扩展
 ```
 
-当前主路径是“Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Gate Fix 完成 → GPT Gate 复审”；收到 PASS 前不进入 Phase 7。
+当前主路径是“Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Gate PASS → V1 总体验收 / RC Freeze → 用户人工验收”；Phase 7 保持 NOT_STARTED，只有真实使用后出现并确认的新缺口才考虑开启。
 
 ## 4. 节点详情与来源
 
@@ -84,7 +87,8 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | Phase 4 Gate | ● | GPT 已明确给出 PASS；附件、设置 UI、compaction 展示等限制不构成 blocker | GPT 审查对话（2026-08-17） |
 | Conversation Map 初始化 | ● | 本文件形成第一版人工可读工作地图；GPT 已 PASS 并给出 Phase 5 唯一执行指令 | 本文件、GPT Map 审查 |
 | Phase 5 Legacy 筛选 | ● | 四项只读审计完成；分类矩阵完成；实际 donor code migration 为 0；GPT 已 PASS | `docs\PHASE-05-LEGACY-CAPABILITY-MATRIX.md`、`docs\PHASE-05-LEGACY-CAPABILITY-SCREENING.md` |
-| Phase 6 Map 技术实现 | ◉ | Runtime 能力审计、Schema/Patch、独立 sidecar、Conversation/Project Map、按需 Panel 和命令行验证已完成，等待 Gate | `docs\PHASE-06-MAP-RUNTIME-CAPABILITY-AUDIT.md`、`docs\PHASE-06-MAP-TECHNICAL-DESIGN.md`、`docs\PHASE-06-MAP-PRODUCT-IMPLEMENTATION.md` |
+| Phase 6 Map 技术实现 | ● | Runtime 能力审计、Schema/Patch、独立 sidecar、Conversation/Project Map、按需 Panel、Gate Fix 和真实 CLI 验证完成；GPT Gate PASS | `docs\PHASE-06-GATE-FIX-REPORT.md`、`docs\PHASE-06-MAP-RUNTIME-CAPABILITY-AUDIT.md` |
+| V1 总体验收 / RC Freeze | ◉ | 自动化集成 Gate 已完成；人工 GUI 验收清单已生成，等待用户实际操作 | `docs\V1-INTEGRATED-ACCEPTANCE.md`、`docs\V1-MANUAL-ACCEPTANCE-CHECKLIST.md` |
 
 ## 5. Phase 0–4 阶段证据摘要
 
@@ -163,17 +167,17 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 2. 新 V1 以 Codex App Server 的 Native Thread → Native Turn → Native Item 为运行事实。
 3. 先建立可靠性，再建立 Codex 式导航，再实现 Native Thread Workspace。
 4. Phase 4 已通过命令行、单元测试、构建、审计和真实 App Server smoke 验证。
-5. GPT 已审查通过 Phase 4 Gate、Conversation Map 和 Phase 5；Phase 6 已完成 Runtime capability audit 与最小实现，当前等待 Gate。
+5. GPT 已审查通过 Phase 4 Gate、Conversation Map、Phase 5 和 Phase 6 Gate Fix；当前进入 V1 总体验收与 RC Freeze。
 
 ### 6.2 当前进行中的工作
 
-Phase 6 的 Runtime capability audit 已完成，当前实现收尾和 Gate 准备包括：
+V1 总体验收与 RC Freeze 当前只做发布阻塞审计、自动化验收和人工 GUI 入口准备：
 
 - 已核实 Codex CLI 0.147.0 的动态工具、Thread/Turn 参数、source ID 和动态调用返回形状；
 - 已按协议证据实现新 Thread dynamic tool 注册；resume Thread 因协议缺少 dynamicTools 而明确标记 `compatibility_fallback`，不宣称原生 same-turn 能力；
 - 已完成有界 Map Schema/Patch/MapStore、Conversation coordinator、Project maintenance runtime、受限 IPC 和按需 Panel；
 - 四项只读子代理均已自然完成、主 Agent 审阅采用并关闭，Gate 前 running subagents = 0；
-- 当前只做最终 check/build/smoke/diff/秘密扫描，不扩展到 Phase 7。
+- 当前只做最终 check/test/build/smoke/diff/秘密扫描，不扩展到 Phase 7。
 
 ### 6.3 下一步计划
 
@@ -184,9 +188,10 @@ Phase 6 的 Runtime capability audit 已完成，当前实现收尾和 Gate 准�
 | 3 | ● | 完成 Legacy 能力审计、分类和 0 项代码迁移决策 |
 | 4 | ● | 提交 Phase 5 Gate，GPT 返回 PASS |
 | 5 | ● | Phase 6 Runtime capability audit、最小技术链与实现已完成 |
-| 6 | ◉ | 提交 Phase 6 结构化报告，等待 GPT 返回 PASS / FIX / REDESIGN / BLOCKED |
+| 6 | ● | Phase 6 Gate Fix 结构化报告已获 GPT PASS，Phase 6 冻结 |
+| 7 | ◉ | V1 总体验收与 Release Candidate Freeze；自动化已通过，等待用户人工 GUI 验收 |
 
-若 Phase 6 GPT Gate 返回 FIX 或 REDESIGN，只按审查意见修订并重测；收到 PASS 前不进入 Phase 7。
+Phase 7 保持 `NOT_STARTED`；只有用户真实使用后确认新的产品缺口，才重新开启范围审查。
 
 ## 7. 已冻结的产品规则
 
@@ -400,20 +405,20 @@ gate: PASS; Phase 6 instruction received
 历史审查请求已完成；GPT 返回 PASS 并给出 Phase 6 唯一执行指令。
 ```
 
-## 14. Phase 6 阶段审查请求
+## 14. Phase 6 阶段审查请求（历史记录，已获 GPT PASS）
 
 ```text
 [CODEX_WORKBENCH_STAGE_REVIEW]
 stage: Phase 6 — Map product technical implementation
-status: Gate Fix implementation and command-line verification complete; waiting GPT Gate re-review
+status: Gate Fix implementation and command-line verification complete; GPT Gate PASS; Phase 6 frozen
 implementation_commit: 98f80c23c0f41a5ce386732f54a012ecb768eb27 (feat: implement codex-driven work maps)
 capability_audit: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-06-MAP-RUNTIME-CAPABILITY-AUDIT.md
 technical_design: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-06-MAP-TECHNICAL-DESIGN.md
 implementation_report: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-06-MAP-PRODUCT-IMPLEMENTATION.md
-current_path: Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Map implementation → Phase 6 Gate Fix → GPT Gate re-review
+current_path: Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Map implementation → Phase 6 Gate Fix PASS → V1 total acceptance / RC Freeze
 completed_phases: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Conversation Map initialization, Phase 5 screening, Phase 6 implementation
-active_phase: Phase 6 Gate Fix review
-next_planned_phase: Phase 7 only after Phase 6 PASS and real usage proves a new gap
+active_phase: V1 total acceptance / Release Candidate Freeze
+next_planned_phase: user manual GUI acceptance; Phase 7 remains NOT_STARTED
 map_statuses: ○ planned / ◉ in_progress / ● completed / ! blocked
 frozen_principles_confirmed: Native Thread is the only conversation identity; Native Turn/Item are runtime facts; Codex owns Agent/Reasoning/Context/Tool semantics; Workbench is a thin product shell/projection/recovery adapter plus Map sidecar
 product_rules: Codex owns semantic understanding; Workbench only orchestrates, validates, stores bounded sync state, and presents
@@ -422,13 +427,13 @@ implemented: versioned bounded Map schema; JSON Patch-like MapPatch with digest/
 same_turn_boundary: new Native Thread registers workbench_map_patch; resumed Native Thread has no native dynamicTools registration and is explicitly marked compatibility_fallback
 fallback_boundary: malformed/unknown Map call fails closed; Map failure marks error/dirty and does not remove or replace normal answer, native binding, or original error
 project_map_boundary: Project maintenance is an independent sidecar/runtime and does not enter normal Conversation, ThreadProjection, Recent, or full history; after resume it may use an ephemeral compatibility maintenance Thread
-tests: npm run check PASS; npm test PASS 45/45; npm run build PASS; real CLI Map/resume/Project/context/pause smokes PASS
+tests: npm run check PASS; npm test PASS 51/51; npm run build PASS; real CLI Map/resume/Project/context/pause smokes PASS
 subagents: Carson/Kant/Popper/Bacon completed, returned, reviewed/adopted, and closed after result
 running_subagents_at_gate: 0
 legacy_project_status: old donor unchanged with pre-existing intentional dirty baseline; no V1 change was made in old donor
 known_limitations: no resumed-thread native same-turn dynamic tool (explicit fallback is bounded and non-native); no full history parser/rebuild; context request is bounded Workbench custom protocol; real smoke may be externally limited by account/network/service
 blockers: none known before GPT review
-gate: pending GPT review
+gate: PASS; Phase 6 frozen
 
 请审查 Phase 6 App Server 能力证据、Map Schema/Patch/sidecar 边界、Conversation/Project Map 生命周期、UI/IPC 安全边界、测试与子代理生命周期。若 PASS，请给出下一阶段唯一执行指令或明确允许冻结；若 FIX/REDESIGN，请列出必须修改项；若 BLOCKED，请指出可复现的真实阻塞。审查通过前不进入 Phase 7。
 ```
@@ -444,4 +449,4 @@ GPT 初审返回 `FIX` 后，已按唯一执行指令完成以下闭环；初始
 - UI/IPC：右侧 Panel 支持 Conversation/Project scope、Update、dirty/syncing/error、confirmation reason、跨 Thread source jump、只读“查看维护对话”；维护 Thread 不污染正常导航；
 - 逐源同步：Map sync 增加 `sourceCursors`，拒绝已处理 source cursor 回退到 null；Map 文件名改为 SHA-256，避免长 ID 前缀碰撞。
 
-Gate Fix 命令证据：`npm run check` PASS；`npm test` 45/45 PASS；`npm run build` PASS；`npm run test:real:map` PASS；`npm run test:real:resumed-map` PASS；`npm run test:real:project-map` PASS；`npm run test:real:context` PASS；`npm run test:real:map-pause` PASS。所有测试均为 CLI，使用精确临时目录和 Thread ID 清理策略，不创建 Codex Desktop/GPT 对话。
+Gate Fix 命令证据：`npm run check` PASS；`npm test` 51/51 PASS；`npm run build` PASS；`npm run test:real:map` PASS；`npm run test:real:resumed-map` PASS；`npm run test:real:project-map` PASS；`npm run test:real:context` PASS；`npm run test:real:map-pause` PASS。所有测试均为 CLI，使用精确临时目录和 Thread ID 清理策略，不创建 Codex Desktop/GPT 对话。

@@ -48,7 +48,12 @@ export function validateInitializeResult(value: unknown): InitializeResult {
     throw error;
   }
   const version = parseCodexVersion(userAgent);
-  if (version && version !== VERIFIED_CODEX_VERSION) {
+  if (!version) {
+    const error = new Error(`Codex userAgent is outside the verified format: ${userAgent}.`) as Error & { code?: string };
+    error.code = "APP_SERVER_VERSION_UNKNOWN";
+    throw error;
+  }
+  if (version !== VERIFIED_CODEX_VERSION) {
     const error = new Error(`Codex ${version} is outside verified version ${VERIFIED_CODEX_VERSION}.`) as Error & { code?: string };
     error.code = "APP_SERVER_VERSION_UNSUPPORTED";
     throw error;

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AppServerProcessClient } from "../src/codex/app-server-client.ts";
+import { resolveCodexCommand } from "../src/codex/codex-command.ts";
 import { NativeThreadRuntime } from "../src/codex/native-thread-runtime.ts";
 import { V1PersistenceStore } from "../src/shared/persistence-store.ts";
 
@@ -12,6 +14,7 @@ const stateFile = join(stateRoot, "native-thread-binding.json");
 const persistenceFile = join(stateRoot, "workbench-state.json");
 const persistence = new V1PersistenceStore(persistenceFile);
 const events: string[] = [];
+const createdThreadIds: string[] = [];
 const runtime = new NativeThreadRuntime({
   cwd,
   stateFile,
@@ -20,6 +23,21 @@ const runtime = new NativeThreadRuntime({
     if (event.method === "turn/started" || event.method === "turn/completed") events.push(`${event.method}:${event.turnId}`);
   },
 });
+
+async function deleteThread(nativeThreadId: string): Promise<void> {
+  const client = new AppServerProcessClient({ command: resolveCodexCommand(), cwd, args: ["app-server", "--stdio"] });
+  try {
+    await client.start();
+    await client.request("initialize", {
+      clientInfo: { name: "codex-workbench-v1-workspace-smoke-cleanup", title: "Workspace Smoke Cleanup", version: "0.1.0" },
+      capabilities: { experimentalApi: false },
+    }, 30_000);
+    client.notify("initialized", {});
+    await client.request("thread/delete", { threadId: nativeThreadId }, 30_000);
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
 
 async function waitForActiveTurn(): Promise<string> {
   for (let attempt = 0; attempt < 500; attempt += 1) {
@@ -33,6 +51,7 @@ async function waitForActiveTurn(): Promise<string> {
 try {
   const started = await runtime.start();
   assert.ok(started.nativeThreadId);
+  createdThreadIds.push(started.nativeThreadId!);
   const interruptedPending = runtime.startTurn(process.env.CODEX_V1_INTERRUPT_PROMPT ?? "Use the shell to run a command that waits 8 seconds, then reply exactly PHASE4_INTERRUPT_OK. Do not modify files.");
   const interruptedTurnId = await waitForActiveTurn();
   await new Promise((resolve) => setTimeout(resolve, Number(process.env.CODEX_V1_INTERRUPT_AFTER_MS ?? 700)));
@@ -80,5 +99,13 @@ try {
   })}\n`);
 } finally {
   await runtime.close().catch(() => undefined);
+  for (const nativeThreadId of createdThreadIds) {
+    try {
+      await deleteThread(nativeThreadId);
+    } catch (error) {
+      process.stderr.write(`WORKSPACE_SMOKE_CLEANUP_FAILED ${JSON.stringify({ nativeThreadId, error: error instanceof Error ? error.message : String(error) })}\n`);
+      process.exitCode = 1;
+    }
+  }
   if (!suppliedRoot) await rm(stateRoot, { recursive: true, force: true });
 }

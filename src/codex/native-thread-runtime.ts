@@ -61,6 +61,12 @@ function idFrom(value: unknown, key: string): string | null {
   return string(object(value)?.[key]);
 }
 
+function responseThreadId(value: unknown): string | null {
+  const response = object(value);
+  const turn = object(response?.turn);
+  return string(response?.threadId) ?? string(turn?.threadId) ?? string(object(response?.thread)?.id);
+}
+
 function messageIds(message: JsonRpcMessage): { threadId: string | null; turnId: string | null; itemId: string | null } {
   const params = object(message.params);
   const thread = object(params?.thread);
@@ -423,6 +429,10 @@ export class NativeThreadRuntime {
         threadId: nativeThreadId,
         input: [{ type: "text", text }],
       }, this.timeoutMs);
+      const responseNativeThreadId = responseThreadId(response);
+      if (responseNativeThreadId && responseNativeThreadId !== nativeThreadId) {
+        throw this.fail("TURN_THREAD_MISMATCH", "turn/start returned a Turn for a different Native Thread.");
+      }
       turnId = idFrom(object(response)?.turn, "id");
       if (!turnId) throw this.fail("TURN_ID_MISSING", "turn/start did not return a Turn ID.");
       this.activeTurnValue = { localRunId, turnId };

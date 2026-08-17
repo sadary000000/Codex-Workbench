@@ -7,8 +7,17 @@ const MAX_PATH_LENGTH = 4_096;
 
 function normalizedString(value: unknown, max: number): string | null {
   if (typeof value !== "string") return null;
-  const result = value.trim().slice(0, max);
+  const result = value.trim();
+  if (result.length > max) return null;
   return result || null;
+}
+
+function normalizedTimestamp(value: unknown): string | null {
+  const result = normalizedString(value, 64);
+  if (!result) return null;
+  const parsed = new Date(result);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== result) return null;
+  return result;
 }
 
 export function normalizeThreadBinding(value: unknown): NativeThreadBinding | null {
@@ -16,8 +25,8 @@ export function normalizeThreadBinding(value: unknown): NativeThreadBinding | nu
   const candidate = value as Record<string, unknown>;
   const nativeThreadId = normalizedString(candidate.nativeThreadId, MAX_ID_LENGTH);
   const cwd = normalizedString(candidate.cwd, MAX_PATH_LENGTH);
-  const createdAt = normalizedString(candidate.createdAt, 64);
-  const updatedAt = normalizedString(candidate.updatedAt, 64);
+  const createdAt = normalizedTimestamp(candidate.createdAt);
+  const updatedAt = normalizedTimestamp(candidate.updatedAt);
   if (candidate.version !== 1 || !nativeThreadId || !cwd || !createdAt || !updatedAt) return null;
   return { version: 1, nativeThreadId, cwd, createdAt, updatedAt };
 }
