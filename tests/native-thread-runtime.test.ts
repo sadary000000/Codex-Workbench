@@ -414,6 +414,35 @@ test("marks an active Prompt for recovery when the Runtime closes, then refuses 
   assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownState, "recovery_required");
 });
 
+test("runs two Native Thread runtimes concurrently and interrupts only the requested Thread", async () => {
+  const first = await createRuntime(false, { threadStartIds: ["native-a"] });
+  const second = await createRuntime(false, { threadStartIds: ["native-b"] });
+  await first.runtime.startNewThread(null);
+  await second.runtime.startNewThread(null);
+
+  const firstPending = first.runtime.startTurn("LONG");
+  const secondPending = second.runtime.startTurn("LONG");
+  const firstTurnId = await waitForActiveTurn(first.runtime);
+  const secondTurnId = await waitForActiveTurn(second.runtime);
+  assert.equal(first.runtime.snapshot().nativeThreadId, "native-a");
+  assert.equal(second.runtime.snapshot().nativeThreadId, "native-b");
+  assert.equal(first.runtime.snapshot().activeTurnId, firstTurnId);
+  assert.equal(second.runtime.snapshot().activeTurnId, secondTurnId);
+
+  const interrupt = await second.runtime.interruptTurn();
+  assert.equal(interrupt.turnId, secondTurnId);
+  await secondPending;
+  assert.equal(first.runtime.snapshot().activeTurnId, firstTurnId);
+  assert.equal(first.runtime.state, "TURN_RUNNING");
+
+  await first.runtime.interruptTurn();
+  await firstPending;
+  assert.equal(first.runtime.state, "READY");
+  assert.equal(second.runtime.state, "READY");
+  await first.runtime.close();
+  await second.runtime.close();
+});
+
 test("explicit resume can select a known Native Thread without silent replacement", async () => {
   const first = await createRuntime();
   await first.runtime.start();

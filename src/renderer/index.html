@@ -50,6 +50,7 @@
       .thread-entry-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
       .thread-entry-state { flex: 0 0 auto; color: #777; font-size: 10px; }
       .state-ready { color: #79c6a4; }
+      .state-running, .state-starting, .state-waiting_user { color: #e5bd70; }
       .state-disconnected, .state-recovery_required, .state-failed { color: #e28b7e; }
       .pin-button { width: 28px; height: 28px; border-radius: 6px; background: transparent; color: #8b8b8b; }
       .pin-button:hover { background: var(--sidebar-hover); color: #f2c66d; }
@@ -138,6 +139,9 @@
       .project-create-form { display: grid; gap: 12px; min-width: min(560px, 82vw); }
       .project-create-form label { display: grid; gap: 6px; }
       .project-create-form input { box-sizing: border-box; }
+      .writer-conflict-dialog { display: grid; gap: 10px; min-width: min(520px, 82vw); }
+      .writer-conflict-dialog h2 { margin: 0; font-size: 15px; }
+      .writer-conflict-dialog p { margin: 0; color: #c9c9c9; font-size: 12px; line-height: 1.55; }
       .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
       .dialog-error { margin: 0; color: var(--danger); font-size: 12px; line-height: 1.45; }
       .map-node { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; width: 100%; padding: 8px 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #d5d5d5; text-align: left; }
@@ -234,6 +238,7 @@
       </aside>
       <dialog id="project-maintenance-dialog" aria-labelledby="project-maintenance-title"><form method="dialog" class="maintenance-dialog"><h2 id="project-maintenance-title">Project Map 维护对话</h2><p class="muted">只读 Native Thread 视图；此 Thread 不会进入普通导航、最近列表或项目 Thread 列表。</p><pre id="project-maintenance-body"></pre><button id="close-project-maintenance" class="debug-button" type="submit">关闭</button></form></dialog>
       <dialog id="project-create-dialog" aria-labelledby="project-create-title"><form id="project-create-form" class="project-create-form"><h2 id="project-create-title">新建 Project</h2><p class="muted">Project 只登记名称和工作目录，不会自动创建文件夹。</p><label for="project-name">Project 名称<input id="project-name" name="name" maxlength="256" autocomplete="off" required></label><label for="project-cwd">工作目录<input id="project-cwd" name="cwd" maxlength="4096" autocomplete="off" required></label><p id="project-create-error" class="dialog-error" hidden></p><div class="dialog-actions"><button id="project-create-cancel" class="debug-button" type="button">取消</button><button id="project-create-submit" class="debug-button send-button" type="submit">创建</button></div></form></dialog>
+      <dialog id="writer-conflict-dialog" aria-labelledby="writer-conflict-title"><form method="dialog" class="writer-conflict-dialog"><h2 id="writer-conflict-title">对话正在被使用</h2><p id="writer-conflict-message">当前对话正在被另一个 Codex 客户端使用。请关闭另一客户端中的该对话后重试。</p><div class="dialog-actions"><button id="writer-conflict-close" class="debug-button" type="submit">知道了</button></div></form></dialog>
     </div>
     <script type="module" src="./renderer.js"></script>
   </body>

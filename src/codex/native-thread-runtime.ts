@@ -210,7 +210,7 @@ export class NativeThreadRuntime {
   }
 
   async startNewThread(projectId?: string | null): Promise<RuntimeSnapshot> {
-    if (this.activeTurnValue || this.stateValue === "TURN_RUNNING") {
+    if (this.activeTurnValue || this.stateValue === "TURN_RUNNING" || this.stateValue === "WAITING_USER") {
       throw this.fail("THREAD_SWITCH_BUSY", "Cannot create a Native Thread while a Turn is running.");
     }
     if (this.stateValue === "STARTING") {
@@ -396,8 +396,8 @@ export class NativeThreadRuntime {
   async resume(nativeThreadId: string): Promise<RuntimeSnapshot> {
     const id = nativeThreadId.trim();
     if (!id) throw this.fail("THREAD_ID_REQUIRED", "nativeThreadId is required for resume.");
-    if (this.stateValue === "READY" || this.stateValue === "TURN_RUNNING") {
-      if (this.activeTurnValue) throw this.fail("THREAD_SWITCH_BUSY", "Cannot switch Native Thread while a Turn is running.");
+    if (this.stateValue === "READY" || this.stateValue === "TURN_RUNNING" || this.stateValue === "WAITING_USER") {
+      if (this.activeTurnValue || this.stateValue === "TURN_RUNNING" || this.stateValue === "WAITING_USER") throw this.fail("THREAD_SWITCH_BUSY", "Cannot switch Native Thread while a Turn is running.");
       this.closing = true;
       await this.closeClient();
       this.closing = false;
@@ -441,7 +441,9 @@ export class NativeThreadRuntime {
     if (!text) throw this.fail("PROMPT_REQUIRED", "Prompt is required.");
     if (text.length > MAX_PROMPT_LENGTH) throw this.fail("PROMPT_TOO_LONG", "Prompt exceeds the Phase 1 limit.");
     if (!this.client || !this.nativeThreadIdValue || !this.initialized) throw this.fail("THREAD_NOT_READY", "Native Thread is not ready.");
-    if (this.activeTurnValue) throw this.fail("TURN_BUSY", "A Native Turn is already running.");
+    if (this.activeTurnValue || this.stateValue === "TURN_RUNNING" || this.stateValue === "WAITING_USER") {
+      throw this.fail("TURN_BUSY", "A Native Turn is already running.");
+    }
     const localRunId = randomUUID();
       const nativeThreadId = this.nativeThreadIdValue;
     let turnId: string | null = null;

@@ -3,6 +3,19 @@ import type { RuntimeErrorInfo } from "./runtime-types.ts";
 const MAX_MESSAGE = 4_000;
 const MAX_STDERR = 8_000;
 
+const WRITER_CONFLICT_MESSAGE = "当前对话正在被另一个 Codex 客户端使用。请关闭另一客户端中的该对话后重试。";
+
+export function isWriterConflictError(error: unknown): boolean {
+  const candidate = error as {
+    code?: unknown;
+    message?: unknown;
+    stderr?: unknown;
+  } | null;
+  if (candidate?.code !== "APP_SERVER_PROTOCOL_REJECTED") return false;
+  const detail = `${String(candidate.message ?? "")}\n${String(candidate.stderr ?? "")}`;
+  return /thread-store\s+conflict|already\s+has\s+an\s+active\s+writer|active\s+writer/i.test(detail);
+}
+
 export function errorInfo(error: unknown): RuntimeErrorInfo {
   const candidate = error as {
     name?: unknown;
@@ -12,14 +25,15 @@ export function errorInfo(error: unknown): RuntimeErrorInfo {
     stderr?: unknown;
     cause?: unknown;
   } | null;
-  const message = String(candidate?.message ?? error ?? "Unknown runtime error").slice(0, MAX_MESSAGE);
+  const rawMessage = String(candidate?.message ?? error ?? "Unknown runtime error").slice(0, MAX_MESSAGE);
+  const writerConflict = isWriterConflictError(error);
   return {
-    name: typeof candidate?.name === "string" ? candidate.name.slice(0, 128) : "Error",
-    code: typeof candidate?.code === "string" ? candidate.code.slice(0, 128) : null,
-    message,
+    name: writerConflict ? "WriterConflictError" : typeof candidate?.name === "string" ? candidate.name.slice(0, 128) : "Error",
+    code: writerConflict ? "WRITER_CONFLICT" : typeof candidate?.code === "string" ? candidate.code.slice(0, 128) : null,
+    message: writerConflict ? WRITER_CONFLICT_MESSAGE : rawMessage,
     exitCode: typeof candidate?.exitCode === "number" ? candidate.exitCode : null,
     stderr: typeof candidate?.stderr === "string" ? candidate.stderr.slice(-MAX_STDERR) : "",
-    ...(candidate?.cause ? { cause: String(candidate.cause).slice(0, 1_000) } : {}),
+    ...(writerConflict ? { cause: rawMessage.slice(0, 1_000) } : candidate?.cause ? { cause: String(candidate.cause).slice(0, 1_000) } : {}),
   };
 }
 
