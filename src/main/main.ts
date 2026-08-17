@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
 import { errorInfo } from "../shared/error-info.ts";
 import { createLogger, logError, type Logger } from "../shared/logger.ts";
+import { isNativeApprovalMethod, isValidNativeApprovalResponse, noAdditionalPermissions } from "../shared/native-approval.ts";
 import { PersistenceStoreError, V1PersistenceStore } from "../shared/persistence-store.ts";
 import type { JsonRpcMessage, ThreadNavigationResult } from "../shared/runtime-types.ts";
 
@@ -27,6 +28,7 @@ const IPC = Object.freeze({
   threadSwitch: "native-thread:switch",
   event: "native-runtime:event",
   serverRequest: "native-runtime:server-request",
+  serverRequestResponse: "native-runtime:server-request-response",
 });
 
 let mainWindow: BrowserWindow | null = null;
@@ -47,6 +49,39 @@ interface RuntimeTarget {
   projectId?: string | null;
 }
 
+interface PendingNativeApproval {
+  id: string | number;
+  method: string;
+  resolve: (response: unknown) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingNativeApprovals = new Map<string, PendingNativeApproval>();
+const NATIVE_APPROVAL_TIMEOUT_MS = 120_000;
+
+function rpcKey(id: string | number): string {
+  return `${typeof id === "number" ? "number" : "string"}:${String(id)}`;
+}
+
+function failClosedServerRequest(message: JsonRpcMessage): undefined {
+  logger.warn("server_request_fail_closed", { method: message.method ?? "unknown", id: message.id ?? null });
+  send(IPC.serverRequest, {
+    status: "rejected",
+    method: message.method ?? "unknown",
+    id: message.id ?? null,
+    params: message.params ?? null,
+  });
+  return undefined;
+}
+
+function cancelPendingNativeApprovals(): void {
+  for (const pending of pendingNativeApprovals.values()) {
+    clearTimeout(pending.timer);
+    pending.resolve(pending.method === "item/permissions/requestApproval" ? noAdditionalPermissions() : { decision: "cancel" });
+  }
+  pendingNativeApprovals.clear();
+}
+
 function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
   const userData = app.getPath("userData");
   logger = createLogger(join(userData, "logs", "workbench-v1.log"));
@@ -59,19 +94,49 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
     onEvent: (event) => {
       logger.info("native_event", { method: event.method, threadId: event.threadId, turnId: event.turnId, itemId: event.itemId });
       send(IPC.event, event);
+      if (runtime === createdRuntime && createdRuntime) send(IPC.state, createdRuntime.snapshot());
     },
     onServerRequest: async (message: JsonRpcMessage) => {
-      logger.warn("server_request_fail_closed", { method: message.method ?? "unknown" });
-      send(IPC.serverRequest, {
-        method: message.method ?? "unknown",
-        id: message.id ?? null,
-        params: message.params ?? null,
-        decision: "denied",
+      if (!message.method || (typeof message.id !== "string" && typeof message.id !== "number") || !isNativeApprovalMethod(message.method)) {
+        return failClosedServerRequest(message);
+      }
+      const key = rpcKey(message.id);
+      if (pendingNativeApprovals.has(key)) return failClosedServerRequest(message);
+      const response = await new Promise<unknown>((resolve) => {
+        const timer = setTimeout(() => {
+          const pending = pendingNativeApprovals.get(key);
+          if (!pending) return;
+          pendingNativeApprovals.delete(key);
+          const timeoutResponse = pending.method === "item/permissions/requestApproval" ? noAdditionalPermissions() : { decision: "cancel" };
+          pending.resolve(timeoutResponse);
+          send(IPC.serverRequest, {
+            status: "resolved",
+            method: pending.method,
+            id: pending.id,
+            response: timeoutResponse,
+            reason: "timeout",
+          });
+        }, NATIVE_APPROVAL_TIMEOUT_MS);
+        pendingNativeApprovals.set(key, { id: message.id!, method: message.method!, resolve, timer });
+        send(IPC.serverRequest, {
+          status: "pending",
+          method: message.method,
+          id: message.id,
+          params: message.params ?? null,
+        });
       });
-      return undefined;
+      send(IPC.serverRequest, {
+        status: "resolved",
+        method: message.method,
+        id: message.id,
+        response,
+      });
+      if (runtime === createdRuntime && createdRuntime) send(IPC.state, createdRuntime.snapshot());
+      return response;
     },
     onProcessExit: (exitCode, stderr) => {
       logger.warn("app_server_process_exit", { exitCode, stderr: stderr.slice(-2_000) });
+      if (runtime === createdRuntime) cancelPendingNativeApprovals();
       if (runtime === createdRuntime && createdRuntime) send(IPC.state, createdRuntime.snapshot());
     },
   });
@@ -116,6 +181,7 @@ async function closeActiveRuntimeForSwitch(): Promise<void> {
     error.code = "THREAD_SWITCH_BUSY";
     throw error;
   }
+  cancelPendingNativeApprovals();
   await runtime.close();
   runtime = null;
 }
@@ -250,6 +316,20 @@ function registerIpc(): void {
       return fail(error);
     }
   });
+  ipcMain.handle(IPC.serverRequestResponse, async (_event, requestId: unknown, response: unknown) => {
+    try {
+      if (typeof requestId !== "string" && typeof requestId !== "number") throw new Error("Native server request ID is invalid.");
+      const pending = pendingNativeApprovals.get(rpcKey(requestId));
+      if (!pending) throw new Error("Native server request is no longer pending.");
+      if (!isValidNativeApprovalResponse(pending.method, response)) throw new Error("Native approval response is invalid.");
+      pendingNativeApprovals.delete(rpcKey(requestId));
+      clearTimeout(pending.timer);
+      pending.resolve(response);
+      return ok({ responded: true, id: requestId });
+    } catch (error) {
+      return fail(error);
+    }
+  });
   ipcMain.handle(IPC.start, async () => {
     try {
       return ok(await getRuntime().start());
@@ -272,9 +352,15 @@ function registerIpc(): void {
     }
   });
   ipcMain.handle(IPC.turn, async (_event, prompt: unknown) => {
+    const activeRuntime = getRuntime();
     try {
-      return ok(await getRuntime().startTurn(typeof prompt === "string" ? prompt : ""));
+      const operation = activeRuntime.startTurn(typeof prompt === "string" ? prompt : "");
+      send(IPC.state, activeRuntime.snapshot());
+      const result = await operation;
+      send(IPC.state, activeRuntime.snapshot());
+      return ok(result);
     } catch (error) {
+      send(IPC.state, activeRuntime.snapshot());
       return fail(error);
     }
   });
@@ -287,6 +373,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.close, async () => {
     try {
+      cancelPendingNativeApprovals();
       await getRuntime().close();
       runtime = null;
       return ok({ closed: true, threadDeleted: false });
@@ -327,6 +414,7 @@ app.whenReady().then(() => {
 }).catch((error) => logError(logger, "app_start_failed", error));
 
 app.on("before-quit", () => {
+  cancelPendingNativeApprovals();
   if (runtime) void runtime.close().catch((error) => logError(logger, "runtime_close_failed", error));
 });
 

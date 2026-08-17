@@ -8,12 +8,21 @@ import type {
   ThreadReadView,
   TurnResult,
 } from "../shared/runtime-types.ts";
+import { normalizeNativeEvent, type NativeVisibleEventKind, type NormalizedNativeEvent } from "../shared/native-event-normalizer.ts";
 import { buildNavigationModel, type NavigationModel } from "./navigation-model.ts";
 
 interface IpcEnvelope<T = unknown> {
   ok: boolean;
   result?: T;
   error?: RuntimeErrorInfo;
+}
+
+interface NativeServerRequestEvent {
+  status: "pending" | "resolved" | "rejected";
+  method: string;
+  id: string | number | null;
+  params?: unknown;
+  response?: unknown;
 }
 
 interface V1Api {
@@ -31,8 +40,9 @@ interface V1Api {
   readThread(): Promise<IpcEnvelope<ThreadReadView>>;
   startTurn(prompt: string): Promise<IpcEnvelope<TurnResult>>;
   interruptTurn(): Promise<IpcEnvelope<{ ok: true; turnId: string }>>;
+  respondToServerRequest(requestId: string | number, response: unknown): Promise<IpcEnvelope<unknown>>;
   onEvent(listener: (payload: NativeEvent) => void): () => void;
-  onServerRequest(listener: (payload: unknown) => void): () => void;
+  onServerRequest(listener: (payload: NativeServerRequestEvent) => void): () => void;
   onState(listener: (payload: RuntimeSnapshot) => void): () => void;
 }
 
@@ -46,12 +56,16 @@ const threadElement = document.querySelector<HTMLSpanElement>("#thread-id")!;
 const turnElement = document.querySelector<HTMLSpanElement>("#turn-id")!;
 const runElement = document.querySelector<HTMLSpanElement>("#run-id")!;
 const cwdElement = document.querySelector<HTMLSpanElement>("#runtime-cwd")!;
-const statusElement = document.querySelector<HTMLParagraphElement>("#operation-status")!;
+const statusElement = document.querySelector<HTMLElement>("#operation-status")!;
 const promptElement = document.querySelector<HTMLTextAreaElement>("#prompt")!;
 const resumeElement = document.querySelector<HTMLInputElement>("#resume-id")!;
 const eventsElement = document.querySelector<HTMLElement>("#events")!;
 const navigationElement = document.querySelector<HTMLElement>("#navigation")!;
-const selectedThreadElement = document.querySelector<HTMLSpanElement>("#selected-thread")!;
+const selectedThreadElement = document.querySelector<HTMLHeadingElement>("#selected-thread")!;
+const threadKindElement = document.querySelector<HTMLElement>("#thread-kind")!;
+const threadIdentifierElement = document.querySelector<HTMLElement>("#thread-identifier")!;
+const threadWorkspaceElement = document.querySelector<HTMLElement>("#thread-workspace")!;
+const jumpLatestButton = document.querySelector<HTMLButtonElement>("#jump-latest")!;
 const startThreadButton = document.querySelector<HTMLButtonElement>("#start-thread")!;
 const readThreadButton = document.querySelector<HTMLButtonElement>("#read-thread")!;
 const interruptButton = document.querySelector<HTMLButtonElement>("#interrupt-turn")!;
@@ -59,12 +73,24 @@ const startTurnButton = document.querySelector<HTMLButtonElement>("#start-turn")
 
 const DRAFT_KEY = "codex-workbench-v1-native-thread-draft";
 let latestState: RuntimeSnapshot | null = null;
+let currentProjection: ThreadProjection | null = null;
+let threadView: ThreadReadView | null = null;
 let navigation: NavigationModel = { pinned: [], projects: [], recent: [] };
+let liveEvents = new Map<string, NormalizedNativeEvent>();
+let pendingApprovals = new Map<string, NativeServerRequestEvent>();
+let turnOperationInFlight = false;
+let followLatest = true;
 
 promptElement.value = localStorage.getItem(DRAFT_KEY) ?? "";
 
 function appendOutput(label: string, payload: unknown): void {
-  const line = `[${new Date().toISOString()}] ${label}\n${JSON.stringify(payload, null, 2)}\n\n`;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(payload, null, 2);
+  } catch {
+    serialized = String(payload);
+  }
+  const line = `[${new Date().toISOString()}] ${label}\n${serialized}\n\n`;
   eventsElement.textContent = `${eventsElement.textContent ?? ""}${line}`.slice(-120_000);
   eventsElement.scrollTop = eventsElement.scrollHeight;
 }
@@ -139,13 +165,10 @@ function createSection(title: string, className: string): { section: HTMLElement
 
 function renderNavigation(): void {
   navigationElement.replaceChildren();
-
   const pinned = createSection("置顶", "pinned-section");
   if (navigation.pinned.length) {
     for (const thread of navigation.pinned) pinned.body.append(createThreadEntry(thread));
-  } else {
-    appendEmpty(pinned.body, "暂无置顶 Thread");
-  }
+  } else appendEmpty(pinned.body, "暂无置顶 Thread");
   navigationElement.append(pinned.section);
 
   const projects = createSection("项目", "projects-section");
@@ -173,37 +196,252 @@ function renderNavigation(): void {
       details.append(summary);
       if (group.threads.length) {
         for (const thread of group.threads) details.append(createThreadEntry(thread));
-      } else {
-        appendEmpty(details, "暂无 Thread");
-      }
+      } else appendEmpty(details, "暂无 Thread");
       projects.body.append(details);
     }
-  } else {
-    appendEmpty(projects.body, "暂无项目");
-  }
+  } else appendEmpty(projects.body, "暂无项目");
   navigationElement.append(projects.section);
 
   const recent = createSection("最近", "recent-section");
   if (navigation.recent.length) {
     for (const thread of navigation.recent) recent.body.append(createThreadEntry(thread));
-  } else {
-    appendEmpty(recent.body, "暂无 Standalone Thread");
-  }
+  } else appendEmpty(recent.body, "暂无 Standalone Thread");
   navigationElement.append(recent.section);
+}
+
+function plainText(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value;
+  if (Array.isArray(value)) {
+    const parts = value.map(plainText).filter((item): item is string => Boolean(item));
+    return parts.length ? parts.join("") : null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  return plainText(record.text)
+    ?? plainText(record.delta)
+    ?? plainText(record.content)
+    ?? plainText(record.markdown)
+    ?? plainText(record.output)
+    ?? plainText(record.message);
+}
+
+function displayStatus(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return displayStatus(record.type) ?? displayStatus(record.status) ?? displayStatus(record.state);
+}
+
+function safeJson(value: unknown, limit = 12_000): string {
+  try {
+    const serialized = JSON.stringify(value, null, 2);
+    return serialized.length > limit ? `${serialized.slice(0, limit)}\n…` : serialized;
+  } catch {
+    return String(value);
+  }
+}
+
+type NativeReadItem = ThreadReadView["turns"][number]["items"][number];
+
+function itemKind(item: NativeReadItem): NativeVisibleEventKind {
+  const type = typeof item.type === "string" ? item.type.toLowerCase().replaceAll("_", "") : "";
+  if (type === "usermessage" || type === "userinput") return "user";
+  if (type === "agentmessage") return "assistant";
+  if (["reasoning", "contextcompaction", "plan", "processing"].includes(type)) return "processing";
+  if (["commandexecution", "mcptoolcall", "toolcall", "functioncall"].includes(type)) return "command_tool";
+  if (["filechange", "file"].includes(type)) return "file";
+  if (["websearch", "web", "webfetch", "search"].includes(type)) return "web";
+  return "unknown";
+}
+
+function eventLabel(kind: NativeVisibleEventKind): string {
+  return {
+    user: "User",
+    assistant: "Assistant",
+    processing: "Thinking / Processing",
+    command_tool: "Command / Tool",
+    file: "File Change",
+    web: "Web / Search",
+    approval: "Approval",
+    unknown: "Native Item",
+  }[kind];
+}
+
+function makeCard(kind: NativeVisibleEventKind, label: string, id: string | null, status: string | null): HTMLElement {
+  const article = document.createElement("article");
+  article.className = `event-card event-${kind}`;
+  const header = document.createElement("header");
+  header.className = "event-card-header";
+  const title = document.createElement("strong");
+  title.textContent = label;
+  const meta = document.createElement("span");
+  meta.className = "event-meta";
+  meta.textContent = [id ? `#${id.slice(0, 12)}` : "", status ?? ""].filter(Boolean).join(" · ");
+  header.append(title, meta);
+  article.append(header);
+  return article;
+}
+
+function appendBody(card: HTMLElement, text: string | null): void {
+  if (!text) return;
+  const body = document.createElement("div");
+  body.className = "event-card-body";
+  body.textContent = text;
+  card.append(body);
+}
+
+function appendRaw(card: HTMLElement, value: unknown, summary = "查看 Native 原始字段"): void {
+  if (value === null || value === undefined) return;
+  const details = document.createElement("details");
+  details.className = "event-raw";
+  const caption = document.createElement("summary");
+  caption.textContent = summary;
+  const pre = document.createElement("pre");
+  pre.textContent = safeJson(value);
+  details.append(caption, pre);
+  card.append(details);
+}
+
+function createReadItemCard(item: NativeReadItem): HTMLElement {
+  const kind = itemKind(item);
+  const card = makeCard(kind, eventLabel(kind), item.id, displayStatus(item.status));
+  const text = plainText(item.text) ?? plainText(item.input) ?? plainText(item.output);
+  appendBody(card, text);
+  if (!text && kind === "processing") appendBody(card, "Native processing");
+  if (!text && kind === "unknown") appendBody(card, `未知 Native Item 类型：${String(item.type ?? "unknown")}`);
+  appendRaw(card, item.raw);
+  return card;
+}
+
+function createTurnView(turn: ThreadReadView["turns"][number]): HTMLElement {
+  const wrapper = document.createElement("section");
+  wrapper.className = "turn-group";
+  const heading = document.createElement("div");
+  heading.className = "turn-heading";
+  const title = document.createElement("strong");
+  title.textContent = `Native Turn ${turn.id ? turn.id.slice(0, 12) : "unknown"}`;
+  const status = document.createElement("span");
+  status.textContent = displayStatus(turn.status) ?? "unknown";
+  heading.append(title, status);
+  wrapper.append(heading);
+  for (const item of turn.items) wrapper.append(createReadItemCard(item));
+  if (!turn.items.length) appendBody(wrapper, "该 Native Turn 尚未包含可展示 Item。");
+  return wrapper;
+}
+
+function createLiveEventCard(event: NormalizedNativeEvent): HTMLElement {
+  const card = makeCard(event.kind, eventLabel(event.kind), event.itemId ?? event.turnId, event.status);
+  appendBody(card, event.text);
+  if (!event.text && event.kind === "processing") appendBody(card, "Native event processing");
+  if (!event.text && event.kind === "unknown") appendBody(card, `未识别 Native Event：${event.method || "unknown"}`);
+  appendRaw(card, event.params);
+  return card;
+}
+
+function approvalKey(id: string | number): string {
+  return `${typeof id === "number" ? "number" : "string"}:${String(id)}`;
+}
+
+function approvalDetails(params: unknown): { command: string | null; reason: string | null; cwd: string | null } {
+  const record = params && typeof params === "object" && !Array.isArray(params) ? params as Record<string, unknown> : {};
+  return {
+    command: plainText(record.command),
+    reason: plainText(record.reason) ?? plainText(record.message),
+    cwd: plainText(record.cwd),
+  };
+}
+
+function createApprovalCard(request: NativeServerRequestEvent): HTMLElement {
+  const card = makeCard("approval", "Native Approval", null, "等待决定");
+  const details = approvalDetails(request.params);
+  if (details.command) appendBody(card, details.command);
+  if (details.reason) appendBody(card, details.reason);
+  if (details.cwd) {
+    const cwd = document.createElement("div");
+    cwd.className = "event-muted";
+    cwd.textContent = `cwd: ${details.cwd}`;
+    card.append(cwd);
+  }
+  const method = document.createElement("div");
+  method.className = "event-muted";
+  method.textContent = `${request.method} · request ${String(request.id)}`;
+  card.append(method);
+  const actions = document.createElement("div");
+  actions.className = "approval-actions";
+  const addDecision = (label: string, decision: unknown) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "debug-button";
+    button.textContent = label;
+    button.addEventListener("click", () => { void respondToApproval(request, decision, actions); });
+    actions.append(button);
+  };
+  if (request.method === "item/permissions/requestApproval") {
+    addDecision("不给额外权限", { decision: { permissions: { fileSystem: null, network: null }, scope: "turn" } });
+  } else {
+    addDecision("接受", { decision: "accept" });
+    addDecision("本会话接受", { decision: "acceptForSession" });
+    addDecision("拒绝", { decision: "decline" });
+    addDecision("取消 Turn", { decision: "cancel" });
+  }
+  card.append(actions);
+  return card;
+}
+
+async function respondToApproval(request: NativeServerRequestEvent, response: unknown, actions: HTMLElement): Promise<void> {
+  if (request.id === null) return;
+  for (const button of actions.querySelectorAll("button")) button.disabled = true;
+  const result = await consume("native.approval.response", api.respondToServerRequest(request.id, response));
+  if (!result) {
+    for (const button of actions.querySelectorAll("button")) button.disabled = false;
+    return;
+  }
+  pendingApprovals.delete(approvalKey(request.id));
+  showStatus("Native Approval 已提交");
+  renderThreadWorkspace();
+}
+
+function renderThreadWorkspace(): void {
+  const shouldFollow = followLatest;
+  threadWorkspaceElement.replaceChildren();
+  if (!threadView && liveEvents.size === 0 && pendingApprovals.size === 0) {
+    const empty = document.createElement("div");
+    empty.className = "workspace-empty";
+    const title = document.createElement("strong");
+    title.textContent = latestState?.nativeThreadId ? "读取 Native Thread" : "选择或新建 Native Thread";
+    const message = document.createElement("p");
+    message.textContent = latestState?.nativeThreadId
+      ? "正在等待 App Server 的 thread/read 结果。"
+      : "左侧导航中的每个对象都对应一个真实的 Native Thread。";
+    empty.append(title, message);
+    threadWorkspaceElement.append(empty);
+  }
+  if (threadView) {
+    for (const turn of threadView.turns) threadWorkspaceElement.append(createTurnView(turn));
+  }
+  for (const event of liveEvents.values()) threadWorkspaceElement.append(createLiveEventCard(event));
+  for (const request of pendingApprovals.values()) threadWorkspaceElement.append(createApprovalCard(request));
+  if (shouldFollow) requestAnimationFrame(() => { threadWorkspaceElement.scrollTop = threadWorkspaceElement.scrollHeight; });
+  jumpLatestButton.hidden = followLatest;
 }
 
 function renderState(state: RuntimeSnapshot): void {
   latestState = state;
   stateElement.textContent = state.state;
   threadElement.textContent = state.nativeThreadId ?? "—";
-  const selected = [...navigation.pinned, ...navigation.recent, ...navigation.projects.flatMap((group) => group.threads)]
-    .find((thread) => thread.nativeThreadId === state.nativeThreadId);
-  selectedThreadElement.textContent = selected ? threadLabel(selected) : state.nativeThreadId ? `Thread ${state.nativeThreadId.slice(0, 8)}` : "未选择 Native Thread";
   turnElement.textContent = state.activeTurnId ?? "—";
   runElement.textContent = state.localRunId ?? "—";
   cwdElement.textContent = state.cwd;
+  const selected = [...navigation.pinned, ...navigation.recent, ...navigation.projects.flatMap((group) => group.threads)]
+    .find((thread) => thread.nativeThreadId === state.nativeThreadId);
+  if (selected) currentProjection = selected;
+  const nativeTitle = threadView?.title?.trim();
+  selectedThreadElement.textContent = nativeTitle || (selected ? threadLabel(selected) : state.nativeThreadId ? `Thread ${state.nativeThreadId.slice(0, 8)}` : "未选择 Native Thread");
+  threadIdentifierElement.textContent = state.nativeThreadId ?? "—";
+  threadKindElement.textContent = currentProjection?.projectId ? "Project Thread" : state.nativeThreadId ? "Standalone Thread" : "Native Thread";
+  const active = Boolean(state.activeTurnId) || turnOperationInFlight || state.state === "TURN_RUNNING" || state.state === "WAITING_USER";
   interruptButton.disabled = !state.activeTurnId;
-  startTurnButton.disabled = !state.nativeThreadId || Boolean(state.activeTurnId);
+  startTurnButton.disabled = !state.nativeThreadId || active;
   if (state.lastError) showError(state.lastError);
   renderNavigation();
 }
@@ -232,30 +470,53 @@ async function refreshNavigation(): Promise<void> {
   ]);
   if (!projects || !threads) return;
   navigation = buildNavigationModel(projects, threads);
+  if (latestState?.nativeThreadId) currentProjection = threads.find((thread) => thread.nativeThreadId === latestState?.nativeThreadId) ?? currentProjection;
   renderNavigation();
   if (latestState) renderState(latestState);
 }
 
+async function loadThreadView(clearLive = true): Promise<boolean> {
+  const result = await consume("thread.read", api.readThread());
+  if (!result) return false;
+  threadView = result;
+  if (clearLive) liveEvents = new Map();
+  renderThreadWorkspace();
+  if (latestState) renderState(latestState);
+  return true;
+}
+
 async function selectThread(nativeThreadId: string): Promise<void> {
-  if (latestState?.activeTurnId && latestState.nativeThreadId !== nativeThreadId) {
+  if ((latestState?.activeTurnId || turnOperationInFlight) && latestState?.nativeThreadId !== nativeThreadId) {
     showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "当前 Turn 运行中，不能切换 Native Thread。", exitCode: null, stderr: "" });
     return;
   }
   const result = await consume("native-thread.switch", api.switchThread(nativeThreadId));
   if (result) {
+    currentProjection = result.projection;
+    threadView = null;
+    liveEvents = new Map();
+    pendingApprovals = new Map();
     renderState(result.snapshot);
+    renderThreadWorkspace();
+    await loadThreadView();
     await refreshNavigation();
   }
 }
 
 async function createNativeThread(projectId: string | null): Promise<void> {
-  if (latestState?.activeTurnId) {
+  if (latestState?.activeTurnId || turnOperationInFlight) {
     showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "当前 Turn 运行中，不能创建 Native Thread。", exitCode: null, stderr: "" });
     return;
   }
   const result = await consume("native-thread.create", api.createThread(projectId));
   if (result) {
+    currentProjection = result.projection;
+    threadView = null;
+    liveEvents = new Map();
+    pendingApprovals = new Map();
     renderState(result.snapshot);
+    renderThreadWorkspace();
+    await loadThreadView();
     await refreshNavigation();
   }
 }
@@ -274,49 +535,113 @@ async function createProject(): Promise<void> {
   if (result) await refreshNavigation();
 }
 
+function addLiveEvent(event: NativeEvent): void {
+  const normalized = normalizeNativeEvent(event);
+  if (normalized.nativeThreadId && latestState?.nativeThreadId && normalized.nativeThreadId !== latestState.nativeThreadId) return;
+  appendOutput("native.event", event);
+  if (normalized.kind === "approval") return;
+  const key = `${normalized.kind}:${normalized.itemId ?? normalized.turnId ?? normalized.sequence ?? Math.random()}`;
+  const previous = liveEvents.get(key);
+  if (previous && (normalized.kind === "assistant" || normalized.kind === "command_tool")) {
+    normalized.text = previous.text && normalized.text ? `${previous.text}${normalized.text}` : normalized.text ?? previous.text;
+  }
+  liveEvents.set(key, normalized);
+  if (normalized.kind === "processing" && normalized.method === "turn/completed") showStatus(`Native Turn ${normalized.status ?? "完成"}`);
+  renderThreadWorkspace();
+}
+
+function handleServerRequest(event: NativeServerRequestEvent): void {
+  appendOutput(`server.request.${event.status}`, event);
+  if (event.id === null) return;
+  const key = approvalKey(event.id);
+  if (event.status === "pending") {
+    pendingApprovals.set(key, event);
+    showStatus("Native Server Request 等待用户决定");
+  } else if (event.status === "resolved" || event.status === "rejected") {
+    pendingApprovals.delete(key);
+  }
+  renderThreadWorkspace();
+}
+
 promptElement.addEventListener("input", () => localStorage.setItem(DRAFT_KEY, promptElement.value));
+threadWorkspaceElement.addEventListener("scroll", () => {
+  followLatest = threadWorkspaceElement.scrollTop + threadWorkspaceElement.clientHeight >= threadWorkspaceElement.scrollHeight - 80;
+  jumpLatestButton.hidden = followLatest;
+});
+jumpLatestButton.addEventListener("click", () => {
+  followLatest = true;
+  threadWorkspaceElement.scrollTo({ top: threadWorkspaceElement.scrollHeight, behavior: "smooth" });
+  jumpLatestButton.hidden = true;
+});
 document.querySelector<HTMLButtonElement>("#new-standalone-thread")!.addEventListener("click", () => { void createNativeThread(null); });
 document.querySelector<HTMLButtonElement>("#new-project")!.addEventListener("click", () => { void createProject(); });
 startThreadButton.addEventListener("click", async () => {
   const result = await consume("runtime.start", api.startThread());
   if (result) {
     renderState(result);
+    await loadThreadView();
     await refreshNavigation();
   }
 });
 document.querySelector<HTMLButtonElement>("#resume-thread")!.addEventListener("click", async () => {
   const result = await consume("native-thread.resume", api.resumeThread(resumeElement.value));
   if (result) {
+    currentProjection = result.projection;
+    threadView = null;
+    liveEvents = new Map();
     renderState(result.snapshot);
+    await loadThreadView();
     await refreshNavigation();
   }
 });
-readThreadButton.addEventListener("click", async () => {
-  const result = await consume("thread.read", api.readThread());
-  if (result) appendOutput("thread.read.view", result);
-});
+readThreadButton.addEventListener("click", () => { void loadThreadView(); });
 interruptButton.addEventListener("click", async () => {
-  await consume("turn.interrupt", api.interruptTurn());
+  const result = await consume("turn.interrupt", api.interruptTurn());
+  if (result) showStatus(`Native Turn ${result.turnId} 已请求 interrupt`);
 });
-startTurnButton.addEventListener("click", async () => {
+startTurnButton.addEventListener("click", async (event) => {
+  event.preventDefault();
   const prompt = promptElement.value;
+  if (!prompt.trim()) {
+    showError({ name: "PromptRequired", code: "PROMPT_REQUIRED", message: "请输入 Prompt。", exitCode: null, stderr: "" });
+    return;
+  }
+  turnOperationInFlight = true;
+  renderState(latestState ?? { state: "TURN_RUNNING", nativeThreadId: null, activeTurnId: null, localRunId: null, cwd: "", initialized: false, processId: null, processExited: true, exitCode: null, lastError: null });
+  showStatus("Prompt 已交给 Native Turn；等待原生结果…");
   const result = await consume("turn.start", api.startTurn(prompt));
+  turnOperationInFlight = false;
   if (result) {
     appendOutput("turn.result", result);
-    await consume("runtime.state", api.getState());
+    const readOk = await loadThreadView();
+    if (readOk) {
+      promptElement.value = "";
+      localStorage.removeItem(DRAFT_KEY);
+    } else {
+      promptElement.value = prompt;
+      localStorage.setItem(DRAFT_KEY, prompt);
+    }
+    await consume("runtime.state", api.getState()).then((state) => { if (state) renderState(state); });
   } else {
     promptElement.value = prompt;
     localStorage.setItem(DRAFT_KEY, prompt);
+    const state = await consume("runtime.state", api.getState());
+    if (state) renderState(state);
   }
 });
-document.querySelector<HTMLButtonElement>("#clear-events")!.addEventListener("click", () => {
-  eventsElement.textContent = "";
-});
+document.querySelector<HTMLButtonElement>("#clear-events")!.addEventListener("click", () => { eventsElement.textContent = ""; });
 
-api.onEvent((event) => appendOutput("native.event", event));
-api.onServerRequest((event) => appendOutput("server.request.fail-closed", event));
-api.onState((state) => renderState(state));
+api.onEvent(addLiveEvent);
+api.onServerRequest(handleServerRequest);
+api.onState((state) => {
+  renderState(state);
+  if (!state.activeTurnId && state.state === "READY" && turnOperationInFlight) renderThreadWorkspace();
+});
 void Promise.all([
-  consume("runtime.state", api.getState()).then((state) => { if (state) renderState(state); }),
+  consume("runtime.state", api.getState()).then(async (state) => {
+    if (!state) return;
+    renderState(state);
+    if (state.nativeThreadId) await loadThreadView();
+  }),
   refreshNavigation(),
 ]);

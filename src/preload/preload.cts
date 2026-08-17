@@ -18,6 +18,7 @@ const channels = Object.freeze({
   threadSwitch: "native-thread:switch",
   event: "native-runtime:event",
   serverRequest: "native-runtime:server-request",
+  serverRequestResponse: "native-runtime:server-request-response",
 });
 
 function listen(channel: string, listener: (payload: unknown) => void): () => void {
@@ -41,6 +42,7 @@ contextBridge.exposeInMainWorld("codexWorkbenchV1", Object.freeze({
   readThread: () => ipcRenderer.invoke(channels.read),
   startTurn: (prompt: string) => ipcRenderer.invoke(channels.turn, String(prompt ?? "").slice(0, 32_768)),
   interruptTurn: () => ipcRenderer.invoke(channels.interrupt),
+  respondToServerRequest: (requestId: string | number, response: unknown) => ipcRenderer.invoke(channels.serverRequestResponse, requestId, response),
   closeRuntime: () => ipcRenderer.invoke(channels.close),
   onEvent: (listener: (payload: unknown) => void) => listen(channels.event, listener),
   onServerRequest: (listener: (payload: unknown) => void) => listen(channels.serverRequest, listener),

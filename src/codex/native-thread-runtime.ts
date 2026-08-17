@@ -10,6 +10,7 @@ import { validateInitializeResult } from "./app-server-capabilities.ts";
 import { asError, errorInfo } from "../shared/error-info.ts";
 import { V1PersistenceStore, type PromptRecoveryPatch, type ThreadProjectionPatch } from "../shared/persistence-store.ts";
 import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
+import { parseThreadReadResponse } from "../shared/thread-read-model.ts";
 import type {
   JsonRpcMessage,
   NativeEvent,
@@ -87,8 +88,16 @@ function statusFromTurn(value: unknown): string | null {
   return string(turn?.status) ?? string(object(turn?.status)?.type);
 }
 
-function activeStatus(value: string | null): boolean {
-  return Boolean(value && /^(active|running|inprogress|in_progress)$/i.test(value));
+function statusText(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  const record = object(value);
+  if (!record) return null;
+  return string(record.type) ?? string(record.status) ?? string(record.phase);
+}
+
+function activeStatus(value: unknown): boolean {
+  const status = statusText(value);
+  return Boolean(status && /^(active|running|inprogress|in_progress)$/i.test(status));
 }
 
 function finalMessage(value: unknown): string | null {
@@ -236,7 +245,13 @@ export class NativeThreadRuntime {
         command: this.command,
         cwd: this.cwd,
         onServerRequest: async (message) => {
-          return this.onServerRequest?.(message);
+          const wasRunning = this.stateValue === "TURN_RUNNING";
+          if (wasRunning) this.stateValue = "WAITING_USER";
+          try {
+            return await this.onServerRequest?.(message);
+          } finally {
+            if (wasRunning && this.stateValue === "WAITING_USER") this.stateValue = "TURN_RUNNING";
+          }
         },
         onProcessExit: (exitCode, stderr) => {
           if (this.closing) return;
@@ -571,7 +586,7 @@ export class NativeThreadRuntime {
     const recoverable = await this.persistence.listRecoverablePrompts(this.nativeThreadIdValue);
     for (const prompt of recoverable) {
       const turn = prompt.turnId ? read.turns.find((candidate) => candidate.id === prompt.turnId) : undefined;
-      if (turn && /^(completed|interrupted|cancelled)$/i.test(turn.status)) {
+      if (turn && /^(completed|interrupted|cancelled)$/i.test(statusText(turn.status) ?? "")) {
         await this.persistence.clearPrompt(prompt.localRunId);
         continue;
       }
@@ -601,20 +616,35 @@ export class NativeThreadRuntime {
     if (!this.client) throw this.fail("THREAD_NOT_READY", "App Server client is not ready.");
     const response = await this.client.request("thread/read", { threadId: expectedId, includeTurns: true }, this.timeoutMs);
     this.assertThreadId(response, expectedId);
-    const root = object(response);
-    const thread = object(root?.thread) ?? root;
-    const rawTurns = Array.isArray(thread?.turns) ? thread.turns : [];
+    const model = parseThreadReadResponse(response);
+    const rawThread = object(model.raw);
+    const nativeTitle = string(rawThread?.title) ?? string(rawThread?.name);
+    const nativeCwd = string(rawThread?.cwd) ?? string(rawThread?.workingDirectory);
     return {
       nativeThreadId: expectedId,
-      status: string(object(thread?.status)?.type) ?? string(thread?.status),
-      turns: rawTurns.map((value) => {
-        const turn = object(value) ?? {};
-        return {
-          id: string(turn.id) ?? "unknown",
-          status: string(turn.status) ?? "unknown",
-          itemCount: Array.isArray(turn.items) ? turn.items.length : 0,
-        };
-      }),
+      status: model.status,
+      title: nativeTitle,
+      cwd: nativeCwd,
+      error: model.error,
+      turns: model.turns.map((turn) => ({
+        id: turn.turnId,
+        status: turn.status,
+        error: turn.error,
+        items: turn.items.map((item) => ({
+          id: item.itemId,
+          type: item.type,
+          status: item.status,
+          kind: item.kind,
+          text: item.text,
+          input: item.input,
+          output: item.output,
+          error: item.error,
+          raw: item.raw,
+        })),
+        itemCount: turn.items.length,
+        raw: turn.raw,
+      })),
+      raw: model.raw,
     };
   }
 

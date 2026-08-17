@@ -106,12 +106,29 @@ export interface WorkbenchPersistenceDocument {
 
 export interface ThreadReadView {
   nativeThreadId: string;
-  status: string | null;
+  status: unknown;
+  title: string | null;
+  cwd: string | null;
+  error: unknown;
   turns: Array<{
-    id: string;
-    status: string;
+    id: string | null;
+    status: unknown;
+    error: unknown;
+    items: Array<{
+      id: string | null;
+      type: unknown;
+      status: unknown;
+      kind: "known" | "unknown";
+      text: unknown;
+      input: unknown;
+      output: unknown;
+      error: unknown;
+      raw: unknown;
+    }>;
     itemCount: number;
+    raw: unknown;
   }>;
+  raw: unknown;
 }
 
 export interface RuntimeSnapshot {

@@ -304,9 +304,9 @@ export class AppServerProcessClient implements AppServerClientPort {
       const result = this.onServerRequest ? await this.onServerRequest(message) : undefined;
       if (result === undefined) {
         this.write({
-          jsonrpc: "2.0",
-          id: message.id,
-          error: { code: -32001, message: "Server requests are fail-closed in Phase 1." },
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32001, message: "Server request response was not provided; the request was rejected." },
         });
       } else {
         this.write({ jsonrpc: "2.0", id: message.id, result });
