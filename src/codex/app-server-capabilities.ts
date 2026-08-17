@@ -35,7 +35,7 @@ function text(value: unknown): string | null {
 }
 
 export function parseCodexVersion(value: string): string | null {
-  return String(value).match(/(?:codex-cli|Codex Desktop)[/\s]+(\d+\.\d+\.\d+)/i)?.[1] ?? null;
+  return String(value).match(/(?:codex-cli|Codex Desktop|codex-workbench-v1)[/\s]+(\d+\.\d+\.\d+)/i)?.[1] ?? null;
 }
 
 export function validateInitializeResult(value: unknown): InitializeResult {

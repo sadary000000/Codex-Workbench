@@ -8,6 +8,7 @@
     "check": "npm run typecheck",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
     "build": "node scripts/build.mjs",
+    "package:win": "node scripts/package-win.mjs",
     "dev": "npm run build && electron .",
     "start": "npm run dev",
     "test": "node --experimental-strip-types --test",

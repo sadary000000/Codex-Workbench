@@ -8,6 +8,7 @@ import type {
   AppServerClientPort,
   ClientSnapshot,
 } from "../src/codex/app-server-client.ts";
+import { AppServerClientError } from "../src/codex/app-server-client.ts";
 import { NativeThreadRuntime } from "../src/codex/native-thread-runtime.ts";
 import { MAP_DYNAMIC_TOOL_SPEC } from "../src/codex/map-tool.ts";
 import { V1PersistenceStore } from "../src/shared/persistence-store.ts";
@@ -25,6 +26,7 @@ interface FakeState {
   turnStartErrorCode?: string;
   processExitOnTurnStart?: boolean;
   turnStartThreadId?: string;
+  threadReadUnmaterialized?: boolean;
 }
 
 class FakeClient implements AppServerClientPort {
@@ -67,6 +69,12 @@ class FakeClient implements AppServerClientPort {
       return { thread: { id: this.state.activeThreadId } };
     }
     if (method === "thread/read") {
+      if (this.state.threadReadUnmaterialized) {
+        throw new AppServerClientError(
+          "APP_SERVER_PROTOCOL_REJECTED",
+          `JSON-RPC -32600: thread ${params.threadId} is not materialized yet; includeTurns is unavailable before first user message`,
+        );
+      }
       return { thread: { id: this.mismatch ? "other-thread" : params.threadId, status: { type: "idle" }, turns: this.state.turns } };
     }
     if (method === "turn/start") {
@@ -154,7 +162,7 @@ class FakeClient implements AppServerClientPort {
   }
 }
 
-async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string } = {}) {
+async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string; threadReadUnmaterialized?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-test-"));
   const state: FakeState = {
     turns: [],
@@ -166,6 +174,7 @@ async function createRuntime(mismatch = false, options: { turnStartErrorCode?: s
     turnStartErrorCode: options.turnStartErrorCode,
     processExitOnTurnStart: options.processExitOnTurnStart,
     turnStartThreadId: options.turnStartThreadId,
+    threadReadUnmaterialized: options.threadReadUnmaterialized,
   };
   const events: JsonRpcMessage[] = [];
   const persistence = new V1PersistenceStore(join(root, "workbench-state.json"));
@@ -219,6 +228,23 @@ test("starts one Native Thread, runs two Turns, reads it, and resumes without a 
   assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownState, "ready");
   assert.deepEqual(await first.persistence.listRecoverablePrompts("native-thread"), []);
   await second.close();
+});
+
+test("treats an unmaterialized Thread read as an empty ready view", async () => {
+  const harness = await createRuntime(false, { threadReadUnmaterialized: true });
+  const started = await harness.runtime.start();
+  assert.equal(started.state, "READY");
+
+  const read = await harness.runtime.readThread();
+
+  assert.equal(read.nativeThreadId, "native-thread");
+  assert.equal(read.status, null);
+  assert.equal(read.cwd, "C:/fake/project");
+  assert.deepEqual(read.turns, []);
+  assert.equal(harness.runtime.state, "READY");
+  assert.equal(harness.runtime.snapshot().lastError, null);
+  assert.equal((await harness.persistence.getThreadProjection("native-thread"))?.lastKnownState, "ready");
+  await harness.runtime.close();
 });
 
 test("rejects a turn/start response that names another Native Thread", async () => {

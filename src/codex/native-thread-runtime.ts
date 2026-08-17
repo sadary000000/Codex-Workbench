@@ -134,6 +134,11 @@ function transportRecovery(error: unknown): boolean {
     || code === "APP_SERVER_CLIENT_CLOSED";
 }
 
+function isUnmaterializedThreadRead(error: unknown): boolean {
+  if (!isAppServerClientError(error) || error.code !== "APP_SERVER_PROTOCOL_REJECTED") return false;
+  return /not materialized yet; includeTurns is unavailable before first user message/i.test(error.message);
+}
+
 function turnError(value: unknown): RuntimeErrorInfo | null {
   if (value === null || value === undefined) return null;
   return errorInfo(value);
@@ -639,7 +644,26 @@ export class NativeThreadRuntime {
 
   private async readThreadInternal(expectedId: string): Promise<ThreadReadView> {
     if (!this.client) throw this.fail("THREAD_NOT_READY", "App Server client is not ready.");
-    const response = await this.client.request("thread/read", { threadId: expectedId, includeTurns: true }, this.timeoutMs);
+    let response: unknown;
+    try {
+      response = await this.client.request("thread/read", { threadId: expectedId, includeTurns: true }, this.timeoutMs);
+    } catch (error) {
+      // Codex App Server creates the persistent Thread before it materializes its
+      // first user Turn. Until then `thread/read(includeTurns)` is a server-defined
+      // JSON-RPC rejection, not a failed or disconnected Workbench runtime.
+      if (isUnmaterializedThreadRead(error)) {
+        return {
+          nativeThreadId: expectedId,
+          status: null,
+          title: null,
+          cwd: this.cwd,
+          error: null,
+          turns: [],
+          raw: null,
+        };
+      }
+      throw error;
+    }
     this.assertThreadId(response, expectedId);
     const model = parseThreadReadResponse(response);
     const rawThread = object(model.raw);
