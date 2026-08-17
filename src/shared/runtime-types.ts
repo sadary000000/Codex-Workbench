@@ -73,6 +73,11 @@ export interface ThreadProjection {
   lastError: RuntimeErrorInfo | null;
 }
 
+export interface ThreadNavigationResult {
+  snapshot: RuntimeSnapshot;
+  projection: ThreadProjection;
+}
+
 export type PromptRecoveryStatus =
   | "pending"
   | "running"

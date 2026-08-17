@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
 import { errorInfo } from "../shared/error-info.ts";
 import { createLogger, logError, type Logger } from "../shared/logger.ts";
-import { V1PersistenceStore } from "../shared/persistence-store.ts";
-import type { JsonRpcMessage } from "../shared/runtime-types.ts";
+import { PersistenceStoreError, V1PersistenceStore } from "../shared/persistence-store.ts";
+import type { JsonRpcMessage, ThreadNavigationResult } from "../shared/runtime-types.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,6 +22,9 @@ const IPC = Object.freeze({
   projectCreate: "persistence:projects:create",
   threadList: "persistence:threads:list",
   threadBind: "persistence:threads:bind",
+  threadUpdate: "persistence:threads:update",
+  threadCreate: "native-thread:create",
+  threadSwitch: "native-thread:switch",
   event: "native-runtime:event",
   serverRequest: "native-runtime:server-request",
 });
@@ -39,14 +42,20 @@ function runtimeCwd(): string {
   return process.env.CODEX_WORKBENCH_CWD?.trim() || process.cwd();
 }
 
-function getRuntime(): NativeThreadRuntime {
-  if (runtime) return runtime;
+interface RuntimeTarget {
+  cwd: string;
+  projectId?: string | null;
+}
+
+function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
   const userData = app.getPath("userData");
   logger = createLogger(join(userData, "logs", "workbench-v1.log"));
-  runtime = new NativeThreadRuntime({
-    cwd: runtimeCwd(),
+  let createdRuntime: NativeThreadRuntime | null = null;
+  const nextRuntime = new NativeThreadRuntime({
+    cwd: target.cwd,
     stateFile: join(userData, "native-thread-binding.json"),
     persistence: getPersistence(),
+    projectId: target.projectId,
     onEvent: (event) => {
       logger.info("native_event", { method: event.method, threadId: event.threadId, turnId: event.turnId, itemId: event.itemId });
       send(IPC.event, event);
@@ -63,9 +72,16 @@ function getRuntime(): NativeThreadRuntime {
     },
     onProcessExit: (exitCode, stderr) => {
       logger.warn("app_server_process_exit", { exitCode, stderr: stderr.slice(-2_000) });
-      send(IPC.state, getRuntime().snapshot());
+      if (runtime === createdRuntime && createdRuntime) send(IPC.state, createdRuntime.snapshot());
     },
   });
+  createdRuntime = nextRuntime;
+  return nextRuntime;
+}
+
+function getRuntime(): NativeThreadRuntime {
+  if (runtime) return runtime;
+  runtime = createRuntime({ cwd: runtimeCwd() });
   return runtime;
 }
 
@@ -83,6 +99,74 @@ function fail(error: unknown): { ok: false; error: ReturnType<typeof errorInfo> 
   const normalized = errorInfo(error);
   logger.error("ipc_operation_failed", normalized);
   return { ok: false, error: normalized };
+}
+
+function projectionNotFound(nativeThreadId: string): PersistenceStoreError {
+  return new PersistenceStoreError(
+    "THREAD_PROJECTION_NOT_FOUND",
+    `Native Thread projection does not exist: ${nativeThreadId}`,
+    getPersistence().path,
+  );
+}
+
+async function closeActiveRuntimeForSwitch(): Promise<void> {
+  if (!runtime) return;
+  if (runtime.snapshot().activeTurnId) {
+    const error = new Error("Cannot switch Native Thread while a Turn is running.") as Error & { code: string };
+    error.code = "THREAD_SWITCH_BUSY";
+    throw error;
+  }
+  await runtime.close();
+  runtime = null;
+}
+
+async function switchNativeThread(nativeThreadId: string): Promise<ThreadNavigationResult> {
+  const id = nativeThreadId.trim();
+  if (!id) throw new Error("nativeThreadId is required for switch.");
+  const projection = await getPersistence().getThreadProjection(id);
+  if (!projection) throw projectionNotFound(id);
+  if (runtime?.nativeThreadId === id && runtime.state === "READY") {
+    return { snapshot: runtime.snapshot(), projection };
+  }
+  await closeActiveRuntimeForSwitch();
+  const candidate = createRuntime({ cwd: projection.cwd });
+  runtime = candidate;
+  try {
+    const snapshot = await candidate.resume(id);
+    const currentProjection = await getPersistence().getThreadProjection(id);
+    if (!currentProjection) throw projectionNotFound(id);
+    return { snapshot, projection: currentProjection };
+  } catch (error) {
+    if (runtime === candidate) runtime = null;
+    await candidate.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function createNativeThread(projectId: string | null): Promise<ThreadNavigationResult> {
+  let cwd = runtimeCwd();
+  let targetProjectId: string | null = null;
+  if (projectId !== null) {
+    const project = await getPersistence().getProject(projectId);
+    if (!project) throw new PersistenceStoreError("PROJECT_NOT_FOUND", `Project does not exist: ${projectId}`, getPersistence().path);
+    cwd = project.cwd;
+    targetProjectId = project.projectId;
+  }
+  await closeActiveRuntimeForSwitch();
+  const candidate = createRuntime({ cwd, projectId: targetProjectId });
+  runtime = candidate;
+  try {
+    const snapshot = await candidate.startNewThread(targetProjectId);
+    const nativeThreadId = snapshot.nativeThreadId;
+    if (!nativeThreadId) throw new Error("Native Thread creation did not return nativeThreadId.");
+    const projection = await getPersistence().getThreadProjection(nativeThreadId);
+    if (!projection) throw projectionNotFound(nativeThreadId);
+    return { snapshot, projection };
+  } catch (error) {
+    if (runtime === candidate) runtime = null;
+    await candidate.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 function registerIpc(): void {
@@ -130,6 +214,42 @@ function registerIpc(): void {
       return fail(error);
     }
   });
+  ipcMain.handle(IPC.threadUpdate, async (_event, nativeThreadId: unknown, patch: unknown) => {
+    try {
+      if (typeof nativeThreadId !== "string" || patch === null || typeof patch !== "object" || Array.isArray(patch)) {
+        throw new Error("Thread projection update input is invalid.");
+      }
+      const value = patch as Record<string, unknown>;
+      const update: { pinned?: boolean; title?: string | null } = {};
+      if ("pinned" in value) {
+        if (typeof value.pinned !== "boolean") throw new Error("Pinned state is invalid.");
+        update.pinned = value.pinned;
+      }
+      if ("title" in value) {
+        if (value.title !== null && typeof value.title !== "string") throw new Error("Thread title is invalid.");
+        update.title = value.title as string | null;
+      }
+      if (!Object.keys(update).length) throw new Error("Thread projection update is empty.");
+      return ok(await getPersistence().updateThreadProjection(nativeThreadId, update));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.threadCreate, async (_event, projectId: unknown) => {
+    try {
+      if (projectId !== null && typeof projectId !== "string") throw new Error("Project ID is invalid.");
+      return ok(await createNativeThread(projectId as string | null));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.threadSwitch, async (_event, nativeThreadId: unknown) => {
+    try {
+      return ok(await switchNativeThread(typeof nativeThreadId === "string" ? nativeThreadId : ""));
+    } catch (error) {
+      return fail(error);
+    }
+  });
   ipcMain.handle(IPC.start, async () => {
     try {
       return ok(await getRuntime().start());
@@ -139,7 +259,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.resume, async (_event, nativeThreadId: unknown) => {
     try {
-      return ok(await getRuntime().resume(typeof nativeThreadId === "string" ? nativeThreadId : ""));
+      return ok(await switchNativeThread(typeof nativeThreadId === "string" ? nativeThreadId : ""));
     } catch (error) {
       return fail(error);
     }
@@ -168,6 +288,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.close, async () => {
     try {
       await getRuntime().close();
+      runtime = null;
       return ok({ closed: true, threadDeleted: false });
     } catch (error) {
       return fail(error);

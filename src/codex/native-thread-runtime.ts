@@ -131,7 +131,7 @@ export class NativeThreadRuntime {
   private readonly onServerRequest: NativeThreadRuntimeOptions["onServerRequest"];
   private readonly onProcessExit: NativeThreadRuntimeOptions["onProcessExit"];
   private readonly persistence: V1PersistenceStore | null;
-  private readonly projectId: string | null | undefined;
+  private projectIdValue: string | null | undefined;
   private client: AppServerClientPort | null = null;
   private unsubscribe = (): void => undefined;
   private stateValue: RuntimeState = "IDLE";
@@ -153,7 +153,7 @@ export class NativeThreadRuntime {
     this.onServerRequest = options.onServerRequest;
     this.onProcessExit = options.onProcessExit;
     this.persistence = options.persistence ?? null;
-    this.projectId = options.projectId;
+    this.projectIdValue = options.projectId;
   }
 
   get nativeThreadId(): string | null { return this.nativeThreadIdValue; }
@@ -176,11 +176,32 @@ export class NativeThreadRuntime {
   }
 
   async start(resumeThreadId?: string): Promise<RuntimeSnapshot> {
-    return this.startInternal(resumeThreadId, false);
+    return this.startInternal(resumeThreadId, false, false);
   }
 
-  private async startInternal(resumeThreadId: string | undefined, explicitResume: boolean): Promise<RuntimeSnapshot> {
-    if (this.stateValue === "READY" || this.stateValue === "TURN_RUNNING") return this.snapshot();
+  async startNewThread(projectId?: string | null): Promise<RuntimeSnapshot> {
+    if (this.activeTurnValue || this.stateValue === "TURN_RUNNING") {
+      throw this.fail("THREAD_SWITCH_BUSY", "Cannot create a Native Thread while a Turn is running.");
+    }
+    if (this.stateValue === "STARTING") {
+      throw this.fail("RUNTIME_STATE_INVALID", "Runtime is still starting.");
+    }
+    this.projectIdValue = projectId === undefined ? this.projectIdValue : projectId;
+    if (this.client) {
+      this.closing = true;
+      await this.closeClient();
+      this.closing = false;
+    }
+    this.stateValue = "IDLE";
+    this.nativeThreadIdValue = null;
+    this.activeTurnValue = null;
+    this.initialized = false;
+    this.lastErrorValue = null;
+    return this.startInternal(undefined, false, true);
+  }
+
+  private async startInternal(resumeThreadId: string | undefined, explicitResume: boolean, forceNew: boolean): Promise<RuntimeSnapshot> {
+    if (!forceNew && (this.stateValue === "READY" || this.stateValue === "TURN_RUNNING")) return this.snapshot();
     if (this.stateValue !== "IDLE" && this.stateValue !== "DISCONNECTED" && this.stateValue !== "FAILED" && this.stateValue !== "RECOVERY_REQUIRED") {
       throw this.fail("RUNTIME_STATE_INVALID", `Runtime cannot start from ${this.stateValue}.`);
     }
@@ -196,14 +217,14 @@ export class NativeThreadRuntime {
       if (bindingState.invalid) throw this.fail("THREAD_BINDING_INVALID", "Persisted Native Thread binding is invalid; no replacement Thread will be created.");
       const persisted = bindingState.binding;
       const persistedId = persisted?.nativeThreadId ?? null;
-      const requestedId = resumeThreadId ?? persistedId;
-      if (!explicitResume && !requestedId && persistenceInspection?.document?.threads.length) {
+      const requestedId = forceNew ? undefined : resumeThreadId ?? persistedId;
+      if (!forceNew && !explicitResume && !requestedId && persistenceInspection?.document?.threads.length) {
         throw this.fail("THREAD_BINDING_MISSING", "Thread projections exist but the active Native Thread binding is missing; explicit resume is required.");
       }
-      if (!explicitResume && persisted && persisted.cwd !== this.cwd) {
+      if (!forceNew && !explicitResume && persisted && persisted.cwd !== this.cwd) {
         throw this.fail("THREAD_CWD_MISMATCH", "Persisted Native Thread belongs to a different cwd.");
       }
-      if (explicitResume && persisted && persistedId === requestedId && persisted.cwd !== this.cwd) {
+      if (!forceNew && explicitResume && persisted && persistedId === requestedId && persisted.cwd !== this.cwd) {
         throw this.fail("THREAD_CWD_MISMATCH", "Persisted Native Thread belongs to a different cwd.");
       }
       if (this.client) {
@@ -314,7 +335,18 @@ export class NativeThreadRuntime {
   async resume(nativeThreadId: string): Promise<RuntimeSnapshot> {
     const id = nativeThreadId.trim();
     if (!id) throw this.fail("THREAD_ID_REQUIRED", "nativeThreadId is required for resume.");
-    return this.startInternal(id, true);
+    if (this.stateValue === "READY" || this.stateValue === "TURN_RUNNING") {
+      if (this.activeTurnValue) throw this.fail("THREAD_SWITCH_BUSY", "Cannot switch Native Thread while a Turn is running.");
+      this.closing = true;
+      await this.closeClient();
+      this.closing = false;
+      this.stateValue = "IDLE";
+      this.nativeThreadIdValue = null;
+      this.lastErrorValue = null;
+    }
+    // Explicit selection preserves the ThreadProjection's existing Project/Standalone ownership.
+    this.projectIdValue = undefined;
+    return this.startInternal(id, true, false);
   }
 
   async readThread(): Promise<ThreadReadView> {
@@ -489,7 +521,7 @@ export class NativeThreadRuntime {
     await this.persistence.ensureThreadProjection({
       nativeThreadId: this.nativeThreadIdValue,
       cwd: this.cwd,
-      ...(this.projectId === undefined ? {} : { projectId: this.projectId }),
+      ...(this.projectIdValue === undefined ? {} : { projectId: this.projectIdValue }),
       ...patch,
     });
   }

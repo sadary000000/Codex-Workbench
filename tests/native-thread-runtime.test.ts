@@ -16,6 +16,9 @@ interface FakeState {
   turns: Array<{ id: string; status: string; items: unknown[] }>;
   startCalls: number;
   nextTurn: number;
+  threadStartIds?: string[];
+  threadStartIndex: number;
+  activeThreadId: string;
   turnStartErrorCode?: string;
   processExitOnTurnStart?: boolean;
 }
@@ -46,11 +49,14 @@ class FakeClient implements AppServerClientPort {
     if (method === "initialize") return { userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex" };
     if (method === "thread/start") {
       this.state.startCalls += 1;
-      queueMicrotask(() => this.emit({ method: "thread/started", params: { thread: { id: "native-thread" } } }));
-      return { thread: { id: "native-thread" } };
+      const nativeThreadId = this.state.threadStartIds?.[this.state.threadStartIndex++] ?? "native-thread";
+      this.state.activeThreadId = nativeThreadId;
+      queueMicrotask(() => this.emit({ method: "thread/started", params: { thread: { id: nativeThreadId } } }));
+      return { thread: { id: nativeThreadId } };
     }
     if (method === "thread/resume") {
-      return { thread: { id: this.mismatch ? "other-thread" : params.threadId } };
+      this.state.activeThreadId = this.mismatch ? "other-thread" : params.threadId;
+      return { thread: { id: this.state.activeThreadId } };
     }
     if (method === "thread/read") {
       return { thread: { id: this.mismatch ? "other-thread" : params.threadId, status: { type: "idle" }, turns: this.state.turns } };
@@ -76,12 +82,12 @@ class FakeClient implements AppServerClientPort {
       };
       this.state.turns.push(turn);
       queueMicrotask(() => {
-        this.emit({ method: "turn/started", params: { threadId: "native-thread", turn } });
+        this.emit({ method: "turn/started", params: { threadId: this.state.activeThreadId, turn } });
         if (params.input?.[0]?.text === "LONG") return;
         turn.status = "completed";
         turn.items = [{ id: `item-${turn.id}`, type: "agentMessage", phase: "final_answer", text: "FAKE_FINAL" }];
-        this.emit({ method: "item/agentMessage/delta", params: { threadId: "native-thread", turnId: turn.id, itemId: `item-${turn.id}`, delta: "FAKE_FINAL" } });
-        this.emit({ method: "turn/completed", params: { threadId: "native-thread", turn } });
+        this.emit({ method: "item/agentMessage/delta", params: { threadId: this.state.activeThreadId, turnId: turn.id, itemId: `item-${turn.id}`, delta: "FAKE_FINAL" } });
+        this.emit({ method: "turn/completed", params: { threadId: this.state.activeThreadId, turn } });
       });
       return { turn };
     }
@@ -89,7 +95,7 @@ class FakeClient implements AppServerClientPort {
       const turn = this.state.turns.find((candidate) => candidate.id === params.turnId);
       if (turn) {
         turn.status = "interrupted";
-        this.emit({ method: "turn/completed", params: { threadId: "native-thread", turn } });
+        this.emit({ method: "turn/completed", params: { threadId: this.state.activeThreadId, turn } });
       }
       return {};
     }
@@ -140,12 +146,15 @@ class FakeClient implements AppServerClientPort {
   }
 }
 
-async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean } = {}) {
+async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[] } = {}) {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-test-"));
   const state: FakeState = {
     turns: [],
     startCalls: 0,
     nextTurn: 0,
+    threadStartIds: options.threadStartIds,
+    threadStartIndex: 0,
+    activeThreadId: "native-thread",
     turnStartErrorCode: options.turnStartErrorCode,
     processExitOnTurnStart: options.processExitOnTurnStart,
   };
@@ -159,6 +168,7 @@ async function createRuntime(mismatch = false, options: { turnStartErrorCode?: s
     cwd: "C:/fake/project",
     stateFile: join(root, "native-thread-binding.json"),
     persistence,
+    projectId: options.projectId,
     clientFactory: factory,
     onEvent: (event) => events.push({ method: event.method, params: event.params }),
   });
@@ -308,6 +318,32 @@ test("explicit resume can select a known Native Thread without silent replacemen
   assert.equal(snapshot.nativeThreadId, "other-thread");
   assert.equal((await first.persistence.getThreadProjection("other-thread"))?.lastKnownState, "ready");
   await resumed.close();
+});
+
+test("creates multiple Native Threads with ownership, then switches back by nativeThreadId", async () => {
+  const harness = await createRuntime(false, {
+    threadStartIds: ["native-a1", "native-a2", "native-s1"],
+  });
+  await harness.persistence.createProject({ projectId: "project-a", name: "Alpha", cwd: "C:/fake/project" });
+
+  const a1 = await harness.runtime.startNewThread("project-a");
+  const a2 = await harness.runtime.startNewThread("project-a");
+  const s1 = await harness.runtime.startNewThread(null);
+  assert.equal(a1.nativeThreadId, "native-a1");
+  assert.equal(a2.nativeThreadId, "native-a2");
+  assert.equal(s1.nativeThreadId, "native-s1");
+  assert.equal((await harness.persistence.getThreadProjection("native-a1"))?.projectId, "project-a");
+  assert.equal((await harness.persistence.getThreadProjection("native-a2"))?.projectId, "project-a");
+  assert.equal((await harness.persistence.getThreadProjection("native-s1"))?.projectId, null);
+
+  const backToA1 = await harness.runtime.resume("native-a1");
+  const backToS1 = await harness.runtime.resume("native-s1");
+  assert.equal(backToA1.nativeThreadId, "native-a1");
+  assert.equal(backToS1.nativeThreadId, "native-s1");
+  assert.equal((await harness.persistence.getThreadProjection("native-a1"))?.projectId, "project-a");
+  assert.equal((await harness.persistence.getThreadProjection("native-s1"))?.projectId, null);
+  assert.equal(harness.state.startCalls, 3);
+  await harness.runtime.close();
 });
 
 test("does not create a new Thread when projections exist but the active binding is missing", async () => {

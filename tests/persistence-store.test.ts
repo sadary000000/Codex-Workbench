@@ -119,3 +119,16 @@ test("rejects duplicate identity and keeps the previous valid document after a f
   );
   assert.equal((await store.getThreadProjection("native-thread"))?.nativeThreadId, "native-thread");
 });
+
+test("pins a Thread as a shortcut without changing Project or Standalone ownership", async () => {
+  const { store } = await createStore();
+  const project = await store.createProject({ name: "Pinned", cwd: "C:/pinned" });
+  await store.ensureThreadProjection({ nativeThreadId: "project-thread", cwd: project.cwd, projectId: project.projectId });
+  await store.ensureThreadProjection({ nativeThreadId: "standalone-thread", cwd: "C:/standalone" });
+
+  const pinnedProjectThread = await store.updateThreadProjection("project-thread", { pinned: true });
+  assert.equal(pinnedProjectThread.pinned, true);
+  assert.equal(pinnedProjectThread.projectId, project.projectId);
+  assert.deepEqual((await store.listThreads(project.projectId)).map((thread) => thread.nativeThreadId), ["project-thread"]);
+  assert.deepEqual((await store.listThreads(null)).map((thread) => thread.nativeThreadId), ["standalone-thread"]);
+});
