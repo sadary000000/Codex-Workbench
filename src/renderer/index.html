@@ -124,9 +124,16 @@
       .map-panel-subtitle { margin-top: 4px; color: #858585; font-size: 11px; line-height: 1.4; }
       .map-panel-status { margin-bottom: 10px; padding: 8px 9px; border-radius: 7px; background: #262626; color: #a9a9a9; font-size: 11px; line-height: 1.45; }
       .map-panel-status.error { color: var(--danger); }
+      .map-scope-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+      .map-scope-tabs [aria-selected="true"] { border-color: #8ab4f8; color: #d8e8ff; background: #26354d; }
       .map-panel-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
       .map-tree { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
       .map-tree-item { display: grid; gap: 4px; }
+      dialog { max-width: min(720px, 90vw); border: 1px solid var(--border); border-radius: 10px; background: #202020; color: #eee; }
+      dialog::backdrop { background: #0009; }
+      .maintenance-dialog { display: grid; gap: 10px; min-width: min(620px, 82vw); }
+      .maintenance-dialog h2 { margin: 0; font-size: 15px; }
+      .maintenance-dialog pre { max-height: 55vh; overflow: auto; padding: 10px; border-radius: 7px; background: #141414; color: #c8c8c8; font-size: 11px; white-space: pre-wrap; }
       .map-node { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; width: 100%; padding: 8px 7px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #d5d5d5; text-align: left; }
       .map-node:hover, .map-node:focus-visible { border-color: #415f53; background: #26342f; outline: none; }
       .map-node-marker { color: #9bd0b8; font-size: 12px; }
@@ -202,15 +209,21 @@
           </section>
         </details>
       </main>
-      <aside id="map-panel" class="map-panel" aria-label="Conversation Map" hidden>
+      <aside id="map-panel" class="map-panel" aria-label="Map" hidden>
         <div class="map-panel-header">
           <div><h2 class="map-panel-title">Conversation Map</h2><div class="map-panel-subtitle">Map 是 Native Thread 的旁路投影，不替代 Turn / Item。</div></div>
           <button id="close-map" class="icon-button" type="button" title="关闭 Conversation Map" aria-label="关闭 Conversation Map">×</button>
         </div>
+        <div class="map-scope-tabs" role="tablist" aria-label="Map 作用域">
+          <button id="map-scope-conversation" class="debug-button" type="button" role="tab" aria-selected="true">Conversation</button>
+          <button id="map-scope-project" class="debug-button" type="button" role="tab" aria-selected="false">Project</button>
+        </div>
         <div id="map-panel-status" class="map-panel-status" role="status">未启用 Map。</div>
-        <div class="map-panel-actions"><button id="enable-map" class="debug-button" type="button">启用</button><button id="pause-map" class="debug-button" type="button">暂停</button><button id="resume-map" class="debug-button" type="button">恢复</button></div>
+        <div id="conversation-map-actions" class="map-panel-actions"><button id="enable-map" class="debug-button" type="button">启用</button><button id="pause-map" class="debug-button" type="button">暂停</button><button id="resume-map" class="debug-button" type="button">恢复</button></div>
+        <div id="project-map-actions" class="map-panel-actions" hidden><button id="enable-project-map" class="debug-button" type="button">启用</button><button id="pause-project-map" class="debug-button" type="button">暂停</button><button id="resume-project-map" class="debug-button" type="button">恢复</button><button id="update-project-map" class="debug-button" type="button">Update</button><button id="view-project-maintenance" class="debug-button" type="button">查看维护对话</button></div>
         <ul id="map-tree" class="map-tree" role="tree" aria-label="Conversation Map 节点"></ul>
       </aside>
+      <dialog id="project-maintenance-dialog" aria-labelledby="project-maintenance-title"><form method="dialog" class="maintenance-dialog"><h2 id="project-maintenance-title">Project Map 维护对话</h2><p class="muted">只读 Native Thread 视图；此 Thread 不会进入普通导航、最近列表或项目 Thread 列表。</p><pre id="project-maintenance-body"></pre><button id="close-project-maintenance" class="debug-button" type="submit">关闭</button></form></dialog>
     </div>
     <script type="module" src="./renderer.js"></script>
   </body>

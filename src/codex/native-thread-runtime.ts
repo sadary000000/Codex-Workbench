@@ -151,6 +151,7 @@ export class NativeThreadRuntime {
   private nativeThreadIdValue: string | null = null;
   private activeTurnValue: ActiveTurn | null = null;
   private initialized = false;
+  private dynamicToolsRegisteredValue = false;
   private lastErrorValue: RuntimeErrorInfo | null = null;
   private closing = false;
   private sequence = 0;
@@ -172,6 +173,7 @@ export class NativeThreadRuntime {
 
   get nativeThreadId(): string | null { return this.nativeThreadIdValue; }
   get state(): RuntimeState { return this.stateValue; }
+  get dynamicToolsRegistered(): boolean { return this.dynamicToolsRegisteredValue; }
 
   snapshot(): RuntimeSnapshot {
     const client = this.client?.snapshot;
@@ -222,6 +224,7 @@ export class NativeThreadRuntime {
     this.stateValue = "STARTING";
     this.lastErrorValue = null;
     this.closing = false;
+    this.dynamicToolsRegisteredValue = false;
     try {
       const persistenceInspection = await this.persistence?.inspect();
       if (persistenceInspection?.status === "invalid") {
@@ -289,7 +292,10 @@ export class NativeThreadRuntime {
       this.initialized = true;
       if (requestedId) {
         this.nativeThreadIdValue = requestedId;
-        const response = await client.request("thread/resume", { threadId: requestedId }, this.timeoutMs);
+        const response = await client.request("thread/resume", {
+          threadId: requestedId,
+          ...(this.dynamicTools.length ? { developerInstructions: MAP_THREAD_START_HINT } : {}),
+        }, this.timeoutMs);
         this.assertThreadId(response, requestedId);
         const read = await this.readThreadInternal(requestedId);
         const activeTurn = read.turns.find((turn) => activeStatus(turn.status));
@@ -326,6 +332,7 @@ export class NativeThreadRuntime {
         const nativeThreadId = threadIdFrom(response);
         if (!nativeThreadId) throw this.fail("THREAD_ID_MISSING", "thread/start did not return nativeThreadId.");
         this.nativeThreadIdValue = nativeThreadId;
+        this.dynamicToolsRegisteredValue = this.dynamicTools.length > 0;
         await saveThreadBinding(this.stateFile, {
           version: 1,
           nativeThreadId,

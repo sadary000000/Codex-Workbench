@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
@@ -65,7 +66,13 @@ export function mapFilePath(rootDirectory: string, scope: MapScope): string {
   const safeScope = assertMapScope(scope);
   const kind = safeScope.kind;
   const identity = safeScope.kind === "conversation" ? safeScope.nativeThreadId : safeScope.projectId;
-  const safe = Buffer.from(identity, "utf8").toString("hex").slice(0, MAP_LIMITS.id * 2);
+  const encoded = Buffer.from(identity, "utf8").toString("hex");
+  // Preserve the original path for normal IDs so existing V1 sidecars remain
+  // readable; use a complete digest only when the old bounded filename would
+  // truncate and allow collisions.
+  const safe = encoded.length <= MAP_LIMITS.id * 2
+    ? encoded
+    : `sha256-${createHash("sha256").update(identity, "utf8").digest("hex")}`;
   return join(rootDirectory, kind, `${safe}.json`);
 }
 
@@ -146,7 +153,7 @@ export class MapStore {
     if (patch.lastProcessedChangeId !== undefined && !validCursorId(patch.lastProcessedChangeId)) throw new MapStoreError("MAP_SYNC_INVALID", "Map change cursor is invalid.", this.filePath);
     if (patch.dirty !== undefined && typeof patch.dirty !== "boolean") throw new MapStoreError("MAP_SYNC_INVALID", "Map dirty state is invalid.", this.filePath);
     if (patch.paused !== undefined && typeof patch.paused !== "boolean") throw new MapStoreError("MAP_SYNC_INVALID", "Map paused state is invalid.", this.filePath);
-    const allowedStatus: MapSyncStatus[] = ["not_enabled", "initializing", "active", "paused", "dirty", "resumed", "synced", "error"];
+    const allowedStatus: MapSyncStatus[] = ["not_enabled", "initializing", "active", "paused", "dirty", "resumed", "syncing", "synced", "error"];
     if (patch.status !== undefined && !allowedStatus.includes(patch.status)) throw new MapStoreError("MAP_SYNC_INVALID", "Map sync status is invalid.", this.filePath);
     return this.mutate((existing) => {
       if (!existing) throw new MapStoreError("MAP_NOT_FOUND", "Map persistence does not exist.", this.filePath);

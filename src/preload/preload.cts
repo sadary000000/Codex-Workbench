@@ -29,6 +29,8 @@ const channels = Object.freeze({
   projectMapPause: "project-map:pause",
   projectMapResume: "project-map:resume",
   projectMapUpdate: "project-map:update",
+  projectMapMaintenanceRead: "project-map:maintenance-read",
+  projectMapState: "project-map:state",
 });
 
 function listen(channel: string, listener: (payload: unknown) => void): () => void {
@@ -62,9 +64,11 @@ contextBridge.exposeInMainWorld("codexWorkbenchV1", Object.freeze({
   pauseProjectMap: (projectId: string) => ipcRenderer.invoke(channels.projectMapPause, String(projectId ?? "").slice(0, 256)),
   resumeProjectMap: (projectId: string) => ipcRenderer.invoke(channels.projectMapResume, String(projectId ?? "").slice(0, 256)),
   updateProjectMap: (projectId: string, delta: unknown) => ipcRenderer.invoke(channels.projectMapUpdate, String(projectId ?? "").slice(0, 256), delta),
+  getProjectMapMaintenance: (projectId: string) => ipcRenderer.invoke(channels.projectMapMaintenanceRead, String(projectId ?? "").slice(0, 256)),
   closeRuntime: () => ipcRenderer.invoke(channels.close),
   onEvent: (listener: (payload: unknown) => void) => listen(channels.event, listener),
   onServerRequest: (listener: (payload: unknown) => void) => listen(channels.serverRequest, listener),
   onState: (listener: (payload: unknown) => void) => listen(channels.state, listener),
   onMapState: (listener: (payload: unknown) => void) => listen(channels.mapState, listener),
+  onProjectMapState: (listener: (payload: unknown) => void) => listen(channels.projectMapState, listener),
 }));

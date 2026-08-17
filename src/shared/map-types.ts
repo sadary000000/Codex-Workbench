@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ThreadReadView } from "./runtime-types.ts";
 
 export const MAP_SCHEMA_VERSION = 1 as const;
 export const MAP_PROMPT_VERSION = "phase6-map-prompt-v1" as const;
@@ -31,6 +32,7 @@ export type MapSyncStatus =
   | "paused"
   | "dirty"
   | "resumed"
+  | "syncing"
   | "synced"
   | "error";
 
@@ -62,6 +64,8 @@ export interface MapSyncMetadata extends MapCursor {
   paused: boolean;
   status: MapSyncStatus;
   cursorHistory: MapCursor[];
+  /** Durable cursor per Native source; project maps must not use one global cursor for all Threads. */
+  sourceCursors: Record<string, MapCursor>;
 }
 
 export interface MapPatchLedgerEntry {
@@ -131,9 +135,25 @@ export interface MapApplyResult {
 export interface ConversationMapStatus {
   enabled: boolean;
   available: boolean;
-  sameTurn: "registered_for_new_threads" | "unavailable_for_resumed_thread";
+  sameTurn: "registered_for_new_threads" | "compatibility_fallback";
   map: MapDocument | null;
   error: { code: string; message: string } | null;
+}
+
+export interface ProjectMapStatus {
+  projectId: string;
+  enabled: boolean;
+  available: boolean;
+  maintenanceThreadId: string | null;
+  maintenanceRunning: boolean;
+  map: MapDocument | null;
+  error: { code: string; message: string } | null;
+}
+
+export interface ProjectMapMaintenanceView {
+  projectId: string;
+  maintenanceThreadId: string;
+  view: ThreadReadView;
 }
 
 export class MapValidationError extends Error {
@@ -291,9 +311,20 @@ function normalizeSync(value: unknown): MapSyncMetadata | null {
   const cursorHistory = Array.isArray(candidate.cursorHistory) && candidate.cursorHistory.length <= MAP_LIMITS.cursorHistory
     ? candidate.cursorHistory.map(normalizeCursor)
     : null;
+  const sourceCursorRecord = candidate.sourceCursors === undefined ? {} : record(candidate.sourceCursors);
+  const sourceCursors: Record<string, MapCursor> = {};
+  if (sourceCursorRecord) {
+    const entries = Object.entries(sourceCursorRecord);
+    if (entries.length > MAP_LIMITS.sources * 4) return null;
+    for (const [sourceId, sourceCursor] of entries) {
+      const normalized = normalizeCursor(sourceCursor);
+      if (!validId(sourceId) || !normalized) return null;
+      sourceCursors[sourceId] = normalized;
+    }
+  }
   if (!cursor || !validTimestamp(updatedAt) || typeof candidate.dirty !== "boolean" || typeof candidate.paused !== "boolean" ||
-    !["not_enabled", "initializing", "active", "paused", "dirty", "resumed", "synced", "error"].includes(String(status)) ||
-    !cursorHistory || cursorHistory.some((item) => item === null)) return null;
+    !["not_enabled", "initializing", "active", "paused", "dirty", "resumed", "syncing", "synced", "error"].includes(String(status)) ||
+    !cursorHistory || cursorHistory.some((item) => item === null) || !sourceCursorRecord) return null;
   return {
     ...cursor,
     updatedAt,
@@ -301,6 +332,7 @@ function normalizeSync(value: unknown): MapSyncMetadata | null {
     paused: candidate.paused,
     status: status as MapSyncStatus,
     cursorHistory: cursorHistory as MapCursor[],
+    sourceCursors,
   };
 }
 
@@ -396,6 +428,7 @@ export function createEmptyMap(scope: MapScope, now = new Date().toISOString()):
       paused: false,
       status: "not_enabled",
       cursorHistory: [],
+      sourceCursors: {},
     },
     promptVersion: MAP_PROMPT_VERSION,
     recentPatches: [],
@@ -579,6 +612,23 @@ function applyOperation(document: MapDocument, operation: MapPatchOperation): vo
   }
 }
 
+function patchSourceIds(patch: MapPatch): string[] {
+  const ids = new Set<string>();
+  if (patch.scope.kind === "conversation") ids.add(patch.scope.nativeThreadId);
+  for (const operation of patch.operations) {
+    const sources = operation.op === "add"
+      ? operation.node.sources
+      : operation.op === "update"
+        ? operation.sources ?? []
+        : operation.op === "source"
+          ? [operation.source]
+          : [];
+    for (const source of sources) ids.add(source.nativeThreadId);
+  }
+  if (!ids.size && patch.scope.kind === "project") ids.add(patch.scope.projectId);
+  return [...ids];
+}
+
 function validatePatchShape(value: unknown): MapPatch {
   const candidate = record(value);
   const schemaVersion = candidate?.schemaVersion;
@@ -632,6 +682,12 @@ export function applyMapPatch(document: MapDocument, value: unknown, now = new D
   const currentCursorKey = cursorKey(candidate.sync);
   const knownCursor = candidate.sync.cursorHistory.some((cursor) => cursorKey(cursor) === cursorKeyValue);
   if (cursorKeyValue !== currentCursorKey && knownCursor) throw new MapValidationError("MAP_CURSOR_REGRESSION", "Map Patch cursor would move back to a previously processed position.");
+  for (const sourceId of patchSourceIds(patch)) {
+    const previous = candidate.sync.sourceCursors[sourceId];
+    if (previous && previous.lastProcessedTurnId !== null && patch.sourceCursor.lastProcessedTurnId === null) {
+      throw new MapValidationError("MAP_CURSOR_REGRESSION", `Map Patch cursor for source ${sourceId} would move back to null.`);
+    }
+  }
   const validation = validateGraph(candidate);
   if (!validation.ok) throw new MapValidationError(validation.code ?? "MAP_DOCUMENT_INVALID", validation.message ?? "Map Patch produced an invalid Map.");
   candidate.revision += 1;
@@ -640,6 +696,7 @@ export function applyMapPatch(document: MapDocument, value: unknown, now = new D
   }
   candidate.sync.lastProcessedTurnId = patch.sourceCursor.lastProcessedTurnId;
   candidate.sync.lastProcessedChangeId = patch.sourceCursor.lastProcessedChangeId;
+  for (const sourceId of patchSourceIds(patch)) candidate.sync.sourceCursors[sourceId] = clone(patch.sourceCursor);
   candidate.sync.updatedAt = now;
   candidate.sync.dirty = false;
   candidate.sync.status = candidate.sync.paused ? "paused" : "synced";

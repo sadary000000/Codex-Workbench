@@ -8,7 +8,7 @@ import type {
   ThreadReadView,
   TurnResult,
 } from "../shared/runtime-types.ts";
-import type { ConversationMapStatus, MapNode, MapSourceRef } from "../shared/map-types.ts";
+import type { ConversationMapStatus, MapNode, MapSourceRef, ProjectMapMaintenanceView, ProjectMapStatus } from "../shared/map-types.ts";
 import { normalizeNativeEvent, type NativeVisibleEventKind, type NormalizedNativeEvent } from "../shared/native-event-normalizer.ts";
 import { buildNavigationModel, type NavigationModel } from "./navigation-model.ts";
 
@@ -50,6 +50,13 @@ interface V1Api {
   pauseMap(nativeThreadId?: string): Promise<IpcEnvelope<ConversationMapStatus>>;
   resumeMap(nativeThreadId?: string): Promise<IpcEnvelope<ConversationMapStatus>>;
   onMapState(listener: (payload: ConversationMapStatus) => void): () => void;
+  getProjectMapStatus(projectId: string): Promise<IpcEnvelope<ProjectMapStatus>>;
+  enableProjectMap(projectId: string): Promise<IpcEnvelope<ProjectMapStatus>>;
+  pauseProjectMap(projectId: string): Promise<IpcEnvelope<ProjectMapStatus>>;
+  resumeProjectMap(projectId: string): Promise<IpcEnvelope<ProjectMapStatus>>;
+  updateProjectMap(projectId: string, delta: unknown): Promise<IpcEnvelope<{ status: ProjectMapStatus; turn: TurnResult }>>;
+  getProjectMapMaintenance(projectId: string): Promise<IpcEnvelope<ProjectMapMaintenanceView>>;
+  onProjectMapState(listener: (payload: ProjectMapStatus) => void): () => void;
 }
 
 declare global {
@@ -85,6 +92,16 @@ const closeMapButton = document.querySelector<HTMLButtonElement>("#close-map")!;
 const enableMapButton = document.querySelector<HTMLButtonElement>("#enable-map")!;
 const pauseMapButton = document.querySelector<HTMLButtonElement>("#pause-map")!;
 const resumeMapButton = document.querySelector<HTMLButtonElement>("#resume-map")!;
+const mapScopeConversationButton = document.querySelector<HTMLButtonElement>("#map-scope-conversation")!;
+const mapScopeProjectButton = document.querySelector<HTMLButtonElement>("#map-scope-project")!;
+const updateProjectMapButton = document.querySelector<HTMLButtonElement>("#update-project-map")!;
+const viewProjectMaintenanceButton = document.querySelector<HTMLButtonElement>("#view-project-maintenance")!;
+const enableProjectMapButton = document.querySelector<HTMLButtonElement>("#enable-project-map")!;
+const pauseProjectMapButton = document.querySelector<HTMLButtonElement>("#pause-project-map")!;
+const resumeProjectMapButton = document.querySelector<HTMLButtonElement>("#resume-project-map")!;
+const maintenanceDialog = document.querySelector<HTMLDialogElement>("#project-maintenance-dialog")!;
+const maintenanceDialogBody = document.querySelector<HTMLElement>("#project-maintenance-body")!;
+const closeMaintenanceDialogButton = document.querySelector<HTMLButtonElement>("#close-project-maintenance")!;
 
 const DRAFT_KEY = "codex-workbench-v1-native-thread-draft";
 let latestState: RuntimeSnapshot | null = null;
@@ -96,7 +113,9 @@ let pendingApprovals = new Map<string, NativeServerRequestEvent>();
 let turnOperationInFlight = false;
 let followLatest = true;
 let mapStatus: ConversationMapStatus | null = null;
+let projectMapStatus: ProjectMapStatus | null = null;
 let mapOpen = false;
+let mapScope: "conversation" | "project" = "conversation";
 
 promptElement.value = localStorage.getItem(DRAFT_KEY) ?? "";
 
@@ -236,10 +255,21 @@ function mapNodeSources(node: MapNode): string {
   return `来源 ${first.turnId.slice(0, 10)}${first.itemId ? ` / ${first.itemId.slice(0, 10)}` : ""}`;
 }
 
-function jumpToMapSource(source: MapSourceRef): void {
+async function jumpToMapSource(source: MapSourceRef): Promise<void> {
   if (latestState?.nativeThreadId !== source.nativeThreadId) {
-    showError({ name: "MapSourceScope", code: "MAP_SOURCE_SCOPE_MISMATCH", message: "Map 来源属于另一个 Native Thread。", exitCode: null, stderr: "" });
-    return;
+    if (latestState?.activeTurnId || turnOperationInFlight) {
+      showError({ name: "MapSourceScope", code: "THREAD_SWITCH_BUSY", message: "当前 Turn 运行中，不能跳转到另一个 Native Thread。", exitCode: null, stderr: "" });
+      return;
+    }
+    const result = await consume("map.source.switch", api.switchThread(source.nativeThreadId));
+    if (!result) return;
+    currentProjection = result.projection;
+    threadView = null;
+    liveEvents = new Map();
+    pendingApprovals = new Map();
+    renderState(result.snapshot);
+    await loadThreadView();
+    await refreshNavigation();
   }
   const candidates = [...threadWorkspaceElement.querySelectorAll<HTMLElement>("[data-native-turn-id]")];
   const target = candidates.find((element) => element.dataset.nativeTurnId === source.turnId && (!source.itemId || element.dataset.nativeItemId === source.itemId))
@@ -276,7 +306,7 @@ function createMapTreeItem(node: MapNode, nodes: MapNode[], level: number): HTML
   button.append(marker, content);
   button.addEventListener("click", () => {
     const source = node.sources[0];
-    if (source) jumpToMapSource(source);
+    if (source) void jumpToMapSource(source);
   });
   wrapper.append(button);
   const children = nodes.filter((candidate) => candidate.parentId === node.nodeId).sort((left, right) => left.ordering - right.ordering);
@@ -296,30 +326,62 @@ function renderMapPanel(): void {
   appShellElement.classList.toggle("map-open", mapOpen);
   toggleMapButton.setAttribute("aria-expanded", String(mapOpen));
   if (!mapOpen) return;
-  if (!mapStatus) {
-    mapPanelStatusElement.textContent = latestState?.nativeThreadId ? "正在读取 Conversation Map 状态。" : "请先选择 Native Thread。";
+  mapScopeConversationButton.setAttribute("aria-selected", String(mapScope === "conversation"));
+  mapScopeProjectButton.setAttribute("aria-selected", String(mapScope === "project"));
+  mapScopeProjectButton.disabled = !currentProjection?.projectId;
+  const activeStatus = mapScope === "project" ? projectMapStatus : mapStatus;
+  const activeMap = activeStatus?.map ?? null;
+  const activeTitle = mapScope === "project" ? "Project Map" : "Conversation Map";
+  const titleElement = mapPanelElement.querySelector<HTMLElement>(".map-panel-title");
+  if (titleElement) titleElement.textContent = activeTitle;
+  const subtitleElement = mapPanelElement.querySelector<HTMLElement>(".map-panel-subtitle");
+  if (subtitleElement) subtitleElement.textContent = mapScope === "project"
+    ? "Project Map 是隐藏维护 Thread 的旁路投影，不进入普通 Thread 导航。"
+    : "Map 是 Native Thread 的旁路投影，不替代 Turn / Item。";
+  const conversationControls = mapPanelElement.querySelector<HTMLElement>("#conversation-map-actions");
+  const projectControls = mapPanelElement.querySelector<HTMLElement>("#project-map-actions");
+  if (conversationControls) conversationControls.hidden = mapScope !== "conversation";
+  if (projectControls) projectControls.hidden = mapScope !== "project";
+  if (!activeStatus) {
+    mapPanelStatusElement.textContent = mapScope === "project"
+      ? (currentProjection?.projectId ? "正在读取 Project Map 状态。" : "当前 Thread 尚未绑定 Project。")
+      : (latestState?.nativeThreadId ? "正在读取 Conversation Map 状态。" : "请先选择 Native Thread。");
     mapPanelStatusElement.classList.remove("error");
     mapTreeElement.replaceChildren();
     return;
   }
-  const map = mapStatus.map;
-  if (mapStatus.error) {
-    mapPanelStatusElement.textContent = `${mapStatus.error.code}: ${mapStatus.error.message}`;
+  const map = activeMap;
+  if (activeStatus.error) {
+    mapPanelStatusElement.textContent = `${activeStatus.error.code}: ${activeStatus.error.message}${activeStatus.error.code === "MAP_CONFIRMATION_REQUIRED" ? " · 需要通过正常对话确认" : ""}`;
     mapPanelStatusElement.classList.add("error");
   } else {
     mapPanelStatusElement.classList.remove("error");
-    mapPanelStatusElement.textContent = !map
-      ? `未启用 · same-turn ${mapStatus.sameTurn === "registered_for_new_threads" ? "已为新 Thread 注册" : "当前 resume Thread 不可用"}`
-      : `${map.sync.status} · revision ${map.revision}${map.sync.dirty ? " · dirty" : ""}${map.sync.paused ? " · paused" : ""} · same-turn ${mapStatus.sameTurn === "registered_for_new_threads" ? "可用" : "不可用"}`;
+    if (mapScope === "project") {
+      const projectStatus = projectMapStatus!;
+      mapPanelStatusElement.textContent = !map
+        ? "未启用 Project Map。"
+        : `${map.sync.status} · revision ${map.revision}${map.sync.dirty ? " · dirty" : ""}${map.sync.paused ? " · paused" : ""}${projectStatus.maintenanceRunning ? " · syncing" : ""}${projectStatus.maintenanceThreadId ? ` · maintenance ${projectStatus.maintenanceThreadId.slice(0, 10)}` : ""}`;
+    } else {
+      mapPanelStatusElement.textContent = !map
+        ? `未启用 · same-turn ${mapStatus!.sameTurn === "registered_for_new_threads" ? "已为新 Thread 注册" : "恢复 Thread 使用兼容维护"}`
+        : `${map.sync.status} · revision ${map.revision}${map.sync.dirty ? " · dirty" : ""}${map.sync.paused ? " · paused" : ""} · same-turn ${mapStatus!.sameTurn === "registered_for_new_threads" ? "可用" : "兼容维护"}`;
+    }
   }
-  enableMapButton.disabled = !latestState?.nativeThreadId || Boolean(mapStatus.enabled);
-  pauseMapButton.disabled = !mapStatus.enabled || Boolean(map?.sync.paused);
-  resumeMapButton.disabled = !mapStatus.enabled || !Boolean(map?.sync.paused);
+  enableMapButton.disabled = mapScope !== "conversation" || !latestState?.nativeThreadId || Boolean(mapStatus?.enabled);
+  pauseMapButton.disabled = mapScope !== "conversation" || !mapStatus?.enabled || Boolean(mapStatus.map?.sync.paused);
+  resumeMapButton.disabled = mapScope !== "conversation" || !mapStatus?.enabled || !Boolean(mapStatus.map?.sync.paused);
+  enableProjectMapButton.disabled = mapScope !== "project" || !currentProjection?.projectId || Boolean(projectMapStatus?.enabled);
+  pauseProjectMapButton.disabled = mapScope !== "project" || !projectMapStatus?.enabled || Boolean(projectMapStatus.map?.sync.paused);
+  resumeProjectMapButton.disabled = mapScope !== "project" || !projectMapStatus?.enabled || !Boolean(projectMapStatus.map?.sync.paused);
+  updateProjectMapButton.disabled = !currentProjection?.projectId || !projectMapStatus?.enabled || Boolean(projectMapStatus.maintenanceRunning);
+  viewProjectMaintenanceButton.disabled = !currentProjection?.projectId || !projectMapStatus?.maintenanceThreadId;
   mapTreeElement.replaceChildren();
   if (!map) {
     const empty = document.createElement("li");
     empty.className = "map-empty";
-    empty.textContent = "启用后，Codex 可通过原生动态工具提交当前增量 Patch。节点只读，修正请通过正常对话完成。";
+    empty.textContent = mapScope === "project"
+      ? "启用后，隐藏维护 Thread 会合并 Project 成员 Thread 的有界增量；需要确认的路线变化会保留在错误状态中。"
+      : "启用后，Codex 可通过原生动态工具提交当前增量 Patch。节点只读，修正请通过正常对话完成。";
     mapTreeElement.append(empty);
     return;
   }
@@ -335,6 +397,12 @@ async function refreshMapStatus(): Promise<void> {
   }
   const result = await consume("map.status", api.getMapStatus(latestState.nativeThreadId));
   if (result) mapStatus = result;
+  if (currentProjection?.projectId) {
+    const projectResult = await consume("project-map.status", api.getProjectMapStatus(currentProjection.projectId));
+    if (projectResult) projectMapStatus = projectResult;
+  } else {
+    projectMapStatus = null;
+  }
   renderMapPanel();
 }
 
@@ -779,6 +847,17 @@ function setMapOpen(open: boolean): void {
 
 toggleMapButton.addEventListener("click", () => setMapOpen(!mapOpen));
 closeMapButton.addEventListener("click", () => setMapOpen(false));
+mapScopeConversationButton.addEventListener("click", () => {
+  mapScope = "conversation";
+  renderMapPanel();
+  if (mapOpen) void refreshMapStatus();
+});
+mapScopeProjectButton.addEventListener("click", () => {
+  if (!currentProjection?.projectId) return;
+  mapScope = "project";
+  renderMapPanel();
+  if (mapOpen) void refreshMapStatus();
+});
 enableMapButton.addEventListener("click", async () => {
   const result = await consume("map.enable", api.enableMap(latestState?.nativeThreadId ?? undefined));
   if (result) {
@@ -803,6 +882,76 @@ resumeMapButton.addEventListener("click", async () => {
     showStatus("Conversation Map 已恢复；等待当前增量通过 Codex Patch 同步。");
   }
 });
+enableProjectMapButton.addEventListener("click", async () => {
+  if (!currentProjection?.projectId) return;
+  const result = await consume("project-map.enable", api.enableProjectMap(currentProjection.projectId));
+  if (result) {
+    projectMapStatus = result;
+    renderMapPanel();
+    showStatus("Project Map 已启用；维护 Thread 保持在普通导航之外。");
+  }
+});
+pauseProjectMapButton.addEventListener("click", async () => {
+  if (!currentProjection?.projectId) return;
+  const result = await consume("project-map.pause", api.pauseProjectMap(currentProjection.projectId));
+  if (result) {
+    projectMapStatus = result;
+    renderMapPanel();
+    showStatus("Project Map 已暂停；成员 Thread 仍可继续，变化会标记 dirty。");
+  }
+});
+resumeProjectMapButton.addEventListener("click", async () => {
+  if (!currentProjection?.projectId) return;
+  const result = await consume("project-map.resume", api.resumeProjectMap(currentProjection.projectId));
+  if (result) {
+    projectMapStatus = result;
+    renderMapPanel();
+    showStatus("Project Map 已恢复。");
+  }
+});
+updateProjectMapButton.addEventListener("click", async () => {
+  const projectId = currentProjection?.projectId;
+  if (!projectId || !latestState?.nativeThreadId) return;
+  const lastTurn = threadView?.turns.at(-1);
+  const delta = {
+    nativeThreadId: latestState.nativeThreadId,
+    turnId: lastTurn?.id ?? null,
+    status: lastTurn?.status ?? null,
+    items: (lastTurn?.items ?? []).slice(-32).map((item) => ({
+      itemId: item.id,
+      type: item.type,
+      status: item.status,
+      text: plainText(item.text) ?? plainText(item.output) ?? plainText(item.input),
+    })),
+  };
+  updateProjectMapButton.disabled = true;
+  const result = await consume("project-map.update", api.updateProjectMap(projectId, delta));
+  if (result) {
+    projectMapStatus = result.status;
+    renderMapPanel();
+    showStatus("Project Map Update 已完成；维护 Thread 未进入普通导航。");
+  } else {
+    renderMapPanel();
+  }
+});
+viewProjectMaintenanceButton.addEventListener("click", async () => {
+  const projectId = currentProjection?.projectId;
+  if (!projectId) return;
+  const result = await consume("project-map.maintenance-read", api.getProjectMapMaintenance(projectId));
+  if (!result) return;
+  const safeView = {
+    projectId: result.projectId,
+    maintenanceThreadId: result.maintenanceThreadId,
+    turns: result.view.turns.map((turn) => ({
+      turnId: turn.id,
+      status: turn.status,
+      items: turn.items.map((item) => ({ itemId: item.id, type: item.type, status: item.status, text: plainText(item.text) ?? plainText(item.output) ?? plainText(item.input) })),
+    })),
+  };
+  maintenanceDialogBody.textContent = JSON.stringify(safeView, null, 2);
+  maintenanceDialog.showModal();
+});
+closeMaintenanceDialogButton.addEventListener("click", () => maintenanceDialog.close());
 
 api.onEvent(addLiveEvent);
 api.onServerRequest(handleServerRequest);
@@ -811,6 +960,11 @@ api.onMapState((status) => {
   const mapThread = status.map?.scope.kind === "conversation" ? status.map.scope.nativeThreadId : null;
   if (current && mapThread && current !== mapThread) return;
   mapStatus = status;
+  renderMapPanel();
+});
+api.onProjectMapState((status) => {
+  if (currentProjection?.projectId !== status.projectId) return;
+  projectMapStatus = status;
   renderMapPanel();
 });
 api.onState((state) => {

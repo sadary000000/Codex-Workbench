@@ -2,7 +2,7 @@
 
 日期：2026-08-17
 阶段：Phase 6 Map 技术实现收尾
-状态：Phase 6 实现与命令行验证完成，等待 GPT Gate 审查
+状态：Phase 6 Gate Fix 实现与命令行验证完成，等待 GPT Gate 复审
 范围：当前 Codex Workbench V1 开发对话
 
 ## 1. 文档定位
@@ -69,7 +69,7 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
     └── 只有真实缺口证明必要时再讨论 Workflow、Review、Git 等扩展
 ```
 
-当前主路径是“Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 实现完成 → GPT Gate”。
+当前主路径是“Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Gate Fix 完成 → GPT Gate 复审”；收到 PASS 前不进入 Phase 7。
 
 ## 4. 节点详情与来源
 
@@ -170,7 +170,7 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 Phase 6 的 Runtime capability audit 已完成，当前实现收尾和 Gate 准备包括：
 
 - 已核实 Codex CLI 0.147.0 的动态工具、Thread/Turn 参数、source ID 和动态调用返回形状；
-- 已按协议证据实现新 Thread dynamic tool 注册；resume Thread 因协议缺少 dynamicTools 而明确标记 same-turn 不可用；
+- 已按协议证据实现新 Thread dynamic tool 注册；resume Thread 因协议缺少 dynamicTools 而明确标记 `compatibility_fallback`，不宣称原生 same-turn 能力；
 - 已完成有界 Map Schema/Patch/MapStore、Conversation coordinator、Project maintenance runtime、受限 IPC 和按需 Panel；
 - 四项只读子代理均已自然完成、主 Agent 审阅采用并关闭，Gate 前 running subagents = 0；
 - 当前只做最终 check/build/smoke/diff/秘密扫描，不扩展到 Phase 7。
@@ -250,7 +250,7 @@ Phase 5 审计时曾明确不存在以下 Map 实现；Phase 6 已按审计结�
 | Map snapshot / node / source reference / dirty / processed cursor / patch log | `MapDocument`/`MapStore` 提供有界节点、来源、sync 状态、cursor 和 recent patch ledger |
 | Project Map maintenance Thread | `ProjectMapManager` 使用独立 lazy runtime/binding；不进入普通 ThreadProjection 或 Recent |
 
-仍然需要区分 `lastKnownTurnId` 与 Map 的 `sourceCursor`：前者是 Native runtime/read model 的事实，后者是 Map sidecar 的处理位置，不能互相覆盖。恢复 Thread 因 `thread/resume` 当前没有 `dynamicTools`，会明确显示 same-turn 不可用；系统不伪造其能力。
+仍然需要区分 `lastKnownTurnId` 与 Map 的 `sourceCursor`：前者是 Native runtime/read model 的事实，后者是 Map sidecar 的处理位置，不能互相覆盖。恢复 Thread 因 `thread/resume` 当前没有 `dynamicTools`，会明确显示 `compatibility_fallback`；系统不伪造其原生能力。
 
 ### 未来分支：Phase 5 / Phase 6
 
@@ -405,30 +405,43 @@ gate: PASS; Phase 6 instruction received
 ```text
 [CODEX_WORKBENCH_STAGE_REVIEW]
 stage: Phase 6 — Map product technical implementation
-status: implementation and command-line verification complete; waiting GPT Gate
+status: Gate Fix implementation and command-line verification complete; waiting GPT Gate re-review
 implementation_commit: 98f80c23c0f41a5ce386732f54a012ecb768eb27 (feat: implement codex-driven work maps)
 capability_audit: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-06-MAP-RUNTIME-CAPABILITY-AUDIT.md
 technical_design: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-06-MAP-TECHNICAL-DESIGN.md
 implementation_report: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-06-MAP-PRODUCT-IMPLEMENTATION.md
-current_path: Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Map implementation → Phase 6 GPT Gate
+current_path: Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Map implementation → Phase 6 Gate Fix → GPT Gate re-review
 completed_phases: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Conversation Map initialization, Phase 5 screening, Phase 6 implementation
-active_phase: Phase 6 Gate review
+active_phase: Phase 6 Gate Fix review
 next_planned_phase: Phase 7 only after Phase 6 PASS and real usage proves a new gap
 map_statuses: ○ planned / ◉ in_progress / ● completed / ! blocked
 frozen_principles_confirmed: Native Thread is the only conversation identity; Native Turn/Item are runtime facts; Codex owns Agent/Reasoning/Context/Tool semantics; Workbench is a thin product shell/projection/recovery adapter plus Map sidecar
 product_rules: Codex owns semantic understanding; Workbench only orchestrates, validates, stores bounded sync state, and presents
-protocol_evidence: codex-cli 0.147.0; ThreadStartParams.dynamicTools and developerInstructions exist; ThreadResumeParams has no dynamicTools; item/tool/call is the confirmed dynamic call path; outputSchema is not used as a Map channel
-implemented: versioned bounded Map schema; JSON Patch-like MapPatch with digest/revision/idempotency/source bounds; independent atomic MapStore; Conversation Map coordinator; independent lazy Project Map runtime/binding; restricted IPC; default-hidden Map Panel and Native source jump
-same_turn_boundary: new Native Thread registers workbench_map_patch; resumed Native Thread is marked sameTurn=false because current resume protocol cannot register dynamic tools
+protocol_evidence: codex-cli 0.147.0; ThreadStartParams.dynamicTools and developerInstructions exist; ThreadResumeParams has no dynamicTools; item/tool/call is the confirmed dynamic call path; outputSchema is not used as a Map channel; context request is a Workbench custom dynamic tool, not a Codex native method
+implemented: versioned bounded Map schema; JSON Patch-like MapPatch with digest/revision/idempotency/source bounds; per-source cursors; independent atomic MapStore; Conversation Map coordinator plus resumed fallback; independent lazy Project Map runtime/binding plus resumed fallback; bounded context request; restricted IPC; default-hidden Conversation/Project Map Panel and cross-Thread source jump
+same_turn_boundary: new Native Thread registers workbench_map_patch; resumed Native Thread has no native dynamicTools registration and is explicitly marked compatibility_fallback
 fallback_boundary: malformed/unknown Map call fails closed; Map failure marks error/dirty and does not remove or replace normal answer, native binding, or original error
-project_map_boundary: Project maintenance is an independent sidecar/runtime and does not enter normal Conversation, ThreadProjection, Recent, or full history
-tests: npm run check PASS; npm test PASS 42/42; npm run build PASS; real CLI Map smoke PASS with 1 dynamic tool call and Map revision 0→1
+project_map_boundary: Project maintenance is an independent sidecar/runtime and does not enter normal Conversation, ThreadProjection, Recent, or full history; after resume it may use an ephemeral compatibility maintenance Thread
+tests: npm run check PASS; npm test PASS 45/45; npm run build PASS; real CLI Map/resume/Project/context/pause smokes PASS
 subagents: Carson/Kant/Popper/Bacon completed, returned, reviewed/adopted, and closed after result
 running_subagents_at_gate: 0
 legacy_project_status: old donor unchanged with pre-existing intentional dirty baseline; no V1 change was made in old donor
-known_limitations: no resumed-thread same-turn dynamic tool; no verified context_request; no outputSchema Map channel; no full history parser/rebuild; real smoke may be externally limited by account/network/service
+known_limitations: no resumed-thread native same-turn dynamic tool (explicit fallback is bounded and non-native); no full history parser/rebuild; context request is bounded Workbench custom protocol; real smoke may be externally limited by account/network/service
 blockers: none known before GPT review
 gate: pending GPT review
 
 请审查 Phase 6 App Server 能力证据、Map Schema/Patch/sidecar 边界、Conversation/Project Map 生命周期、UI/IPC 安全边界、测试与子代理生命周期。若 PASS，请给出下一阶段唯一执行指令或明确允许冻结；若 FIX/REDESIGN，请列出必须修改项；若 BLOCKED，请指出可复现的真实阻塞。审查通过前不进入 Phase 7。
 ```
+
+## 15. Phase 6 Gate Fix 追加证据
+
+GPT 初审返回 `FIX` 后，已按唯一执行指令完成以下闭环；初始实现和 45 个单元测试未回退：
+
+- resumed Conversation Thread：CLI 0.147.0 的 `thread/resume` 请求不含 `dynamicTools`；原 Thread 继续执行，`sameTurn=compatibility_fallback`，独立 ephemeral maintenance Thread 注册 `workbench_map_patch`，真实调用 1 次，Map revision `0 → 1`，source cursor 前进；
+- Project Map：真实 Project Thread A/B + 隐藏 maintenance Thread，revision `0 → 1 → 2`；Manager 重启后 binding 恢复，动态工具缺失时走兼容 maintenance fallback，继续到 revision `3`；A/B `sourceCursors` 独立保存；maintenance 不进入 `ThreadProjection`、Recent 或普通导航；
+- Context request：新增 Workbench 自定义 `workbench_map_context_request`，严格绑定 Project、maintenance active Turn、成员 Thread/cwd 和 bounded `afterTurnId`；真实 dynamic tool registration/call/return smoke 通过，返回 JSON 完整；
+- Pause/resume：pause 中真实 Turn 不改 Map、完成后 dirty；resume 后真实 Patch 只推进 cursor/revision，`fullRebuildCount=0`；
+- UI/IPC：右侧 Panel 支持 Conversation/Project scope、Update、dirty/syncing/error、confirmation reason、跨 Thread source jump、只读“查看维护对话”；维护 Thread 不污染正常导航；
+- 逐源同步：Map sync 增加 `sourceCursors`，拒绝已处理 source cursor 回退到 null；Map 文件名改为 SHA-256，避免长 ID 前缀碰撞。
+
+Gate Fix 命令证据：`npm run check` PASS；`npm test` 45/45 PASS；`npm run build` PASS；`npm run test:real:map` PASS；`npm run test:real:resumed-map` PASS；`npm run test:real:project-map` PASS；`npm run test:real:context` PASS；`npm run test:real:map-pause` PASS。所有测试均为 CLI，使用精确临时目录和 Thread ID 清理策略，不创建 Codex Desktop/GPT 对话。

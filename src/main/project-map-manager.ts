@@ -1,26 +1,32 @@
 import { join } from "node:path";
+import { AppServerProcessClient } from "../codex/app-server-client.ts";
+import { MAP_CONTEXT_REQUEST_LIMITS, MAP_CONTEXT_REQUEST_TOOL_SPEC, MAP_DYNAMIC_TOOL_SPEC, contextRequestResponse, dynamicToolResponse, isMapContextRequestCall, isMapToolCall } from "../codex/map-tool.ts";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
-import { MAP_DYNAMIC_TOOL_SPEC, isMapToolCall, dynamicToolResponse } from "../codex/map-tool.ts";
 import { resolveCodexCommand } from "../codex/codex-command.ts";
-import type { JsonRpcMessage, TurnResult } from "../shared/runtime-types.ts";
-import { MapValidationError, type MapDocument } from "../shared/map-types.ts";
+import { parseThreadReadResponse } from "../shared/thread-read-model.ts";
+import type { JsonRpcMessage, ThreadProjection, ThreadReadView, TurnResult } from "../shared/runtime-types.ts";
+import { MapValidationError, type MapDocument, type ProjectMapMaintenanceView, type ProjectMapStatus } from "../shared/map-types.ts";
 import { MapStore, mapFilePath } from "../shared/map-store.ts";
 import { V1PersistenceStore } from "../shared/persistence-store.ts";
-
-export interface ProjectMapStatus {
-  projectId: string;
-  enabled: boolean;
-  available: boolean;
-  maintenanceThreadId: string | null;
-  maintenanceRunning: boolean;
-  map: MapDocument | null;
-  error: { code: string; message: string } | null;
-}
+import { inspectThreadBinding } from "../shared/thread-state-store.ts";
 
 export interface ProjectMapManagerOptions {
   userDataDirectory: string;
   persistence: V1PersistenceStore;
   command?: string;
+  onChanged?: (status: ProjectMapStatus) => void;
+}
+
+interface ContextRequestRecord {
+  fingerprint: string;
+  response: unknown;
+}
+
+interface ContextTurnState {
+  requestCount: number;
+  turnCount: number;
+  bytes: number;
+  records: Map<string, ContextRequestRecord>;
 }
 
 function boundedJson(value: unknown, max: number): string {
@@ -40,15 +46,24 @@ function errorMeta(error: unknown): { code: string; message: string } {
   };
 }
 
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function text(value: unknown, max = 2_000): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  return value.slice(0, max);
+}
+
 function sourceThreadIds(value: unknown): string[] {
   const result: string[] = [];
-  const candidate = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  const candidate = record(value);
   const operations = Array.isArray(candidate?.operations) ? candidate.operations : [];
   for (const operation of operations) {
-    const item = operation && typeof operation === "object" && !Array.isArray(operation) ? operation as Record<string, unknown> : null;
+    const item = record(operation);
     if (!item) continue;
     const sources = item.op === "add"
-      ? (item.node && typeof item.node === "object" && !Array.isArray(item.node) ? (item.node as Record<string, unknown>).sources : undefined)
+      ? record(item.node)?.sources
       : item.op === "update"
         ? item.sources
         : item.op === "source"
@@ -56,27 +71,97 @@ function sourceThreadIds(value: unknown): string[] {
           : [];
     if (!Array.isArray(sources)) continue;
     for (const source of sources) {
-      if (!source || typeof source !== "object" || Array.isArray(source)) continue;
-      const nativeThreadId = (source as Record<string, unknown>).nativeThreadId;
+      const nativeThreadId = record(source)?.nativeThreadId;
       if (typeof nativeThreadId === "string") result.push(nativeThreadId);
     }
   }
   return [...new Set(result)];
 }
 
+function pathKey(value: string): string {
+  const trimmed = value.replace(/[\\/]+$/, "").replaceAll("/", "\\");
+  return process.platform === "win32" ? trimmed.toLowerCase() : trimmed;
+}
+
+function contextStateKey(projectId: string, turnId: string): string {
+  return `${projectId}\u0000${turnId}`;
+}
+
+function safeFingerprint(value: unknown): string {
+  try { return JSON.stringify(value); } catch { return "[unserializable]"; }
+}
+
+function normalizeCompatibilityPatch(value: unknown): unknown {
+  const candidate = record(value);
+  if (!candidate || !Array.isArray(candidate.operations)) return value;
+  return {
+    ...candidate,
+    operations: candidate.operations.map((operation) => {
+      const item = record(operation);
+      if (!item || item.op !== undefined || item.type !== "add_node") return operation;
+      return {
+        op: "add",
+        node: {
+          nodeId: item.nodeId,
+          parentId: item.parentId,
+          title: item.title,
+          status: item.status,
+          details: item.details,
+          history: item.history,
+          sources: item.sources,
+          ordering: item.ordering,
+        },
+      };
+    }),
+  };
+}
+
+function boundedTurnView(view: ThreadReadView, afterTurnId: string | null, maxTurns: number, maxBytes: number): { turns: unknown[]; nextCursor: string | null; bytes: number } {
+  const start = afterTurnId === null ? 0 : view.turns.findIndex((turn) => turn.id === afterTurnId) + 1;
+  if (afterTurnId !== null && start === 0) throw new MapValidationError("CONTEXT_CURSOR_INVALID", "Requested context cursor is not present in the Native Thread.");
+  const turns: unknown[] = [];
+  let bytes = 0;
+  for (const turn of view.turns.slice(start, start + maxTurns)) {
+    const compact = {
+      turnId: turn.id,
+      status: text(turn.status, 64) ?? turn.status,
+      items: turn.items.slice(0, 64).map((item) => ({
+        itemId: item.id,
+        type: text(item.type, 64) ?? item.type,
+        status: text(item.status, 64) ?? item.status,
+        text: text(item.text) ?? text(item.output) ?? text(item.input),
+      })),
+    };
+    const candidate = JSON.stringify([...turns, compact]);
+    const candidateBytes = Buffer.byteLength(candidate, "utf8");
+    if (candidateBytes > maxBytes) break;
+    turns.push(compact);
+    bytes = candidateBytes;
+  }
+  return { turns, nextCursor: turns.length ? (turns.at(-1) as { turnId: string | null }).turnId : afterTurnId, bytes };
+}
+
 export class ProjectMapManager {
   private readonly userDataDirectory: string;
   private readonly persistence: V1PersistenceStore;
   private readonly command: string;
+  private readonly onChanged: ProjectMapManagerOptions["onChanged"];
   private readonly stores = new Map<string, MapStore>();
   private readonly runtimes = new Map<string, NativeThreadRuntime>();
   private readonly patchedTurnIds = new Map<string, string>();
+  private readonly contextStates = new Map<string, ContextTurnState>();
+  private readonly fallbackScopes = new Map<string, string>();
+  private readonly fallbackPatchedProjects = new Set<string>();
+  private contextRequestCalls = 0;
 
   constructor(options: ProjectMapManagerOptions) {
     this.userDataDirectory = options.userDataDirectory;
     this.persistence = options.persistence;
     this.command = options.command ?? resolveCodexCommand();
+    this.onChanged = options.onChanged;
   }
+
+  get contextRequestCallCount(): number { return this.contextRequestCalls; }
 
   private store(projectId: string): MapStore {
     const id = projectId.trim();
@@ -88,21 +173,39 @@ export class ProjectMapManager {
     return created;
   }
 
+  private bindingPath(projectId: string): string {
+    return join(this.userDataDirectory, "maps", "project", `${Buffer.from(projectId, "utf8").toString("hex")}.binding.json`);
+  }
+
+  private async maintenanceThreadId(projectId: string): Promise<string | null> {
+    const runtime = this.runtimes.get(projectId);
+    if (runtime?.nativeThreadId) return runtime.nativeThreadId;
+    return (await inspectThreadBinding(this.bindingPath(projectId))).binding?.nativeThreadId ?? null;
+  }
+
+  private async emitStatus(projectId: string): Promise<ProjectMapStatus> {
+    const status = await this.status(projectId);
+    this.onChanged?.(status);
+    return status;
+  }
+
   async status(projectId: string): Promise<ProjectMapStatus> {
     const id = projectId.trim();
     const runtime = this.runtimes.get(id);
     const inspection = await this.store(id).inspect();
+    const maintenanceId = await this.maintenanceThreadId(id);
+    const maintenanceRunning = Boolean(runtime?.snapshot().activeTurnId);
     if (inspection.document) return {
       projectId: id,
       enabled: inspection.document.sync.status !== "not_enabled",
       available: true,
-      maintenanceThreadId: runtime?.nativeThreadId ?? null,
-      maintenanceRunning: Boolean(runtime?.snapshot().activeTurnId),
+      maintenanceThreadId: maintenanceId,
+      maintenanceRunning,
       map: inspection.document,
       error: null,
     };
-    if (inspection.status === "missing") return { projectId: id, enabled: false, available: true, maintenanceThreadId: runtime?.nativeThreadId ?? null, maintenanceRunning: Boolean(runtime?.snapshot().activeTurnId), map: null, error: null };
-    return { projectId: id, enabled: false, available: false, maintenanceThreadId: runtime?.nativeThreadId ?? null, maintenanceRunning: Boolean(runtime?.snapshot().activeTurnId), map: null, error: { code: inspection.code ?? "PROJECT_MAP_CORRUPT", message: inspection.message ?? "Project Map persistence is invalid." } };
+    if (inspection.status === "missing") return { projectId: id, enabled: false, available: true, maintenanceThreadId: maintenanceId, maintenanceRunning, map: null, error: null };
+    return { projectId: id, enabled: false, available: false, maintenanceThreadId: maintenanceId, maintenanceRunning, map: null, error: { code: inspection.code ?? "PROJECT_MAP_CORRUPT", message: inspection.message ?? "Project Map persistence is invalid." } };
   }
 
   async enable(projectId: string): Promise<ProjectMapStatus> {
@@ -111,17 +214,27 @@ export class ProjectMapManager {
     if (!project) throw new Error(`Project does not exist: ${id}`);
     await this.store(id).ensure({ kind: "project", projectId: id });
     await this.store(id).enable();
-    return this.status(id);
+    return this.emitStatus(id);
   }
 
   async pause(projectId: string): Promise<ProjectMapStatus> {
     await this.store(projectId).pause();
-    return this.status(projectId);
+    return this.emitStatus(projectId);
   }
 
   async resume(projectId: string): Promise<ProjectMapStatus> {
     await this.store(projectId).resume();
-    return this.status(projectId);
+    return this.emitStatus(projectId);
+  }
+
+  async markThreadCompleted(projectId: string, nativeThreadId: string, turnId: string, _delta?: unknown): Promise<void> {
+    const id = projectId.trim();
+    const members = await this.persistence.listThreads(id);
+    if (!members.some((thread) => thread.nativeThreadId === nativeThreadId)) return;
+    const current = await this.status(id);
+    if (!current.enabled || !current.map || current.map.sync.paused) return;
+    const map = await this.store(id).updateSync({ lastProcessedTurnId: turnId, dirty: true, status: "dirty" });
+    this.onChanged?.(await this.statusFromMap(id, map));
   }
 
   async updateFromDelta(projectId: string, delta: unknown): Promise<{ status: ProjectMapStatus; turn: TurnResult }> {
@@ -133,40 +246,227 @@ export class ProjectMapManager {
     if (mapStatus.map.sync.paused) throw new MapValidationError("PROJECT_MAP_PAUSED", "Project Map is paused.");
     const runtime = await this.ensureRuntime(id, project.cwd);
     const nodeSummary = mapStatus.map.nodes.slice(0, 64).map((node) => ({ nodeId: node.nodeId, title: node.title, status: node.status, sources: node.sources.slice(0, 2) }));
+    await this.store(id).updateSync({ dirty: false, status: "syncing" });
+    this.onChanged?.(await this.status(id));
     const prompt = [
       "You are the hidden Codex Workbench Project Map maintenance Thread.",
       "Do not invent a second conversation or transcript. Semantically merge only the bounded current delta into the existing Project Map.",
+      "If the current delta is insufficient, use workbench_map_context_request once with only project member Native Threads and bounded cursors; never request a path or full transcript.",
       "If the delta implies a major route change, submit a Map Patch with requiresUserConfirmation=true and a concise confirmationReason; do not silently replace the old route.",
       "Use the workbench_map_patch dynamic tool for the machine-readable update. Keep any final text short; the user-visible answer belongs to the normal Thread.",
+      "Map Patch operations must use the literal key op, for example {op:\"add\",node:{...}}; do not use type or add_node.",
+      "If the bounded delta contains forceContextRequest=true and a contextRequest object, call workbench_map_context_request exactly once before workbench_map_patch, using that bounded request; do not skip it.",
       `Project Map revision: ${mapStatus.map.revision}`,
       `Project scope: ${boundedJson({ kind: "project", projectId: id }, 1_000)}`,
       `Existing bounded node summary: ${boundedJson(nodeSummary, 8_000)}`,
       `Current bounded delta: ${boundedJson(delta, 12_000)}`,
     ].join("\n");
-    const turn = await runtime.startTurn(prompt);
-    if (this.patchedTurnIds.get(id) !== turn.turnId) await this.store(id).updateSync({ dirty: true, status: "dirty" });
-    return { status: await this.status(id), turn };
+    try {
+      if (!runtime.dynamicToolsRegistered) {
+        const turn = await this.runCompatibilityMaintenance(id, project.cwd, prompt);
+        if (!this.fallbackPatchedProjects.delete(id)) await this.store(id).updateSync({ dirty: true, status: "dirty" });
+        return { status: await this.emitStatus(id), turn };
+      }
+      const turn = await runtime.startTurn(prompt);
+      if (this.patchedTurnIds.get(id) !== turn.turnId) await this.store(id).updateSync({ dirty: true, status: "dirty" });
+      return { status: await this.emitStatus(id), turn };
+    } catch (error) {
+      await this.store(id).updateSync({ dirty: true, status: "error" }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async maintenanceRead(projectId: string): Promise<ProjectMapMaintenanceView> {
+    const id = projectId.trim();
+    const project = await this.persistence.getProject(id);
+    if (!project) throw new Error(`Project does not exist: ${id}`);
+    const runtime = await this.ensureRuntime(id, project.cwd);
+    const view = await runtime.readThread();
+    if (!runtime.nativeThreadId) throw new Error("Maintenance Thread ID is unavailable.");
+    return { projectId: id, maintenanceThreadId: runtime.nativeThreadId, view };
   }
 
   async handleServerRequest(projectId: string, message: JsonRpcMessage): Promise<unknown> {
-    if (message.method !== "item/tool/call" || !isMapToolCall(message.params)) return undefined;
+    if (message.method !== "item/tool/call") return undefined;
+    const requestedThreadId = record(message.params)?.threadId;
+    const fallbackProjectId = typeof requestedThreadId === "string" ? this.fallbackScopes.get(requestedThreadId) : undefined;
+    if (isMapContextRequestCall(message.params)) return this.handleContextRequest(projectId, message.params, fallbackProjectId === projectId);
+    if (!isMapToolCall(message.params)) return undefined;
+    const id = projectId.trim();
     const params = message.params;
-    const status = await this.status(projectId);
+    const runtime = this.runtimes.get(id);
+    const fallback = fallbackProjectId === id;
+    if ((!fallback && (!runtime || runtime.nativeThreadId !== params.threadId || runtime.snapshot().activeTurnId !== params.turnId)) || (fallback && !this.fallbackScopes.has(params.threadId))) {
+      return dynamicToolResponse(false, "Project Map maintenance identity is invalid; no patch was applied.");
+    }
+    const status = await this.status(id);
     if (!status.enabled || !status.map) return dynamicToolResponse(false, "Project Map is not enabled; do not apply a maintenance patch.");
-    const args = params.arguments as Record<string, unknown>;
-    const scope = args && typeof args.scope === "object" && !Array.isArray(args.scope) ? args.scope as Record<string, unknown> : null;
-    if (scope?.kind !== "project" || scope.projectId !== projectId) return dynamicToolResponse(false, "Project Map patch scope is invalid.");
-    const allowedThreads = new Set((await this.persistence.listThreads(projectId)).map((thread) => thread.nativeThreadId));
+    const patchArguments = normalizeCompatibilityPatch(params.arguments);
+    const args = record(patchArguments);
+    const scope = record(args?.scope);
+    if (scope?.kind !== "project" || scope.projectId !== id) return dynamicToolResponse(false, "Project Map patch scope is invalid.");
+    const project = await this.persistence.getProject(id);
+    if (!project) return dynamicToolResponse(false, "Project no longer exists; no patch was applied.");
+    const members = await this.persistence.listThreads(id);
+    const allowedThreads = new Set(members.filter((thread) => pathKey(thread.cwd) === pathKey(project.cwd)).map((thread) => thread.nativeThreadId));
     for (const sourceThreadId of sourceThreadIds(args)) {
       if (!allowedThreads.has(sourceThreadId)) return dynamicToolResponse(false, "Project Map patch contains a source outside this Project.");
     }
     try {
-      const result = await this.store(projectId).applyPatch(args as never);
-      this.patchedTurnIds.set(projectId, params.turnId);
+      const result = await this.store(id).applyPatch(patchArguments as never);
+      if (fallback) this.fallbackPatchedProjects.add(id);
+      else this.patchedTurnIds.set(id, params.turnId);
+      this.onChanged?.(await this.status(id));
       return dynamicToolResponse(true, result.idempotent ? "Project Map patch was already applied." : "Project Map patch accepted.");
     } catch (error) {
-      return dynamicToolResponse(false, `Project Map patch rejected (${errorMeta(error).code}); keep the previous route.`);
+      const meta = errorMeta(error);
+      this.onChanged?.({ ...status, error: meta, available: meta.code !== "MAP_CORRUPT" });
+      return dynamicToolResponse(false, `Project Map patch rejected (${meta.code}); keep the previous route.`);
     }
+  }
+
+  private async handleContextRequest(projectId: string, params: { threadId: string; turnId: string; arguments: unknown }, fallback = false): Promise<unknown> {
+    this.contextRequestCalls += 1;
+    const id = projectId.trim();
+    const runtime = this.runtimes.get(id);
+    const args = record(params.arguments);
+    const scope = record(args?.scope);
+    if ((!fallback && (!runtime || runtime.nativeThreadId !== params.threadId || runtime.snapshot().activeTurnId !== params.turnId)) || (fallback && this.fallbackScopes.get(params.threadId) !== id)) {
+      return contextRequestResponse(false, { error: "CONTEXT_CALL_IDENTITY_INVALID" });
+    }
+    if (args?.schemaVersion !== 1 || typeof args.requestId !== "string" || args.requestId.length < 1 || args.requestId.length > 128 ||
+      args.reason === undefined || typeof args.reason !== "string" || args.reason.length < 1 || args.reason.length > MAP_CONTEXT_REQUEST_LIMITS.reason ||
+      scope?.kind !== "project" || scope.projectId !== id || !Array.isArray(args.requests) || args.requests.length < 1 || args.requests.length > MAP_CONTEXT_REQUEST_LIMITS.requests) {
+      return contextRequestResponse(false, { error: "CONTEXT_REQUEST_INVALID" });
+    }
+    const key = contextStateKey(id, params.turnId);
+    const state = this.contextStates.get(key) ?? { requestCount: 0, turnCount: 0, bytes: 0, records: new Map<string, ContextRequestRecord>() };
+    const fingerprint = safeFingerprint(args);
+    const cached = state.records.get(args.requestId);
+    if (cached) {
+      if (cached.fingerprint !== fingerprint) return contextRequestResponse(false, { error: "CONTEXT_REQUEST_ID_REUSE" });
+      return cached.response;
+    }
+    if (state.requestCount >= 2) return contextRequestResponse(false, { error: "CONTEXT_REQUEST_LIMIT" });
+    const requests = args.requests as unknown[];
+    if (state.turnCount + requests.length > MAP_CONTEXT_REQUEST_LIMITS.turns) return contextRequestResponse(false, { error: "CONTEXT_TURN_LIMIT" });
+    if (requests.some((value) => {
+      const item = record(value);
+      return !item || typeof item.nativeThreadId !== "string" || item.nativeThreadId.length < 1 || item.nativeThreadId.length > 128 ||
+        (item.afterTurnId !== undefined && item.afterTurnId !== null && typeof item.afterTurnId !== "string") ||
+        (item.beforeTurnId !== undefined && item.beforeTurnId !== null) ||
+        typeof item.maxTurns !== "number" || !Number.isSafeInteger(item.maxTurns) || item.maxTurns < 1 || item.maxTurns > MAP_CONTEXT_REQUEST_LIMITS.turns ||
+        typeof item.maxBytes !== "number" || !Number.isSafeInteger(item.maxBytes) || item.maxBytes < 1 || item.maxBytes > MAP_CONTEXT_REQUEST_LIMITS.bytes;
+    })) return contextRequestResponse(false, { error: "CONTEXT_BOUNDS_INVALID" });
+    const project = await this.persistence.getProject(id);
+    if (!project) return contextRequestResponse(false, { error: "PROJECT_NOT_FOUND" });
+    const members = await this.persistence.listThreads(id);
+    const allowed = new Map(members.filter((thread) => pathKey(thread.cwd) === pathKey(project.cwd)).map((thread) => [thread.nativeThreadId, thread]));
+    const sources: unknown[] = [];
+    try {
+      for (const value of requests) {
+        const item = value as Record<string, unknown>;
+        const nativeThreadId = item.nativeThreadId as string;
+        const projection = allowed.get(nativeThreadId);
+        if (!projection) return contextRequestResponse(false, { error: "CONTEXT_THREAD_NOT_IN_PROJECT", nativeThreadId });
+        const view = await this.readNativeThread(projection);
+        const bounded = boundedTurnView(view, item.afterTurnId === null || item.afterTurnId === undefined ? null : item.afterTurnId as string, item.maxTurns as number, item.maxBytes as number);
+        sources.push({ nativeThreadId, turns: bounded.turns, nextCursor: bounded.nextCursor });
+      }
+    } catch (error) {
+      return contextRequestResponse(false, { error: errorMeta(error).code, message: errorMeta(error).message });
+    }
+    const responseValue = { schemaVersion: 1, requestId: args.requestId, scope: { kind: "project", projectId: id }, reason: args.reason, sources };
+    const bytes = Buffer.byteLength(JSON.stringify(responseValue), "utf8");
+    if (state.bytes + bytes > MAP_CONTEXT_REQUEST_LIMITS.bytes) return contextRequestResponse(false, { error: "CONTEXT_BYTES_LIMIT" });
+    const response = contextRequestResponse(true, responseValue);
+    state.requestCount += 1;
+    state.turnCount += requests.length;
+    state.bytes += bytes;
+    state.records.set(args.requestId, { fingerprint, response });
+    this.contextStates.set(key, state);
+    return response;
+  }
+
+  private async readNativeThread(projection: ThreadProjection): Promise<ThreadReadView> {
+    const client = new AppServerProcessClient({ command: this.command, cwd: projection.cwd, args: ["app-server", "--stdio"] });
+    try {
+      await client.start();
+      await client.request("initialize", {
+        clientInfo: { name: "codex-workbench-v1-context-reader", title: "Codex Workbench Context Reader", version: "0.1.0" },
+        capabilities: { experimentalApi: false },
+      }, 120_000);
+      client.notify("initialized", {});
+      await client.request("thread/resume", { threadId: projection.nativeThreadId }, 120_000);
+      const response = await client.request("thread/read", { threadId: projection.nativeThreadId, includeTurns: true }, 120_000);
+      const model = parseThreadReadResponse(response);
+      return {
+        nativeThreadId: projection.nativeThreadId,
+        status: model.status,
+        title: null,
+        cwd: projection.cwd,
+        error: model.error,
+        turns: model.turns.map((turn) => ({
+          id: turn.turnId,
+          status: turn.status,
+          error: null,
+          items: turn.items.map((item) => ({ id: item.itemId, type: item.type, status: item.status, kind: item.kind, text: item.text, input: item.input, output: item.output, error: null, raw: null })),
+          itemCount: turn.items.length,
+          raw: null,
+        })),
+        raw: null,
+      };
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
+  private async runCompatibilityMaintenance(projectId: string, cwd: string, prompt: string): Promise<TurnResult> {
+    const client = new AppServerProcessClient({ command: this.command, cwd, args: ["app-server", "--stdio"], onServerRequest: (message) => this.handleServerRequest(projectId, message) });
+    let fallbackThreadId: string | null = null;
+    try {
+      await client.start();
+      await client.request("initialize", {
+        clientInfo: { name: "codex-workbench-v1-project-map-fallback", title: "Codex Workbench Project Map Compatibility Fallback", version: "0.1.0" },
+        capabilities: { experimentalApi: true },
+      }, 120_000);
+      client.notify("initialized", {});
+      const started = record(await client.request("thread/start", { cwd, approvalPolicy: "never", sandbox: "read-only", ephemeral: true, dynamicTools: [MAP_DYNAMIC_TOOL_SPEC, MAP_CONTEXT_REQUEST_TOOL_SPEC], developerInstructions: "This is a Project Map compatibility maintenance Thread after resume. Call the supplied Workbench tools only with the bounded Project scope and keep the normal answer out of this side channel." }, 120_000));
+      fallbackThreadId = typeof record(started?.thread)?.id === "string" ? record(started?.thread)?.id as string : typeof started?.threadId === "string" ? started.threadId : null;
+      if (!fallbackThreadId) throw new Error("Project Map compatibility maintenance Thread ID is missing.");
+      this.fallbackScopes.set(fallbackThreadId, projectId);
+      const response = record(await client.request("turn/start", { threadId: fallbackThreadId, input: [{ type: "text", text: prompt }] }, 120_000));
+      const turn = record(response?.turn);
+      const turnId = typeof turn?.id === "string" ? turn.id : typeof response?.turnId === "string" ? response.turnId : null;
+      if (!turnId) throw new Error("Project Map compatibility maintenance Turn ID is missing.");
+      const completed = await client.waitForNotification("turn/completed", (message) => {
+        const params = record(message.params);
+        const terminal = record(params?.turn);
+        return (typeof params?.threadId === "string" ? params.threadId : typeof terminal?.threadId === "string" ? terminal.threadId : null) === fallbackThreadId
+          && (typeof params?.turnId === "string" ? params.turnId : typeof terminal?.id === "string" ? terminal.id : null) === turnId;
+      }, 120_000);
+      const params = record(completed.params);
+      const terminal = record(params?.turn);
+      const status = typeof terminal?.status === "string" ? terminal.status : typeof params?.status === "string" ? params.status : "completed";
+      if (status !== "completed") throw new Error(`Project Map compatibility maintenance Turn ended with ${status}.`);
+      return { localRunId: `project-map-fallback-${turnId}`, nativeThreadId: fallbackThreadId, turnId, status: "completed", terminalStatus: status, finalMessage: null, error: null };
+    } finally {
+      if (fallbackThreadId) this.fallbackScopes.delete(fallbackThreadId);
+      await client.close().catch(() => undefined);
+    }
+  }
+
+  private async statusFromMap(projectId: string, map: MapDocument): Promise<ProjectMapStatus> {
+    const runtime = this.runtimes.get(projectId);
+    return {
+      projectId,
+      enabled: map.sync.status !== "not_enabled",
+      available: true,
+      maintenanceThreadId: await this.maintenanceThreadId(projectId),
+      maintenanceRunning: Boolean(runtime?.snapshot().activeTurnId),
+      map,
+      error: null,
+    };
   }
 
   async close(): Promise<void> {
@@ -176,12 +476,12 @@ export class ProjectMapManager {
 
   private async ensureRuntime(projectId: string, cwd: string): Promise<NativeThreadRuntime> {
     const existing = this.runtimes.get(projectId);
-    if (existing && (existing.state === "READY" || existing.state === "TURN_RUNNING")) return existing;
+    if (existing && (existing.state === "READY" || existing.state === "TURN_RUNNING" || existing.state === "WAITING_USER")) return existing;
     const runtime = new NativeThreadRuntime({
       cwd,
-      stateFile: join(this.userDataDirectory, "maps", "project", `${Buffer.from(projectId, "utf8").toString("hex")}.binding.json`),
+      stateFile: this.bindingPath(projectId),
       command: this.command,
-      dynamicTools: [MAP_DYNAMIC_TOOL_SPEC],
+      dynamicTools: [MAP_DYNAMIC_TOOL_SPEC, MAP_CONTEXT_REQUEST_TOOL_SPEC],
       onServerRequest: (message) => this.handleServerRequest(projectId, message),
     });
     this.runtimes.set(projectId, runtime);

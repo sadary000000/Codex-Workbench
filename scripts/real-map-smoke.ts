@@ -39,7 +39,7 @@ function externalLimitation(error: unknown): boolean {
 
 function cleanupClassification(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  if (/ephemeral threads? do not support|ephemeral.*delete/i.test(message)) return "ephemeral_auto_cleanup";
+  if ((error as { code?: unknown })?.code === "APP_SERVER_PROTOCOL_REJECTED" || /ephemeral threads? do not support|ephemeral.*delete|delete.*ephemeral|ephemeral.*thread/i.test(message)) return "ephemeral_auto_cleanup";
   return `thread_delete_failed:${(error as { code?: unknown })?.code ?? "unknown"}`;
 }
 
@@ -105,6 +105,13 @@ try {
   const completedTurn = object(completedParams?.turn);
   const mapStatus = await coordinator.status(nativeThreadId);
   assert.equal(text(completedTurn?.status) ?? text(completedParams?.status), "completed");
+  assert.equal(serverRequests.length, 1, "real smoke did not receive exactly one Map dynamic tool call");
+  const call = object(dynamicToolCallParams);
+  assert.equal(call?.tool, "workbench_map_patch");
+  assert.equal(call?.threadId, nativeThreadId);
+  assert.equal((object(dynamicToolResponse)?.success), true);
+  assert.equal(mapStatus.map?.revision, 1);
+  assert.equal(mapStatus.map?.nodes.length, 2);
 
   try {
     await client.request("thread/delete", { threadId: nativeThreadId }, 30_000);
@@ -135,7 +142,7 @@ try {
       cleanupResult,
     })}\n`);
   } else {
-    process.stderr.write(`MAP_SMOKE_FAILED ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    process.stderr.write(`MAP_SMOKE_FAILED ${error instanceof Error ? error.stack ?? error.message : String(error)}\nTRACE ${JSON.stringify({ dynamicToolCallParams, dynamicToolResponse })}\n`);
     process.exitCode = 1;
   }
 } finally {

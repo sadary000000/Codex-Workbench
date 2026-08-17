@@ -7,6 +7,7 @@ import { errorInfo } from "../shared/error-info.ts";
 import { createLogger, logError, type Logger } from "../shared/logger.ts";
 import { isNativeApprovalMethod, isValidNativeApprovalResponse, noAdditionalPermissions } from "../shared/native-approval.ts";
 import { PersistenceStoreError, V1PersistenceStore } from "../shared/persistence-store.ts";
+import { inspectThreadBinding } from "../shared/thread-state-store.ts";
 import type { JsonRpcMessage, ThreadNavigationResult } from "../shared/runtime-types.ts";
 import { ConversationMapCoordinator } from "./map-coordinator.ts";
 import { ProjectMapManager } from "./project-map-manager.ts";
@@ -42,6 +43,8 @@ const IPC = Object.freeze({
   projectMapPause: "project-map:pause",
   projectMapResume: "project-map:resume",
   projectMapUpdate: "project-map:update",
+  projectMapMaintenanceRead: "project-map:maintenance-read",
+  projectMapState: "project-map:state",
 });
 
 let mainWindow: BrowserWindow | null = null;
@@ -63,6 +66,7 @@ function getConversationMaps(): ConversationMapCoordinator {
   if (conversationMaps) return conversationMaps;
   conversationMaps = new ConversationMapCoordinator({
     userDataDirectory: app.getPath("userData"),
+    command: undefined,
     onChanged: (status) => send(IPC.mapState, status),
   });
   return conversationMaps;
@@ -70,7 +74,11 @@ function getConversationMaps(): ConversationMapCoordinator {
 
 function getProjectMaps(): ProjectMapManager {
   if (projectMaps) return projectMaps;
-  projectMaps = new ProjectMapManager({ userDataDirectory: app.getPath("userData"), persistence: getPersistence() });
+  projectMaps = new ProjectMapManager({
+    userDataDirectory: app.getPath("userData"),
+    persistence: getPersistence(),
+    onChanged: (status) => send(IPC.projectMapState, status),
+  });
   return projectMaps;
 }
 
@@ -125,7 +133,13 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
       logger.info("native_event", { method: event.method, threadId: event.threadId, turnId: event.turnId, itemId: event.itemId });
       send(IPC.event, event);
       if (event.method === "turn/completed" && event.threadId && event.turnId) {
-        void getConversationMaps().markTurnCompleted(event.threadId, event.turnId);
+        void getConversationMaps().markTurnCompleted(event.threadId, event.turnId, event.params);
+        void (async () => {
+          const projection = await getPersistence().getThreadProjection(event.threadId!);
+          if (projection?.projectId) {
+            await getProjectMaps().markThreadCompleted(projection.projectId, event.threadId!, event.turnId!, event.params);
+          }
+        })().catch((error) => logger.warn("project_map_dirty_update_failed", { error: String(error) }));
       }
       if (runtime === createdRuntime && createdRuntime) send(IPC.state, createdRuntime.snapshot());
     },
@@ -236,7 +250,7 @@ async function switchNativeThread(nativeThreadId: string): Promise<ThreadNavigat
   runtime = candidate;
   try {
     const snapshot = await candidate.resume(id);
-    getConversationMaps().markResumedThread(id);
+    getConversationMaps().markResumedThread(id, projection.cwd);
     const currentProjection = await getPersistence().getThreadProjection(id);
     if (!currentProjection) throw projectionNotFound(id);
     return { snapshot, projection: currentProjection };
@@ -354,6 +368,14 @@ function registerIpc(): void {
       return fail(error);
     }
   });
+  ipcMain.handle(IPC.projectMapMaintenanceRead, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string") throw new Error("Project ID is required.");
+      return ok(await getProjectMaps().maintenanceRead(projectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
   ipcMain.handle(IPC.projectList, async () => {
     try {
       return ok(await getPersistence().listProjects());
@@ -442,7 +464,13 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC.start, async () => {
     try {
-      return ok(await getRuntime().start());
+      const binding = await inspectThreadBinding(join(app.getPath("userData"), "native-thread-binding.json"));
+      const snapshot = await getRuntime().start();
+      if (binding.binding?.nativeThreadId && snapshot.nativeThreadId === binding.binding.nativeThreadId) {
+        const projection = await getPersistence().getThreadProjection(snapshot.nativeThreadId);
+        if (projection) getConversationMaps().markResumedThread(snapshot.nativeThreadId, projection.cwd);
+      }
+      return ok(snapshot);
     } catch (error) {
       return fail(error);
     }

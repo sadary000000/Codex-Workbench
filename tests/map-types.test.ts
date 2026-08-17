@@ -85,3 +85,25 @@ test("requires confirmation and preserves the previous document", () => {
   assert.equal(initial.revision, 0);
   assert.match(mapPatchDigest(candidate), /^[0-9a-f]{64}$/);
 });
+
+test("keeps a per-source cursor from regressing to null", () => {
+  const initial = createEmptyMap({ kind: "project", projectId: "project-cursor" });
+  const firstPatch: MapPatch = {
+    schemaVersion: 1,
+    patchId: "cursor-first",
+    scope: { kind: "project", projectId: "project-cursor" },
+    baseRevision: 0,
+    sourceCursor: { lastProcessedTurnId: "turn-a", lastProcessedChangeId: null },
+    operations: [{ op: "add", node: { nodeId: "source-node", parentId: "root", title: "Source A", status: "completed", details: "", history: [], sources: [{ nativeThreadId: "thread-a", turnId: "turn-a", itemId: null }], ordering: 1 } }],
+  };
+  const next = applyMapPatch(initial, firstPatch).document;
+  assert.equal(next.sync.sourceCursors["thread-a"]?.lastProcessedTurnId, "turn-a");
+  assert.throws(() => applyMapPatch(next, {
+    schemaVersion: 1,
+    patchId: "cursor-regression",
+    scope: { kind: "project", projectId: "project-cursor" },
+    baseRevision: 1,
+    sourceCursor: { lastProcessedTurnId: null, lastProcessedChangeId: null },
+    operations: [{ op: "source", nodeId: "source-node", source: { nativeThreadId: "thread-a", turnId: "turn-a", itemId: null } }],
+  }), (error: unknown) => error instanceof MapValidationError && error.code === "MAP_CURSOR_REGRESSION");
+});
