@@ -2,7 +2,7 @@
 
 日期：2026-08-17
 阶段：STAGE B — Workspace Scroll / Composer 基础
-状态：STAGE A 已完成；STAGE B 正在实现，等待 GPT 阶段审查
+状态：STAGE A 已完成；STAGE B PASS / FROZEN；STAGE C NOT_STARTED
 范围：当前 Codex Workbench V1 开发对话
 
 ## 1. 文档定位
@@ -67,7 +67,7 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 │   └── ● Phase 6 Gate：GPT PASS，正式冻结
 ├── ◉ V1 总体验收 / Release Candidate Freeze
 │   ├── ● 自动化集成验收与真实 CLI smoke
-│   └── ◉ 用户人工 GUI 验收待执行
+│   └── ● STAGE B 用户人工 GUI 验收已完成
 └── ○ Phase 7：真实使用后的增强（NOT_STARTED）
     └── 只有真实缺口证明必要时再讨论 Workflow、Review、Git 等扩展
 ```
@@ -79,10 +79,10 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 ```text
 ● STAGE A — Multi-Thread Runtime / Writer Conflict / Post-Acceptance Fix
 └── 已通过自动化与 GPT 审查；保持 Native Thread identity、RuntimeRegistry 隔离、writer conflict、orphan fail-closed 和 restart reopen 不变量
-◉ STAGE B — Workspace Scroll / Composer 基础
-└── 当前执行：Header + Conversation Scroll Container + 常驻 Composer、底部跟随、上滚保护、Jump to latest
-○ STAGE C 及以后
-└── 暂不进入，等待 STAGE B Gate 与 GPT 审查
+● STAGE B — Workspace Scroll / Composer 基础
+└── 已完成并冻结：Header + Conversation Scroll Container + 常驻 Composer、底部跟随、上滚保护、Jump to latest；自动化 Gate 与用户 GUI 验收均 PASS
+○ STAGE C
+└── NOT_STARTED；本轮不进入
 ```
 
 ## 4. 节点详情与来源
@@ -99,9 +99,9 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | Conversation Map 初始化 | ● | 本文件形成第一版人工可读工作地图；GPT 已 PASS 并给出 Phase 5 唯一执行指令 | 本文件、GPT Map 审查 |
 | Phase 5 Legacy 筛选 | ● | 四项只读审计完成；分类矩阵完成；实际 donor code migration 为 0；GPT 已 PASS | `docs\PHASE-05-LEGACY-CAPABILITY-MATRIX.md`、`docs\PHASE-05-LEGACY-CAPABILITY-SCREENING.md` |
 | Phase 6 Map 技术实现 | ● | Runtime 能力审计、Schema/Patch、独立 sidecar、Conversation/Project Map、按需 Panel、Gate Fix 和真实 CLI 验证完成；GPT Gate PASS | `docs\PHASE-06-GATE-FIX-REPORT.md`、`docs\PHASE-06-MAP-RUNTIME-CAPABILITY-AUDIT.md` |
-| V1 总体验收 / RC Freeze | ◉ | 自动化集成 Gate 已完成；人工 GUI 验收清单已生成，等待用户实际操作 | `docs\V1-INTEGRATED-ACCEPTANCE.md`、`docs\V1-MANUAL-ACCEPTANCE-CHECKLIST.md` |
+| V1 总体验收 / RC Freeze | ◉ | 自动化集成 Gate 已完成；STAGE B 五项人工 GUI 验收已 PASS，整体 V1/RC 状态按后续阶段分别更新 | `docs\V1-INTEGRATED-ACCEPTANCE.md`、`docs\V1-MANUAL-ACCEPTANCE-CHECKLIST.md` |
 | STAGE A — Multi-Thread Runtime / Writer Conflict / Post-Acceptance Fix | ● | 多 Thread Runtime、writer conflict、orphan fail-closed、restart reopen 和 active-thread truth 已通过 GPT 审查 | `docs\STAGE-A-MULTI-THREAD-RUNTIME.md`、`docs\STAGE-A-POST-ACCEPTANCE-FIX.md` |
-| STAGE B — Workspace Scroll / Composer 基础 | ◉ | 当前实现 Header、Conversation 主滚动容器、常驻 Composer、底部跟随、上滚保护和 Jump to latest；等待最终 Gate | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、本阶段报告 |
+| STAGE B — Workspace Scroll / Composer 基础 | ● | Header、Conversation 主滚动容器、常驻 Composer、底部跟随、上滚保护和 Jump to latest 已完成；自动化 Gate 与用户 GUI 验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、本阶段报告 |
 
 ## 5. Phase 0–4 阶段证据摘要
 
@@ -180,17 +180,17 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 2. 新 V1 以 Codex App Server 的 Native Thread → Native Turn → Native Item 为运行事实。
 3. 先建立可靠性，再建立 Codex 式导航，再实现 Native Thread Workspace。
 4. Phase 4 已通过命令行、单元测试、构建、审计和真实 App Server smoke 验证。
-5. GPT 已审查通过 Phase 4 Gate、Conversation Map、Phase 5、Phase 6 Gate Fix 和 STAGE A；当前进入 STAGE B Workspace / Composer 基础收敛。
+5. GPT 已审查通过 Phase 4 Gate、Conversation Map、Phase 5、Phase 6 Gate Fix 和 STAGE A；STAGE B Workspace / Composer 基础已实现、通过审查并完成用户 GUI 验收，现已冻结。
 
-### 6.2 当前进行中的工作
+### 6.2 STAGE B 已完成与冻结
 
-STAGE B 当前只处理 Workspace Scroll / Composer 基础，不改变 Native Runtime、Thread identity、Turn/Item truth 或 Map UI：
+STAGE B 只处理 Workspace Scroll / Composer 基础，不改变 Native Runtime、Thread identity、Turn/Item truth 或 Map UI；当前已 PASS / FROZEN：
 
 - 已确认最新 v1.1 规划将 STAGE B 定义为 Header + Conversation Scroll Container + 常驻 Composer；该版本替代此前 v1.0 实施顺序；
 - 当前实现收敛为固定视口主布局、Conversation 唯一主要滚动区域、Composer 脱离消息文档流、底部预留、底部跟随、上滚保护和 Jump to latest；
 - STAGE A 的多 Thread 并行、per-thread event/approval、writer conflict、orphan fail-closed、restart reopen 与 active-thread truth 作为回归边界；
 - 本阶段不进入 STAGE C，不新增第二套 Conversation / Transcript / Task / Agent / Context truth；
-- 当前只做契约测试、全量回归、必要真实 App Server smoke、diff/秘密扫描和阶段报告。
+- 自动化 Gate、全量回归、必要真实 App Server smoke、diff/秘密扫描和用户 GUI 验收均已完成。
 
 ### 6.3 下一步计划
 
@@ -203,9 +203,10 @@ STAGE B 当前只处理 Workspace Scroll / Composer 基础，不改变 Native Ru
 | 5 | ● | Phase 6 Runtime capability audit、最小技术链与实现已完成 |
 | 6 | ● | Phase 6 Gate Fix 结构化报告已获 GPT PASS，Phase 6 冻结 |
 | 7 | ● | STAGE A 多 Thread Runtime / Writer Conflict / Post-Acceptance Fix 已通过 GPT 审查 |
-| 8 | ◉ | STAGE B Workspace Scroll / Composer 基础；完成后提交 GPT 审查并等待人工 GUI 复测 |
+| 8 | ● | STAGE B Workspace Scroll / Composer 基础完成；GPT 审查 PASS，用户人工 GUI 验收 PASS，阶段冻结 |
+| 9 | ○ | STAGE C：NOT_STARTED；不在本轮范围内 |
 
-STAGE C 及历史 Phase 7 保持 `NOT_STARTED`；只有 STAGE B Gate 通过并获得 GPT 审查后才讨论下一阶段。
+STAGE C 及历史 Phase 7 保持 `NOT_STARTED`；本轮完成 STAGE B 冻结后停止，不进入下一阶段。
 
 ## 7. 已冻结的产品规则
 

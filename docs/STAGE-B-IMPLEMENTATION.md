@@ -1,5 +1,11 @@
 # Codex Workbench V1 — STAGE B 实施报告
 
+## status
+
+- Automated Gate: PASS。
+- Manual GUI Acceptance: PASS（用户已明确确认）。
+- Stage B Status: PASS / FROZEN。
+
 ## scope_resolution
 
 ```text
@@ -21,7 +27,7 @@ GATE: 机器契约/回归与真实 Runtime smoke 完成；GUI 行为保留人工
 - `docs/STAGE-A-MULTI-THREAD-RUNTIME.md`：多 Thread Runtime、per-thread event/approval、writer conflict 不变量。
 - `docs/STAGE-A-POST-ACCEPTANCE-FIX.md`：orphan fail-closed、restart reopen、active-thread truth 和 Composer target guard。
 - `docs/PHASE-04-CODEX-THREAD-WORKSPACE.md`：现有 Renderer Workspace 的历史实现参考，不作为当前 STAGE B 定义。
-- `docs/WORKBENCH-V1-CONVERSATION-MAP.md`：已更新当前 `STAGE A → ●`、`STAGE B → ◉`。
+- `docs/WORKBENCH-V1-CONVERSATION-MAP.md`：已更新当前 `STAGE A → ●`、`STAGE B → ●`，并标记 `STAGE C → ○ NOT_STARTED`。
 - Git history：`e738ea3` 为用户指定的 Stage B implementation baseline；`8106551` 是之后仅修正 donor 状态描述的 docs-only commit。
 
 ## goal
@@ -100,7 +106,7 @@ GATE: 机器契约/回归与真实 Runtime smoke 完成；GUI 行为保留人工
 
 ## manual_acceptance_required
 
-当前没有把 CLI/静态 contract 结果宣称为 GUI PASS。重新生成/启动新构建后，需要人工确认：
+状态：PASS。以下 5 项结果均由用户完成 GUI 验收并明确确认；这里只记录用户已验证的事实，不将 CLI/静态 contract 结果替代人工验收：
 
 1. 长 Thread 中 Composer 始终可见，消息区独立滚动，不必翻到历史底部才能输入。
 2. 位于底部时继续输出自动跟随；主动上滚阅读历史时继续输出不抢位置。
@@ -108,7 +114,7 @@ GATE: 机器契约/回归与真实 Runtime smoke 完成；GUI 行为保留人工
 4. 切换 A/B Thread 后各自从最新位置开始，A 的输出不会改变 B 的滚动位置。
 5. Composer 调整到较高高度、展开 Native Runtime 调试区时，Composer 仍可用，Conversation 不发生外层页面滚动。
 
-新的 packaged EXE 已生成于 `dist/package/Codex Workbench.exe`；可直接用该文件进行以下 GUI 人工复测。
+以上 5 项均已 PASS；Stage B 不再有待完成的人工验收项。
 
 ## subagents
 
@@ -154,14 +160,14 @@ GATE: 机器契约/回归与真实 Runtime smoke 完成；GUI 行为保留人工
 
 ## known_limitations
 
-- 没有引入 Electron/浏览器自动化依赖；GUI 行为仍需人工验收，静态 contract 和 CLI smoke 不替代人工 GUI PASS。
+- 没有引入 Electron/浏览器自动化依赖；本阶段 GUI 结果以用户人工验收为准，静态 contract 和 CLI smoke 不替代人工 GUI PASS。
 - 如果再次在 EXE 运行期间打包，Windows 可能重新返回 `EBUSY`；需先关闭正在运行的 packaged EXE，再执行 build/package。
 - Stage B 不处理 Stage A 已冻结的 writer-conflict 对话文案/重试入口，也不扩展附件、Model、Reasoning、Permission 等能力。
 
 ## blockers
 
-none。最新 build/package 已通过；当前只等待该 packaged EXE 的 5 项 GUI 人工验收。
+none。自动化 Gate、真实 Runtime smoke 和用户 5 项 GUI 人工验收均已完成。
 
 ## gate
 
-READY_FOR_GPT_REVIEW
+PASS / FROZEN
