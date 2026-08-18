@@ -84,7 +84,6 @@
       .turn-heading { display: flex; justify-content: space-between; gap: 12px; padding: 0 2px 4px; color: #8c8c8c; font-size: 11px; }
       .event-card { max-width: 860px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel); overflow: hidden; }
       .event-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 13px; border-bottom: 1px solid #353535; color: #dedede; font-size: 12px; }
-      .event-meta { color: #777; font: 10px ui-monospace, Consolas, monospace; }
       .event-card-body { padding: 13px 15px; color: #e6e6e6; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
       .event-user { background: #292929; }
       .event-assistant { background: #252b29; border-color: #385248; }
@@ -94,9 +93,6 @@
       .event-system { background: #25282a; border-color: #3d464b; }
       .event-unknown { background: #282828; border-style: dashed; }
       .event-muted { padding: 5px 14px 0; color: #999; font-size: 11px; word-break: break-word; }
-      .event-raw { margin: 0 13px 12px; color: #999; font-size: 11px; }
-      .event-raw summary { cursor: pointer; }
-      .event-raw pre { max-height: 240px; margin: 8px 0 0; overflow: auto; padding: 9px; border-radius: 6px; background: #1c1c1c; color: #b6c5bf; white-space: pre-wrap; word-break: break-word; font: 10px/1.45 ui-monospace, Consolas, monospace; }
       .approval-actions { display: flex; flex-wrap: wrap; gap: 7px; padding: 12px 14px 14px; }
       .jump-latest { position: absolute; z-index: 2; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 7px 12px; border: 1px solid #4c6f61; border-radius: 999px; background: #193b30; color: #b9e8d3; font-size: 12px; }
       .composer { display: grid; gap: 8px; min-height: 0; max-width: 900px; width: calc(100% - 60px); margin: 0 auto 18px; padding: 10px; border: 1px solid #484848; border-radius: 12px; background: #2b2b2b; box-shadow: 0 7px 28px #0003; }
@@ -113,6 +109,13 @@
       .debug-panel { min-height: 0; max-height: min(32vh, 360px); margin: 0 30px 18px; overflow: auto; border-top: 1px solid #333; color: #aaa; font-size: 12px; }
       .debug-panel > summary { padding: 10px 0; cursor: pointer; }
       .debug-grid { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 14px; padding-bottom: 12px; }
+      .diagnostics-index { display: grid; gap: 8px; }
+      .diagnostics-index > summary, .diagnostics-raw > summary { cursor: pointer; }
+      .diagnostics-index-list { display: grid; gap: 4px; max-height: 180px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+      .diagnostics-index-list ul { display: grid; gap: 4px; margin: 4px 0 0 16px; padding: 0; list-style: none; }
+      .diagnostics-target { width: 100%; padding: 5px 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #a9cabc; text-align: left; font: 11px ui-monospace, Consolas, monospace; }
+      .diagnostics-target:hover, .diagnostics-target:focus-visible { border-color: #456d5d; background: #24372f; outline: none; }
+      .diagnostics-raw pre { max-height: 220px; margin: 8px 0 0; overflow: auto; padding: 9px; border-radius: 6px; background: #1c1c1c; color: #b6c5bf; white-space: pre-wrap; word-break: break-word; font: 10px/1.45 ui-monospace, Consolas, monospace; }
       .card { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel-soft); }
       .stack { display: grid; gap: 10px; }
       h2 { margin: 0; color: #d8d8d8; font-size: 14px; }
@@ -179,51 +182,60 @@
   </head>
   <body>
     <div id="app-shell" class="app-shell">
-      <aside class="sidebar" aria-label="Native Thread 导航">
+      <aside class="sidebar" aria-label="对话导航">
         <div class="brand"><span class="brand-mark">C</span><span>Codex Workbench <span class="brand-subtitle">V1</span></span></div>
         <div class="sidebar-actions">
           <button id="new-standalone-thread" class="sidebar-action primary" type="button"><span class="action-icon">＋</span><span>新建 Thread</span></button>
           <button id="new-project" class="sidebar-action" type="button"><span class="action-icon">▦</span><span>新建 Project</span></button>
         </div>
         <nav id="navigation" aria-label="Pinned Projects Recent"></nav>
-        <div class="sidebar-footer">Native Thread 是唯一对话身份<br>Phase 4 · Thread Workspace</div>
+        <div class="sidebar-footer">Codex-shaped Workspace · V1<br>开发者诊断按需打开</div>
       </aside>
       <main>
         <header class="workspace-header">
           <div>
-            <div class="eyebrow">Native Thread Workspace</div>
-            <h1 id="selected-thread">未选择 Native Thread</h1>
-            <div class="thread-meta"><span id="thread-kind">Native Thread</span><span>·</span><code id="thread-identifier">—</code></div>
+            <div class="eyebrow">Thread Workspace</div>
+            <h1 id="selected-thread">未选择对话</h1>
+            <div class="thread-meta"><span id="thread-kind">对话</span></div>
           </div>
-          <div class="header-actions"><span id="runtime-state" class="runtime-pill">IDLE</span><button id="toggle-map" class="icon-button" type="button" title="打开 Conversation Map" aria-expanded="false" aria-controls="map-panel">⌁</button><button id="read-thread" class="icon-button" type="button" title="重新读取 Native Thread">↻</button></div>
+          <div class="header-actions"><span id="runtime-state" class="runtime-pill">空闲</span><button id="toggle-map" class="icon-button" type="button" title="打开 Conversation Map" aria-expanded="false" aria-controls="map-panel">⌁</button><button id="read-thread" class="icon-button" type="button" title="重新读取对话">↻</button></div>
         </header>
-        <div id="operation-status" class="status-banner" role="status">正在读取 Native Thread 导航。</div>
-        <section class="workspace-conversation" aria-label="Native Conversation">
-          <section id="thread-workspace" aria-label="Native Turn and Item stream" tabindex="0"></section>
-          <button id="jump-latest" class="jump-latest" type="button" hidden>跳到最新 Native Item</button>
+        <div id="operation-status" class="status-banner" role="status">正在读取对话列表。</div>
+        <section class="workspace-conversation" aria-label="Conversation">
+          <section id="thread-workspace" aria-label="Conversation stream" tabindex="0"></section>
+          <button id="jump-latest" class="jump-latest" type="button" hidden>跳到最新</button>
         </section>
         <form id="composer" class="composer">
-          <textarea id="prompt" placeholder="发送 Prompt。失败或断开时，Prompt 会保留用于恢复。" aria-label="Native Turn Prompt"></textarea>
-          <div class="composer-toolbar"><span class="composer-hint">Native Turn · 文本输入 · 不创建本地 Transcript</span><button id="interrupt-turn" class="debug-button stop-button" type="button">停止</button><button id="start-turn" class="debug-button send-button" type="submit">发送</button></div>
+          <textarea id="prompt" placeholder="发送消息。断开时，输入会保留用于恢复。" aria-label="Message input"></textarea>
+          <div class="composer-toolbar"><span class="composer-hint">发送消息</span><button id="interrupt-turn" class="debug-button stop-button" type="button">停止</button><button id="start-turn" class="debug-button send-button" type="submit">发送</button></div>
         </form>
         <details id="debug-panel" class="debug-panel">
-          <summary>Native Runtime 调试与恢复</summary>
-          <section class="debug-grid" aria-label="Native Runtime 调试区">
+          <summary>Developer / Diagnostics</summary>
+          <section class="debug-grid" aria-label="Developer Diagnostics">
             <section class="card stack" aria-labelledby="runtime-heading">
-              <h2 id="runtime-heading">Native Runtime</h2>
+              <h2 id="runtime-heading">Runtime 定位</h2>
               <div class="muted">nativeThreadId：<span id="thread-id" class="value">—</span></div>
               <div class="muted">activeTurnId：<span id="turn-id" class="value">—</span></div>
               <div class="muted">localRunId：<span id="run-id" class="value">—</span></div>
               <div class="muted">cwd：<span id="runtime-cwd" class="value">—</span></div>
+              <div class="muted">最近错误：<span id="diagnostics-error" class="value">—</span></div>
               <div class="row"><button id="start-thread" class="debug-button" type="button">启动 / 恢复</button><button id="interrupt-turn-debug" class="debug-button" type="button" hidden>interrupt</button></div>
               <label for="resume-id">显式切换 nativeThreadId</label>
               <input id="resume-id" autocomplete="off" placeholder="粘贴已有 Native Thread ID">
               <button id="resume-thread" class="debug-button" type="button">resume / 切换</button>
+              <details class="diagnostics-raw">
+                <summary>thread/read 原始快照</summary>
+                <pre id="thread-read-raw">—</pre>
+              </details>
             </section>
             <section class="card stack" aria-labelledby="turn-heading">
-              <h2 id="turn-heading">Native Event 调试输出</h2>
+              <h2 id="turn-heading">原始事件与操作日志</h2>
               <div class="row"><button id="clear-events" class="debug-button" type="button">清空调试输出</button></div>
-              <pre id="events" aria-live="polite"></pre>
+              <details class="diagnostics-index">
+                <summary>Thread / Turn / Item 定位</summary>
+                <ul id="diagnostics-index-list" class="diagnostics-index-list"></ul>
+              </details>
+              <pre id="events" aria-label="Raw event and operation log" aria-live="polite"></pre>
             </section>
           </section>
         </details>

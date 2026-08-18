@@ -13,6 +13,7 @@ import { normalizeNativeEvent, type NativeVisibleEventKind, type NormalizedNativ
 import { buildNavigationModel, type NavigationModel } from "./navigation-model.ts";
 import { isComposerTargetValid } from "../shared/thread-target.ts";
 import { isNearLatest } from "./workspace-scroll.ts";
+import { defaultEventLabel, operationStatusLabel, runtimeStateLabel, shouldRenderDefaultEvent, userFacingErrorMessage } from "./ui-projection.ts";
 
 interface IpcEnvelope<T = unknown> {
   ok: boolean;
@@ -76,10 +77,12 @@ const statusElement = document.querySelector<HTMLElement>("#operation-status")!;
 const promptElement = document.querySelector<HTMLTextAreaElement>("#prompt")!;
 const resumeElement = document.querySelector<HTMLInputElement>("#resume-id")!;
 const eventsElement = document.querySelector<HTMLElement>("#events")!;
+const diagnosticsErrorElement = document.querySelector<HTMLElement>("#diagnostics-error")!;
+const threadReadRawElement = document.querySelector<HTMLElement>("#thread-read-raw")!;
+const diagnosticsIndexElement = document.querySelector<HTMLElement>("#diagnostics-index-list")!;
 const navigationElement = document.querySelector<HTMLElement>("#navigation")!;
 const selectedThreadElement = document.querySelector<HTMLHeadingElement>("#selected-thread")!;
 const threadKindElement = document.querySelector<HTMLElement>("#thread-kind")!;
-const threadIdentifierElement = document.querySelector<HTMLElement>("#thread-identifier")!;
 const threadWorkspaceElement = document.querySelector<HTMLElement>("#thread-workspace")!;
 const jumpLatestButton = document.querySelector<HTMLButtonElement>("#jump-latest")!;
 const startThreadButton = document.querySelector<HTMLButtonElement>("#start-thread")!;
@@ -128,6 +131,9 @@ let liveEvents = new Map<string, NormalizedNativeEvent>();
 let pendingApprovals = new Map<string, NativeServerRequestEvent>();
 const liveEventsByThread = new Map<string, Map<string, NormalizedNativeEvent>>();
 const pendingApprovalsByThread = new Map<string, Map<string, NativeServerRequestEvent>>();
+const diagnosticsLogsByThread = new Map<string, string>();
+const diagnosticsErrorsByThread = new Map<string, RuntimeErrorInfo>();
+let globalDiagnosticsLog = "";
 const runtimeStates = new Map<string, RuntimeSnapshot>();
 const turnOperationThreads = new Set<string>();
 let followLatest = true;
@@ -175,7 +181,23 @@ function clearCurrentDraft(): void {
   localStorage.removeItem(draftKey(draftThreadId ?? null));
 }
 
-function appendOutput(label: string, payload: unknown): void {
+function currentDiagnosticsThreadId(): string | null {
+  return selectedNativeThreadId ?? latestState?.nativeThreadId ?? null;
+}
+
+function diagnosticsDisplayThreadId(): string | null {
+  return currentDiagnosticsThreadId() ?? threadUnavailableId;
+}
+
+function renderDiagnosticsLog(): void {
+  const nativeThreadId = diagnosticsDisplayThreadId();
+  eventsElement.textContent = nativeThreadId
+    ? (diagnosticsLogsByThread.get(nativeThreadId) ?? "")
+    : globalDiagnosticsLog;
+  eventsElement.scrollTop = eventsElement.scrollHeight;
+}
+
+function appendOutput(label: string, payload: unknown, nativeThreadId = currentDiagnosticsThreadId()): void {
   let serialized: string;
   try {
     serialized = JSON.stringify(payload, null, 2);
@@ -183,20 +205,26 @@ function appendOutput(label: string, payload: unknown): void {
     serialized = String(payload);
   }
   const line = `[${new Date().toISOString()}] ${label}\n${serialized}\n\n`;
-  eventsElement.textContent = `${eventsElement.textContent ?? ""}${line}`.slice(-120_000);
-  eventsElement.scrollTop = eventsElement.scrollHeight;
+  if (nativeThreadId) {
+    diagnosticsLogsByThread.set(nativeThreadId, `${diagnosticsLogsByThread.get(nativeThreadId) ?? ""}${line}`.slice(-120_000));
+  } else {
+    globalDiagnosticsLog = `${globalDiagnosticsLog}${line}`.slice(-120_000);
+  }
+  renderDiagnosticsLog();
 }
 
 function showError(error: RuntimeErrorInfo | undefined): void {
+  const nativeThreadId = currentDiagnosticsThreadId() ?? threadUnavailableId;
+  if (nativeThreadId && error) diagnosticsErrorsByThread.set(nativeThreadId, error);
   if (error?.code === "WRITER_CONFLICT" && !writerConflictDialog.open) {
     writerConflictMessage.textContent = error.message;
     writerConflictDialog.showModal();
   }
-  const stderr = error?.code === "WRITER_CONFLICT" ? "" : error?.stderr ? ` | stderr: ${error.stderr}` : "";
   statusElement.textContent = error
-    ? `${error.code ?? error.name}: ${error.message}${stderr}`
+    ? userFacingErrorMessage(error)
     : "未知 Runtime 错误";
   statusElement.classList.add("error");
+  diagnosticsErrorElement.textContent = error ? safeJson(error) : "—";
 }
 
 function showStatus(message: string): void {
@@ -216,6 +244,7 @@ function activateThreadBuffers(nativeThreadId: string | null): void {
   pendingApprovalsByThread.set(nativeThreadId, approvals);
   liveEvents = events;
   pendingApprovals = approvals;
+  renderDiagnosticsLog();
 }
 
 function runtimeIsActive(state: RuntimeSnapshot | undefined | null): boolean {
@@ -250,7 +279,7 @@ function runtimeDisplayState(thread: ThreadProjection): { className: string; lab
 }
 
 function threadLabel(thread: ThreadProjection): string {
-  return thread.title?.trim() || `Thread ${thread.nativeThreadId.slice(0, 8)}`;
+  return thread.title?.trim() || "未命名对话";
 }
 
 function appendEmpty(container: HTMLElement, message: string): void {
@@ -328,8 +357,8 @@ function renderNavigation(): void {
       projectAdd.type = "button";
       projectAdd.className = "project-add";
       projectAdd.textContent = "+";
-      projectAdd.title = `在 ${group.project.name} 中新建 Native Thread`;
-      projectAdd.setAttribute("aria-label", `在 ${group.project.name} 中新建 Native Thread`);
+      projectAdd.title = `在 ${group.project.name} 中新建对话`;
+      projectAdd.setAttribute("aria-label", `在 ${group.project.name} 中新建对话`);
       projectAdd.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -370,7 +399,7 @@ async function jumpToMapSource(source: MapSourceRef): Promise<void> {
   const target = candidates.find((element) => element.dataset.nativeTurnId === source.turnId && (!source.itemId || element.dataset.nativeItemId === source.itemId))
     ?? candidates.find((element) => element.dataset.nativeTurnId === source.turnId);
   if (!target) {
-    showStatus("Map 来源尚未出现在当前 thread/read 视图中。");
+    showStatus("Map 来源尚未出现在当前对话视图中。");
     return;
   }
   target.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -565,30 +594,17 @@ function itemKind(item: NativeReadItem): NativeVisibleEventKind {
 }
 
 function eventLabel(kind: NativeVisibleEventKind): string {
-  return {
-    user: "User",
-    assistant: "Assistant",
-    processing: "Thinking / Processing",
-    command_tool: "Command / Tool",
-    file: "File Change",
-    web: "Web / Search",
-    approval: "Approval",
-    system: "Native Status",
-    unknown: "Native Item",
-  }[kind];
+  return defaultEventLabel(kind);
 }
 
-function makeCard(kind: NativeVisibleEventKind, label: string, id: string | null, status: string | null): HTMLElement {
+function makeCard(kind: NativeVisibleEventKind, label: string): HTMLElement {
   const article = document.createElement("article");
   article.className = `event-card event-${kind}`;
   const header = document.createElement("header");
   header.className = "event-card-header";
   const title = document.createElement("strong");
   title.textContent = label;
-  const meta = document.createElement("span");
-  meta.className = "event-meta";
-  meta.textContent = [id ? `#${id.slice(0, 12)}` : "", status ?? ""].filter(Boolean).join(" · ");
-  header.append(title, meta);
+  header.append(title);
   article.append(header);
   return article;
 }
@@ -601,29 +617,16 @@ function appendBody(card: HTMLElement, text: string | null): void {
   card.append(body);
 }
 
-function appendRaw(card: HTMLElement, value: unknown, summary = "查看 Native 原始字段"): void {
-  if (value === null || value === undefined) return;
-  const details = document.createElement("details");
-  details.className = "event-raw";
-  const caption = document.createElement("summary");
-  caption.textContent = summary;
-  const pre = document.createElement("pre");
-  pre.textContent = safeJson(value);
-  details.append(caption, pre);
-  card.append(details);
-}
-
 function createReadItemCard(item: NativeReadItem, turnId: string | null): HTMLElement {
   const kind = itemKind(item);
-  const card = makeCard(kind, eventLabel(kind), item.id, displayStatus(item.status));
+  const card = makeCard(kind, eventLabel(kind));
   if (turnId) card.dataset.nativeTurnId = turnId;
   if (item.id) card.dataset.nativeItemId = item.id;
   card.tabIndex = -1;
   const text = plainText(item.text) ?? plainText(item.input) ?? plainText(item.output);
   appendBody(card, text);
-  if (!text && kind === "processing") appendBody(card, "Native processing");
-  if (!text && kind === "unknown") appendBody(card, `未知 Native Item 类型：${String(item.type ?? "unknown")}`);
-  appendRaw(card, item.raw);
+  if (!text && kind === "processing") appendBody(card, "正在处理…");
+  if (!text && kind === "unknown") appendBody(card, "暂不支持直接展示的内容。请在 Developer / Diagnostics 查看详情。");
   return card;
 }
 
@@ -635,22 +638,21 @@ function createTurnView(turn: ThreadReadView["turns"][number]): HTMLElement {
   const heading = document.createElement("div");
   heading.className = "turn-heading";
   const title = document.createElement("strong");
-  title.textContent = `Native Turn ${turn.id ? turn.id.slice(0, 12) : "unknown"}`;
-  const status = document.createElement("span");
-  status.textContent = displayStatus(turn.status) ?? "unknown";
-  heading.append(title, status);
+  title.textContent = "本轮对话";
+  heading.append(title);
   wrapper.append(heading);
   for (const item of turn.items) wrapper.append(createReadItemCard(item, turn.id));
-  if (!turn.items.length) appendBody(wrapper, "该 Native Turn 尚未包含可展示 Item。");
+  if (!turn.items.length) appendBody(wrapper, "本轮暂未包含可展示内容。");
   return wrapper;
 }
 
 function createLiveEventCard(event: NormalizedNativeEvent): HTMLElement {
-  const card = makeCard(event.kind, eventLabel(event.kind), event.itemId ?? event.turnId, event.status);
+  const card = makeCard(event.kind, eventLabel(event.kind));
+  if (event.turnId) card.dataset.nativeTurnId = event.turnId;
+  if (event.itemId) card.dataset.nativeItemId = event.itemId;
   appendBody(card, event.text);
-  if (!event.text && event.kind === "processing") appendBody(card, "Native event processing");
-  if (!event.text && event.kind === "unknown") appendBody(card, `未识别 Native Event：${event.method || "unknown"}`);
-  appendRaw(card, event.params);
+  if (!event.text && event.kind === "processing") appendBody(card, "正在处理…");
+  if (!event.text && event.kind === "unknown") appendBody(card, "其他更新。请在 Developer / Diagnostics 查看详情。");
   return card;
 }
 
@@ -668,7 +670,7 @@ function approvalDetails(params: unknown): { command: string | null; reason: str
 }
 
 function createApprovalCard(request: NativeServerRequestEvent): HTMLElement {
-  const card = makeCard("approval", "Native Approval", null, "等待决定");
+  const card = makeCard("approval", "需要确认");
   const details = approvalDetails(request.params);
   if (details.command) appendBody(card, details.command);
   if (details.reason) appendBody(card, details.reason);
@@ -678,10 +680,6 @@ function createApprovalCard(request: NativeServerRequestEvent): HTMLElement {
     cwd.textContent = `cwd: ${details.cwd}`;
     card.append(cwd);
   }
-  const method = document.createElement("div");
-  method.className = "event-muted";
-  method.textContent = `${request.method} · request ${String(request.id)}`;
-  card.append(method);
   const actions = document.createElement("div");
   actions.className = "approval-actions";
   const addDecision = (label: string, decision: unknown) => {
@@ -704,11 +702,60 @@ function createApprovalCard(request: NativeServerRequestEvent): HTMLElement {
   return card;
 }
 
+function diagnosticTargetButton(label: string, turnId: string | null, itemId: string | null): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "diagnostics-target";
+  button.textContent = label;
+  button.addEventListener("click", () => {
+    const candidates = [...threadWorkspaceElement.querySelectorAll<HTMLElement>("[data-native-turn-id]")];
+    const target = candidates.find((element) =>
+      element.dataset.nativeTurnId === turnId
+      && (!itemId || element.dataset.nativeItemId === itemId));
+    if (!target) return;
+    target.scrollIntoView({ behavior: "auto", block: "center" });
+    target.focus({ preventScroll: true });
+  });
+  return button;
+}
+
+function renderDiagnosticsIndex(): void {
+  diagnosticsIndexElement.replaceChildren();
+  if (!threadView) {
+    const empty = document.createElement("li");
+    empty.className = "muted";
+    empty.textContent = "暂无 thread/read 定位数据。";
+    diagnosticsIndexElement.append(empty);
+    return;
+  }
+  for (const [turnIndex, turn] of threadView.turns.entries()) {
+    const turnRow = document.createElement("li");
+    const turnId = turn.id;
+    turnRow.append(diagnosticTargetButton(`Turn ${turnId ?? `（无 ID，${turnIndex + 1}）`}`, turnId, null));
+    if (turn.items.length > 0) {
+      const itemList = document.createElement("ul");
+      for (const [itemIndex, item] of turn.items.entries()) {
+        const itemRow = document.createElement("li");
+        itemRow.append(diagnosticTargetButton(`Item ${item.id ?? `（无 ID，${itemIndex + 1}）`}`, turnId, item.id));
+        itemList.append(itemRow);
+      }
+      turnRow.append(itemList);
+    }
+    diagnosticsIndexElement.append(turnRow);
+  }
+}
+
+function renderDiagnosticsProjection(): void {
+  threadReadRawElement.textContent = threadView ? safeJson(threadView.raw) : "—";
+  renderDiagnosticsIndex();
+  renderDiagnosticsLog();
+}
+
 async function respondToApproval(request: NativeServerRequestEvent, response: unknown, actions: HTMLElement): Promise<void> {
   if (request.id === null) return;
   const nativeThreadId = request.threadId ?? latestState?.nativeThreadId;
   if (!nativeThreadId) {
-    showError({ name: "ApprovalThreadMissing", code: "THREAD_NOT_SELECTED", message: "无法确定该 Native Approval 所属的 Thread。", exitCode: null, stderr: "" });
+    showError({ name: "ApprovalThreadMissing", code: "THREAD_NOT_SELECTED", message: "无法确定该确认所属的对话。", exitCode: null, stderr: "" });
     return;
   }
   for (const button of actions.querySelectorAll("button")) button.disabled = true;
@@ -720,7 +767,7 @@ async function respondToApproval(request: NativeServerRequestEvent, response: un
   const approvals = pendingApprovalsByThread.get(nativeThreadId);
   approvals?.delete(approvalKey(request.id));
   if (latestState?.nativeThreadId === nativeThreadId) activateThreadBuffers(nativeThreadId);
-  showStatus("Native Approval 已提交");
+    showStatus("确认已提交");
   renderThreadWorkspace();
 }
 
@@ -733,24 +780,27 @@ function renderThreadWorkspace(): void {
     empty.className = "workspace-empty";
     const title = document.createElement("strong");
     title.textContent = threadUnavailableId
-      ? "Native Thread 不可用"
+      ? "对话不可用"
       : latestState?.nativeThreadId
-        ? "读取 Native Thread"
-        : "选择或新建 Native Thread";
+        ? "正在读取对话"
+        : "选择或新建对话";
     const message = document.createElement("p");
     message.textContent = threadUnavailableId
-      ? `Thread ${threadUnavailableId.slice(0, 8)} 无法 resume/read。请显式切换到另一个可用 Thread；Workbench 不会替你改发到其他 Thread。`
+      ? "该对话无法恢复或读取。请显式切换到另一个可用对话；Workbench 不会替你改发到其他对话。"
       : latestState?.nativeThreadId
-        ? "正在等待 App Server 的 thread/read 结果。"
-        : "左侧导航中的每个对象都对应一个真实的 Native Thread。";
+        ? "正在等待对话内容。"
+        : "左侧每个对象都对应一个真实的 Codex 对话。";
     empty.append(title, message);
     threadWorkspaceElement.append(empty);
   }
   if (threadView) {
     for (const turn of threadView.turns) threadWorkspaceElement.append(createTurnView(turn));
   }
-  for (const event of liveEvents.values()) threadWorkspaceElement.append(createLiveEventCard(event));
+  for (const event of liveEvents.values()) {
+    if (shouldRenderDefaultEvent(event.kind)) threadWorkspaceElement.append(createLiveEventCard(event));
+  }
   for (const request of pendingApprovals.values()) threadWorkspaceElement.append(createApprovalCard(request));
+  renderDiagnosticsProjection();
   requestAnimationFrame(() => {
     if (shouldFollow && followLatest) {
       threadWorkspaceElement.scrollTop = threadWorkspaceElement.scrollHeight;
@@ -777,18 +827,18 @@ function renderState(state: RuntimeSnapshot): void {
   }
   latestState = state;
   syncDraftForThread(state.nativeThreadId);
-  stateElement.textContent = state.state;
+  stateElement.textContent = runtimeStateLabel(state.state);
   threadElement.textContent = state.nativeThreadId ?? "—";
   turnElement.textContent = state.activeTurnId ?? "—";
   runElement.textContent = state.localRunId ?? "—";
   cwdElement.textContent = state.cwd;
+  diagnosticsErrorElement.textContent = state.lastError ? safeJson(state.lastError) : "—";
   const selected = [...navigation.pinned, ...navigation.recent, ...navigation.projects.flatMap((group) => group.threads)]
     .find((thread) => thread.nativeThreadId === state.nativeThreadId);
   if (selected) currentProjection = selected;
   const nativeTitle = threadView?.title?.trim();
-  selectedThreadElement.textContent = nativeTitle || (selected ? threadLabel(selected) : state.nativeThreadId ? `Thread ${state.nativeThreadId.slice(0, 8)}` : "未选择 Native Thread");
-  threadIdentifierElement.textContent = state.nativeThreadId ?? "—";
-  threadKindElement.textContent = currentProjection?.projectId ? "Project Thread" : state.nativeThreadId ? "Standalone Thread" : "Native Thread";
+  selectedThreadElement.textContent = nativeTitle || (selected ? threadLabel(selected) : state.nativeThreadId ? "未命名对话" : "未选择对话");
+  threadKindElement.textContent = currentProjection?.projectId ? "项目对话" : state.nativeThreadId ? "独立对话" : "对话";
   const active = runtimeIsActive(state);
   const runtimeTarget = state.nativeThreadId ? runtimeStates.get(state.nativeThreadId) : null;
   const targetValid = isComposerTargetValid({
@@ -817,11 +867,13 @@ function renderNoSelectedThread(): void {
   turnElement.textContent = "—";
   runElement.textContent = "—";
   cwdElement.textContent = "—";
+  threadElement.textContent = threadUnavailableId ?? "—";
+  const unavailableError = threadUnavailableId ? diagnosticsErrorsByThread.get(threadUnavailableId) : null;
+  diagnosticsErrorElement.textContent = unavailableError ? safeJson(unavailableError) : "—";
   selectedThreadElement.textContent = threadUnavailableId
-    ? `Thread ${threadUnavailableId.slice(0, 8)}（不可用）`
-    : "未选择 Native Thread";
-  threadIdentifierElement.textContent = threadUnavailableId ?? "—";
-  threadKindElement.textContent = threadUnavailableId ? "Native Thread · 不可用" : "Native Thread";
+    ? "对话不可用"
+    : "未选择对话";
+  threadKindElement.textContent = threadUnavailableId ? "对话 · 不可用" : "对话";
   interruptButton.disabled = true;
   startTurnButton.disabled = true;
   resetWorkspaceScroll();
@@ -838,7 +890,7 @@ async function consume<T>(label: string, operation: Promise<IpcEnvelope<T>>): Pr
       showError(response.error);
       return null;
     }
-    showStatus(`${label} 完成`);
+    showStatus(operationStatusLabel(label));
     return response.result ?? null;
   } catch (error) {
     appendOutput(`${label} exception`, error);
@@ -880,7 +932,7 @@ async function loadThreadView(clearLive = true): Promise<boolean> {
 
 async function selectThread(nativeThreadId: string): Promise<void> {
   if (threadTransitionInFlight) {
-    showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换 Native Thread，请等待当前切换完成。", exitCode: null, stderr: "" });
+    showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换对话，请等待当前切换完成。", exitCode: null, stderr: "" });
     return;
   }
   const previousState = latestState;
@@ -943,7 +995,7 @@ async function selectThread(nativeThreadId: string): Promise<void> {
 
 async function createNativeThread(projectId: string | null): Promise<void> {
   if (threadTransitionInFlight) {
-    showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换 Native Thread，请等待当前切换完成。", exitCode: null, stderr: "" });
+    showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换对话，请等待当前切换完成。", exitCode: null, stderr: "" });
     return;
   }
   const previousState = latestState;
@@ -995,7 +1047,7 @@ async function createNativeThread(projectId: string | null): Promise<void> {
 
 async function startPersistedThread(silentExpectedMissing: boolean): Promise<void> {
   if (threadTransitionInFlight) {
-    if (!silentExpectedMissing) showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换 Native Thread，请等待当前切换完成。", exitCode: null, stderr: "" });
+    if (!silentExpectedMissing) showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换对话，请等待当前切换完成。", exitCode: null, stderr: "" });
     return;
   }
   if (silentExpectedMissing && hasSelectedNativeThread()) return;
@@ -1011,7 +1063,7 @@ async function startPersistedThread(silentExpectedMissing: boolean): Promise<voi
     }
     const result = response.result;
     if (!result) return;
-    showStatus("上次 Native Thread 已恢复");
+    showStatus("上次对话已恢复");
     renderState(result);
     await loadThreadView();
     await refreshNavigation();
@@ -1065,9 +1117,9 @@ async function submitProjectCreate(): Promise<void> {
 function addLiveEvent(event: NativeEvent): void {
   const normalized = normalizeNativeEvent(event);
   const nativeThreadId = normalized.nativeThreadId ?? event.threadId;
-  appendOutput("native.event", event);
+  appendOutput("live-event", event, nativeThreadId);
   if (!nativeThreadId) return;
-  if (normalized.kind === "approval") return;
+  if (normalized.kind === "approval" || !shouldRenderDefaultEvent(normalized.kind)) return;
   const events = liveEventsByThread.get(nativeThreadId) ?? new Map<string, NormalizedNativeEvent>();
   liveEventsByThread.set(nativeThreadId, events);
   const key = `${normalized.kind}:${normalized.itemId ?? normalized.turnId ?? normalized.sequence ?? Math.random()}`;
@@ -1076,7 +1128,7 @@ function addLiveEvent(event: NativeEvent): void {
     normalized.text = previous.text && normalized.text ? `${previous.text}${normalized.text}` : normalized.text ?? previous.text;
   }
   events.set(key, normalized);
-  if (normalized.kind === "processing" && normalized.method === "turn/completed") showStatus(`Native Turn ${normalized.status ?? "完成"}`);
+  if (normalized.kind === "processing" && normalized.method === "turn/completed") showStatus("本轮已完成");
   if (selectedNativeThreadId !== nativeThreadId) {
     renderNavigation();
     return;
@@ -1086,16 +1138,16 @@ function addLiveEvent(event: NativeEvent): void {
 }
 
 function handleServerRequest(event: NativeServerRequestEvent): void {
-  appendOutput(`server.request.${event.status}`, event);
-  if (event.id === null) return;
   const nativeThreadId = event.threadId ?? selectedNativeThreadId;
+  appendOutput(`server-request.${event.status}`, event, nativeThreadId);
+  if (event.id === null) return;
   if (!nativeThreadId) return;
   const approvals = pendingApprovalsByThread.get(nativeThreadId) ?? new Map<string, NativeServerRequestEvent>();
   pendingApprovalsByThread.set(nativeThreadId, approvals);
   const key = approvalKey(event.id);
   if (event.status === "pending") {
     approvals.set(key, { ...event, threadId: nativeThreadId });
-    showStatus("Native Server Request 等待用户决定");
+    showStatus("等待你的确认");
   } else if (event.status === "resolved" || event.status === "rejected") {
     approvals.delete(key);
   }
@@ -1139,11 +1191,11 @@ readThreadButton.addEventListener("click", () => { void loadThreadView(); });
 interruptButton.addEventListener("click", async () => {
   const nativeThreadId = latestState?.nativeThreadId;
   if (!nativeThreadId) {
-    showError({ name: "ThreadNotSelected", code: "THREAD_NOT_SELECTED", message: "请先选择一个 Native Thread。", exitCode: null, stderr: "" });
+    showError({ name: "ThreadNotSelected", code: "THREAD_NOT_SELECTED", message: "请先选择一个对话。", exitCode: null, stderr: "" });
     return;
   }
   const result = await consume("turn.interrupt", api.interruptTurn(nativeThreadId));
-  if (result) showStatus(`Native Turn ${result.turnId} 已请求 interrupt`);
+  if (result) showStatus("已请求停止");
 });
 startTurnButton.addEventListener("click", async (event) => {
   event.preventDefault();
@@ -1154,7 +1206,7 @@ startTurnButton.addEventListener("click", async (event) => {
   }
   const nativeThreadId = latestState?.nativeThreadId;
   if (!nativeThreadId) {
-    showError({ name: "ThreadNotSelected", code: "THREAD_NOT_SELECTED", message: "请先选择或新建一个 Native Thread。", exitCode: null, stderr: "" });
+    showError({ name: "ThreadNotSelected", code: "THREAD_NOT_SELECTED", message: "请先选择或新建一个对话。", exitCode: null, stderr: "" });
     return;
   }
   const runtimeTarget = runtimeStates.get(nativeThreadId);
@@ -1167,7 +1219,7 @@ startTurnButton.addEventListener("click", async (event) => {
     showError({
       name: "ThreadTargetMismatch",
       code: "THREAD_TARGET_MISMATCH",
-      message: "当前 Composer 没有一个已验证且就绪的 Native Thread 目标，已禁止发送。请显式切换到可用 Thread。",
+      message: "当前输入没有一个已验证且就绪的对话目标，已禁止发送。请显式切换到可用对话。",
       exitCode: null,
       stderr: "",
     });
@@ -1176,7 +1228,7 @@ startTurnButton.addEventListener("click", async (event) => {
   if (turnOperationThreads.has(nativeThreadId)) return;
   turnOperationThreads.add(nativeThreadId);
   renderState(latestState ?? { state: "TURN_RUNNING", nativeThreadId, activeTurnId: null, localRunId: null, cwd: "", initialized: false, processId: null, processExited: true, exitCode: null, lastError: null });
-  showStatus("Prompt 已交给 Native Turn；等待原生结果…");
+  showStatus("消息已发送，等待回复…");
   const result = await consume("turn.start", api.startTurn(prompt, nativeThreadId));
   turnOperationThreads.delete(nativeThreadId);
   if (result) {
@@ -1207,7 +1259,12 @@ startTurnButton.addEventListener("click", async (event) => {
     }
   }
 });
-document.querySelector<HTMLButtonElement>("#clear-events")!.addEventListener("click", () => { eventsElement.textContent = ""; });
+document.querySelector<HTMLButtonElement>("#clear-events")!.addEventListener("click", () => {
+  const nativeThreadId = diagnosticsDisplayThreadId();
+  if (nativeThreadId) diagnosticsLogsByThread.delete(nativeThreadId);
+  else globalDiagnosticsLog = "";
+  renderDiagnosticsLog();
+});
 
 function setMapOpen(open: boolean): void {
   mapOpen = open;
@@ -1243,7 +1300,7 @@ pauseMapButton.addEventListener("click", async () => {
   if (result) {
     mapStatus = result;
     renderMapPanel();
-    showStatus("Conversation Map 已暂停；Native Thread 仍可继续，后续变化会标记 dirty。");
+    showStatus("Conversation Map 已暂停；当前对话仍可继续，后续变化会标记 dirty。");
   }
 });
 resumeMapButton.addEventListener("click", async () => {
@@ -1269,7 +1326,7 @@ pauseProjectMapButton.addEventListener("click", async () => {
   if (result) {
     projectMapStatus = result;
     renderMapPanel();
-    showStatus("Project Map 已暂停；成员 Thread 仍可继续，变化会标记 dirty。");
+    showStatus("Project Map 已暂停；成员对话仍可继续，后续变化会标记 dirty。");
   }
 });
 resumeProjectMapButton.addEventListener("click", async () => {
