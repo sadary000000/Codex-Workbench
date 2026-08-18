@@ -30,6 +30,7 @@ interface FakeState {
   turnStartThreadId?: string;
   threadReadUnmaterialized?: boolean;
   threadReadNoRollout?: boolean;
+  threadResumeWriterConflict?: boolean;
 }
 
 class FakeClient implements AppServerClientPort {
@@ -76,6 +77,13 @@ class FakeClient implements AppServerClientPort {
       return { thread: { id: nativeThreadId } };
     }
     if (method === "thread/resume") {
+      if (this.state.threadResumeWriterConflict) {
+        throw new AppServerClientError(
+          "APP_SERVER_PROTOCOL_REJECTED",
+          "JSON-RPC -32600: thread-store conflict",
+          { stderr: "thread already has an active writer" },
+        );
+      }
       this.state.activeThreadId = this.mismatch ? "other-thread" : params.threadId;
       return { thread: { id: this.state.activeThreadId } };
     }
@@ -350,6 +358,29 @@ test("rejects a silently replaced nativeThreadId on resume", async () => {
     clientFactory: (_options) => new FakeClient(first.state, true),
   });
   await assert.rejects(resumed.start(), (error: any) => error?.code === "THREAD_ID_MISMATCH");
+});
+
+test("preserves the previous projection state when resume hits a Writer Conflict", async () => {
+  const first = await createRuntime();
+  await first.runtime.start();
+  await first.runtime.close();
+  first.state.threadResumeWriterConflict = true;
+
+  const resumed = new NativeThreadRuntime({
+    cwd: "C:/fake/project",
+    stateFile: first.stateFile,
+    persistence: first.persistence,
+    clientFactory: (_options) => new FakeClient(first.state),
+  });
+  await assert.rejects(
+    resumed.resume("native-thread"),
+    (error: any) => error?.code === "APP_SERVER_PROTOCOL_REJECTED",
+  );
+  const projection = await first.persistence.getThreadProjection("native-thread");
+  assert.equal(projection?.lastKnownState, "ready");
+  assert.equal(projection?.lastError?.code, "WRITER_CONFLICT");
+  await resumed.close();
+  assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownState, "ready");
 });
 
 test("refuses to create a replacement Thread for an invalid persisted binding", async () => {

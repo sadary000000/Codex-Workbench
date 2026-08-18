@@ -52,6 +52,24 @@ test("persists Projects, multiple ThreadProjections, and Standalone Threads", as
   assert.equal((await store.listThreads(secondProject.projectId)).length, 0);
 });
 
+test("deletes one orphan Thread projection together with unrecoverable prompts", async () => {
+  const { store } = await createStore();
+  const project = await store.createProject({ name: "Orphan", cwd: "C:/orphan" });
+  await store.ensureThreadProjection({ nativeThreadId: "orphan-thread", cwd: project.cwd, projectId: project.projectId });
+  await store.ensureThreadProjection({ nativeThreadId: "survivor-thread", cwd: project.cwd, projectId: project.projectId });
+  await store.beginPrompt({ localRunId: "orphan-prompt", nativeThreadId: "orphan-thread", prompt: "cannot recover" });
+  await store.beginPrompt({ localRunId: "survivor-prompt", nativeThreadId: "survivor-thread", prompt: "keep" });
+
+  const removed = await store.deleteThreadProjection("orphan-thread");
+
+  assert.equal(removed?.nativeThreadId, "orphan-thread");
+  assert.equal(await store.getThreadProjection("orphan-thread"), null);
+  assert.deepEqual((await store.listThreads(project.projectId)).map((thread) => thread.nativeThreadId), ["survivor-thread"]);
+  assert.deepEqual(await store.listRecoverablePrompts("orphan-thread"), []);
+  assert.equal((await store.listRecoverablePrompts("survivor-thread"))[0]?.prompt, "keep");
+  assert.equal(await store.deleteThreadProjection("orphan-thread"), null);
+});
+
 test("preserves Prompt recovery until an explicit clear", async () => {
   const { store } = await createStore();
   const project = await store.createProject({ name: "Prompt", cwd: "C:/prompt" });

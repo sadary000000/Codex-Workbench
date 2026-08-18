@@ -16,6 +16,27 @@ export function isWriterConflictError(error: unknown): boolean {
   return /thread-store\s+conflict|already\s+has\s+an\s+active\s+writer|active\s+writer/i.test(detail);
 }
 
+/**
+ * A persisted Workbench projection can outlive the native Codex rollout it
+ * points at. This is a terminal identity failure for that local projection,
+ * unlike a transport failure or a temporary writer conflict.
+ */
+export function isNoRolloutError(error: unknown): boolean {
+  const candidate = error as {
+    code?: unknown;
+    message?: unknown;
+    stderr?: unknown;
+    rpcError?: { message?: unknown } | null;
+  } | null;
+  if (candidate?.code !== "APP_SERVER_PROTOCOL_REJECTED") return false;
+  const detail = [
+    candidate.message,
+    candidate.stderr,
+    candidate.rpcError?.message,
+  ].map((value) => String(value ?? "")).join("\n");
+  return /\bno\s+rollout\s+found(?:\s+for\s+thread(?:\s+id)?\b)?/i.test(detail);
+}
+
 export function errorInfo(error: unknown): RuntimeErrorInfo {
   const candidate = error as {
     name?: unknown;

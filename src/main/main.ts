@@ -3,11 +3,11 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
 import { MAP_DYNAMIC_TOOL_SPEC, MAP_TOOL_CALL_METHOD } from "../codex/map-tool.ts";
-import { errorInfo } from "../shared/error-info.ts";
+import { errorInfo, isNoRolloutError } from "../shared/error-info.ts";
 import { createLogger, logError, type Logger } from "../shared/logger.ts";
 import { isNativeApprovalMethod, isValidNativeApprovalResponse, noAdditionalPermissions } from "../shared/native-approval.ts";
 import { PersistenceStoreError, V1PersistenceStore } from "../shared/persistence-store.ts";
-import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
+import { clearThreadBindingIfMatches, inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
 import type { JsonRpcMessage, RuntimeSnapshot, ThreadNavigationResult } from "../shared/runtime-types.ts";
 import { ConversationMapCoordinator } from "./map-coordinator.ts";
 import { ProjectMapManager } from "./project-map-manager.ts";
@@ -272,10 +272,57 @@ function projectionNotFound(nativeThreadId: string): PersistenceStoreError {
   );
 }
 
+function missingNativeThreadError(nativeThreadId: string, cause: unknown): Error & { code: string } {
+  const error = new Error(`Native Thread 已不存在，Workbench 已清理本地孤儿记录：${nativeThreadId}`) as Error & { code: string };
+  error.code = "NATIVE_THREAD_MISSING";
+  error.cause = errorInfo(cause).message;
+  return error;
+}
+
+async function removeMissingNativeThread(nativeThreadId: string): Promise<void> {
+  const id = nativeThreadId.trim();
+  if (!id) return;
+  let cleanupError: unknown = null;
+  const rememberCleanupError = (error: unknown): void => {
+    if (!cleanupError) cleanupError = error;
+  };
+  cancelPendingNativeApprovals(id);
+  try {
+    // Close before deleting the projection: NativeThreadRuntime.close() writes
+    // its final lifecycle state, so deletion must be the last local mutation.
+    await runtimes.close(id);
+  } catch (error) {
+    logger.warn("missing_native_thread_runtime_close_failed", { nativeThreadId: id, error: errorInfo(error).message });
+    rememberCleanupError(error);
+  }
+  let projectionCleanupSucceeded = false;
+  try {
+    await getPersistence().deleteThreadProjection(id);
+    projectionCleanupSucceeded = true;
+  } catch (error) {
+    logger.error("missing_native_thread_projection_delete_failed", { nativeThreadId: id, error: errorInfo(error).message });
+    rememberCleanupError(error);
+  }
+  if (projectionCleanupSucceeded) {
+    try {
+      await clearThreadBindingIfMatches(join(app.getPath("userData"), "native-thread-binding.json"), id);
+    } catch (error) {
+      logger.warn("missing_native_thread_binding_clear_failed", { nativeThreadId: id, error: errorInfo(error).message });
+      rememberCleanupError(error);
+    }
+  }
+  if (currentNativeThreadId === id) currentNativeThreadId = null;
+  if (cleanupError) throw cleanupError;
+}
+
+async function cleanupMissingNativeThread(nativeThreadId: string, cause: unknown): Promise<never> {
+  await removeMissingNativeThread(nativeThreadId);
+  throw missingNativeThreadError(nativeThreadId, cause);
+}
+
 async function selectNativeThread(nativeThreadId: string): Promise<void> {
   const projection = await getPersistence().getThreadProjection(nativeThreadId);
   if (!projection) throw projectionNotFound(nativeThreadId);
-  currentNativeThreadId = nativeThreadId;
   const now = new Date().toISOString();
   await saveThreadBinding(join(app.getPath("userData"), "native-thread-binding.json"), {
     version: 1,
@@ -284,6 +331,7 @@ async function selectNativeThread(nativeThreadId: string): Promise<void> {
     createdAt: now,
     updatedAt: now,
   });
+  currentNativeThreadId = nativeThreadId;
 }
 
 async function loadRuntimeForThread(nativeThreadId: string): Promise<NativeThreadRuntime> {
@@ -315,9 +363,14 @@ async function startCurrentRuntime(): Promise<NativeThreadRuntime> {
     error.code = "THREAD_BINDING_MISSING";
     throw error;
   }
-  const runtime = await loadRuntimeForThread(nativeThreadId);
-  currentNativeThreadId = nativeThreadId;
-  return runtime;
+  try {
+    const runtime = await loadRuntimeForThread(nativeThreadId);
+    currentNativeThreadId = nativeThreadId;
+    return runtime;
+  } catch (error) {
+    if (isNoRolloutError(error)) return cleanupMissingNativeThread(nativeThreadId, error);
+    throw error;
+  }
 }
 
 async function switchNativeThread(nativeThreadId: string): Promise<ThreadNavigationResult> {
@@ -325,11 +378,16 @@ async function switchNativeThread(nativeThreadId: string): Promise<ThreadNavigat
   if (!id) throw new Error("nativeThreadId is required for switch.");
   const projection = await getPersistence().getThreadProjection(id);
   if (!projection) throw projectionNotFound(id);
-  const candidate = await loadRuntimeForThread(id);
-  await selectNativeThread(id);
-  const currentProjection = await getPersistence().getThreadProjection(id);
-  if (!currentProjection) throw projectionNotFound(id);
-  return { snapshot: candidate.snapshot(), projection: currentProjection };
+  try {
+    const candidate = await loadRuntimeForThread(id);
+    await selectNativeThread(id);
+    const currentProjection = await getPersistence().getThreadProjection(id);
+    if (!currentProjection) throw projectionNotFound(id);
+    return { snapshot: candidate.snapshot(), projection: currentProjection };
+  } catch (error) {
+    if (isNoRolloutError(error)) return cleanupMissingNativeThread(id, error);
+    throw error;
+  }
 }
 
 async function createNativeThread(projectId: string | null): Promise<ThreadNavigationResult> {
@@ -342,16 +400,18 @@ async function createNativeThread(projectId: string | null): Promise<ThreadNavig
     targetProjectId = project.projectId;
   }
   const candidate = createRuntime({ cwd, projectId: targetProjectId });
+  let attachedNativeThreadId: string | null = null;
   try {
     const snapshot = await candidate.startNewThread(targetProjectId);
-    const nativeThreadId = snapshot.nativeThreadId;
-    if (!nativeThreadId) throw new Error("Native Thread creation did not return nativeThreadId.");
-    const projection = await getPersistence().getThreadProjection(nativeThreadId);
-    if (!projection) throw projectionNotFound(nativeThreadId);
-    runtimes.attach(nativeThreadId, candidate);
-    await selectNativeThread(nativeThreadId);
+    attachedNativeThreadId = snapshot.nativeThreadId;
+    if (!attachedNativeThreadId) throw new Error("Native Thread creation did not return nativeThreadId.");
+    const projection = await getPersistence().getThreadProjection(attachedNativeThreadId);
+    if (!projection) throw projectionNotFound(attachedNativeThreadId);
+    runtimes.attach(attachedNativeThreadId, candidate);
+    await selectNativeThread(attachedNativeThreadId);
     return { snapshot, projection };
   } catch (error) {
+    if (attachedNativeThreadId) runtimes.detach(attachedNativeThreadId, candidate);
     await candidate.close().catch(() => undefined);
     throw error;
   }
@@ -550,14 +610,17 @@ function registerIpc(): void {
     }
   });
   ipcMain.handle(IPC.read, async () => {
+    const nativeThreadId = currentNativeThreadId;
     try {
       return ok(await getRuntime().readThread());
     } catch (error) {
+      if (nativeThreadId && isNoRolloutError(error)) return cleanupMissingNativeThread(nativeThreadId, error).catch((missing) => fail(missing));
       return fail(error);
     }
   });
   ipcMain.handle(IPC.turn, async (_event, prompt: unknown, nativeThreadId: unknown) => {
     let activeRuntime: NativeThreadRuntime | null = null;
+    const requestedThreadId = typeof nativeThreadId === "string" && nativeThreadId.trim() ? nativeThreadId.trim() : currentNativeThreadId;
     try {
       activeRuntime = getRuntime(typeof nativeThreadId === "string" ? nativeThreadId : null);
       const operation = activeRuntime.startTurn(typeof prompt === "string" ? prompt : "");
@@ -567,13 +630,17 @@ function registerIpc(): void {
       return ok(result);
     } catch (error) {
       if (activeRuntime) send(IPC.state, activeRuntime.snapshot());
+      const failedThreadId = activeRuntime?.nativeThreadId ?? requestedThreadId;
+      if (failedThreadId && isNoRolloutError(error)) return cleanupMissingNativeThread(failedThreadId, error).catch((missing) => fail(missing));
       return fail(error);
     }
   });
   ipcMain.handle(IPC.interrupt, async (_event, nativeThreadId: unknown) => {
+    const requestedThreadId = typeof nativeThreadId === "string" && nativeThreadId.trim() ? nativeThreadId.trim() : currentNativeThreadId;
     try {
       return ok(await getRuntime(typeof nativeThreadId === "string" ? nativeThreadId : null).interruptTurn());
     } catch (error) {
+      if (requestedThreadId && isNoRolloutError(error)) return cleanupMissingNativeThread(requestedThreadId, error).catch((missing) => fail(missing));
       return fail(error);
     }
   });

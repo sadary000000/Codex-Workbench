@@ -7,7 +7,7 @@ import {
   type AppServerClientPort,
 } from "./app-server-client.ts";
 import { validateInitializeResult } from "./app-server-capabilities.ts";
-import { asError, errorInfo } from "../shared/error-info.ts";
+import { asError, errorInfo, isWriterConflictError } from "../shared/error-info.ts";
 import { V1PersistenceStore, type PromptRecoveryPatch, type ThreadProjectionPatch } from "../shared/persistence-store.ts";
 import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
 import { parseThreadReadResponse } from "../shared/thread-read-model.ts";
@@ -384,7 +384,11 @@ export class NativeThreadRuntime {
       if (previousState !== "RECOVERY_REQUIRED" && previousState !== "DISCONNECTED") this.stateValue = "FAILED";
       const failureState = this.stateValue as RuntimeState;
       await this.safePersistProjection({
-        lastKnownState: failureState === "DISCONNECTED" ? "disconnected" : failureState === "RECOVERY_REQUIRED" ? "recovery_required" : "failed",
+        ...(isWriterConflictError(normalized)
+          ? {}
+          : {
+              lastKnownState: failureState === "DISCONNECTED" ? "disconnected" : failureState === "RECOVERY_REQUIRED" ? "recovery_required" : "failed",
+            }),
         lastError: details,
       });
       this.closing = true;
@@ -429,7 +433,7 @@ export class NativeThreadRuntime {
       const recoveryRequired = transportRecovery(normalized);
       this.stateValue = recoveryRequired ? "RECOVERY_REQUIRED" : "FAILED";
       await this.safePersistProjection({
-        lastKnownState: recoveryRequired ? "recovery_required" : "failed",
+        ...(isWriterConflictError(normalized) ? {} : { lastKnownState: recoveryRequired ? "recovery_required" : "failed" }),
         lastError: details,
       });
       throw normalized;
@@ -518,7 +522,9 @@ export class NativeThreadRuntime {
       this.lastErrorValue = details;
       const failureState: RuntimeState = this.stateValue;
       await this.safePersistProjection({
-        lastKnownState: failureState === "DISCONNECTED" ? "disconnected" : recoveryRequired ? "recovery_required" : "failed",
+        ...(isWriterConflictError(normalized)
+          ? {}
+          : { lastKnownState: failureState === "DISCONNECTED" ? "disconnected" : recoveryRequired ? "recovery_required" : "failed" }),
         lastKnownTurnId: turnId,
         lastError: details,
       });
@@ -548,7 +554,9 @@ export class NativeThreadRuntime {
         lastError: details,
       });
       await this.safePersistProjection({
-        lastKnownState: transportRecovery(normalized) ? "recovery_required" : "failed",
+        ...(isWriterConflictError(normalized)
+          ? {}
+          : { lastKnownState: transportRecovery(normalized) ? "recovery_required" : "failed" }),
         lastKnownTurnId: turnId,
         lastError: details,
       });
@@ -575,7 +583,7 @@ export class NativeThreadRuntime {
             ? "recovery_required"
             : "ready";
       await this.safePersistProjection({
-        lastKnownState: closeProjectionState,
+        ...(this.lastErrorValue?.code === "WRITER_CONFLICT" && !active ? {} : { lastKnownState: closeProjectionState }),
         lastKnownTurnId: active?.turnId ?? null,
         ...(active ? { lastError: details } : {}),
       });

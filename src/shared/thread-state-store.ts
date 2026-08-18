@@ -65,3 +65,13 @@ export async function saveThreadBinding(filePath: string, binding: NativeThreadB
     throw error;
   }
 }
+
+/** Remove a binding only when it still points to the specified Native Thread. */
+export async function clearThreadBindingIfMatches(filePath: string, nativeThreadId: string): Promise<boolean> {
+  const id = nativeThreadId.trim();
+  if (!id) return false;
+  const inspection = await inspectThreadBinding(filePath);
+  if (inspection.binding?.nativeThreadId !== id) return false;
+  await rm(filePath, { force: true });
+  return true;
+}

@@ -217,14 +217,21 @@ function runtimeIsActive(state: RuntimeSnapshot | undefined | null): boolean {
     || state.state === "WAITING_USER";
 }
 
+function hasSelectedNativeThread(): boolean {
+  const state = latestState;
+  return Boolean(state && state.nativeThreadId) || Boolean(selectedNativeThreadId);
+}
+
 function runtimeDisplayState(thread: ThreadProjection): { className: string; label: string } {
   const runtime = runtimeStates.get(thread.nativeThreadId);
+  if (runtime?.lastError?.code === "WRITER_CONFLICT") return { className: "recovery_required", label: "待重试" };
   if (runtime?.state === "WAITING_USER") return { className: "waiting_user", label: "等待确认" };
   if (runtimeIsActive(runtime)) return { className: "running", label: "运行中" };
   if (runtime?.state === "STARTING") return { className: "starting", label: "启动中" };
   if (runtime?.state === "DISCONNECTED") return { className: "disconnected", label: "已断开" };
   if (runtime?.state === "RECOVERY_REQUIRED") return { className: "recovery_required", label: "需恢复" };
   if (runtime?.state === "FAILED") return { className: "failed", label: "失败" };
+  if (thread.lastError?.code === "WRITER_CONFLICT") return { className: "recovery_required", label: "待重试" };
   return {
     className: thread.lastKnownState,
     label: thread.lastKnownState === "ready" ? "就绪" : thread.lastKnownState,
@@ -839,10 +846,16 @@ async function selectThread(nativeThreadId: string): Promise<void> {
       activateThreadBuffers(result.snapshot.nativeThreadId);
       renderState(result.snapshot);
       renderThreadWorkspace();
-      await loadThreadView();
+      const loaded = await loadThreadView();
       await refreshNavigation();
-      await refreshMapStatus(generation, result.snapshot.nativeThreadId, result.projection.projectId);
-      completed = true;
+      if (loaded) {
+        await refreshMapStatus(generation, result.snapshot.nativeThreadId, result.projection.projectId);
+        completed = true;
+      }
+    } else if (generation === threadViewGeneration) {
+      // A missing native rollout is removed by Main. Refreshing here removes
+      // the orphan row while finally restores the last valid Thread locally.
+      await refreshNavigation();
     }
   } finally {
     if (!completed && generation === threadViewGeneration) {
@@ -887,10 +900,12 @@ async function createNativeThread(projectId: string | null): Promise<void> {
       activateThreadBuffers(result.snapshot.nativeThreadId);
       renderState(result.snapshot);
       renderThreadWorkspace();
-      await loadThreadView();
+      const loaded = await loadThreadView();
       await refreshNavigation();
-      await refreshMapStatus(generation, result.snapshot.nativeThreadId, result.projection.projectId);
-      completed = true;
+      if (loaded) {
+        await refreshMapStatus(generation, result.snapshot.nativeThreadId, result.projection.projectId);
+        completed = true;
+      }
     }
   } finally {
     if (!completed && generation === threadViewGeneration) {
@@ -902,6 +917,36 @@ async function createNativeThread(projectId: string | null): Promise<void> {
       if (previousState) renderState(previousState);
       else renderThreadWorkspace();
     }
+    threadTransitionInFlight = false;
+  }
+}
+
+async function startPersistedThread(silentExpectedMissing: boolean): Promise<void> {
+  if (threadTransitionInFlight) {
+    if (!silentExpectedMissing) showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换 Native Thread，请等待当前切换完成。", exitCode: null, stderr: "" });
+    return;
+  }
+  if (silentExpectedMissing && hasSelectedNativeThread()) return;
+  threadTransitionInFlight = true;
+  try {
+    const response = await api.startThread();
+    appendOutput("runtime.start", response);
+    if (!response.ok) {
+      const expectedMissing = response.error?.code === "THREAD_BINDING_MISSING" || response.error?.code === "THREAD_BINDING_INVALID";
+      if (!silentExpectedMissing || !expectedMissing) showError(response.error);
+      await refreshNavigation();
+      return;
+    }
+    const result = response.result;
+    if (!result) return;
+    showStatus("上次 Native Thread 已恢复");
+    renderState(result);
+    await loadThreadView();
+    await refreshNavigation();
+  } catch (error) {
+    appendOutput("runtime.start exception", error);
+    showError({ name: "RendererError", code: "RENDERER_OPERATION_FAILED", message: String(error), exitCode: null, stderr: "" });
+  } finally {
     threadTransitionInFlight = false;
   }
 }
@@ -1009,12 +1054,7 @@ projectCreateForm.addEventListener("submit", (event) => {
 projectCreateCancelButton.addEventListener("click", () => projectCreateDialog.close());
 writerConflictCloseButton.addEventListener("click", () => writerConflictDialog.close());
 startThreadButton.addEventListener("click", async () => {
-  const result = await consume("runtime.start", api.startThread());
-  if (result) {
-    renderState(result);
-    await loadThreadView();
-    await refreshNavigation();
-  }
+  await startPersistedThread(false);
 });
 document.querySelector<HTMLButtonElement>("#resume-thread")!.addEventListener("click", async () => {
   const result = await consume("native-thread.resume", api.resumeThread(resumeElement.value));
@@ -1220,11 +1260,14 @@ api.onState((state) => {
   renderState(state);
   if (state.nativeThreadId === selectedNativeThreadId && !state.activeTurnId && state.state === "READY") renderThreadWorkspace();
 });
-void Promise.all([
-  consume("runtime.state", api.getState()).then(async (state) => {
-    if (!state) return;
+void (async () => {
+  const state = await consume("runtime.state", api.getState());
+  if (state) {
     renderState(state);
     if (state.nativeThreadId) await loadThreadView();
-  }),
-  refreshNavigation(),
-]);
+  }
+  await refreshNavigation();
+  if (!hasSelectedNativeThread()) {
+    await startPersistedThread(true);
+  }
+})();
