@@ -159,7 +159,7 @@ Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth�
 
 - secret scan PASS；没有发现 API key、private key、Token、Cookie、password 或测试凭据被纳入变更。
 - 用户未提交文件保持原状态且未 add：`dist-stage-a/`、`指导文档/Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、`指导文档/Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.2.docx`。
-- 旧 donor `D:\办公\AI\Codex_Workbench` 只读、未修改；Auto_Agent 旧项目未作为产品工作目录、未修改。
+- 旧 donor `D:\办公\AI\Codex_Workbench` 只读、未修改；它保留进入本轮前的既有 dirty baseline，本轮未执行 reset、clean、stash、checkout 或 commit。Auto_Agent 旧项目未作为产品工作目录、未修改。
 - 本轮没有加入 Workflow、Review、Git Workbench、Browser、Multi-Agent 产品层、Prompt Templates、Attachment 假实现、Map semantic redesign 或 Project Dashboard。
 
 ## 12. subagents
@@ -269,7 +269,7 @@ package:
 security: PASS
 git_scope: PASS; only intended product fix/docs commits, user files untouched
 local_user_files_status: preserved and untracked; not added/modified/deleted
-legacy_project_status: D:\办公\AI\Codex_Workbench read-only and unchanged
+legacy_project_status: D:\办公\AI\Codex_Workbench read-only; pre-existing dirty baseline preserved; no reset/clean/stash/checkout/commit
 subagents: Nash/Poincare/Singer/Bacon/Kuhn all naturally completed, reviewed, adopted as applicable, then closed
 running_subagents_at_gate: 0
 accepted_limitations: legacy sparse-state migration edges, no Electron GUI harness, maintenance sidecar boundary, package provenance not embedded
