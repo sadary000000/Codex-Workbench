@@ -21,16 +21,23 @@
         --accent: #10a37f;
         --danger: #ef9c93;
         --content-max-width: 900px;
+        --sidebar-width: clamp(220px, 22vw, 256px);
+        --panel-width: 328px;
       }
       * { box-sizing: border-box; }
       body { margin: 0; min-height: 100vh; background: #212121; }
       button, input, textarea { font: inherit; }
       button { border: 0; color: inherit; cursor: pointer; }
       button:disabled { cursor: not-allowed; opacity: .45; }
-      .app-shell { display: grid; grid-template-columns: 276px minmax(0, 1fr) 0; min-height: 100vh; transition: grid-template-columns .16s ease; }
-      .app-shell.map-open { grid-template-columns: 276px minmax(0, 1fr) 328px; }
-      .sidebar { display: flex; flex-direction: column; min-width: 0; padding: 12px 10px; background: var(--sidebar); border-right: 1px solid #292929; }
+      .app-shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0; min-height: 100vh; overflow: hidden; transition: grid-template-columns .16s ease; }
+      .app-shell.map-open { grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--panel-width); }
+      .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) 0; }
+      .app-shell.sidebar-collapsed.map-open { grid-template-columns: 0 minmax(0, 1fr) var(--panel-width); }
+      .sidebar { display: flex; flex-direction: column; min-width: 0; min-height: 100vh; overflow: hidden; padding: 12px 10px; background: var(--sidebar); border-right: 1px solid #292929; transition: opacity .12s ease, padding .16s ease; }
+      .app-shell.sidebar-collapsed .sidebar { visibility: hidden; padding-inline: 0; border-right: 0; opacity: 0; pointer-events: none; }
       .brand { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 0 10px 10px; font-size: 14px; font-weight: 650; }
+      .brand-identity { display: flex; min-width: 0; align-items: center; gap: 9px; overflow: hidden; }
+      .brand-identity > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .brand-mark { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 6px; background: #ececec; color: #171717; font-size: 12px; font-weight: 800; }
       .brand-subtitle { color: #8f8f8f; font-size: 11px; font-weight: 400; }
       .sidebar-actions { display: grid; gap: 6px; margin-bottom: 18px; }
@@ -39,13 +46,13 @@
       .sidebar-action.primary { background: #2c2c2c; }
       .sidebar-action.primary:hover { background: #3a3a3a; }
       .action-icon { width: 16px; color: #bdbdbd; text-align: center; }
-      #navigation { min-height: 0; overflow: auto; padding-right: 2px; }
+      #navigation { min-height: 0; min-width: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; padding-right: 2px; scrollbar-gutter: stable; }
       .sidebar-section { margin-bottom: 18px; }
       .sidebar-section-header { padding: 0 10px 7px; }
       .sidebar-section-header h2 { margin: 0; color: #858585; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
       .sidebar-section-body { display: grid; gap: 2px; }
       .sidebar-empty { display: block; padding: 5px 10px; color: #6f6f6f; font-size: 12px; }
-      .thread-entry-row { display: grid; grid-template-columns: minmax(0, 1fr) 28px; align-items: center; gap: 2px; }
+      .thread-entry-row { display: grid; grid-template-columns: minmax(0, 1fr) 0; align-items: center; min-width: 0; gap: 2px; }
       .thread-entry { display: flex; align-items: center; justify-content: space-between; min-width: 0; gap: 8px; width: 100%; padding: 8px 10px; border-radius: 7px; background: transparent; color: #d6d6d6; text-align: left; }
       .thread-entry[aria-current="page"] { background: var(--sidebar-active); color: #fff; }
       .thread-entry-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
@@ -54,10 +61,12 @@
       .state-ready { color: #999; }
       .state-running, .state-starting, .state-waiting_user { color: #e5bd70; }
       .state-disconnected, .state-recovery_required, .state-failed, .state-unavailable { color: #e28b7e; }
-      .pin-button { width: 28px; height: 28px; border-radius: 6px; background: transparent; color: #8b8b8b; }
+      .pin-button { width: 0; height: 28px; overflow: hidden; padding: 0; border-radius: 6px; background: transparent; color: #8b8b8b; opacity: 0; transition: width .12s ease, opacity .12s ease; }
+      .thread-entry-row:hover, .thread-entry-row:focus-within, .thread-entry-row:has(.thread-entry[aria-current="page"]) { grid-template-columns: minmax(0, 1fr) 24px; }
+      .thread-entry-row:hover .pin-button, .thread-entry-row:focus-within .pin-button, .thread-entry-row:has(.thread-entry[aria-current="page"]) .pin-button { width: 24px; opacity: 1; }
       .pin-button:hover { background: var(--sidebar-hover); color: #f2c66d; }
-      .project-group { margin: 0 0 2px; }
-      .project-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 4px; }
+      .project-group { min-width: 0; margin: 0 0 2px; }
+      .project-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; min-width: 0; gap: 4px; }
       .project-group summary { display: flex; align-items: center; min-height: 32px; padding: 4px 8px 4px 10px; border-radius: 7px; color: #d8d8d8; cursor: pointer; list-style-position: outside; }
       .project-group summary:hover { background: var(--sidebar-hover); }
       .project-group summary::marker { color: #777; }
@@ -70,7 +79,8 @@
       .project-group > .thread-entry-row, .project-group > .sidebar-empty { margin-left: 16px; }
       .sidebar-footer { margin-top: auto; padding: 12px 10px 2px; color: #666; font-size: 11px; line-height: 1.45; }
       main { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; height: 100vh; min-width: 0; min-height: 0; overflow: hidden; }
-      .workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 78px; padding: 0 30px; border-bottom: 1px solid var(--border); }
+      .workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 72px; padding: 0 clamp(16px, 3vw, 30px); border-bottom: 1px solid var(--border); }
+      .workspace-header-main { min-width: 0; }
       .eyebrow { color: #8d8d8d; font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
       h1 { margin: 4px 0 0; font-size: 20px; font-weight: 600; }
       .thread-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; color: #8c8c8c; font-size: 11px; }
@@ -83,6 +93,7 @@
       .runtime-pill.runtime-error { border-color: #744844; color: var(--danger); }
       .icon-button { width: 32px; height: 32px; border: 1px solid #444; border-radius: 7px; background: #2d2d2d; color: #d8d8d8; }
       .icon-button:hover { background: #3a3a3a; }
+      .sidebar-close { flex: 0 0 auto; width: 28px; height: 28px; margin-left: auto; }
       .status-banner { min-height: 34px; margin: 12px 30px 0; padding: 8px 12px; border-radius: 7px; background: #292929; color: #a9a9a9; font-size: 12px; }
       .status-banner.error { color: var(--danger); }
       .workspace-conversation { position: relative; display: flex; min-height: 0; overflow: hidden; }
@@ -126,24 +137,32 @@
       .approval-button.primary:hover { background: #1d7a5e; }
       .approval-button.danger { color: #f0aaa2; }
       .jump-latest { position: absolute; z-index: 2; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 7px 12px; border: 1px solid #4c6f61; border-radius: 999px; background: #193b30; color: #b9e8d3; font-size: 12px; }
-      .composer { display: grid; gap: 8px; min-height: 0; max-width: var(--content-max-width); width: calc(100% - 60px); margin: 0 auto 18px; padding: 10px; border: 1px solid #484848; border-radius: 12px; background: #2b2b2b; box-shadow: 0 7px 28px #0003; }
+      .composer { display: grid; gap: 7px; min-height: 0; max-width: var(--content-max-width); width: calc(100% - clamp(32px, 6vw, 60px)); margin: 0 auto 14px; padding: 9px; border: 1px solid #484848; border-radius: 13px; background: #2b2b2b; box-shadow: 0 7px 28px #0003; }
       textarea, input { width: 100%; border: 1px solid #4a4a4a; border-radius: 7px; background: #1d1d1d; color: #eee; padding: 10px; outline: none; }
       textarea:focus, input:focus { border-color: #6b8f82; box-shadow: 0 0 0 2px #315d4d55; }
-      textarea { min-height: 74px; max-height: 220px; resize: vertical; }
+      textarea { min-height: 58px; max-height: 240px; resize: vertical; }
       .composer-toolbar, .row { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
-      .composer-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
-      .composer-option { display: grid; gap: 3px; min-width: 0; }
-      .composer-option label { color: #888; font-size: 10px; }
-      .composer-option select { min-width: 0; width: 100%; padding: 6px 7px; border: 1px solid #464646; border-radius: 6px; background: #1d1d1d; color: #ddd; font-size: 11px; }
-      .composer-capability-note { color: #777; font-size: 10px; }
-      .composer-hint { flex: 1; color: #888; font-size: 11px; }
+      .composer-toolbar { min-height: 30px; }
+      .composer-tools { display: flex; min-width: 0; flex: 1 1 auto; flex-wrap: wrap; gap: 6px; align-items: center; }
+      .composer-popover { position: relative; min-width: 0; }
+      .composer-popover > summary { display: inline-flex; align-items: center; min-height: 28px; max-width: 100%; padding: 5px 8px; border: 1px solid #454545; border-radius: 7px; background: #303030; color: #d6d6d6; cursor: pointer; font-size: 11px; list-style: none; }
+      .composer-popover > summary::-webkit-details-marker { display: none; }
+      .composer-popover > summary::after { content: "⌄"; margin-left: 6px; color: #858585; }
+      .composer-popover[open] > summary, .composer-popover > summary:hover { border-color: #608576; background: #263b33; color: #e7f4ee; }
+      .composer-popover-menu { position: absolute; z-index: 10; bottom: calc(100% + 8px); left: 0; display: grid; min-width: min(280px, calc(100vw - 32px)); gap: 9px; padding: 11px; border: 1px solid #4d4d4d; border-radius: 10px; background: #242424; box-shadow: 0 12px 30px #0008; }
+      .composer-popover-menu label { display: grid; gap: 4px; color: #999; font-size: 10px; }
+      .composer-popover-menu select { min-width: 0; width: 100%; padding: 7px 8px; border: 1px solid #464646; border-radius: 6px; background: #1d1d1d; color: #ddd; font-size: 11px; }
+      .composer-capability-note { display: none; color: #e7b9ae; font-size: 10px; line-height: 1.4; }
+      .composer-capability-note:not([hidden]) { display: block; }
+      .composer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+      .composer-actions > button { min-width: 58px; }
       .debug-button { padding: 7px 10px; border: 1px solid #4b4b4b; border-radius: 6px; background: #343434; color: #eee; font-size: 12px; }
       .debug-button:hover { background: #414141; }
       .send-button { background: #10a37f; color: #fff; }
       .send-button:hover { background: #13b88e; }
       .stop-button { color: #f0aaa2; }
-      .debug-panel { min-height: 0; max-height: min(32vh, 360px); margin: 0 30px 18px; overflow: auto; border-top: 1px solid #333; color: #aaa; font-size: 12px; }
-      .debug-panel > summary { padding: 10px 0; cursor: pointer; }
+      .debug-panel { min-height: 0; max-height: min(32vh, 360px); margin: 0 clamp(16px, 3vw, 30px) 14px; overflow: auto; border-top: 1px solid #333; color: #aaa; font-size: 12px; }
+      .debug-panel > summary { padding: 8px 0; cursor: pointer; color: #8faaa0; }
       .debug-grid { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 14px; padding-bottom: 12px; }
       .diagnostics-index { display: grid; gap: 8px; }
       .diagnostics-index > summary, .diagnostics-raw > summary { cursor: pointer; }
@@ -159,7 +178,7 @@
       label { color: #b5b5b5; font-size: 12px; }
       .value { color: #9fd6c0; word-break: break-all; }
       pre#events { min-height: 160px; max-height: 330px; margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word; border-radius: 7px; padding: 11px; background: #1c1c1c; color: #c5d9d0; font: 11px/1.5 ui-monospace, Consolas, monospace; }
-      .map-panel { min-width: 0; overflow: hidden; padding: 14px 12px; border-left: 1px solid var(--border); background: #1b1b1b; }
+      .map-panel { min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 14px 12px; border-left: 1px solid var(--border); background: #1b1b1b; }
       .map-panel[hidden] { display: none; }
       .map-panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
       .map-panel-title { margin: 0; color: #e4e4e4; font-size: 14px; font-weight: 650; }
@@ -205,31 +224,36 @@
       .map-source:hover, .map-source:focus-visible { border-color: #6eaa8c; outline: none; }
       .map-node-children { display: grid; gap: 3px; margin-left: 16px; padding-left: 6px; border-left: 1px solid #333; }
       .map-empty { padding: 18px 8px; color: #777; font-size: 12px; line-height: 1.5; }
-      @media (max-width: 860px) {
-        .app-shell { grid-template-columns: 236px minmax(0, 1fr); }
-        .workspace-header, .status-banner, .debug-panel { padding-left: 16px; padding-right: 16px; margin-left: 16px; margin-right: 16px; }
-        .workspace-conversation { margin: 0 16px; }
-        #thread-workspace { padding-left: 0; padding-right: 0; }
-        .workspace-header { margin: 0; }
-        .composer { width: calc(100% - 32px); }
+      @media (max-width: 1100px) {
+        .app-shell.map-open, .app-shell.sidebar-collapsed.map-open { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
+        .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+        .map-panel { position: fixed; z-index: 6; inset: 0 0 0 auto; width: min(88vw, var(--panel-width)); box-shadow: -14px 0 30px #0008; }
         .debug-grid { grid-template-columns: 1fr; }
       }
-      @media (max-width: 620px) {
-        .app-shell { grid-template-columns: 1fr; }
-        .sidebar { max-height: 42vh; border-right: 0; border-bottom: 1px solid #292929; }
-        #navigation { max-height: 25vh; }
+      @media (max-width: 720px) {
+        .app-shell, .app-shell.map-open, .app-shell.sidebar-collapsed, .app-shell.sidebar-collapsed.map-open { grid-template-columns: 1fr; }
+        .sidebar { position: fixed; z-index: 7; inset: 0 auto 0 0; width: min(84vw, 280px); min-height: 100vh; border-right: 1px solid #292929; box-shadow: 14px 0 30px #0008; transform: translateX(0); }
+        .app-shell.sidebar-collapsed .sidebar { transform: translateX(-105%); }
+        #navigation { max-height: none; }
         main { height: 100vh; }
-        .workspace-header { align-items: flex-start; flex-direction: column; gap: 10px; padding-top: 16px; padding-bottom: 16px; }
-        .header-actions { width: 100%; justify-content: flex-end; }
-        .app-shell.map-open { grid-template-columns: 1fr; }
-        .map-panel { position: fixed; z-index: 4; inset: 0 0 0 auto; width: min(88vw, 328px); box-shadow: -14px 0 30px #0008; }
+        .workspace-header { min-height: 66px; }
+        .workspace-header-main { max-width: calc(100% - 2px); }
+        .header-actions { gap: 5px; }
+        .composer { width: calc(100% - 24px); }
+        .composer-tools { flex-basis: 100%; order: 2; }
+        .composer-actions { margin-left: auto; }
+        .composer-popover-menu { position: fixed; right: 12px; bottom: 76px; left: 12px; width: auto; }
+        .sidebar-close { display: inline-grid; }
+      }
+      @media (min-width: 721px) {
+        .sidebar-close { display: none; }
       }
     </style>
   </head>
   <body>
     <div id="app-shell" class="app-shell">
-      <aside class="sidebar" aria-label="对话导航">
-        <div class="brand"><span class="brand-mark">C</span><span>Codex Workbench <span class="brand-subtitle">V1</span></span></div>
+      <aside id="sidebar" class="sidebar" aria-label="对话导航">
+        <div class="brand"><span class="brand-identity"><span class="brand-mark">C</span><span>Codex Workbench <span class="brand-subtitle">V1</span></span></span><button id="sidebar-close" class="icon-button sidebar-close" type="button" title="收起左栏" aria-label="收起左栏">×</button></div>
         <div class="sidebar-actions">
           <button id="new-standalone-thread" class="sidebar-action primary" type="button"><span class="action-icon">＋</span><span>新建 Thread</span></button>
           <button id="new-project" class="sidebar-action" type="button"><span class="action-icon">▦</span><span>新建 Project</span></button>
@@ -239,12 +263,12 @@
       </aside>
       <main>
         <header class="workspace-header">
-          <div>
+          <div class="workspace-header-main">
             <div class="eyebrow">Codex Thread</div>
             <h1 id="selected-thread">未选择对话</h1>
             <div class="thread-meta"><span id="thread-kind">对话</span></div>
           </div>
-          <div class="header-actions"><span id="runtime-state" class="runtime-pill" role="status" aria-live="polite" hidden></span><button id="rename-thread" class="icon-button" type="button" title="重命名 Thread" aria-label="重命名 Thread" disabled>✎</button><button id="toggle-map" class="icon-button" type="button" title="打开 Conversation Map" aria-expanded="false" aria-controls="map-panel">⌁</button><button id="read-thread" class="icon-button" type="button" title="重新读取对话">↻</button></div>
+          <div class="header-actions"><button id="toggle-sidebar" class="icon-button" type="button" title="隐藏左栏" aria-label="隐藏左栏" aria-expanded="true" aria-controls="sidebar">☰</button><span id="runtime-state" class="runtime-pill" role="status" aria-live="polite" hidden></span><button id="rename-thread" class="icon-button" type="button" title="重命名 Thread" aria-label="重命名 Thread" disabled>✎</button><button id="toggle-map" class="icon-button" type="button" title="打开 Conversation Map" aria-expanded="false" aria-controls="map-panel">⌁</button><button id="read-thread" class="icon-button" type="button" title="重新读取对话">↻</button></div>
         </header>
         <div id="operation-status" class="status-banner" role="status">正在读取对话列表。</div>
         <section class="workspace-conversation" aria-label="Conversation">
@@ -252,15 +276,27 @@
           <button id="jump-latest" class="jump-latest" type="button" hidden>跳到最新</button>
         </section>
         <form id="composer" class="composer">
-          <div class="composer-options" aria-label="本轮 Composer 选项">
-            <div class="composer-option"><label for="composer-model">模型</label><select id="composer-model"><option value="">加载中…</option></select></div>
-            <div class="composer-option"><label for="composer-effort">推理强度</label><select id="composer-effort"><option value="">跟随模型</option></select></div>
-            <div class="composer-option"><label for="composer-approval">审批</label><select id="composer-approval"><option value="never">不请求审批</option><option value="on-request">需要时请求审批</option></select></div>
-            <div class="composer-option"><label for="composer-sandbox">沙箱</label><select id="composer-sandbox"><option value="read-only">只读</option><option value="workspace-write">项目可写</option></select></div>
+          <textarea id="prompt" placeholder="发送消息…" aria-label="Message input"></textarea>
+          <div id="composer-capability-note" class="composer-capability-note" hidden></div>
+          <div class="composer-toolbar">
+            <div class="composer-tools" aria-label="Composer 设置">
+              <details id="composer-model-menu" class="composer-popover">
+                <summary id="composer-model-summary">模型 · 推理</summary>
+                <div class="composer-popover-menu">
+                  <label for="composer-model">模型<select id="composer-model"><option value="">加载中…</option></select></label>
+                  <label for="composer-effort">推理强度<select id="composer-effort"><option value="">跟随模型</option></select></label>
+                </div>
+              </details>
+              <details id="composer-access-menu" class="composer-popover">
+                <summary id="composer-access-summary">访问权限</summary>
+                <div class="composer-popover-menu">
+                  <label for="composer-approval">审批<select id="composer-approval"><option value="never">不请求审批</option><option value="on-request">需要时请求审批</option></select></label>
+                  <label for="composer-sandbox">沙箱<select id="composer-sandbox"><option value="read-only">只读</option><option value="workspace-write">项目可写</option></select></label>
+                </div>
+              </details>
+            </div>
+            <div class="composer-actions"><button id="interrupt-turn" class="debug-button stop-button" type="button" hidden>停止</button><button id="start-turn" class="debug-button send-button" type="submit">发送</button></div>
           </div>
-          <div id="composer-capability-note" class="composer-capability-note">选项仅影响下一条回复；对话身份和历史仍由 Codex App Server 管理。</div>
-          <textarea id="prompt" placeholder="发送消息。断开时，输入会保留用于恢复。" aria-label="Message input"></textarea>
-          <div class="composer-toolbar"><span class="composer-hint">发送消息</span><button id="interrupt-turn" class="debug-button stop-button" type="button">停止</button><button id="start-turn" class="debug-button send-button" type="submit">发送</button></div>
         </form>
         <details id="debug-panel" class="debug-panel">
           <summary>Developer / Diagnostics</summary>

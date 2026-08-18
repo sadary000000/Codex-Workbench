@@ -100,6 +100,7 @@ const selectedThreadElement = document.querySelector<HTMLHeadingElement>("#selec
 const threadKindElement = document.querySelector<HTMLElement>("#thread-kind")!;
 const threadWorkspaceElement = document.querySelector<HTMLElement>("#thread-workspace")!;
 const jumpLatestButton = document.querySelector<HTMLButtonElement>("#jump-latest")!;
+const composerFormElement = document.querySelector<HTMLFormElement>("#composer")!;
 const startThreadButton = document.querySelector<HTMLButtonElement>("#start-thread")!;
 const readThreadButton = document.querySelector<HTMLButtonElement>("#read-thread")!;
 const interruptButton = document.querySelector<HTMLButtonElement>("#interrupt-turn")!;
@@ -109,7 +110,11 @@ const composerEffortElement = document.querySelector<HTMLSelectElement>("#compos
 const composerApprovalElement = document.querySelector<HTMLSelectElement>("#composer-approval")!;
 const composerSandboxElement = document.querySelector<HTMLSelectElement>("#composer-sandbox")!;
 const composerCapabilityNoteElement = document.querySelector<HTMLElement>("#composer-capability-note")!;
+const composerModelSummaryElement = document.querySelector<HTMLElement>("#composer-model-summary")!;
+const composerAccessSummaryElement = document.querySelector<HTMLElement>("#composer-access-summary")!;
 const appShellElement = document.querySelector<HTMLElement>("#app-shell")!;
+const sidebarToggleButton = document.querySelector<HTMLButtonElement>("#toggle-sidebar")!;
+const sidebarCloseButton = document.querySelector<HTMLButtonElement>("#sidebar-close")!;
 const mapPanelElement = document.querySelector<HTMLElement>("#map-panel")!;
 const mapPanelStatusElement = document.querySelector<HTMLElement>("#map-panel-status")!;
 const mapTreeElement = document.querySelector<HTMLElement>("#map-tree")!;
@@ -166,6 +171,7 @@ const writerConflictMessage = document.querySelector<HTMLElement>("#writer-confl
 
 const DRAFT_KEY_PREFIX = "codex-workbench-v1-native-thread-draft:";
 const LEGACY_DRAFT_KEY = "codex-workbench-v1-native-thread-draft";
+const SIDEBAR_COLLAPSED_KEY = "codex-workbench-v1-sidebar-collapsed";
 let latestState: RuntimeSnapshot | null = null;
 let selectedNativeThreadId: string | null = null;
 let threadUnavailableId: string | null = null;
@@ -188,6 +194,7 @@ let globalDiagnosticsLog = "";
 const runtimeStates = new Map<string, RuntimeSnapshot>();
 const turnOperationThreads = new Set<string>();
 const composerCapabilitiesByThread = new Map<string, ComposerCapabilities>();
+const composerCapabilityFailuresByThread = new Set<string>();
 const composerPreferencesByThread = new Map<string, ComposerPreferences>();
 const composerPreferencesLoadedByThread = new Set<string>();
 const unavailableComposerPreferencesByThread = new Map<string, string[]>();
@@ -199,6 +206,7 @@ let mapScope: "conversation" | "project" = "conversation";
 let draftThreadId: string | null | undefined;
 let threadTransitionInFlight = false;
 let threadViewGeneration = 0;
+let interruptInFlight = false;
 
 function composerPreferences(nativeThreadId: string): ComposerPreferences {
   const existing = composerPreferencesByThread.get(nativeThreadId);
@@ -211,6 +219,51 @@ function composerPreferences(nativeThreadId: string): ComposerPreferences {
 function selectedModelCapability(nativeThreadId: string): ComposerCapabilities["models"][number] | null {
   const preferences = composerPreferences(nativeThreadId);
   return composerCapabilitiesByThread.get(nativeThreadId)?.models.find((model) => model.model === preferences.model) ?? null;
+}
+
+function renderComposerSummaries(): void {
+  const model = composerModelElement.selectedOptions[0]?.textContent?.trim();
+  const effort = composerEffortElement.selectedOptions[0]?.textContent?.trim();
+  const modelLabel = model && model !== "等待能力发现" && model !== "无可用模型" ? model : "模型";
+  const effortLabel = effort && effort !== "跟随模型" ? effort : "推理";
+  composerModelSummaryElement.textContent = `${modelLabel} · ${effortLabel}`;
+  composerModelSummaryElement.title = `${modelLabel} · ${effortLabel}`;
+  const approvalLabel = composerApprovalElement.value === "on-request" ? "需批准" : "不请求审批";
+  const sandboxLabel = composerSandboxElement.value === "workspace-write" ? "项目可写" : "只读";
+  composerAccessSummaryElement.textContent = [
+    composerApprovalElement.value === "on-request" ? approvalLabel : null,
+    sandboxLabel,
+  ].filter(Boolean).join(" · ");
+  composerAccessSummaryElement.title = `${approvalLabel} · ${sandboxLabel}`;
+}
+
+function setSidebarCollapsed(collapsed: boolean): void {
+  appShellElement.classList.toggle("sidebar-collapsed", collapsed);
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "true" : "false");
+  sidebarToggleButton.setAttribute("aria-expanded", String(!collapsed));
+  sidebarToggleButton.setAttribute("aria-label", collapsed ? "显示左栏" : "隐藏左栏");
+  sidebarToggleButton.title = collapsed ? "显示左栏" : "隐藏左栏";
+}
+
+function updateComposerActionState(): void {
+  const state = latestState;
+  const nativeThreadId = state?.nativeThreadId ?? null;
+  const runtimeTarget = nativeThreadId ? runtimeStates.get(nativeThreadId) : null;
+  const active = runtimeIsActive(state);
+  const targetValid = isComposerTargetValid({
+    requestedThreadId: nativeThreadId,
+    selectedThreadId: selectedNativeThreadId,
+    runtimeThreadId: runtimeTarget?.nativeThreadId,
+    runtimeState: runtimeTarget?.state,
+  });
+  const preferences = nativeThreadId ? composerPreferencesByThread.get(nativeThreadId) : null;
+  const unavailable = nativeThreadId ? unavailableComposerPreferencesByThread.get(nativeThreadId) ?? [] : [];
+  const capabilityFailure = nativeThreadId ? composerCapabilityFailuresByThread.has(nativeThreadId) : false;
+  const capabilityBlocksSend = unavailable.length > 0 || Boolean(capabilityFailure && (preferences?.model || preferences?.effort));
+  startTurnButton.disabled = !targetValid || active || capabilityBlocksSend;
+  startTurnButton.hidden = active;
+  interruptButton.disabled = !active || interruptInFlight;
+  interruptButton.hidden = !active;
 }
 
 async function restoreComposerPreferences(nativeThreadId: string): Promise<void> {
@@ -252,10 +305,11 @@ function renderComposerOptions(nativeThreadId: string | null): void {
     const capability = selectedModelCapability(nativeThreadId!);
     composerEffortElement.replaceChildren();
     const efforts = capability?.supportedReasoningEfforts ?? [];
-    if (preferences.effort && !efforts.some((effort) => effort.reasoningEffort === preferences.effort)) {
-      composerEffortElement.append(new Option(`${preferences.effort}（已不可用）`, preferences.effort, true, true));
+    const unsupportedEffort = preferences.effort && !efforts.some((effort) => effort.reasoningEffort === preferences.effort);
+    if (unsupportedEffort) {
+      composerEffortElement.append(new Option(`${preferences.effort}（已不可用）`, preferences.effort!, true, true));
     }
-    if (!efforts.length) composerEffortElement.append(new Option("跟随模型", ""));
+    composerEffortElement.append(new Option("跟随模型", "", false, !preferences.effort));
     for (const effort of efforts) composerEffortElement.append(new Option(effort.reasoningEffort, effort.reasoningEffort, false, effort.reasoningEffort === preferences.effort));
     composerEffortElement.disabled = false;
   }
@@ -265,15 +319,27 @@ function renderComposerOptions(nativeThreadId: string | null): void {
   composerApprovalElement.disabled = !nativeThreadId || active;
   composerSandboxElement.disabled = !nativeThreadId || active;
   const unavailable = nativeThreadId ? unavailableComposerPreferencesByThread.get(nativeThreadId) ?? [] : [];
-  composerCapabilityNoteElement.textContent = capabilities
-    ? `${unavailable.length ? `已保存选项不可用：${unavailable.join(", ")}；请选择有效值。` : `已发现 ${capabilities.models.length} 个模型。`}选项仅影响下一条 Native Turn。附件输入暂未开放。`
-    : "正在读取 App Server 能力；文本发送仍可使用，选项仅影响下一条 Native Turn。";
+  const capabilityFailure = nativeThreadId ? composerCapabilityFailuresByThread.has(nativeThreadId) : false;
+  composerCapabilityNoteElement.textContent = unavailable.length
+    ? `已保存选项不可用：${unavailable.join(", ")}；请选择有效值后再发送。`
+    : capabilityFailure
+      ? "Composer 能力暂不可用；请查看上方状态后重试。"
+      : "";
+  composerCapabilityNoteElement.hidden = unavailable.length === 0 && !capabilityFailure;
+  renderComposerSummaries();
+  updateComposerActionState();
 }
 
 async function refreshComposerCapabilities(nativeThreadId: string, generation: number): Promise<void> {
   await restoreComposerPreferences(nativeThreadId);
   const result = await consume("composer.capabilities", api.getComposerCapabilities(nativeThreadId));
-  if (!result || generation !== threadViewGeneration || selectedNativeThreadId !== nativeThreadId) return;
+  if (!result) {
+    composerCapabilityFailuresByThread.add(nativeThreadId);
+    if (generation === threadViewGeneration && selectedNativeThreadId === nativeThreadId) renderComposerOptions(nativeThreadId);
+    return;
+  }
+  if (generation !== threadViewGeneration || selectedNativeThreadId !== nativeThreadId) return;
+  composerCapabilityFailuresByThread.delete(nativeThreadId);
   composerCapabilitiesByThread.set(nativeThreadId, result);
   const current = composerPreferencesByThread.get(nativeThreadId);
   const discoveredDefault = defaultComposerPreferences(result);
@@ -530,6 +596,7 @@ function createSection(title: string, className: string): { section: HTMLElement
 }
 
 function renderNavigation(): void {
+  const preservedScrollTop = navigationElement.scrollTop;
   navigationElement.querySelectorAll<HTMLDetailsElement>(".project-group").forEach((details) => {
     const projectId = details.dataset.projectId;
     if (projectId) projectOpenState.set(projectId, details.open);
@@ -598,6 +665,7 @@ function renderNavigation(): void {
     for (const thread of navigation.recent) recent.body.append(createThreadEntry(thread));
   } else appendEmpty(recent.body, "暂无 Standalone Thread");
   navigationElement.append(recent.section);
+  navigationElement.scrollTop = preservedScrollTop;
 }
 
 function mapNodeMarker(status: MapNode["status"]): string {
@@ -1152,7 +1220,9 @@ function renderState(state: RuntimeSnapshot): void {
     runtimeState: runtimeTarget?.state,
   });
   interruptButton.disabled = !state.activeTurnId;
+  interruptButton.hidden = !active;
   startTurnButton.disabled = !targetValid || active;
+  startTurnButton.hidden = active;
   renameThreadButton.disabled = !selected;
   if (state.lastError) showError(state.lastError);
   renderNavigation();
@@ -1184,7 +1254,9 @@ function renderNoSelectedThread(): void {
   threadKindElement.textContent = threadUnavailableId ? "对话 · 不可用" : "对话";
   threadKindElement.title = "";
   interruptButton.disabled = true;
+  interruptButton.hidden = true;
   startTurnButton.disabled = true;
+  startTurnButton.hidden = false;
   renameThreadButton.disabled = true;
   resetWorkspaceScroll();
   renderNavigation();
@@ -1633,6 +1705,26 @@ threadWorkspaceElement.addEventListener("scroll", () => {
   });
   jumpLatestButton.hidden = followLatest;
 });
+if (typeof ResizeObserver !== "undefined") {
+  let resizeRestoreFrame: number | null = null;
+  const conversationResizeObserver = new ResizeObserver(() => {
+    if (resizeRestoreFrame !== null) cancelAnimationFrame(resizeRestoreFrame);
+    const preserveFollow = followLatest;
+    const preservedScrollTop = threadWorkspaceElement.scrollTop;
+    resizeRestoreFrame = requestAnimationFrame(() => {
+      resizeRestoreFrame = null;
+      if (preserveFollow) {
+        threadWorkspaceElement.scrollTop = threadWorkspaceElement.scrollHeight;
+        jumpLatestButton.hidden = true;
+        return;
+      }
+      const maxScrollTop = Math.max(0, threadWorkspaceElement.scrollHeight - threadWorkspaceElement.clientHeight);
+      threadWorkspaceElement.scrollTop = Math.min(preservedScrollTop, maxScrollTop);
+      jumpLatestButton.hidden = false;
+    });
+  });
+  conversationResizeObserver.observe(threadWorkspaceElement);
+}
 jumpLatestButton.addEventListener("click", () => {
   followLatest = true;
   threadWorkspaceElement.scrollTo({ top: threadWorkspaceElement.scrollHeight, behavior: "auto" });
@@ -1692,13 +1784,21 @@ document.querySelector<HTMLButtonElement>("#resume-thread")!.addEventListener("c
 });
 readThreadButton.addEventListener("click", () => { void loadThreadView(); });
 interruptButton.addEventListener("click", async () => {
+  if (interruptInFlight) return;
   const nativeThreadId = latestState?.nativeThreadId;
   if (!nativeThreadId) {
     showError({ name: "ThreadNotSelected", code: "THREAD_NOT_SELECTED", message: "请先选择一个对话。", exitCode: null, stderr: "" });
     return;
   }
-  const result = await consume("turn.interrupt", api.interruptTurn(nativeThreadId));
-  if (result) showStatus("已请求停止");
+  interruptInFlight = true;
+  interruptButton.disabled = true;
+  try {
+    const result = await consume("turn.interrupt", api.interruptTurn(nativeThreadId));
+    if (result) showStatus("已请求停止");
+  } finally {
+    interruptInFlight = false;
+    updateComposerActionState();
+  }
 });
 composerModelElement.addEventListener("change", () => {
   const nativeThreadId = selectedNativeThreadId;
@@ -1722,14 +1822,16 @@ composerEffortElement.addEventListener("change", () => {
 composerApprovalElement.addEventListener("change", () => {
   if (!selectedNativeThreadId) return;
   composerPreferences(selectedNativeThreadId).approvalPolicy = composerApprovalElement.value === "on-request" ? "on-request" : "never";
+  renderComposerSummaries();
   persistComposerPreferences(selectedNativeThreadId);
 });
 composerSandboxElement.addEventListener("change", () => {
   if (!selectedNativeThreadId) return;
   composerPreferences(selectedNativeThreadId).sandbox = composerSandboxElement.value === "workspace-write" ? "workspace-write" : "read-only";
+  renderComposerSummaries();
   persistComposerPreferences(selectedNativeThreadId);
 });
-startTurnButton.addEventListener("click", async (event) => {
+composerFormElement.addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = promptElement.value;
   if (!prompt.trim()) {
@@ -1762,6 +1864,16 @@ startTurnButton.addEventListener("click", async (event) => {
   const unavailable = capabilities
     ? validateComposerPreferencesAgainstCapabilities(preferences, capabilities).unavailable
     : unavailableComposerPreferencesByThread.get(nativeThreadId) ?? [];
+  if (composerCapabilityFailuresByThread.has(nativeThreadId) && (preferences.model || preferences.effort)) {
+    showError({
+      name: "ComposerCapabilityUnavailable",
+      code: "COMPOSER_CAPABILITY_UNAVAILABLE",
+      message: "Composer 能力暂不可用，已禁止发送可能失效的模型或推理设置。请恢复能力发现后重试。",
+      exitCode: null,
+      stderr: "",
+    }, nativeThreadId);
+    return;
+  }
   if (unavailable.length) {
     showError({
       name: "ComposerPreferenceUnavailable",
@@ -1821,6 +1933,12 @@ document.querySelector<HTMLButtonElement>("#clear-events")!.addEventListener("cl
   else globalDiagnosticsLog = "";
   renderDiagnosticsLog();
 });
+
+sidebarToggleButton.addEventListener("click", () => {
+  setSidebarCollapsed(!appShellElement.classList.contains("sidebar-collapsed"));
+});
+sidebarCloseButton.addEventListener("click", () => setSidebarCollapsed(true));
+setSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
 
 function setMapOpen(open: boolean): void {
   mapOpen = open;
