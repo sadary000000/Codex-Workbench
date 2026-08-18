@@ -1,9 +1,9 @@
 # Codex Workbench V1：Conversation Map 初始化
 
 日期：2026-08-19
-阶段：STAGE I — App Shell / Sidebar / Workspace / Compact Composer 优化
-状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E PASS / FROZEN；STAGE F PASS / FROZEN；STAGE G PASS / FROZEN；STAGE H Automated/Real Gate PASS、Manual Acceptance DEFERRED/PENDING BY USER；STAGE I ◉ 进行中；STAGE J NOT_STARTED
-范围：当前 Codex Workbench V1 开发对话；不进入 STAGE J
+阶段：STAGE J — V1 Final Integrated Acceptance / Release Freeze
+状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E PASS / FROZEN；STAGE F PASS / FROZEN；STAGE G PASS / FROZEN；STAGE H Automated/Real PASS、Manual Acceptance merged into STAGE J；STAGE I PASS / FROZEN；STAGE J ◉ FINAL RC — AWAITING USER FINAL ACCEPTANCE
+范围：当前 Codex Workbench V1 最终 RC 收口；不进入 STAGE K
 
 ## 1. 文档定位
 
@@ -92,11 +92,11 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 ● STAGE G — Project 生命周期 + 主界面收敛
 └── Project lifecycle 与 Native Thread ownership/safety 用户验收通过；UI convergence 明确 deferred，作为 ACCEPTED UX GAP 延后 STAGE I
 ● STAGE H — 人工回归验收 / Reliability Hardening
-└── Automated/Real Gate PASS；Manual Acceptance DEFERRED/PENDING BY USER，不写成最终人工 PASS
-◉ STAGE I — App Shell / Sidebar / Workspace / Compact Composer 优化
-└── STAGE I FIX 已完成：根滚动、Sidebar 独立列表滚动、Diagnostics Bottom Drawer、responsive/Map overlay 与 Composer 稳定性已修复并通过自动化/真实回归；等待用户 GUI 验收与 GPT 审查
-○ STAGE J
-└── NOT_STARTED；不得由本阶段自动进入
+└── Automated/Real Gate PASS；Manual Acceptance PENDING，剩余人工功能验收合并到 STAGE J，不独立声称用户 PASS
+● STAGE I — App Shell / Sidebar / Workspace / Compact Composer 优化
+└── STAGE I FIX Automated/Implementation Gate PASS；用户明确确认“STAGE I FIX 测试通过”；PASS / FROZEN
+◉ STAGE J — V1 Final Integrated Acceptance / Release Freeze
+└── Final RC 自动化/真实回归与文档收口进行中；等待用户最后一次总体验收
 ```
 
 ## 4. 节点详情与来源
@@ -121,8 +121,9 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | STAGE E — Thread Header + Conversation Message Stream | ● | Header、User/Assistant、Thinking/Processing、Command/Tool、File、Search/Web、Approval 和 Turn 状态的轻量 UI projection 已实现；用户人工 GUI 验收 PASS，阶段冻结 | `docs\STAGE-E-THREAD-HEADER-CONVERSATION-STREAM.md` |
 | STAGE F — Composer Capability + Approval + FIX | ● | capability、Approval、Requested/Sent Diagnostics 和按 Native Thread 的 preference 重启恢复已完成；用户人工验收 PASS，阶段冻结 | `docs\STAGE-F-COMPOSER-CAPABILITY-APPROVAL.md`、`docs\STAGE-F-FIX-COMPOSER-PERSISTENCE-DIAGNOSTICS.md` |
 | STAGE G — Project 生命周期 + 主界面收敛 | ● | Project lifecycle 与 Native Thread ownership/safety 用户验收通过；UI convergence 显式 deferred 为 ACCEPTED UX GAP，延后 STAGE I | `docs\STAGE-G-PROJECT-LIFECYCLE-UI-CONVERGENCE.md`、STAGE G 冻结指令 |
-| STAGE H — 人工回归验收 / Reliability Hardening | ●/deferred | Automated/Real Gate PASS；Manual Functional Acceptance DEFERRED/PENDING BY USER，不写成最终人工 PASS | `docs\STAGE-H-RELIABILITY-REGRESSION-ACCEPTANCE.md` |
-| STAGE I — App Shell / Sidebar / Workspace / Compact Composer 优化 | ◉ | STAGE I FIX 已完成：根滚动、Sidebar、Diagnostics、responsive/map overlay、Composer 稳定性已修复；自动化与真实回归 PASS，GUI 仍需用户验收 | `docs\STAGE-I-FIX-LAYOUT-SCROLL-DIAGNOSTICS-COMPOSER.md`、`docs\STAGE-I-APP-SHELL-COMPACT-COMPOSER.md` |
+| STAGE H — 人工回归验收 / Reliability Hardening | ●/merged | Automated/Real Gate PASS；Manual Functional Acceptance PENDING，剩余人工验收合并到 STAGE J | `docs\STAGE-H-RELIABILITY-REGRESSION-ACCEPTANCE.md` |
+| STAGE I — App Shell / Sidebar / Workspace / Compact Composer 优化 | ● | STAGE I FIX 自动化/实现 Gate PASS；用户明确确认阶段级 GUI 测试通过；PASS / FROZEN | `docs\STAGE-I-FIX-LAYOUT-SCROLL-DIAGNOSTICS-COMPOSER.md`、`docs\STAGE-I-APP-SHELL-COMPACT-COMPOSER.md` |
+| STAGE J — V1 Final Integrated Acceptance / Release Freeze | ◉ | Final RC 收口、全量自动/真实回归与最终文档审计；等待用户最后一次总体验收 | `docs\STAGE-J-V1-FINAL-INTEGRATED-ACCEPTANCE.md` |
 
 ## 5. Phase 0–4 阶段证据摘要
 
@@ -270,10 +271,10 @@ STAGE F 正式名称为 `Composer Capability + Approval`，必须先读取真实
 | 12 | ● | STAGE F Composer Capability + Approval + FIX 完成；GPT/用户人工验收 PASS，阶段冻结 |
 | 13 | ● | STAGE G Project lifecycle / ownership / safety 通过；UI convergence deferred to STAGE I |
 | 14 | ●/deferred | STAGE H Automated/Real Gate PASS；Manual Functional Acceptance DEFERRED/PENDING BY USER |
-| 15 | ◉ | STAGE I App Shell / Sidebar / Workspace / Compact Composer 优化已实现，等待用户 GUI 验收与 GPT 审查 |
-| 16 | ○ | STAGE J：NOT_STARTED |
+| 15 | ● | STAGE I FIX 已完成并由用户确认测试通过，阶段冻结 |
+| 16 | ◉ | STAGE J Final RC：等待用户最后一次总体验收 |
 
-STAGE G 已冻结；UI convergence 作为 ACCEPTED UX GAP 已进入 STAGE I。STAGE H 的 Automated/Real Gate 已通过，人工功能验收仍标记为 DEFERRED/PENDING BY USER；当前 STAGE I FIX 已完成内部自动化与真实回归 Gate，等待用户 GUI 验收和 GPT 审查，不进入 STAGE J。
+STAGE G 已冻结；UI convergence 作为 ACCEPTED UX GAP 已由 STAGE I 处理。STAGE H 的 Automated/Real Gate 已通过，剩余人工功能验收合并到 STAGE J；STAGE I 已由用户确认阶段级 GUI 测试通过并冻结。当前进入 STAGE J Final RC，等待用户最后一次总体验收，不进入 STAGE K。
 
 ## 7. 已冻结的产品规则
 

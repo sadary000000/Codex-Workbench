@@ -1,9 +1,11 @@
 # STAGE I — App Shell / Sidebar / Workspace / Compact Composer 优化
 
 日期：2026-08-19  
-状态：实现与自动化 Gate 完成；等待用户 GUI 验收与 GPT 审查  
+状态：Automated Gate PASS；Manual GUI Acceptance PASS；STAGE I PASS / FROZEN
 base_commit：`39484c5`（STAGE H reliability gate）  
 implementation_commit：`3a06289`（`feat: refine app shell and compact composer`）
+
+manual_gui_acceptance：用户明确确认“STAGE I FIX 测试通过”；本报告不补充未经用户陈述的逐项 GUI 观察。
 
 ## 1. scope resolution
 
@@ -144,7 +146,9 @@ implementation_commit：`3a06289`（`feat: refine app shell and compact composer
 - SHA-256：`31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC`
 - 已检查 packaged `resources/app/dist/renderer/index.html` 包含本阶段 Sidebar/Composer 结构。
 
-## 6. manual GUI acceptance required
+## 6. manual GUI acceptance
+
+用户明确确认：`STAGE I FIX 测试通过`。以下保留原人工验收范围作为可追溯清单，不将其扩写为新的逐项观察。
 
 未将 CLI/static smoke 冒充 GUI PASS。用户使用最新固定路径 EXE 时需重点检查：
 
@@ -160,7 +164,7 @@ implementation_commit：`3a06289`（`feat: refine app shell and compact composer
 10. Diagnostics 默认隐藏、展开后仍独立滚动；Map 打开时不遮挡 Composer popover，source jump/anchors 正常。
 11. A/B multi-thread、Approval、Stop、restart/reopen、Project lifecycle、Map source trace 保持既有人工验收结论。
 
-本轮未完成 GUI screenshot/manual smoke：Windows Computer Use 捕获该 Electron 窗口时连续两次返回 `SetIsBorderRequired failed: 不支持此接口 (0x80004002)`，因此 GUI 项目必须由用户人工检查；不影响代码/CLI Gate，但不能宣称视觉人工 PASS。
+当前环境没有可用的 Electron viewport GUI harness；Windows Computer Use 曾连续两次返回 `SetIsBorderRequired failed: 不支持此接口 (0x80004002)`。这不改变用户已经给出的阶段级人工结论；本报告不补充额外逐项 GUI 观察。
 
 ## 7. subagents
 
@@ -200,7 +204,7 @@ blockers：none for implementation/automated Gate；manual GUI acceptance pendin
 STAGE H Automated/Real Gate: PASS
 STAGE H Manual Functional Acceptance: DEFERRED/PENDING BY USER
 STAGE I Automated Gate: PASS
-STAGE I Manual GUI Acceptance: REQUIRED / NOT CLAIMED
-STAGE I: READY_FOR_GPT_REVIEW
-STAGE J: NOT_STARTED
+STAGE I Manual GUI Acceptance: PASS (user-confirmed)
+STAGE I: PASS / FROZEN
+STAGE J: IN_PROGRESS
 ```

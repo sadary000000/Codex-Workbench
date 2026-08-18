@@ -1,7 +1,7 @@
 # STAGE I FIX — Layout / Scroll / Diagnostics / Compact Composer Audit & Fix
 
 日期：2026-08-19  
-状态：修复、自动化验证与真实 App Server 回归完成；等待用户使用最新 packaged EXE 做 GUI 验收与 GPT 审查  
+状态：Automated / Implementation Gate PASS；Manual GUI Acceptance PASS；Stage I FIX PASS / FROZEN
 base_commit：`49b8a94`（STAGE I implementation/documentation baseline）  
 fix_commit：`da29164`（`fix: harden stage i responsive workspace layout`）
 
@@ -14,6 +14,8 @@ fix_commit：`da29164`（`fix: harden stage i responsive workspace layout`）
 本轮按真实现象反向修复。`RUNTIME_VERIFIED` 只表示源码、contract 和打包资源验证；GUI 几何与交互明确标为 `USER_REQUIRED`，不把静态测试冒充 GUI PASS。
 
 ## 2. previous claim audit
+
+表内 `USER_REQUIRED` 是修复阶段形成时的逐项 GUI 待验收标记；最终人工结论只采用用户明确确认的阶段级结果，不补充未经用户陈述的逐项观察。
 
 | 项目 | CLAIMED_BEFORE | ACTUAL_RUNTIME_RESULT | FIX_APPLIED | RUNTIME_VERIFIED | GUI 状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -30,6 +32,13 @@ fix_commit：`da29164`（`fix: harden stage i responsive workspace layout`）
 | diagnostics isolation | per-thread log map | 异步 capability 错误可能覆盖当前 Thread 状态栏 | capability consume 显式绑定目标 ID；showError 只更新当前目标 UI | contract + unit | USER_REQUIRED：A/B |
 | unavailable refresh | fail-closed | read 失败后左侧 projection 可能仍显示旧状态 | read failure 后刷新 navigation，并恢复 unavailable 错误提示 | contract + unit | USER_REQUIRED |
 | textarea | max-height 已存在 | 没有自动增长 | input 按 scrollHeight 增长，最大 240px，超出内部滚动；draft 切换同步高度 | contract + build | USER_REQUIRED |
+
+## 2.1 final manual acceptance
+
+- Automated / Implementation Gate：PASS。
+- Manual GUI Acceptance：PASS。
+- 用户明确确认：`STAGE I FIX 测试通过`。
+- 本节不将该确认扩写为未经用户逐项描述的 GUI 观察。
 
 ## 3. final scroll domains
 
@@ -87,9 +96,9 @@ fix_commit：`da29164`（`fix: harden stage i responsive workspace layout`）
 
 固定产物：`D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe`。
 
-用户需要用重新生成的 EXE 验收：1600/1280/1024/约800px 无 page-level scrollbar；Brand/Add 固定且 25–40 个 Thread 时只有列表滚动；Conversation/Header/Composer 关系稳定；Diagnostics 收起薄、展开向上、内部滚动且不移动 Composer；Map、collapse、A/B Thread、Composer Send/Stop 正常。
+用户已明确确认：`STAGE I FIX 测试通过`。该结论覆盖本阶段 GUI 验收，但本报告不补充未经用户陈述的逐项观察。
 
-Computer Use 曾连续两次捕获 Electron 窗口失败：`SetIsBorderRequired failed: 不支持此接口 (0x80004002)`。因此本报告不声称 packaged GUI PASS，GUI 标记为 `USER_REQUIRED`。
+当前环境没有可用的 Electron viewport GUI harness；Computer Use 曾连续两次捕获 Electron 窗口失败：`SetIsBorderRequired failed: 不支持此接口 (0x80004002)`。这不改变用户已经给出的阶段级人工结论。
 
 ## 8. subagents
 
@@ -109,16 +118,16 @@ Computer Use 曾连续两次捕获 Electron 窗口失败：`SetIsBorderRequired 
 
 ## 10. known limitations / blockers / gate
 
-- 没有可用的 Electron viewport GUI harness；1600/1280/1024/800 的真实几何与交互需用户验收。
+- 没有可用的 Electron viewport GUI harness；本报告不提供额外逐项 GUI 观察，人工结论以用户明确确认的阶段级结果为准。
 - 720px CSS Drawer 低于 Electron 当前 `minWidth:760`，约800px 是本阶段实际窄窗口目标。
 - Attachment 继续 deferred/unsupported。
-- 实现/自动化 Gate 无 blocker；GUI 为 `USER_REQUIRED`。
-- 不进入 STAGE J。
+- 实现/自动化 Gate 无 blocker；Stage I 已由用户确认人工验收通过并冻结。
+- STAGE J 已获授权，最终 RC 由其收口。
 
 ```text
-STAGE I FIX Automated Gate: PASS
+STAGE I FIX Automated / Implementation Gate: PASS
 STAGE I FIX Real App Server Regression: PASS
-STAGE I FIX Packaged GUI: USER_REQUIRED / NOT_CLAIMED
-STAGE I FIX: READY_FOR_GPT_REVIEW
-STAGE J: NOT_STARTED
+STAGE I FIX Manual GUI Acceptance: PASS (user-confirmed)
+STAGE I FIX: PASS / FROZEN
+STAGE J: IN_PROGRESS
 ```

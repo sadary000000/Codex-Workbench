@@ -1,8 +1,10 @@
 # STAGE H — 人工回归验收 / Reliability Hardening
 
 日期：2026-08-18  
-状态：Automated Gate PASS；真实 App Server 回归 PASS；等待 GPT 审查与用户最终人工功能验收  
+状态：Automated Gate PASS；Real App Server Gate PASS；Manual Functional Acceptance PENDING；剩余人工验收已合并到 STAGE J Final Manual Acceptance
 范围：只对 STAGE A–G 已实现能力做可靠性回归和最小缺陷修复；不进入 STAGE I。
+
+本报告不将 STAGE H 写成独立用户 PASS。由于用户明确要求不再拆分 H 与 J 多轮，H 的剩余人工功能验收并入 STAGE J 最终总体验收。
 
 ## 1. scope resolution
 
@@ -166,7 +168,9 @@ Stage H implementation commit：`1c6dbcc` — `feat: harden stage h reliability`
 - SHA-256：`31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC`
 - 没有自动启动 GUI 代替用户人工验收；最新 EXE 是人工回归基线。
 
-## 12. manual acceptance required
+## 12. manual acceptance merged into STAGE J
+
+以下人工功能验收项目仍需在 STAGE J 最终用户验收中完成；本报告不将其写成 H 独立 PASS。
 
 请用户使用上面的最新 EXE 复测以下功能性项目；CLI/static test 不等同 GUI PASS：
 
@@ -206,11 +210,13 @@ Stage H implementation commit：`1c6dbcc` — `feat: harden stage h reliability`
 
 ```text
 Automated Gate: PASS
-Real App Server Regression: PASS
+Real App Server Gate: PASS
+Manual Functional Acceptance: PENDING
+STAGE H: PASS_AUTOMATED / MANUAL_MERGED_TO_STAGE_J
 Packaged Build: PASS
 Manual GUI Acceptance: REQUIRED / NOT CLAIMED
-STAGE H: READY_FOR_GPT_REVIEW
-STAGE I: NOT_STARTED
+STAGE I: PASS / FROZEN
+STAGE J: IN_PROGRESS
 ```
 
-本阶段完成后停止，不进入 STAGE I，等待 GPT 审查和用户人工功能验收。
+STAGE H 本身不独立冻结；剩余人工功能验收由 STAGE J 最终总体验收承接。
