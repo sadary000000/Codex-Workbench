@@ -2,7 +2,7 @@
 
 日期：2026-08-18  
 状态：PASS / FROZEN
-范围：STAGE F capability/Approval 与 STAGE F FIX 已完成；不进入 STAGE G
+范围：STAGE F capability/Approval 与 STAGE F FIX 已完成并冻结；允许进入 STAGE G，不进入 STAGE H
 
 ## 0. STAGE F / STAGE F FIX freeze result
 

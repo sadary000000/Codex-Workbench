@@ -457,6 +457,13 @@ export class NativeThreadRuntime {
     }
   }
 
+  /** Detach a live runtime from Workbench Project metadata without changing Native identity. */
+  async detachProjectOwnership(): Promise<void> {
+    if (!this.nativeThreadIdValue) return;
+    this.projectIdValue = null;
+    if (this.persistence) await this.persistence.updateThreadProjection(this.nativeThreadIdValue, { projectId: null });
+  }
+
   async discoverComposerCapabilities(): Promise<ComposerCapabilities> {
     if (!this.client || !this.initialized) throw this.fail("THREAD_NOT_READY", "Native Thread is not ready.");
     const response = await this.client.request("model/list", { limit: 100, includeHidden: false }, this.timeoutMs);

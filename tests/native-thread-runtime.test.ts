@@ -634,6 +634,18 @@ test("creates multiple Native Threads with ownership, then switches back by nati
   await harness.runtime.close();
 });
 
+test("detaches a loaded Project runtime without changing Native Thread identity", async () => {
+  const harness = await createRuntime(false, { threadStartIds: ["native-project-detach"] });
+  await harness.persistence.createProject({ projectId: "project-detach", name: "Detach", cwd: "C:/fake/project" });
+  const started = await harness.runtime.startNewThread("project-detach");
+  assert.equal(started.nativeThreadId, "native-project-detach");
+  await harness.runtime.detachProjectOwnership();
+  const read = await harness.runtime.readThread();
+  assert.equal(read.nativeThreadId, started.nativeThreadId);
+  assert.equal((await harness.persistence.getThreadProjection(started.nativeThreadId!))?.projectId, null);
+  await harness.runtime.close();
+});
+
 test("does not create a new Thread when projections exist but the active binding is missing", async () => {
   const first = await createRuntime();
   await first.runtime.start();

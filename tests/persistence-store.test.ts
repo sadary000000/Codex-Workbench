@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -196,4 +196,24 @@ test("keeps an unsupported saved Composer value and migrates old v1 files withou
   assert.deepEqual(await migrated.getComposerPreferences("thread-old"), null);
   await migrated.saveComposerPreferences({ nativeThreadId: "thread-old", model: "removed-model", effort: "removed-effort", approvalPolicy: "never", sandbox: "read-only" });
   assert.equal((await migrated.getComposerPreferences("thread-old"))?.model, "removed-model");
+});
+
+test("renames a Project without changing cwd and removes only Workbench ownership", async () => {
+  const { root, store } = await createStore();
+  const projectDirectory = await mkdtemp(join(root, "project-files-"));
+  const project = await store.createProject({ name: "Original", cwd: projectDirectory });
+  await store.ensureThreadProjection({ nativeThreadId: "project-thread-a", cwd: projectDirectory, projectId: project.projectId });
+  await store.ensureThreadProjection({ nativeThreadId: "project-thread-b", cwd: projectDirectory, projectId: project.projectId });
+  const renamed = await store.updateProject(project.projectId, { name: "Renamed" });
+
+  assert.equal(renamed.name, "Renamed");
+  assert.equal(renamed.cwd, projectDirectory);
+  const removal = await store.removeProject(project.projectId);
+  assert.equal(removal.project.projectId, project.projectId);
+  assert.deepEqual(removal.detachedNativeThreadIds.sort(), ["project-thread-a", "project-thread-b"]);
+  assert.equal(await store.getProject(project.projectId), null);
+  assert.deepEqual((await store.listThreads(null)).map((thread) => thread.nativeThreadId).sort(), ["project-thread-a", "project-thread-b"]);
+  assert.equal((await store.getThreadProjection("project-thread-a"))?.nativeThreadId, "project-thread-a");
+  assert.equal((await store.getThreadProjection("project-thread-a"))?.projectId, null);
+  assert.equal((await stat(projectDirectory)).isDirectory(), true);
 });

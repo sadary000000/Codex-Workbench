@@ -42,6 +42,10 @@ interface V1Api {
   inspectPersistence(): Promise<IpcEnvelope<unknown>>;
   listProjects(): Promise<IpcEnvelope<ProjectRecord[]>>;
   createProject(input: unknown): Promise<IpcEnvelope<ProjectRecord>>;
+  chooseProjectDirectory(): Promise<IpcEnvelope<string | null>>;
+  updateProject(projectId: string, patch: unknown): Promise<IpcEnvelope<ProjectRecord>>;
+  removeProject(projectId: string): Promise<IpcEnvelope<{ project: ProjectRecord; detachedNativeThreadIds: string[] }>>;
+  openProject(projectId: string): Promise<IpcEnvelope<{ projectId: string; cwd: string }>>;
   listThreads(projectId?: string | null): Promise<IpcEnvelope<ThreadProjection[]>>;
   bindThreadToProject(nativeThreadId: string, projectId: string | null): Promise<IpcEnvelope<ThreadProjection>>;
   updateThreadProjection(nativeThreadId: string, patch: unknown): Promise<IpcEnvelope<ThreadProjection>>;
@@ -128,9 +132,27 @@ const projectCreateDialog = document.querySelector<HTMLDialogElement>("#project-
 const projectCreateForm = document.querySelector<HTMLFormElement>("#project-create-form")!;
 const projectNameElement = document.querySelector<HTMLInputElement>("#project-name")!;
 const projectCwdElement = document.querySelector<HTMLInputElement>("#project-cwd")!;
+const projectChooseDirectoryButton = document.querySelector<HTMLButtonElement>("#project-choose-directory")!;
 const projectCreateErrorElement = document.querySelector<HTMLElement>("#project-create-error")!;
 const projectCreateCancelButton = document.querySelector<HTMLButtonElement>("#project-create-cancel")!;
 const projectCreateSubmitButton = document.querySelector<HTMLButtonElement>("#project-create-submit")!;
+const projectRenameDialog = document.querySelector<HTMLDialogElement>("#project-rename-dialog")!;
+const projectRenameForm = document.querySelector<HTMLFormElement>("#project-rename-form")!;
+const projectRenameInput = document.querySelector<HTMLInputElement>("#project-rename-input")!;
+const projectRenameErrorElement = document.querySelector<HTMLElement>("#project-rename-error")!;
+const projectRenameCancelButton = document.querySelector<HTMLButtonElement>("#project-rename-cancel")!;
+const projectRenameSubmitButton = document.querySelector<HTMLButtonElement>("#project-rename-submit")!;
+const projectMenuDialog = document.querySelector<HTMLDialogElement>("#project-menu-dialog")!;
+const projectMenuName = document.querySelector<HTMLElement>("#project-menu-name")!;
+const projectMenuRenameButton = document.querySelector<HTMLButtonElement>("#project-menu-rename")!;
+const projectMenuOpenButton = document.querySelector<HTMLButtonElement>("#project-menu-open")!;
+const projectMenuRemoveButton = document.querySelector<HTMLButtonElement>("#project-menu-remove")!;
+const projectRemoveDialog = document.querySelector<HTMLDialogElement>("#project-remove-dialog")!;
+const projectRemoveForm = document.querySelector<HTMLFormElement>("#project-remove-form")!;
+const projectRemoveMessage = document.querySelector<HTMLElement>("#project-remove-message")!;
+const projectRemoveErrorElement = document.querySelector<HTMLElement>("#project-remove-error")!;
+const projectRemoveCancelButton = document.querySelector<HTMLButtonElement>("#project-remove-cancel")!;
+const projectRemoveSubmitButton = document.querySelector<HTMLButtonElement>("#project-remove-submit")!;
 const renameThreadButton = document.querySelector<HTMLButtonElement>("#rename-thread")!;
 const threadRenameDialog = document.querySelector<HTMLDialogElement>("#thread-rename-dialog")!;
 const threadRenameForm = document.querySelector<HTMLFormElement>("#thread-rename-form")!;
@@ -148,6 +170,10 @@ let latestState: RuntimeSnapshot | null = null;
 let selectedNativeThreadId: string | null = null;
 let threadUnavailableId: string | null = null;
 let currentProjection: ThreadProjection | null = null;
+let editingProjectId: string | null = null;
+let projectMenuTarget: ProjectRecord | null = null;
+let pendingProjectRemoval: ProjectRecord | null = null;
+const projectOpenState = new Map<string, boolean>();
 let threadView: ThreadReadView | null = null;
 const nativeTitlesByThread = new Map<string, string | null>();
 const autoTitlesByThread = new Map<string, string | null>();
@@ -504,6 +530,10 @@ function createSection(title: string, className: string): { section: HTMLElement
 }
 
 function renderNavigation(): void {
+  navigationElement.querySelectorAll<HTMLDetailsElement>(".project-group").forEach((details) => {
+    const projectId = details.dataset.projectId;
+    if (projectId) projectOpenState.set(projectId, details.open);
+  });
   navigationElement.replaceChildren();
   const pinned = createSection("置顶", "pinned-section");
   if (navigation.pinned.length) {
@@ -514,13 +544,37 @@ function renderNavigation(): void {
   const projects = createSection("项目", "projects-section");
   if (navigation.projects.length) {
     for (const group of navigation.projects) {
+      const projectRow = document.createElement("div");
+      projectRow.className = "project-row";
       const details = document.createElement("details");
       details.className = "project-group";
-      details.open = true;
+      details.dataset.projectId = group.project.projectId;
+      details.open = projectOpenState.get(group.project.projectId) ?? true;
+      details.addEventListener("toggle", () => {
+        projectOpenState.set(group.project.projectId, details.open);
+      });
       const summary = document.createElement("summary");
       const projectName = document.createElement("span");
       projectName.className = "project-name";
       projectName.textContent = group.project.name;
+      summary.append(projectName);
+      details.append(summary);
+      if (group.threads.length) {
+        for (const thread of group.threads) details.append(createThreadEntry(thread));
+      } else appendEmpty(details, "暂无 Thread");
+      const projectActions = document.createElement("div");
+      projectActions.className = "project-actions";
+      const projectMenu = document.createElement("button");
+      projectMenu.type = "button";
+      projectMenu.className = "project-menu-button";
+      projectMenu.textContent = "操作";
+      projectMenu.title = `打开 ${group.project.name} 的操作菜单`;
+      projectMenu.setAttribute("aria-label", `打开 ${group.project.name} 的操作菜单`);
+      projectMenu.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openProjectMenuDialog(group.project);
+      });
       const projectAdd = document.createElement("button");
       projectAdd.type = "button";
       projectAdd.className = "project-add";
@@ -532,12 +586,9 @@ function renderNavigation(): void {
         event.stopPropagation();
         void createNativeThread(group.project.projectId);
       });
-      summary.append(projectName, projectAdd);
-      details.append(summary);
-      if (group.threads.length) {
-        for (const thread of group.threads) details.append(createThreadEntry(thread));
-      } else appendEmpty(details, "暂无 Thread");
-      projects.body.append(details);
+      projectActions.append(projectMenu, projectAdd);
+      projectRow.append(details, projectActions);
+      projects.body.append(projectRow);
     }
   } else appendEmpty(projects.body, "暂无项目");
   navigationElement.append(projects.section);
@@ -1204,6 +1255,17 @@ async function loadThreadView(clearLive = true): Promise<boolean> {
   return true;
 }
 
+function openProjectMenuDialog(project: ProjectRecord): void {
+  projectMenuTarget = project;
+  projectMenuName.textContent = `${project.name} · ${project.cwd}`;
+  projectMenuDialog.showModal();
+}
+
+function closeProjectMenuDialog(): void {
+  projectMenuTarget = null;
+  projectMenuDialog.close();
+}
+
 async function selectThread(nativeThreadId: string): Promise<void> {
   if (threadTransitionInFlight) {
     showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换对话，请等待当前切换完成。", exitCode: null, stderr: "" });
@@ -1396,14 +1458,93 @@ async function submitThreadRename(): Promise<void> {
 
 function openProjectCreateDialog(): void {
   projectNameElement.value = "新项目";
-  projectCwdElement.value = latestState?.cwd ?? "";
+  projectCwdElement.value = "";
   projectCreateErrorElement.hidden = true;
   projectCreateErrorElement.textContent = "";
+  projectChooseDirectoryButton.disabled = false;
   projectCreateSubmitButton.disabled = false;
   projectCreateCancelButton.disabled = false;
   projectCreateDialog.showModal();
   projectNameElement.focus();
   projectNameElement.select();
+}
+
+async function chooseProjectDirectory(): Promise<void> {
+  projectChooseDirectoryButton.disabled = true;
+  const selected = await consume("project.choose-directory", api.chooseProjectDirectory());
+  projectChooseDirectoryButton.disabled = false;
+  if (selected) projectCwdElement.value = selected;
+}
+
+function openProjectRenameDialog(project: ProjectRecord): void {
+  editingProjectId = project.projectId;
+  projectRenameInput.value = project.name;
+  projectRenameErrorElement.hidden = true;
+  projectRenameErrorElement.textContent = "";
+  projectRenameSubmitButton.disabled = false;
+  projectRenameCancelButton.disabled = false;
+  projectRenameDialog.showModal();
+  projectRenameInput.focus();
+  projectRenameInput.select();
+}
+
+async function submitProjectRename(): Promise<void> {
+  const projectId = editingProjectId;
+  const name = projectRenameInput.value.trim();
+  if (!projectId || !name) {
+    projectRenameErrorElement.textContent = "Project 名称不能为空。";
+    projectRenameErrorElement.hidden = false;
+    return;
+  }
+  projectRenameSubmitButton.disabled = true;
+  projectRenameCancelButton.disabled = true;
+  const result = await consume("project.rename", api.updateProject(projectId, { name }));
+  if (result) {
+    editingProjectId = null;
+    projectRenameDialog.close();
+    await refreshNavigation();
+    showStatus("Project 显示名称已更新。");
+  } else {
+    projectRenameErrorElement.textContent = "Project 重命名失败，请查看上方错误和 Diagnostics。";
+    projectRenameErrorElement.hidden = false;
+    projectRenameSubmitButton.disabled = false;
+    projectRenameCancelButton.disabled = false;
+  }
+}
+
+async function openProjectDirectory(project: ProjectRecord): Promise<void> {
+  const result = await consume("project.open", api.openProject(project.projectId));
+  if (result) showStatus(`已打开 Project 工作目录：${result.cwd}`);
+}
+
+function openProjectRemoveDialog(project: ProjectRecord): void {
+  pendingProjectRemoval = project;
+  projectRemoveMessage.textContent = `将从 Workbench 移除“${project.name}”及其本地项目归属。磁盘文件和文件夹不会被删除；其中的 Thread 会安全解绑为 Standalone。`;
+  projectRemoveErrorElement.hidden = true;
+  projectRemoveErrorElement.textContent = "";
+  projectRemoveSubmitButton.disabled = false;
+  projectRemoveCancelButton.disabled = false;
+  projectRemoveDialog.showModal();
+}
+
+async function submitProjectRemove(): Promise<void> {
+  const project = pendingProjectRemoval;
+  if (!project) return;
+  projectRemoveSubmitButton.disabled = true;
+  projectRemoveCancelButton.disabled = true;
+  const result = await consume("project.remove", api.removeProject(project.projectId));
+  if (result) {
+    pendingProjectRemoval = null;
+    projectRemoveDialog.close();
+    await refreshNavigation();
+    await refreshMapStatus(threadViewGeneration, selectedNativeThreadId, currentProjection?.projectId ?? null);
+    showStatus(`Project 已从 Workbench 移除；${result.detachedNativeThreadIds.length} 个 Thread 已保留并解绑。`);
+  } else {
+    projectRemoveErrorElement.textContent = "Project 移除失败，未删除磁盘文件；请查看上方错误和 Diagnostics。";
+    projectRemoveErrorElement.hidden = false;
+    projectRemoveSubmitButton.disabled = false;
+    projectRemoveCancelButton.disabled = false;
+  }
 }
 
 async function submitProjectCreate(): Promise<void> {
@@ -1489,11 +1630,43 @@ jumpLatestButton.addEventListener("click", () => {
 });
 document.querySelector<HTMLButtonElement>("#new-standalone-thread")!.addEventListener("click", () => { void createNativeThread(null); });
 document.querySelector<HTMLButtonElement>("#new-project")!.addEventListener("click", openProjectCreateDialog);
+projectChooseDirectoryButton.addEventListener("click", () => { void chooseProjectDirectory(); });
 projectCreateForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void submitProjectCreate();
 });
 projectCreateCancelButton.addEventListener("click", () => projectCreateDialog.close());
+projectMenuRenameButton.addEventListener("click", () => {
+  const project = projectMenuTarget;
+  closeProjectMenuDialog();
+  if (project) openProjectRenameDialog(project);
+});
+projectMenuOpenButton.addEventListener("click", () => {
+  const project = projectMenuTarget;
+  closeProjectMenuDialog();
+  if (project) void openProjectDirectory(project);
+});
+projectMenuRemoveButton.addEventListener("click", () => {
+  const project = projectMenuTarget;
+  closeProjectMenuDialog();
+  if (project) openProjectRemoveDialog(project);
+});
+projectRenameForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitProjectRename();
+});
+projectRenameCancelButton.addEventListener("click", () => {
+  editingProjectId = null;
+  projectRenameDialog.close();
+});
+projectRemoveForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitProjectRemove();
+});
+projectRemoveCancelButton.addEventListener("click", () => {
+  pendingProjectRemoval = null;
+  projectRemoveDialog.close();
+});
 renameThreadButton.addEventListener("click", openThreadRenameDialog);
 threadRenameForm.addEventListener("submit", (event) => {
   event.preventDefault();

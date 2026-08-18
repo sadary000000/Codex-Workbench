@@ -20,6 +20,7 @@
         --soft: #c9c9c9;
         --accent: #10a37f;
         --danger: #ef9c93;
+        --content-max-width: 900px;
       }
       * { box-sizing: border-box; }
       body { margin: 0; min-height: 100vh; background: #212121; }
@@ -50,18 +51,22 @@
       .thread-entry-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
       .thread-entry-state { display: inline-grid; min-width: 10px; place-items: center; flex: 0 0 auto; color: #777; font-size: 11px; line-height: 1; }
       .state-idle { color: transparent; }
-      .state-ready { color: #79c6a4; }
+      .state-ready { color: #999; }
       .state-running, .state-starting, .state-waiting_user { color: #e5bd70; }
       .state-disconnected, .state-recovery_required, .state-failed, .state-unavailable { color: #e28b7e; }
       .pin-button { width: 28px; height: 28px; border-radius: 6px; background: transparent; color: #8b8b8b; }
       .pin-button:hover { background: var(--sidebar-hover); color: #f2c66d; }
       .project-group { margin: 0 0 2px; }
-      .project-group summary { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 4px 8px 4px 10px; border-radius: 7px; color: #d8d8d8; cursor: pointer; list-style-position: outside; }
+      .project-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 4px; }
+      .project-group summary { display: flex; align-items: center; min-height: 32px; padding: 4px 8px 4px 10px; border-radius: 7px; color: #d8d8d8; cursor: pointer; list-style-position: outside; }
       .project-group summary:hover { background: var(--sidebar-hover); }
       .project-group summary::marker { color: #777; }
-      .project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+      .project-name { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+      .project-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; padding-top: 4px; }
+      .project-menu-button, .project-add { min-height: 24px; border-radius: 5px; background: transparent; color: #9d9d9d; font-size: 11px; }
+      .project-menu-button { padding: 0 5px; }
+      .project-menu-button:hover, .project-add:hover { background: #444; color: #fff; }
       .project-add { width: 23px; height: 23px; border-radius: 5px; background: transparent; color: #a6a6a6; }
-      .project-add:hover { background: #444; color: #fff; }
       .project-group > .thread-entry-row, .project-group > .sidebar-empty { margin-left: 16px; }
       .sidebar-footer { margin-top: auto; padding: 12px 10px 2px; color: #666; font-size: 11px; line-height: 1.45; }
       main { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; height: 100vh; min-width: 0; min-height: 0; overflow: hidden; }
@@ -85,7 +90,7 @@
       .workspace-empty { display: grid; min-height: 220px; place-items: center; align-content: center; color: #999; text-align: center; }
       .workspace-empty strong { color: #ddd; font-size: 15px; }
       .workspace-empty p { max-width: 560px; margin: 8px 0 0; line-height: 1.6; }
-      .turn-group { display: grid; gap: 10px; max-width: 900px; margin: 0 auto 28px; }
+      .turn-group { display: grid; gap: 10px; max-width: var(--content-max-width); margin: 0 auto 28px; }
       .turn-heading { display: flex; justify-content: space-between; gap: 12px; padding: 0 2px 2px; color: #777; font-size: 11px; }
       .turn-status { color: #858585; font-size: 12px; line-height: 1.5; }
       .turn-status-error { color: #e6a29a; }
@@ -121,7 +126,7 @@
       .approval-button.primary:hover { background: #1d7a5e; }
       .approval-button.danger { color: #f0aaa2; }
       .jump-latest { position: absolute; z-index: 2; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 7px 12px; border: 1px solid #4c6f61; border-radius: 999px; background: #193b30; color: #b9e8d3; font-size: 12px; }
-      .composer { display: grid; gap: 8px; min-height: 0; max-width: 900px; width: calc(100% - 60px); margin: 0 auto 18px; padding: 10px; border: 1px solid #484848; border-radius: 12px; background: #2b2b2b; box-shadow: 0 7px 28px #0003; }
+      .composer { display: grid; gap: 8px; min-height: 0; max-width: var(--content-max-width); width: calc(100% - 60px); margin: 0 auto 18px; padding: 10px; border: 1px solid #484848; border-radius: 12px; background: #2b2b2b; box-shadow: 0 7px 28px #0003; }
       textarea, input { width: 100%; border: 1px solid #4a4a4a; border-radius: 7px; background: #1d1d1d; color: #eee; padding: 10px; outline: none; }
       textarea:focus, input:focus { border-color: #6b8f82; box-shadow: 0 0 0 2px #315d4d55; }
       textarea { min-height: 74px; max-height: 220px; resize: vertical; }
@@ -174,6 +179,14 @@
       .project-create-form { display: grid; gap: 12px; min-width: min(560px, 82vw); }
       .project-create-form label { display: grid; gap: 6px; }
       .project-create-form input { box-sizing: border-box; }
+      .project-path-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; align-items: center; }
+      .project-path-picker input[readonly] { color: #b8b8b8; }
+      .danger-button { border-color: #744844; color: var(--danger); }
+      .danger-button:hover { background: #472c2a; }
+      .project-menu-form { display: grid; gap: 12px; min-width: min(560px, 82vw); }
+      .project-menu-form h2 { margin: 0; font-size: 15px; }
+      .project-menu-actions { display: grid; gap: 7px; }
+      .project-menu-actions .debug-button { text-align: left; }
       .writer-conflict-dialog { display: grid; gap: 10px; min-width: min(520px, 82vw); }
       .writer-conflict-dialog h2 { margin: 0; font-size: 15px; }
       .writer-conflict-dialog p { margin: 0; color: #c9c9c9; font-size: 12px; line-height: 1.55; }
@@ -295,7 +308,10 @@
         <ul id="map-tree" class="map-tree" role="tree" aria-label="Conversation Map 节点"></ul>
       </aside>
       <dialog id="project-maintenance-dialog" aria-labelledby="project-maintenance-title"><form method="dialog" class="maintenance-dialog"><h2 id="project-maintenance-title">Project Map 维护对话</h2><p class="muted">只读 Native Thread 视图；此 Thread 不会进入普通导航、最近列表或项目 Thread 列表。</p><pre id="project-maintenance-body"></pre><button id="close-project-maintenance" class="debug-button" type="submit">关闭</button></form></dialog>
-      <dialog id="project-create-dialog" aria-labelledby="project-create-title"><form id="project-create-form" class="project-create-form"><h2 id="project-create-title">新建 Project</h2><p class="muted">Project 只登记名称和工作目录，不会自动创建文件夹。</p><label for="project-name">Project 名称<input id="project-name" name="name" maxlength="256" autocomplete="off" required></label><label for="project-cwd">工作目录<input id="project-cwd" name="cwd" maxlength="4096" autocomplete="off" required></label><p id="project-create-error" class="dialog-error" hidden></p><div class="dialog-actions"><button id="project-create-cancel" class="debug-button" type="button">取消</button><button id="project-create-submit" class="debug-button send-button" type="submit">创建</button></div></form></dialog>
+      <dialog id="project-create-dialog" aria-labelledby="project-create-title"><form id="project-create-form" class="project-create-form"><h2 id="project-create-title">新建 Project</h2><p class="muted">登记一个已存在的本地文件夹；Workbench 不会自动创建或删除磁盘文件。</p><label for="project-name">Project 名称<input id="project-name" name="name" maxlength="256" autocomplete="off" required></label><label for="project-cwd">工作目录<div class="project-path-picker"><input id="project-cwd" name="cwd" maxlength="4096" autocomplete="off" readonly required><button id="project-choose-directory" class="debug-button" type="button">选择文件夹</button></div></label><p id="project-create-error" class="dialog-error" hidden></p><div class="dialog-actions"><button id="project-create-cancel" class="debug-button" type="button">取消</button><button id="project-create-submit" class="debug-button send-button" type="submit">创建</button></div></form></dialog>
+      <dialog id="project-menu-dialog" aria-labelledby="project-menu-title"><form method="dialog" class="project-menu-form"><h2 id="project-menu-title">Project 操作</h2><p id="project-menu-name" class="muted"></p><div class="project-menu-actions"><button id="project-menu-rename" class="debug-button" type="button">重命名</button><button id="project-menu-open" class="debug-button" type="button">在资源管理器中打开</button><button id="project-menu-remove" class="debug-button danger-button" type="button">移除 Project</button></div><div class="dialog-actions"><button class="debug-button" type="submit">关闭</button></div></form></dialog>
+      <dialog id="project-rename-dialog" aria-labelledby="project-rename-title"><form id="project-rename-form" class="project-create-form"><h2 id="project-rename-title">重命名 Project</h2><p class="muted">只修改 Workbench 中的显示名称，不修改工作目录或其中文件。</p><label for="project-rename-input">显示名称<input id="project-rename-input" name="name" maxlength="256" autocomplete="off" required></label><p id="project-rename-error" class="dialog-error" hidden></p><div class="dialog-actions"><button id="project-rename-cancel" class="debug-button" type="button">取消</button><button id="project-rename-submit" class="debug-button send-button" type="submit">保存</button></div></form></dialog>
+      <dialog id="project-remove-dialog" aria-labelledby="project-remove-title"><form id="project-remove-form" class="project-create-form"><h2 id="project-remove-title">移除 Project</h2><p id="project-remove-message" class="muted"></p><p id="project-remove-error" class="dialog-error" hidden></p><div class="dialog-actions"><button id="project-remove-cancel" class="debug-button" type="button">取消</button><button id="project-remove-submit" class="debug-button danger-button" type="submit">确认移除</button></div></form></dialog>
       <dialog id="thread-rename-dialog" aria-labelledby="thread-rename-title"><form id="thread-rename-form" class="thread-rename-form"><h2 id="thread-rename-title">重命名 Thread</h2><p class="muted">只保存本地显示标题，不修改 Native Thread、Runtime 或对话内容。清空后恢复原生/自动标题。</p><label for="thread-rename-input">显示标题<input id="thread-rename-input" name="displayTitle" maxlength="256" autocomplete="off"></label><p id="thread-rename-error" class="dialog-error" hidden></p><div class="dialog-actions"><button id="thread-rename-cancel" class="debug-button" type="button">取消</button><button id="thread-rename-submit" class="debug-button send-button" type="submit">保存</button></div></form></dialog>
       <dialog id="writer-conflict-dialog" aria-labelledby="writer-conflict-title"><form method="dialog" class="writer-conflict-dialog"><h2 id="writer-conflict-title">对话正在被使用</h2><p id="writer-conflict-message">当前对话正在被另一个 Codex 客户端使用。请关闭另一客户端中的该对话后重试。</p><div class="dialog-actions"><button id="writer-conflict-close" class="debug-button" type="submit">知道了</button></div></form></dialog>
     </div>

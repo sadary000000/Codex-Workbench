@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
@@ -15,6 +15,7 @@ import { RuntimeRegistry } from "./runtime-registry.ts";
 import { markThreadUnavailable } from "./thread-availability.ts";
 import { isComposerTargetValid } from "../shared/thread-target.ts";
 import { buildNativeTurnOptions, parseComposerPreferences } from "../codex/composer-capabilities.ts";
+import { validateProjectDirectory } from "../shared/project-path.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -33,6 +34,10 @@ const IPC = Object.freeze({
   persistenceInspect: "persistence:inspect",
   projectList: "persistence:projects:list",
   projectCreate: "persistence:projects:create",
+  projectChooseDirectory: "persistence:projects:choose-directory",
+  projectUpdate: "persistence:projects:update",
+  projectRemove: "persistence:projects:remove",
+  projectOpen: "persistence:projects:open",
   threadList: "persistence:threads:list",
   threadBind: "persistence:threads:bind",
   threadUpdate: "persistence:threads:update",
@@ -263,6 +268,14 @@ function getPersistence(): V1PersistenceStore {
   if (persistence) return persistence;
   persistence = new V1PersistenceStore(join(app.getPath("userData"), "workbench-state.json"));
   return persistence;
+}
+
+async function detachLoadedProjectRuntimes(projectId: string): Promise<void> {
+  const memberIds = new Set((await getPersistence().listThreads(projectId)).map((thread) => thread.nativeThreadId));
+  for (const { nativeThreadId, runtime } of runtimes.list()) {
+    if (!memberIds.has(nativeThreadId)) continue;
+    await runtime.detachProjectOwnership();
+  }
 }
 
 function ok(result: unknown): { ok: true; result: unknown } {
@@ -511,12 +524,65 @@ function registerIpc(): void {
   ipcMain.handle(IPC.projectCreate, async (_event, input: unknown) => {
     try {
       const value = input !== null && typeof input === "object" ? input as Record<string, unknown> : {};
+      const cwd = await validateProjectDirectory(typeof value.cwd === "string" ? value.cwd : "");
       return ok(await getPersistence().createProject({
         projectId: typeof value.projectId === "string" ? value.projectId : undefined,
         name: typeof value.name === "string" ? value.name : "",
-        cwd: typeof value.cwd === "string" ? value.cwd : "",
+        cwd,
         metadata: value.metadata as Record<string, string> | undefined,
       }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectChooseDirectory, async () => {
+    try {
+      const result = mainWindow && !mainWindow.isDestroyed()
+        ? await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] })
+        : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+      if (result.canceled || !result.filePaths[0]) return ok(null);
+      return ok(await validateProjectDirectory(result.filePaths[0]));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectUpdate, async (_event, projectId: unknown, input: unknown) => {
+    try {
+      if (typeof projectId !== "string") throw new Error("Project ID is required.");
+      const value = input !== null && typeof input === "object" ? input as Record<string, unknown> : {};
+      return ok(await getPersistence().updateProject(projectId, { name: typeof value.name === "string" ? value.name : "" }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectRemove, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string") throw new Error("Project ID is required.");
+      await detachLoadedProjectRuntimes(projectId);
+      const result = await getPersistence().removeProject(projectId);
+      try {
+        await getProjectMaps().removeProjectMetadata(projectId);
+      } catch (error) {
+        logger.warn("project_map_metadata_cleanup_failed", { projectId, error: errorInfo(error).message });
+      }
+      return ok(result);
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectOpen, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string") throw new Error("Project ID is required.");
+      const project = await getPersistence().getProject(projectId);
+      if (!project) throw new PersistenceStoreError("PROJECT_NOT_FOUND", "Project does not exist.", getPersistence().path);
+      const cwd = await validateProjectDirectory(project.cwd);
+      const openError = await shell.openPath(cwd);
+      if (openError) {
+        const error = new Error(`无法打开 Project 工作目录：${openError}`) as Error & { code: string };
+        error.code = "PROJECT_OPEN_FAILED";
+        throw error;
+      }
+      return ok({ projectId: project.projectId, cwd });
     } catch (error) {
       return fail(error);
     }

@@ -86,6 +86,16 @@ export interface CreateProjectInput {
   metadata?: Record<string, string>;
 }
 
+export interface ProjectPatch {
+  /** Display metadata only. Project cwd is an identity boundary and is immutable in V1. */
+  name?: string;
+}
+
+export interface ProjectRemovalResult {
+  project: ProjectRecord;
+  detachedNativeThreadIds: string[];
+}
+
 export interface EnsureThreadProjectionInput {
   nativeThreadId: string;
   cwd: string;
@@ -498,6 +508,41 @@ export class V1PersistenceStore {
       const project: ProjectRecord = { ...normalized, createdAt: now, updatedAt: now };
       document.projects.push(project);
       return clone(project);
+    });
+  }
+
+  async updateProject(projectId: string, patch: ProjectPatch): Promise<ProjectRecord> {
+    const id = boundedString(projectId, MAX_ID_LENGTH);
+    const name = patch.name === undefined ? undefined : boundedString(patch.name, MAX_NAME_LENGTH);
+    if (!id || name === null) {
+      throw new PersistenceStoreError("PROJECT_INVALID", "Project update input is invalid.", this.filePath);
+    }
+    return this.mutate((document) => {
+      const project = document.projects.find((candidate) => candidate.projectId === id);
+      if (!project) throw new PersistenceStoreError("PROJECT_NOT_FOUND", "Project does not exist.", this.filePath);
+      if (name !== undefined) project.name = name;
+      project.updatedAt = this.now();
+      return clone(project);
+    });
+  }
+
+  async removeProject(projectId: string): Promise<ProjectRemovalResult> {
+    const id = boundedString(projectId, MAX_ID_LENGTH);
+    if (!id) throw new PersistenceStoreError("PROJECT_INVALID", "Project ID is invalid.", this.filePath);
+    return this.mutate((document) => {
+      const projectIndex = document.projects.findIndex((candidate) => candidate.projectId === id);
+      if (projectIndex < 0) throw new PersistenceStoreError("PROJECT_NOT_FOUND", "Project does not exist.", this.filePath);
+      const project = document.projects[projectIndex];
+      const detachedNativeThreadIds: string[] = [];
+      const now = this.now();
+      for (const thread of document.threads) {
+        if (thread.projectId !== id) continue;
+        thread.projectId = null;
+        thread.updatedAt = now;
+        detachedNativeThreadIds.push(thread.nativeThreadId);
+      }
+      document.projects.splice(projectIndex, 1);
+      return { project: clone(project), detachedNativeThreadIds };
     });
   }
 

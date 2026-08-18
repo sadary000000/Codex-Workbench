@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -30,5 +30,22 @@ test("keeps Project Map lifecycle independent from normal Thread projections", a
   const resumed = await manager.resume("project-map-test");
   assert.equal(resumed.map?.sync.paused, false);
   assert.equal((await persistence.listThreads("project-map-test")).length, 1);
+  await manager.close();
+});
+
+test("removes Project Map metadata without touching the real Project directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-project-map-remove-"));
+  const projectCwd = await mkdtemp(join(root, "project-files-"));
+  const persistence = new V1PersistenceStore(join(root, "workbench-state.json"));
+  await persistence.createProject({ projectId: "project-map-remove", name: "Project Map Remove", cwd: projectCwd });
+  const manager = new ProjectMapManager({ userDataDirectory: root, persistence, command: "codex" });
+  await manager.enable("project-map-remove");
+  await manager.removeProjectMetadata("project-map-remove");
+  assert.equal((await stat(projectCwd)).isDirectory(), true);
+  await persistence.removeProject("project-map-remove");
+  const removedStatus = await manager.status("project-map-remove");
+  assert.equal(removedStatus.map, null);
+  assert.equal(removedStatus.error?.code, "PROJECT_NOT_FOUND");
+  await assert.rejects(manager.resume("project-map-remove"), /Project does not exist/);
   await manager.close();
 });

@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { AppServerProcessClient } from "../codex/app-server-client.ts";
 import { MAP_CONTEXT_REQUEST_LIMITS, MAP_CONTEXT_REQUEST_TOOL_SPEC, MAP_DYNAMIC_TOOL_SPEC, contextRequestResponse, dynamicToolResponse, isMapContextRequestCall, isMapToolCall } from "../codex/map-tool.ts";
@@ -192,6 +193,16 @@ export class ProjectMapManager {
 
   async status(projectId: string): Promise<ProjectMapStatus> {
     const id = projectId.trim();
+    const project = await this.persistence.getProject(id);
+    if (!project) return {
+      projectId: id,
+      enabled: false,
+      available: false,
+      maintenanceThreadId: null,
+      maintenanceRunning: false,
+      map: null,
+      error: { code: "PROJECT_NOT_FOUND", message: `Project does not exist: ${id}` },
+    };
     const runtime = this.runtimes.get(id);
     const inspection = await this.store(id).inspect();
     const maintenanceId = await this.maintenanceThreadId(id);
@@ -221,6 +232,7 @@ export class ProjectMapManager {
 
   async pause(projectId: string): Promise<ProjectMapStatus> {
     const id = projectId.trim();
+    if (!(await this.persistence.getProject(id))) throw new Error(`Project does not exist: ${id}`);
     await this.store(id).pause();
     this.lastErrors.delete(id);
     return this.emitStatus(id);
@@ -228,6 +240,7 @@ export class ProjectMapManager {
 
   async resume(projectId: string): Promise<ProjectMapStatus> {
     const id = projectId.trim();
+    if (!(await this.persistence.getProject(id))) throw new Error(`Project does not exist: ${id}`);
     await this.store(id).resume();
     this.lastErrors.delete(id);
     return this.emitStatus(id);
@@ -483,6 +496,29 @@ export class ProjectMapManager {
   async close(): Promise<void> {
     await Promise.all([...this.runtimes.values()].map((runtime) => runtime.close().catch(() => undefined)));
     this.runtimes.clear();
+  }
+
+  /** Remove only Workbench-owned Project Map metadata after Project detach. */
+  async removeProjectMetadata(projectId: string): Promise<void> {
+    const id = projectId.trim();
+    if (!id) return;
+    const runtime = this.runtimes.get(id);
+    if (runtime) await runtime.close().catch(() => undefined);
+    this.runtimes.delete(id);
+    this.stores.delete(id);
+    this.patchedTurnIds.delete(id);
+    this.contextStates.forEach((_state, key) => {
+      if (key.startsWith(`${id}\u0000`)) this.contextStates.delete(key);
+    });
+    this.fallbackPatchedProjects.delete(id);
+    this.lastErrors.delete(id);
+    this.fallbackScopes.forEach((scope, threadId) => {
+      if (scope === id) this.fallbackScopes.delete(threadId);
+    });
+    await Promise.all([
+      rm(mapFilePath(join(this.userDataDirectory, "maps", "project"), { kind: "project", projectId: id }), { force: true }),
+      rm(this.bindingPath(id), { force: true }),
+    ]);
   }
 
   private async ensureRuntime(projectId: string, cwd: string): Promise<NativeThreadRuntime> {
