@@ -1,8 +1,8 @@
 # Codex Workbench V1：Conversation Map 初始化
 
 日期：2026-08-18
-阶段：STAGE D — Thread 标题 + 左侧导航状态
-状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D ◉ 进行中
+阶段：STAGE E — Thread Header + Conversation Message Stream
+状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E ◉ 进行中
 范围：当前 Codex Workbench V1 开发对话
 
 ## 1. 文档定位
@@ -83,9 +83,11 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 └── 已完成并冻结：Header + Conversation Scroll Container + 常驻 Composer、底部跟随、上滚保护、Jump to latest；自动化 Gate 与用户 GUI 验收均 PASS
 ● STAGE C — UI Projection / Diagnostics 分层
 └── 默认 UI 隐藏协议噪声；Developer / Diagnostics 可按 Native Thread 定位原始信息；自动化 Gate 与用户人工验收 PASS，阶段冻结
-◉ STAGE D — Thread 标题 + 左侧导航状态
-└── 原生 title / displayTitle fallback、用户重命名和克制的左侧运行状态已完成内部实现，等待 GPT/用户验收
-○ STAGE E
+● STAGE D — Thread 标题 + 左侧导航状态
+└── 原生 title / displayTitle fallback、用户重命名和克制的左侧运行状态已完成；用户人工 GUI 验收 PASS，阶段冻结
+◉ STAGE E — Thread Header + Conversation Message Stream
+└── Header 与 Native Thread/Turn/Item 默认 UI 投影实现完成，等待 GPT/用户人工验收
+○ STAGE F
 └── NOT_STARTED；本阶段完成后停止，不提前进入
 ```
 
@@ -107,7 +109,8 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | STAGE A — Multi-Thread Runtime / Writer Conflict / Post-Acceptance Fix | ● | 多 Thread Runtime、writer conflict、orphan fail-closed、restart reopen 和 active-thread truth 已通过 GPT 审查 | `docs\STAGE-A-MULTI-THREAD-RUNTIME.md`、`docs\STAGE-A-POST-ACCEPTANCE-FIX.md` |
 | STAGE B — Workspace Scroll / Composer 基础 | ● | Header、Conversation 主滚动容器、常驻 Composer、底部跟随、上滚保护和 Jump to latest 已完成；自动化 Gate 与用户 GUI 验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、本阶段报告 |
 | STAGE C — UI Projection / Diagnostics 分层 | ● | 默认 UI 隐藏协议噪声；Developer / Diagnostics 提供 Thread/Turn/Item 定位、原始快照、按 Thread 隔离的事件日志和错误详情；自动化 Gate 与用户人工验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、`docs\STAGE-C-UI-PROJECTION-DIAGNOSTICS.md` |
-| STAGE D — Thread 标题 + 左侧导航状态 | ◉ | 原生 title 优先、displayTitle fallback、用户重命名和左侧轻量运行 indicator；一次 Turn 失败不污染 Thread 身份；内部实现完成，等待 GPT/用户验收 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.2.docx` |
+| STAGE D — Thread 标题 + 左侧导航状态 | ● | 原生 title 优先、displayTitle fallback、用户重命名和左侧轻量运行 indicator；一次 Turn 失败不污染 Thread 身份；用户人工 GUI 验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.2.docx`、`docs\STAGE-D-THREAD-TITLE-NAVIGATION-STATE.md` |
+| STAGE E — Thread Header + Conversation Message Stream | ◉ | Header、User/Assistant、Thinking/Processing、Command/Tool、File、Search/Web、Approval 和 Turn 状态的轻量 UI projection 已实现；等待 GPT/用户人工验收 | `docs\STAGE-E-THREAD-HEADER-CONVERSATION-STREAM.md` |
 
 ## 5. Phase 0–4 阶段证据摘要
 
@@ -209,7 +212,7 @@ STAGE C 正式名称为 `UI Projection / Diagnostics 分层`，只改变 Rendere
 - STAGE A 的多 Thread、Approval、Stop、writer conflict、orphan/reopen 和 STAGE B 的滚动/Composer 行为作为回归边界保留。
 - 用户已完成 STAGE C 人工检查，并明确确认当前未发现问题；阶段结论为 PASS / FROZEN。
 
-### 6.4 STAGE D 当前范围
+### 6.4 STAGE D 已完成与冻结
 
 STAGE D 正式名称为 `Thread 标题 + 左侧导航状态`，只处理 Thread 可识别性和左侧状态语义：
 
@@ -218,8 +221,19 @@ STAGE D 正式名称为 `Thread 标题 + 左侧导航状态`，只处理 Thread 
 - 左侧移除永久 ready/failed/completed 标签；运行中只保留轻量 activity indicator；
 - 一次 Turn 失败在对应 Turn/Diagnostics 中表达，不把整条 Thread 永久标红；
 - nativeThreadId 继续只在 Developer / Diagnostics 展示，Thread identity、RuntimeRegistry、Composer target 和 Map source 不变。
+- 用户已完成 STAGE D 人工 GUI 验收，并明确确认 `PASS`；阶段结论为 PASS / FROZEN。
 
-### 6.5 下一步计划
+### 6.5 STAGE E 当前范围
+
+STAGE E 正式名称为 `Thread Header + Conversation Message Stream`，只处理 Thread Workspace 的 Header 产品化和 Native Thread/Turn/Item 的默认 UI 投影：
+
+- Header 只保留可读标题、Project/Standalone 上下文、必要 workspace 提示和必要运行异常；协议级 READY/COMPLETED、完整 ID 和 Runtime implementation details 继续进入 Diagnostics；
+- User/Assistant 使用明确但轻量的层级，普通 Assistant 内容作为主视觉，不把普通消息包装成调试卡；
+- Thinking/Processing、Command/Tool、File、Search/Web、Approval 和 failed/interrupted/reconnect 按真实 Native 状态做紧凑投影与按需展开；
+- Unknown Native Item 安全降级；保持 Stage B 滚动/Composer、Stage C Diagnostics/source anchor、Stage A 多 Thread 隔离；
+- 不建立 Conversation、Transcript、Assistant cache、Task、Agent、Context 等第二事实源，不进入 Stage F。
+
+### 6.6 下一步计划
 
 | 顺序 | 状态 | 动作 |
 | --- | --- | --- |
@@ -232,10 +246,11 @@ STAGE D 正式名称为 `Thread 标题 + 左侧导航状态`，只处理 Thread 
 | 7 | ● | STAGE A 多 Thread Runtime / Writer Conflict / Post-Acceptance Fix 已通过 GPT 审查 |
 | 8 | ● | STAGE B Workspace Scroll / Composer 基础完成；GPT 审查 PASS，用户人工 GUI 验收 PASS，阶段冻结 |
 | 9 | ● | STAGE C UI Projection / Diagnostics 分层完成；GPT 审查 PASS，用户人工验收 PASS，阶段冻结 |
-| 10 | ◉ | STAGE D Thread 标题 + 左侧导航状态内部实现完成，等待 GPT/用户验收 |
-| 11 | ○ | STAGE E：NOT_STARTED；不在本轮范围内 |
+| 10 | ● | STAGE D Thread 标题 + 左侧导航状态完成；用户人工 GUI 验收 PASS，阶段冻结 |
+| 11 | ◉ | STAGE E Thread Header + Conversation Message Stream 实现完成，等待 GPT/用户人工验收 |
+| 12 | ○ | STAGE F：NOT_STARTED；不在本轮范围内 |
 
-STAGE D 完成内部 Gate 后停止并提交 GPT 审查；STAGE E 及历史 Phase 7 保持 `NOT_STARTED`，本轮不进入下一阶段。
+STAGE E 完成内部 Gate 后停止并提交 GPT 审查；STAGE F 及历史 Phase 7 保持 `NOT_STARTED`，本轮不进入下一阶段。
 
 ## 7. 已冻结的产品规则
 
@@ -462,7 +477,7 @@ implementation_report: D:\办公\AI\Codex_Workbench_V1\docs\PHASE-06-MAP-PRODUCT
 current_path: Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Map implementation → Phase 6 Gate Fix PASS → V1 total acceptance / RC Freeze
 completed_phases: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Conversation Map initialization, Phase 5 screening, Phase 6 implementation
 active_phase: V1 total acceptance / Release Candidate Freeze
-next_planned_phase: STAGE D Thread title and left navigation status; STAGE E and Phase 7 remain NOT_STARTED
+next_planned_phase: STAGE E Thread Header + Conversation Message Stream; STAGE F and Phase 7 remain NOT_STARTED
 map_statuses: ○ planned / ◉ in_progress / ● completed / ! blocked
 frozen_principles_confirmed: Native Thread is the only conversation identity; Native Turn/Item are runtime facts; Codex owns Agent/Reasoning/Context/Tool semantics; Workbench is a thin product shell/projection/recovery adapter plus Map sidecar
 product_rules: Codex owns semantic understanding; Workbench only orchestrates, validates, stores bounded sync state, and presents

@@ -46,3 +46,19 @@ test("stage D projects titles and activity state without making turn failure a T
   assert.match(renderer, /nativeTitlesByThread\.set\(expectedThreadId/);
   assert.match(renderer, /autoTitlesByThread\.set\(expectedThreadId/);
 });
+
+test("stage E keeps native message projection behind a thin renderer surface", () => {
+  assert.match(renderer, /from "\.\/message-projection\.ts";/);
+  assert.match(renderer, /projectReadItem\(item\)/);
+  assert.match(renderer, /projectLiveEvent\(event\)/);
+  assert.match(renderer, /className = `conversation-message message-\$\{projection\.kind\}`/);
+  assert.match(renderer, /className = "processing-indicator"/);
+  assert.match(renderer, /event-details/);
+  assert.match(renderer, /(?:article|card)\.dataset\.nativeTurnId = turnId/);
+  assert.match(renderer, /(?:article|card)\.dataset\.nativeItemId = itemId/);
+  assert.match(renderer, /turnElements\.get\(turnId\)/);
+  assert.match(html, /id="runtime-state"[^>]*hidden/);
+  assert.match(html, /\.message-user\s*\{[^}]*justify-self:\s*end/s);
+  assert.match(html, /\.message-assistant\s*\{[^}]*justify-self:\s*start/s);
+  assert.match(html, /\.event-details\s*\{/);
+});

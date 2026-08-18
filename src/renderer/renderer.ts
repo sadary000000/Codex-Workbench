@@ -9,12 +9,13 @@ import type {
   TurnResult,
 } from "../shared/runtime-types.ts";
 import type { ConversationMapStatus, MapNode, MapSourceRef, ProjectMapMaintenanceView, ProjectMapStatus } from "../shared/map-types.ts";
-import { normalizeNativeEvent, type NativeVisibleEventKind, type NormalizedNativeEvent } from "../shared/native-event-normalizer.ts";
+import { normalizeNativeEvent, type NormalizedNativeEvent } from "../shared/native-event-normalizer.ts";
 import { buildNavigationModel, type NavigationModel } from "./navigation-model.ts";
 import { isComposerTargetValid } from "../shared/thread-target.ts";
 import { isNearLatest } from "./workspace-scroll.ts";
 import { normalizeUserDisplayTitle, resolveThreadTitle } from "./thread-title.ts";
-import { defaultEventLabel, operationStatusLabel, runtimeStateLabel, shouldRenderDefaultEvent, userFacingErrorMessage } from "./ui-projection.ts";
+import { operationStatusLabel, runtimeStateLabel, shouldRenderDefaultEvent, userFacingErrorMessage } from "./ui-projection.ts";
+import { projectLiveEvent, projectReadItem, projectTurnState, type MessageProjection } from "./message-projection.ts";
 
 interface IpcEnvelope<T = unknown> {
   ok: boolean;
@@ -263,6 +264,28 @@ function runtimeIsActive(state: RuntimeSnapshot | undefined | null): boolean {
     || turnOperationThreads.has(state.nativeThreadId ?? "")
     || state.state === "TURN_RUNNING"
     || state.state === "WAITING_USER";
+}
+
+function headerRuntimeState(state: RuntimeSnapshot): { label: string; className: string; hidden: boolean } {
+  switch (state.state) {
+    case "TURN_RUNNING": return { label: "运行中", className: "runtime-active", hidden: false };
+    case "WAITING_USER": return { label: "需要确认", className: "runtime-attention", hidden: false };
+    case "STARTING": return { label: "启动中", className: "runtime-active", hidden: false };
+    case "DISCONNECTED": return { label: "已断开", className: "runtime-error", hidden: false };
+    case "RECOVERY_REQUIRED": return { label: "需要恢复", className: "runtime-error", hidden: false };
+    case "FAILED": return { label: "操作失败", className: "runtime-error", hidden: false };
+    default: return { label: "", className: "", hidden: true };
+  }
+}
+
+function workspaceContextLabel(state: RuntimeSnapshot): string {
+  if (currentProjection?.projectId) {
+    const project = navigation.projects.find((group) => group.project.projectId === currentProjection?.projectId)?.project;
+    return project ? `项目 · ${project.name}` : "项目对话";
+  }
+  if (!state.nativeThreadId) return "对话";
+  const path = state.cwd.replaceAll("\\", "/").split("/").filter(Boolean).at(-1);
+  return path ? `独立对话 · ${path}` : "独立对话";
 }
 
 function hasSelectedNativeThread(): boolean {
@@ -622,22 +645,7 @@ function safeJson(value: unknown, limit = 12_000): string {
 
 type NativeReadItem = ThreadReadView["turns"][number]["items"][number];
 
-function itemKind(item: NativeReadItem): NativeVisibleEventKind {
-  const type = typeof item.type === "string" ? item.type.toLowerCase().replaceAll("_", "") : "";
-  if (type === "usermessage" || type === "userinput") return "user";
-  if (type === "agentmessage") return "assistant";
-  if (["reasoning", "contextcompaction", "plan", "processing"].includes(type)) return "processing";
-  if (["commandexecution", "mcptoolcall", "toolcall", "functioncall"].includes(type)) return "command_tool";
-  if (["filechange", "file"].includes(type)) return "file";
-  if (["websearch", "web", "webfetch", "search"].includes(type)) return "web";
-  return "unknown";
-}
-
-function eventLabel(kind: NativeVisibleEventKind): string {
-  return defaultEventLabel(kind);
-}
-
-function makeCard(kind: NativeVisibleEventKind, label: string): HTMLElement {
+function makeCard(kind: string, label: string): HTMLElement {
   const article = document.createElement("article");
   article.className = `event-card event-${kind}`;
   const header = document.createElement("header");
@@ -649,25 +657,97 @@ function makeCard(kind: NativeVisibleEventKind, label: string): HTMLElement {
   return article;
 }
 
-function appendBody(card: HTMLElement, text: string | null): void {
+function setCardStatus(card: HTMLElement, statusLabel: string | null): void {
+  if (!statusLabel) return;
+  const status = document.createElement("span");
+  status.className = "event-status";
+  status.textContent = statusLabel;
+  card.querySelector(".event-card-header")?.append(status);
+}
+
+function appendBody(card: HTMLElement, text: string | null, className = "event-card-body"): void {
   if (!text) return;
   const body = document.createElement("div");
-  body.className = "event-card-body";
+  body.className = className;
   body.textContent = text;
   card.append(body);
 }
 
-function createReadItemCard(item: NativeReadItem, turnId: string | null): HTMLElement {
-  const kind = itemKind(item);
-  const card = makeCard(kind, eventLabel(kind));
+function appendProjectionDetails(container: HTMLElement, projection: MessageProjection): void {
+  if (!projection.details.length && projection.kind !== "unknown") return;
+  const details = document.createElement("details");
+  details.className = "event-details";
+  const summary = document.createElement("summary");
+  summary.textContent = projection.kind === "unknown" ? "查看 Native 详情" : "查看详情";
+  details.append(summary);
+  for (const detail of projection.details) {
+    const row = document.createElement("div");
+    row.className = "event-detail-row";
+    const label = document.createElement("span");
+    label.className = "event-detail-label";
+    label.textContent = detail.label;
+    const value = document.createElement("pre");
+    value.className = "event-detail-value";
+    value.textContent = safeJson(detail.value, 8_000);
+    row.append(label, value);
+    details.append(row);
+  }
+  if (projection.kind === "unknown") {
+    const rawDetails = document.createElement("details");
+    rawDetails.className = "event-raw-details";
+    const rawSummary = document.createElement("summary");
+    rawSummary.textContent = "查看原始 Native Item";
+    const raw = document.createElement("pre");
+    raw.textContent = safeJson(projection.raw, 8_000);
+    rawDetails.append(rawSummary, raw);
+    details.append(rawDetails);
+  }
+  container.append(details);
+}
+
+function projectSurfaceElement(projection: MessageProjection, turnId: string | null, itemId: string | null): HTMLElement {
+  if (projection.kind === "user" || projection.kind === "assistant") {
+    const article = document.createElement("article");
+    article.className = `conversation-message message-${projection.kind}`;
+    if (turnId) article.dataset.nativeTurnId = turnId;
+    if (itemId) article.dataset.nativeItemId = itemId;
+    article.tabIndex = -1;
+    const label = document.createElement("span");
+    label.className = "message-role";
+    label.textContent = projection.label;
+    const body = document.createElement("div");
+    body.className = "message-prose";
+    body.textContent = projection.text ?? "";
+    article.append(label, body);
+    return article;
+  }
+
+  if (projection.kind === "processing") {
+    const article = document.createElement("article");
+    article.className = "processing-indicator";
+    if (turnId) article.dataset.nativeTurnId = turnId;
+    if (itemId) article.dataset.nativeItemId = itemId;
+    article.tabIndex = -1;
+    const dot = document.createElement("span");
+    dot.className = "processing-dot";
+    const label = document.createElement("span");
+    label.textContent = projection.summary || "正在处理…";
+    article.append(dot, label);
+    return article;
+  }
+
+  const card = makeCard(projection.kind, projection.label);
   if (turnId) card.dataset.nativeTurnId = turnId;
-  if (item.id) card.dataset.nativeItemId = item.id;
+  if (itemId) card.dataset.nativeItemId = itemId;
   card.tabIndex = -1;
-  const text = plainText(item.text) ?? plainText(item.input) ?? plainText(item.output);
-  appendBody(card, text);
-  if (!text && kind === "processing") appendBody(card, "正在处理…");
-  if (!text && kind === "unknown") appendBody(card, "暂不支持直接展示的内容。请在 Developer / Diagnostics 查看详情。");
+  setCardStatus(card, projection.statusLabel);
+  appendBody(card, projection.summary);
+  appendProjectionDetails(card, projection);
   return card;
+}
+
+function createReadItemCard(item: NativeReadItem, turnId: string | null): HTMLElement {
+  return projectSurfaceElement(projectReadItem(item), turnId, item.id);
 }
 
 function createTurnView(turn: ThreadReadView["turns"][number]): HTMLElement {
@@ -678,28 +758,28 @@ function createTurnView(turn: ThreadReadView["turns"][number]): HTMLElement {
   const heading = document.createElement("div");
   heading.className = "turn-heading";
   const title = document.createElement("strong");
-  title.textContent = "本轮对话";
+  title.textContent = "本轮";
   heading.append(title);
   wrapper.append(heading);
-  const turnStatus = displayStatus(turn.status)?.toLowerCase().replaceAll("_", "") ?? "";
-  if (turn.error !== null && turn.error !== undefined || /fail|error/.test(turnStatus)) {
-    appendBody(wrapper, "本轮执行失败；详情请在 Developer / Diagnostics 查看。" );
-  } else if (/interrupt|cancel/.test(turnStatus)) {
-    appendBody(wrapper, "本轮已中断。" );
+  const turnState = projectTurnState(turn.status, turn.error);
+  if (turnState === "failed") {
+    appendBody(wrapper, "本轮执行失败；详情请在 Developer / Diagnostics 查看。", "turn-status turn-status-error");
+  } else if (turnState === "interrupted") {
+    appendBody(wrapper, "本轮已中断。", "turn-status turn-status-interrupted");
   }
   for (const item of turn.items) wrapper.append(createReadItemCard(item, turn.id));
-  if (!turn.items.length) appendBody(wrapper, "本轮暂未包含可展示内容。");
+  if (!turn.items.length) appendBody(wrapper, "本轮暂未包含可展示内容。", "turn-status");
   return wrapper;
 }
 
 function createLiveEventCard(event: NormalizedNativeEvent): HTMLElement {
-  const card = makeCard(event.kind, eventLabel(event.kind));
-  if (event.turnId) card.dataset.nativeTurnId = event.turnId;
-  if (event.itemId) card.dataset.nativeItemId = event.itemId;
-  appendBody(card, event.text);
-  if (!event.text && event.kind === "processing") appendBody(card, "正在处理…");
-  if (!event.text && event.kind === "unknown") appendBody(card, "其他更新。请在 Developer / Diagnostics 查看详情。");
-  return card;
+  const projection = projectLiveEvent(event);
+  if (!projection) {
+    const empty = document.createElement("span");
+    empty.hidden = true;
+    return empty;
+  }
+  return projectSurfaceElement(projection, event.turnId, event.itemId);
 }
 
 function approvalKey(id: string | number): string {
@@ -717,6 +797,14 @@ function approvalDetails(params: unknown): { command: string | null; reason: str
 
 function createApprovalCard(request: NativeServerRequestEvent): HTMLElement {
   const card = makeCard("approval", "需要确认");
+  const params = request.params && typeof request.params === "object" && !Array.isArray(request.params)
+    ? request.params as Record<string, unknown>
+    : {};
+  const turnId = plainText(params.turnId) ?? plainText((params.turn as Record<string, unknown> | null)?.id);
+  const itemId = plainText(params.itemId) ?? plainText((params.item as Record<string, unknown> | null)?.id);
+  if (turnId) card.dataset.nativeTurnId = turnId;
+  if (itemId) card.dataset.nativeItemId = itemId;
+  card.classList.add("approval-card");
   const details = approvalDetails(request.params);
   if (details.command) appendBody(card, details.command);
   if (details.reason) appendBody(card, details.reason);
@@ -728,21 +816,21 @@ function createApprovalCard(request: NativeServerRequestEvent): HTMLElement {
   }
   const actions = document.createElement("div");
   actions.className = "approval-actions";
-  const addDecision = (label: string, decision: unknown) => {
+  const addDecision = (label: string, decision: unknown, tone = "") => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "debug-button";
+    button.className = `approval-button ${tone}`.trim();
     button.textContent = label;
     button.addEventListener("click", () => { void respondToApproval(request, decision, actions); });
     actions.append(button);
   };
   if (request.method === "item/permissions/requestApproval") {
-    addDecision("不给额外权限", { decision: { permissions: { fileSystem: null, network: null }, scope: "turn" } });
+    addDecision("不给额外权限", { decision: { permissions: { fileSystem: null, network: null }, scope: "turn" } }, "danger");
   } else {
-    addDecision("接受", { decision: "accept" });
+    addDecision("接受", { decision: "accept" }, "primary");
     addDecision("本会话接受", { decision: "acceptForSession" });
-    addDecision("拒绝", { decision: "decline" });
-    addDecision("取消 Turn", { decision: "cancel" });
+    addDecision("拒绝", { decision: "decline" }, "danger");
+    addDecision("取消 Turn", { decision: "cancel" }, "danger");
   }
   card.append(actions);
   return card;
@@ -839,13 +927,23 @@ function renderThreadWorkspace(): void {
     empty.append(title, message);
     threadWorkspaceElement.append(empty);
   }
+  const turnElements = new Map<string, HTMLElement>();
   if (threadView) {
-    for (const turn of threadView.turns) threadWorkspaceElement.append(createTurnView(turn));
+    for (const turn of threadView.turns) {
+      const element = createTurnView(turn);
+      if (turn.id) turnElements.set(turn.id, element);
+      threadWorkspaceElement.append(element);
+    }
   }
   for (const event of liveEvents.values()) {
     if (shouldRenderDefaultEvent(event.kind)) threadWorkspaceElement.append(createLiveEventCard(event));
   }
-  for (const request of pendingApprovals.values()) threadWorkspaceElement.append(createApprovalCard(request));
+  for (const request of pendingApprovals.values()) {
+    const card = createApprovalCard(request);
+    const turnId = card.dataset.nativeTurnId;
+    const turn = turnId ? turnElements.get(turnId) : null;
+    (turn ?? threadWorkspaceElement).append(card);
+  }
   renderDiagnosticsProjection();
   requestAnimationFrame(() => {
     if (shouldFollow && followLatest) {
@@ -873,7 +971,11 @@ function renderState(state: RuntimeSnapshot): void {
   }
   latestState = state;
   syncDraftForThread(state.nativeThreadId);
-  stateElement.textContent = runtimeStateLabel(state.state);
+  const headerState = headerRuntimeState(state);
+  stateElement.textContent = headerState.label;
+  stateElement.hidden = headerState.hidden;
+  stateElement.className = `runtime-pill ${headerState.className}`.trim();
+  stateElement.title = headerState.hidden ? runtimeStateLabel(state.state) : headerState.label;
   threadElement.textContent = state.nativeThreadId ?? "—";
   turnElement.textContent = state.activeTurnId ?? "—";
   runElement.textContent = state.localRunId ?? "—";
@@ -883,7 +985,8 @@ function renderState(state: RuntimeSnapshot): void {
     .find((thread) => thread.nativeThreadId === state.nativeThreadId);
   if (selected) currentProjection = selected;
   selectedThreadElement.textContent = selected ? threadLabel(selected) : state.nativeThreadId ? "新对话" : "未选择对话";
-  threadKindElement.textContent = currentProjection?.projectId ? "项目对话" : state.nativeThreadId ? "独立对话" : "对话";
+  threadKindElement.textContent = workspaceContextLabel(state);
+  threadKindElement.title = state.cwd || "";
   const active = runtimeIsActive(state);
   const runtimeTarget = state.nativeThreadId ? runtimeStates.get(state.nativeThreadId) : null;
   const targetValid = isComposerTargetValid({
@@ -908,7 +1011,9 @@ function renderNoSelectedThread(): void {
   activateThreadBuffers(null);
   syncDraftForThread(null);
   promptElement.value = "";
-  stateElement.textContent = "—";
+  stateElement.textContent = "";
+  stateElement.hidden = true;
+  stateElement.className = "runtime-pill";
   threadElement.textContent = "—";
   turnElement.textContent = "—";
   runElement.textContent = "—";
@@ -920,6 +1025,7 @@ function renderNoSelectedThread(): void {
     ? "对话不可用"
     : "未选择对话";
   threadKindElement.textContent = threadUnavailableId ? "对话 · 不可用" : "对话";
+  threadKindElement.title = "";
   interruptButton.disabled = true;
   startTurnButton.disabled = true;
   renameThreadButton.disabled = true;
