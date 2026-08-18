@@ -4,6 +4,13 @@
 
 `Thread 标题 + 左侧导航状态`
 
+## freeze_status
+
+- Automated Gate: PASS
+- Manual GUI Acceptance: PASS（用户已明确确认）
+- Stage D Status: PASS / FROZEN
+- Stage E: 已获授权进入实现；本报告不宣称 Stage E 人工验收结果。
+
 ## scope_resolution
 
 ```text
@@ -231,6 +238,6 @@ none for automated validation. Awaiting GPT review and user GUI acceptance.
 
 ## gate
 
-`READY_FOR_GPT_REVIEW`
+`PASS / FROZEN`
 
-本阶段内部实现完成，Conversation Map 已更新为 `STAGE C → ●`、`STAGE D → ◉`、`STAGE E → ○ NOT_STARTED`；完成后停止，不进入 STAGE E。
+Stage D 已由用户完成 GUI 验收并明确确认通过；本报告仅冻结该结论，不补写未由用户确认的逐项观察。Conversation Map 已进入 Stage E 实现状态。
