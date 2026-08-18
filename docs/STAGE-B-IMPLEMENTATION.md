@@ -86,7 +86,9 @@ GATE: 机器契约/回归与真实 Runtime smoke 完成；GUI 行为保留人工
 - `npm audit --omit=dev`：PASS，0 vulnerabilities。
 - `git diff --check`：PASS。
 - changed-file secret scan：PASS，未发现高风险 token/private-key 模式。
-- `npm run build` 默认输出目录曾执行但被正在运行的 packaged EXE 锁定，返回 Windows `EBUSY`；使用同一 build 脚本和 `CODEX_WORKBENCH_DIST=C:\Users\sadar\AppData\Local\Temp\codex-workbench-v1-stage-b-build` 的隔离输出执行 PASS，并确认 `main/main.js`、`renderer/renderer.js`、`renderer/index.html` 均生成。
+- `npm run build`：最终 PASS；用户关闭锁定进程后默认 `dist` 输出已重新生成。
+- `npm run package:win`：最终 PASS；`dist/package/Codex Workbench.exe` 已生成。
+- 此前一次默认 build 的 Windows `EBUSY` 已确认是运行中 packaged EXE 的文件锁；关闭进程后重跑 build/package 已通过。
 
 ## real_appserver_smoke
 
@@ -106,7 +108,7 @@ GATE: 机器契约/回归与真实 Runtime smoke 完成；GUI 行为保留人工
 4. 切换 A/B Thread 后各自从最新位置开始，A 的输出不会改变 B 的滚动位置。
 5. Composer 调整到较高高度、展开 Native Runtime 调试区时，Composer 仍可用，Conversation 不发生外层页面滚动。
 
-现有 `dist/package/Codex Workbench.exe` 仍由 4 个运行中的同一 packaged 进程锁定，未强制结束用户进程；默认 dist/package 需在这些进程关闭后重新 build/package 才能做新的 EXE 人工复测。
+新的 packaged EXE 已生成于 `dist/package/Codex Workbench.exe`；可直接用该文件进行以下 GUI 人工复测。
 
 ## subagents
 
@@ -153,12 +155,12 @@ GATE: 机器契约/回归与真实 Runtime smoke 完成；GUI 行为保留人工
 ## known_limitations
 
 - 没有引入 Electron/浏览器自动化依赖；GUI 行为仍需人工验收，静态 contract 和 CLI smoke 不替代人工 GUI PASS。
-- 默认 `dist` build 的锁定问题属于当前 4 个运行中 packaged EXE 的环境状态；隔离输出 build 已 PASS。
+- 如果再次在 EXE 运行期间打包，Windows 可能重新返回 `EBUSY`；需先关闭正在运行的 packaged EXE，再执行 build/package。
 - Stage B 不处理 Stage A 已冻结的 writer-conflict 对话文案/重试入口，也不扩展附件、Model、Reasoning、Permission 等能力。
 
 ## blockers
 
-产品实现无 blocker。新的 packaged EXE 人工复测暂受现有运行中 EXE 锁定影响；关闭这些进程后可重新执行默认 build/package。该环境限制不改变本阶段代码或 Native Runtime 证据。
+none。最新 build/package 已通过；当前只等待该 packaged EXE 的 5 项 GUI 人工验收。
 
 ## gate
 
