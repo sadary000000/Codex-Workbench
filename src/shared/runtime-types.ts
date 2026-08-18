@@ -49,7 +49,8 @@ export type ThreadProjectionState =
   | "ready"
   | "disconnected"
   | "recovery_required"
-  | "failed";
+  | "failed"
+  | "unavailable";
 
 export interface ProjectRecord {
   projectId: string;

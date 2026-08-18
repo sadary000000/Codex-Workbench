@@ -7,11 +7,13 @@ import { errorInfo, isNoRolloutError } from "../shared/error-info.ts";
 import { createLogger, logError, type Logger } from "../shared/logger.ts";
 import { isNativeApprovalMethod, isValidNativeApprovalResponse, noAdditionalPermissions } from "../shared/native-approval.ts";
 import { PersistenceStoreError, V1PersistenceStore } from "../shared/persistence-store.ts";
-import { clearThreadBindingIfMatches, inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
+import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
 import type { JsonRpcMessage, RuntimeSnapshot, ThreadNavigationResult } from "../shared/runtime-types.ts";
 import { ConversationMapCoordinator } from "./map-coordinator.ts";
 import { ProjectMapManager } from "./project-map-manager.ts";
 import { RuntimeRegistry } from "./runtime-registry.ts";
+import { markThreadUnavailable } from "./thread-availability.ts";
+import { isComposerTargetValid } from "../shared/thread-target.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -272,52 +274,36 @@ function projectionNotFound(nativeThreadId: string): PersistenceStoreError {
   );
 }
 
-function missingNativeThreadError(nativeThreadId: string, cause: unknown): Error & { code: string } {
-  const error = new Error(`Native Thread 已不存在，Workbench 已清理本地孤儿记录：${nativeThreadId}`) as Error & { code: string };
-  error.code = "NATIVE_THREAD_MISSING";
+function unavailableNativeThreadError(nativeThreadId: string, cause: unknown): Error & { code: string } {
+  const error = new Error(`Native Thread 当前不可用，已保留本地 projection 与原 nativeThreadId：${nativeThreadId}`) as Error & { code: string };
+  error.code = "NATIVE_THREAD_UNAVAILABLE";
   error.cause = errorInfo(cause).message;
   return error;
 }
 
-async function removeMissingNativeThread(nativeThreadId: string): Promise<void> {
+async function markUnavailableNativeThread(nativeThreadId: string, cause: unknown): Promise<never> {
   const id = nativeThreadId.trim();
-  if (!id) return;
-  let cleanupError: unknown = null;
-  const rememberCleanupError = (error: unknown): void => {
-    if (!cleanupError) cleanupError = error;
-  };
+  if (!id) throw unavailableNativeThreadError(nativeThreadId, cause);
   cancelPendingNativeApprovals(id);
   try {
-    // Close before deleting the projection: NativeThreadRuntime.close() writes
-    // its final lifecycle state, so deletion must be the last local mutation.
     await runtimes.close(id);
   } catch (error) {
     logger.warn("missing_native_thread_runtime_close_failed", { nativeThreadId: id, error: errorInfo(error).message });
-    rememberCleanupError(error);
   }
-  let projectionCleanupSucceeded = false;
+  let stateUpdateError: unknown = null;
   try {
-    await getPersistence().deleteThreadProjection(id);
-    projectionCleanupSucceeded = true;
+    await markThreadUnavailable(getPersistence(), id, cause);
   } catch (error) {
-    logger.error("missing_native_thread_projection_delete_failed", { nativeThreadId: id, error: errorInfo(error).message });
-    rememberCleanupError(error);
+    stateUpdateError = error;
+    logger.error("missing_native_thread_projection_mark_failed", { nativeThreadId: id, error: errorInfo(error).message });
   }
-  if (projectionCleanupSucceeded) {
-    try {
-      await clearThreadBindingIfMatches(join(app.getPath("userData"), "native-thread-binding.json"), id);
-    } catch (error) {
-      logger.warn("missing_native_thread_binding_clear_failed", { nativeThreadId: id, error: errorInfo(error).message });
-      rememberCleanupError(error);
-    }
-  }
-  if (currentNativeThreadId === id) currentNativeThreadId = null;
-  if (cleanupError) throw cleanupError;
-}
-
-async function cleanupMissingNativeThread(nativeThreadId: string, cause: unknown): Promise<never> {
-  await removeMissingNativeThread(nativeThreadId);
-  throw missingNativeThreadError(nativeThreadId, cause);
+  // A failed target must never leave the previous Thread as an implicit
+  // Composer target. The old runtime may remain alive in RuntimeRegistry, but
+  // the selected Main-process target is now intentionally empty until the
+  // user explicitly selects a valid Thread again.
+  currentNativeThreadId = null;
+  if (stateUpdateError) throw stateUpdateError;
+  throw unavailableNativeThreadError(id, cause);
 }
 
 async function selectNativeThread(nativeThreadId: string): Promise<void> {
@@ -368,7 +354,7 @@ async function startCurrentRuntime(): Promise<NativeThreadRuntime> {
     currentNativeThreadId = nativeThreadId;
     return runtime;
   } catch (error) {
-    if (isNoRolloutError(error)) return cleanupMissingNativeThread(nativeThreadId, error);
+    if (isNoRolloutError(error)) return markUnavailableNativeThread(nativeThreadId, error);
     throw error;
   }
 }
@@ -385,7 +371,7 @@ async function switchNativeThread(nativeThreadId: string): Promise<ThreadNavigat
     if (!currentProjection) throw projectionNotFound(id);
     return { snapshot: candidate.snapshot(), projection: currentProjection };
   } catch (error) {
-    if (isNoRolloutError(error)) return cleanupMissingNativeThread(id, error);
+    if (isNoRolloutError(error)) return markUnavailableNativeThread(id, error);
     throw error;
   }
 }
@@ -614,7 +600,7 @@ function registerIpc(): void {
     try {
       return ok(await getRuntime().readThread());
     } catch (error) {
-      if (nativeThreadId && isNoRolloutError(error)) return cleanupMissingNativeThread(nativeThreadId, error).catch((missing) => fail(missing));
+      if (nativeThreadId && isNoRolloutError(error)) return markUnavailableNativeThread(nativeThreadId, error).catch((unavailable) => fail(unavailable));
       return fail(error);
     }
   });
@@ -622,7 +608,22 @@ function registerIpc(): void {
     let activeRuntime: NativeThreadRuntime | null = null;
     const requestedThreadId = typeof nativeThreadId === "string" && nativeThreadId.trim() ? nativeThreadId.trim() : currentNativeThreadId;
     try {
+      if (!requestedThreadId || requestedThreadId !== currentNativeThreadId) {
+        const error = new Error("Composer target does not match the currently selected Native Thread.") as Error & { code: string };
+        error.code = "THREAD_TARGET_MISMATCH";
+        throw error;
+      }
       activeRuntime = getRuntime(typeof nativeThreadId === "string" ? nativeThreadId : null);
+      if (!isComposerTargetValid({
+        requestedThreadId,
+        selectedThreadId: currentNativeThreadId,
+        runtimeThreadId: activeRuntime.nativeThreadId,
+        runtimeState: activeRuntime.state,
+      })) {
+        const error = new Error("Composer target does not match the ready Runtime target.") as Error & { code: string };
+        error.code = "THREAD_TARGET_MISMATCH";
+        throw error;
+      }
       const operation = activeRuntime.startTurn(typeof prompt === "string" ? prompt : "");
       send(IPC.state, activeRuntime.snapshot());
       const result = await operation;
@@ -631,7 +632,7 @@ function registerIpc(): void {
     } catch (error) {
       if (activeRuntime) send(IPC.state, activeRuntime.snapshot());
       const failedThreadId = activeRuntime?.nativeThreadId ?? requestedThreadId;
-      if (failedThreadId && isNoRolloutError(error)) return cleanupMissingNativeThread(failedThreadId, error).catch((missing) => fail(missing));
+      if (failedThreadId && isNoRolloutError(error)) return markUnavailableNativeThread(failedThreadId, error).catch((unavailable) => fail(unavailable));
       return fail(error);
     }
   });
@@ -640,7 +641,7 @@ function registerIpc(): void {
     try {
       return ok(await getRuntime(typeof nativeThreadId === "string" ? nativeThreadId : null).interruptTurn());
     } catch (error) {
-      if (requestedThreadId && isNoRolloutError(error)) return cleanupMissingNativeThread(requestedThreadId, error).catch((missing) => fail(missing));
+      if (requestedThreadId && isNoRolloutError(error)) return markUnavailableNativeThread(requestedThreadId, error).catch((unavailable) => fail(unavailable));
       return fail(error);
     }
   });

@@ -167,6 +167,7 @@ export class NativeThreadRuntime {
   private newThreadReadFallbackAllowedValue = false;
   private lastStartedThreadIdValue: string | null = null;
   private lastErrorValue: RuntimeErrorInfo | null = null;
+  private preserveProjectionStateOnCloseValue = false;
   private closing = false;
   private sequence = 0;
 
@@ -238,9 +239,11 @@ export class NativeThreadRuntime {
     this.stateValue = "STARTING";
     this.lastErrorValue = null;
     this.closing = false;
+    this.preserveProjectionStateOnCloseValue = false;
     this.dynamicToolsRegisteredValue = false;
     this.newThreadReadFallbackAllowedValue = false;
     this.lastStartedThreadIdValue = null;
+    let resumeAttempted = false;
     try {
       const persistenceInspection = await this.persistence?.inspect();
       if (persistenceInspection?.status === "invalid") {
@@ -251,6 +254,7 @@ export class NativeThreadRuntime {
       const persisted = bindingState.binding;
       const persistedId = persisted?.nativeThreadId ?? null;
       const requestedId = forceNew ? undefined : resumeThreadId ?? persistedId;
+      resumeAttempted = Boolean(requestedId);
       // Only the same in-process `thread/start` lifecycle may use the empty-read
       // fallback. A resumed ID must go through the real `thread/resume` path and
       // surface a missing rollout instead of being silently treated as empty.
@@ -380,11 +384,13 @@ export class NativeThreadRuntime {
       const normalized = asError(error);
       const details = errorInfo(normalized);
       this.lastErrorValue = details;
+      const preserveProjectionState = (resumeAttempted || isWriterConflictError(normalized)) && normalized.code !== "ACTIVE_TURN_RECOVERY_REQUIRED";
+      this.preserveProjectionStateOnCloseValue = preserveProjectionState;
       const previousState = this.stateValue as RuntimeState;
       if (previousState !== "RECOVERY_REQUIRED" && previousState !== "DISCONNECTED") this.stateValue = "FAILED";
       const failureState = this.stateValue as RuntimeState;
       await this.safePersistProjection({
-        ...(isWriterConflictError(normalized)
+        ...(preserveProjectionState
           ? {}
           : {
               lastKnownState: failureState === "DISCONNECTED" ? "disconnected" : failureState === "RECOVERY_REQUIRED" ? "recovery_required" : "failed",
@@ -583,7 +589,9 @@ export class NativeThreadRuntime {
             ? "recovery_required"
             : "ready";
       await this.safePersistProjection({
-        ...(this.lastErrorValue?.code === "WRITER_CONFLICT" && !active ? {} : { lastKnownState: closeProjectionState }),
+        ...((this.preserveProjectionStateOnCloseValue || this.lastErrorValue?.code === "WRITER_CONFLICT") && !active
+          ? {}
+          : { lastKnownState: closeProjectionState }),
         lastKnownTurnId: active?.turnId ?? null,
         ...(active ? { lastError: details } : {}),
       });

@@ -379,8 +379,44 @@ test("preserves the previous projection state when resume hits a Writer Conflict
   const projection = await first.persistence.getThreadProjection("native-thread");
   assert.equal(projection?.lastKnownState, "ready");
   assert.equal(projection?.lastError?.code, "WRITER_CONFLICT");
+  first.state.threadResumeWriterConflict = false;
+  const retried = await resumed.resume("native-thread");
+  assert.equal(retried.nativeThreadId, "native-thread");
+  assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownState, "ready");
+  assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastError, null);
   await resumed.close();
   assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownState, "ready");
+});
+
+test("keeps a resumed no-rollout failure transient and retries the same Native Thread", async () => {
+  const first = await createRuntime();
+  await first.runtime.start();
+  await first.runtime.close();
+  first.state.threadReadNoRollout = true;
+
+  const resumed = new NativeThreadRuntime({
+    cwd: "C:/fake/project",
+    stateFile: first.stateFile,
+    persistence: first.persistence,
+    clientFactory: (_options) => new FakeClient(first.state),
+  });
+  await assert.rejects(
+    resumed.resume("native-thread"),
+    (error: any) => error?.code === "APP_SERVER_PROTOCOL_REJECTED",
+  );
+  const failedProjection = await first.persistence.getThreadProjection("native-thread");
+  assert.equal(failedProjection?.lastKnownState, "ready");
+  assert.equal(failedProjection?.lastError?.code, "APP_SERVER_PROTOCOL_REJECTED");
+  assert.equal(first.state.startCalls, 1);
+
+  first.state.threadReadNoRollout = false;
+  const retried = await resumed.resume("native-thread");
+  assert.equal(retried.nativeThreadId, "native-thread");
+  const recoveredProjection = await first.persistence.getThreadProjection("native-thread");
+  assert.equal(recoveredProjection?.lastKnownState, "ready");
+  assert.equal(recoveredProjection?.lastError, null);
+  assert.equal(first.state.startCalls, 1);
+  await resumed.close();
 });
 
 test("refuses to create a replacement Thread for an invalid persisted binding", async () => {

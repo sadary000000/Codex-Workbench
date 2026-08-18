@@ -28,6 +28,7 @@ const THREAD_STATES = new Set<ThreadProjectionState>([
   "disconnected",
   "recovery_required",
   "failed",
+  "unavailable",
 ]);
 
 const PROMPT_STATES = new Set<PromptRecoveryStatus>([
@@ -460,24 +461,6 @@ export class V1PersistenceStore {
     const id = boundedString(nativeThreadId, MAX_ID_LENGTH);
     if (!id) return null;
     return clone((await this.read()).threads.find((thread) => thread.nativeThreadId === id) ?? null);
-  }
-
-  /**
-   * Remove one local projection after the native identity has been proven to
-   * be gone. Prompt recovery records are removed with it because they cannot
-   * be reconciled to a missing native Thread and would otherwise invalidate
-   * the persistence document's identity relation.
-   */
-  async deleteThreadProjection(nativeThreadId: string): Promise<ThreadProjection | null> {
-    const id = boundedString(nativeThreadId, MAX_ID_LENGTH);
-    if (!id) throw new PersistenceStoreError("THREAD_PROJECTION_INVALID", "Thread ID is invalid.", this.filePath);
-    return this.mutate((document) => {
-      const index = document.threads.findIndex((thread) => thread.nativeThreadId === id);
-      if (index < 0) return null;
-      const [removed] = document.threads.splice(index, 1);
-      document.prompts = document.prompts.filter((prompt) => prompt.nativeThreadId !== id);
-      return clone(removed);
-    });
   }
 
   async ensureThreadProjection(input: EnsureThreadProjectionInput): Promise<ThreadProjection> {
