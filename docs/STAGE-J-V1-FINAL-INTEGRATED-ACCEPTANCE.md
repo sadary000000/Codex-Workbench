@@ -231,7 +231,7 @@ official_stage_name: V1 Final Integrated Acceptance / Release Freeze
 stage_i_freeze_commit: 370b9b56eb5d9dc1b03f4d3d600eb6e29aec5cec
 base_commit: 552c28c
 implementation_or_fix_commit: 09cd467b12937f0642d8b8b67a6fb763d23a301f
-final_report_commit: document-introducing commit recorded in final handoff
+final_report_commit: 207b06dc80fd8c033c4978fb12eccfb4cb31b4b0 (document-introducing commit)
 
 stage_status:
   A: PASS / FROZEN
@@ -280,4 +280,3 @@ gate: RC_READY_FOR_USER_FINAL_ACCEPTANCE
 ```
 
 完成本报告后 STOP；不进入 STAGE K。
-
