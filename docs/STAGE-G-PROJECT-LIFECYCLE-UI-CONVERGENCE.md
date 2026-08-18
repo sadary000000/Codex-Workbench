@@ -1,8 +1,9 @@
 # STAGE G — Project 生命周期 + 主界面收敛
 
 日期：2026-08-18  
-状态：Automated Gate PASS；等待 GPT 审查与用户人工 GUI 验收  
-范围边界：本阶段不进入 STAGE H，不做 Map UI 产品化、Workflow、Review、Git、Browser、Multi-Agent、Prompt Templates 或磁盘文件删除。
+状态：Automated Gate PASS；Project lifecycle manual acceptance PASS；Native Thread ownership/safety manual acceptance PASS；UI convergence DEFERRED BY USER；Stage G PASS / FROZEN
+UI convergence classification：ACCEPTED UX GAP；Deferred target：STAGE I
+范围边界：本阶段已冻结；UI 深度 Polish 延后 STAGE I；不做 Map UI 产品化、Workflow、Review、Git、Browser、Multi-Agent、Prompt Templates 或磁盘文件删除。
 
 ## 1. goal
 
@@ -116,24 +117,17 @@
 - `npm run test:real:composer-capability`：PASS。
 - `npm run test:real:composer-persistence`：PASS。
 - 本阶段新增与 A–F 真实 smoke 均使用 CLI/App Server 链路；没有把静态/contract test 冒充 Electron GUI 验收。
-- 本阶段未把静态/contract test 冒充 Electron GUI 验收；系统目录选择器和 `shell.openPath` 仍需用户在打包 EXE 中人工确认。
+- 本阶段未把静态/contract test 冒充 Electron GUI 验收；用户已将 Project lifecycle / ownership / safety 聚合确认通过；UI convergence 仍明确 deferred。
 
 ## 9. manual acceptance required
 
-用户需要使用最新 `dist/package/Codex Workbench V1.exe` 验证：
+用户已确认 Project lifecycle / ownership / safety 通过；以下 UI convergence 项显式 deferred，不写成 GUI 通过：
 
-1. Add Project 能打开系统目录选择器并登记真实目录。
-2. 同一路径不会产生难以区分的重复 Project。
-3. Project 可重命名，路径和 Thread ID 不变。
-4. “在资源管理器中打开”打开正确目录。
-5. Remove modal 明确说明不会删除本地文件；确认后目录仍存在。
-6. Project Thread 移除后成为同一 nativeThreadId 的 Standalone，不静默切到其他 Thread。
-7. Pinned / Projects / Recent 归属、空 Project、折叠状态正常。
-8. 重启后 Project 列表/Thread 归属和同一 Native Thread 恢复正常。
-9. 宽屏正文不铺满；普通 Assistant 无大型卡片；Tool/File/Search/Approval/Error 仍有必要强调。
-10. running / unavailable / failed Turn 状态与 Header、Composer、scroll、Diagnostics、Map source jump 无回归。
+1. Project lifecycle：用户确认通过。
+2. Native Thread ownership / safety：用户确认通过。
+3. UI convergence：用户暂不验收，作为 ACCEPTED UX GAP 延后 STAGE I。
 
-本清单只列待人工验证项，不宣称 GUI PASS。
+本记录只写用户明确确认的聚合结论；未把 UI convergence 写成 GUI PASS。
 
 ## 10. Stage A–F regression
 
@@ -171,4 +165,4 @@
 
 ## 14. gate
 
-实现完成后：Automated Gate READY；保持 `STAGE G = ◉ awaiting GPT + user manual acceptance`，不进入 STAGE H。
+Automated Gate：PASS；Project lifecycle manual acceptance：PASS；Native Thread ownership/safety manual acceptance：PASS；UI convergence：DEFERRED BY USER / ACCEPTED UX GAP；Stage G：PASS / FROZEN；Deferred target：STAGE I。

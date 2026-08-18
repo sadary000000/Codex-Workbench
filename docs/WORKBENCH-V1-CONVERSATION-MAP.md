@@ -1,9 +1,9 @@
 # Codex Workbench V1：Conversation Map 初始化
 
 日期：2026-08-18
-阶段：STAGE G — Project 生命周期 + 主界面收敛
-状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E PASS / FROZEN；STAGE F PASS / FROZEN；STAGE G ◉ 进行中；STAGE H NOT_STARTED
-范围：当前 Codex Workbench V1 开发对话；不进入 STAGE H
+阶段：STAGE H — 人工回归验收 / Reliability Hardening
+状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E PASS / FROZEN；STAGE F PASS / FROZEN；STAGE G PASS / FROZEN；STAGE H ◉ 进行中；STAGE I NOT_STARTED
+范围：当前 Codex Workbench V1 开发对话；不进入 STAGE I
 
 ## 1. 文档定位
 
@@ -89,10 +89,12 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 └── Header 与 Native Thread/Turn/Item 默认 UI 投影完成；用户人工 GUI 验收 PASS，阶段冻结
 ● STAGE F — Composer Capability + Approval + FIX
 └── capability、Approval、Requested/Sent Diagnostics 与 per-Thread preference 重启恢复已通过自动化和用户人工验收，阶段冻结
-◉ STAGE G — Project 生命周期 + 主界面收敛
-└── Project 日常生命周期、Thread ownership 安全边界和稳定 Workspace 的宽度/边框/状态色/密度收敛进行中
-○ STAGE H
-└── NOT_STARTED；不在本阶段范围内
+● STAGE G — Project 生命周期 + 主界面收敛
+└── Project lifecycle 与 Native Thread ownership/safety 用户验收通过；UI convergence 明确 deferred，作为 ACCEPTED UX GAP 延后 STAGE I
+◉ STAGE H — 人工回归验收 / Reliability Hardening
+└── 对 STAGE A–G 做真实任务、异常路径、重启恢复和长时间使用回归；不新增一级产品功能
+○ STAGE I
+└── NOT_STARTED；负责 deferred UI convergence / Visual Polish
 ```
 
 ## 4. 节点详情与来源
@@ -116,7 +118,7 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | STAGE D — Thread 标题 + 左侧导航状态 | ● | 原生 title 优先、displayTitle fallback、用户重命名和左侧轻量运行 indicator；一次 Turn 失败不污染 Thread 身份；用户人工 GUI 验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.2.docx`、`docs\STAGE-D-THREAD-TITLE-NAVIGATION-STATE.md` |
 | STAGE E — Thread Header + Conversation Message Stream | ● | Header、User/Assistant、Thinking/Processing、Command/Tool、File、Search/Web、Approval 和 Turn 状态的轻量 UI projection 已实现；用户人工 GUI 验收 PASS，阶段冻结 | `docs\STAGE-E-THREAD-HEADER-CONVERSATION-STREAM.md` |
 | STAGE F — Composer Capability + Approval + FIX | ● | capability、Approval、Requested/Sent Diagnostics 和按 Native Thread 的 preference 重启恢复已完成；用户人工验收 PASS，阶段冻结 | `docs\STAGE-F-COMPOSER-CAPABILITY-APPROVAL.md`、`docs\STAGE-F-FIX-COMPOSER-PERSISTENCE-DIAGNOSTICS.md` |
-| STAGE G — Project 生命周期 + 主界面收敛 | ◉ | Project 生命周期与主界面 P1 收敛实现中；不删除磁盘目录，不替换 Native Thread identity | `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.2.docx`、STAGE G 执行指令 |
+| STAGE G — Project 生命周期 + 主界面收敛 | ● | Project lifecycle 与 Native Thread ownership/safety 用户验收通过；UI convergence 显式 deferred 为 ACCEPTED UX GAP，延后 STAGE I | `docs\STAGE-G-PROJECT-LIFECYCLE-UI-CONVERGENCE.md`、STAGE G 冻结指令 |
 
 ## 5. Phase 0–4 阶段证据摘要
 
@@ -262,10 +264,11 @@ STAGE F 正式名称为 `Composer Capability + Approval`，必须先读取真实
 | 10 | ● | STAGE D Thread 标题 + 左侧导航状态完成；用户人工 GUI 验收 PASS，阶段冻结 |
 | 11 | ● | STAGE E Thread Header + Conversation Message Stream 完成；用户人工 GUI 验收 PASS，阶段冻结 |
 | 12 | ● | STAGE F Composer Capability + Approval + FIX 完成；GPT/用户人工验收 PASS，阶段冻结 |
-| 13 | ◉ | STAGE G Project 生命周期 + 主界面收敛进行中；完成后等待 GPT/用户人工验收 |
-| 14 | ○ | STAGE H：NOT_STARTED；不在本轮范围内 |
+| 13 | ● | STAGE G Project lifecycle / ownership / safety 通过；UI convergence deferred to STAGE I |
+| 14 | ◉ | STAGE H 人工回归验收 / Reliability Hardening 进行中 |
+| 15 | ○ | STAGE I：NOT_STARTED；承接 deferred UI convergence / Visual Polish |
 
-STAGE G 完成内部 Gate 后停止并提交 GPT 审查；STAGE H 及历史 Phase 7 保持 `NOT_STARTED`，本轮不进入下一阶段。
+STAGE G 已冻结；UI convergence 作为 ACCEPTED UX GAP 延后 STAGE I。当前进入 STAGE H；完成内部 Gate 后停止并提交 GPT 审查，不进入 STAGE I。
 
 ## 7. 已冻结的产品规则
 
