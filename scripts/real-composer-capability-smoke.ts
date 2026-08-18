@@ -6,13 +6,16 @@ import { AppServerProcessClient } from "../src/codex/app-server-client.ts";
 import { resolveCodexCommand } from "../src/codex/codex-command.ts";
 import { NativeThreadRuntime } from "../src/codex/native-thread-runtime.ts";
 import { V1PersistenceStore } from "../src/shared/persistence-store.ts";
+import type { ComposerRequestDiagnostics } from "../src/shared/runtime-types.ts";
 
 const cwd = process.env.CODEX_WORKBENCH_CWD ?? process.cwd();
 const stateRoot = await mkdtemp(join(tmpdir(), "codex-workbench-v1-stage-f-composer-"));
+let requestDiagnostics: ComposerRequestDiagnostics | null = null;
 const runtime = new NativeThreadRuntime({
   cwd,
   stateFile: join(stateRoot, "binding.json"),
   persistence: new V1PersistenceStore(join(stateRoot, "state.json")),
+  onTurnStartRequest: (request) => { requestDiagnostics = request; },
 });
 let nativeThreadId: string | null = null;
 async function deleteThread(id: string): Promise<void> {
@@ -43,6 +46,15 @@ try {
   });
   assert.equal(turn.nativeThreadId, nativeThreadId);
   assert.equal(turn.status, "completed");
+  const sent = requestDiagnostics as ComposerRequestDiagnostics | null;
+  assert.ok(sent);
+  assert.equal(sent.nativeThreadId, nativeThreadId);
+  assert.equal(sent.model, model.model);
+  assert.equal(sent.effort, effort);
+  assert.equal(sent.approvalPolicy, "never");
+  assert.deepEqual(sent.sandboxPolicy, { type: "readOnly", networkAccess: false });
+  assert.equal(sent.inputCapability, "text");
+  assert.equal(sent.attachments, "unsupported/deferred");
   const read = await runtime.readThread();
   assert.equal(read.nativeThreadId, nativeThreadId);
   process.stdout.write(`STAGE_F_COMPOSER_CAPABILITY ${JSON.stringify({ nativeThreadId, model: model.model, effort, turnId: turn.turnId, status: turn.status, approvalPath: "native-broker-ready-manual-trigger-required" })}\n`);

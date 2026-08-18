@@ -170,3 +170,30 @@ test("persists displayTitle as UI metadata and reads the legacy title key withou
   assert.equal(migrated?.displayTitleSource, "user");
   assert.equal(migrated?.nativeThreadId, projection.nativeThreadId);
 });
+
+test("persists Composer preferences by Native Thread and restores them after reopening", async () => {
+  const { root, store } = await createStore();
+  await store.ensureThreadProjection({ nativeThreadId: "thread-a", cwd: "C:/a" });
+  await store.ensureThreadProjection({ nativeThreadId: "thread-b", cwd: "C:/b" });
+  const savedA = await store.saveComposerPreferences({ nativeThreadId: "thread-a", model: "model-luna", effort: "high", approvalPolicy: "on-request", sandbox: "workspace-write" });
+  const savedB = await store.saveComposerPreferences({ nativeThreadId: "thread-b", model: "model-sol", effort: "medium", approvalPolicy: "never", sandbox: "read-only" });
+  assert.equal(savedA.nativeThreadId, "thread-a");
+  const reopened = new V1PersistenceStore(join(root, "workbench-state.json"));
+  assert.deepEqual(await reopened.getComposerPreferences("thread-a"), savedA);
+  assert.deepEqual(await reopened.getComposerPreferences("thread-b"), savedB);
+  assert.equal(await reopened.getComposerPreferences("missing"), null);
+});
+
+test("keeps an unsupported saved Composer value and migrates old v1 files without preferences", async () => {
+  const { root, store } = await createStore();
+  await store.ensureThreadProjection({ nativeThreadId: "thread-old", cwd: "C:/old" });
+  await store.saveComposerPreferences({ nativeThreadId: "thread-old", model: "removed-model", effort: "removed-effort", approvalPolicy: "never", sandbox: "read-only" });
+  const filePath = join(root, "workbench-state.json");
+  const document = JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
+  delete document.composerPreferences;
+  await writeFile(filePath, JSON.stringify(document), "utf8");
+  const migrated = new V1PersistenceStore(filePath);
+  assert.deepEqual(await migrated.getComposerPreferences("thread-old"), null);
+  await migrated.saveComposerPreferences({ nativeThreadId: "thread-old", model: "removed-model", effort: "removed-effort", approvalPolicy: "never", sandbox: "read-only" });
+  assert.equal((await migrated.getComposerPreferences("thread-old"))?.model, "removed-model");
+});

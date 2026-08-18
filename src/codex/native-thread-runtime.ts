@@ -16,6 +16,7 @@ import { MAP_THREAD_START_HINT } from "./map-tool.ts";
 import { normalizeComposerCapabilities } from "./composer-capabilities.ts";
 import type {
   ComposerCapabilities,
+  ComposerRequestDiagnostics,
   JsonRpcMessage,
   NativeEvent,
   PromptRecoveryStatus,
@@ -39,6 +40,7 @@ export interface NativeThreadRuntimeOptions {
   clientFactory?: (options: AppServerClientOptions) => AppServerClientPort;
   onEvent?: (event: NativeEvent) => void;
   onServerRequest?: (message: JsonRpcMessage) => Promise<unknown> | unknown;
+  onTurnStartRequest?: (request: ComposerRequestDiagnostics) => void;
   dynamicTools?: DynamicToolSpec[];
   onProcessExit?: (exitCode: number | null, stderr: string) => void;
   persistence?: V1PersistenceStore;
@@ -156,6 +158,7 @@ export class NativeThreadRuntime {
   private readonly clientFactory: (options: AppServerClientOptions) => AppServerClientPort;
   private readonly onEvent: NativeThreadRuntimeOptions["onEvent"];
   private readonly onServerRequest: NativeThreadRuntimeOptions["onServerRequest"];
+  private readonly onTurnStartRequest: NativeThreadRuntimeOptions["onTurnStartRequest"];
   private readonly dynamicTools: DynamicToolSpec[];
   private readonly onProcessExit: NativeThreadRuntimeOptions["onProcessExit"];
   private readonly persistence: V1PersistenceStore | null;
@@ -183,6 +186,7 @@ export class NativeThreadRuntime {
     this.clientFactory = options.clientFactory ?? ((clientOptions) => new AppServerProcessClient(clientOptions));
     this.onEvent = options.onEvent;
     this.onServerRequest = options.onServerRequest;
+    this.onTurnStartRequest = options.onTurnStartRequest;
     this.dynamicTools = options.dynamicTools ? structuredClone(options.dynamicTools) : [];
     this.onProcessExit = options.onProcessExit;
     this.persistence = options.persistence ?? null;
@@ -468,7 +472,7 @@ export class NativeThreadRuntime {
       throw this.fail("TURN_BUSY", "A Native Turn is already running.");
     }
     const localRunId = randomUUID();
-      const nativeThreadId = this.nativeThreadIdValue;
+    const nativeThreadId = this.nativeThreadIdValue;
     let turnId: string | null = null;
     try {
       this.newThreadReadFallbackAllowedValue = false;
@@ -476,11 +480,23 @@ export class NativeThreadRuntime {
         await this.persistence.beginPrompt({ localRunId, nativeThreadId, prompt: text });
       }
       this.stateValue = "TURN_RUNNING";
-      const response = await this.client.request("turn/start", {
+      const requestParams = {
         threadId: nativeThreadId,
         input: [{ type: "text", text }],
         ...options,
-      }, this.timeoutMs);
+      };
+      this.onTurnStartRequest?.({
+        nativeThreadId,
+        localRunId,
+        requestedAt: new Date().toISOString(),
+        model: options.model ?? null,
+        effort: options.effort ?? null,
+        approvalPolicy: options.approvalPolicy ?? null,
+        sandboxPolicy: options.sandboxPolicy ?? null,
+        inputCapability: "text",
+        attachments: "unsupported/deferred",
+      });
+      const response = await this.client.request("turn/start", requestParams, this.timeoutMs);
       const responseNativeThreadId = responseThreadId(response);
       if (responseNativeThreadId && responseNativeThreadId !== nativeThreadId) {
         throw this.fail("TURN_THREAD_MISMATCH", "turn/start returned a Turn for a different Native Thread.");

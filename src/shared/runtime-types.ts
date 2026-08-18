@@ -108,6 +108,7 @@ export interface WorkbenchPersistenceDocument {
   projects: ProjectRecord[];
   threads: ThreadProjection[];
   prompts: PromptRecoveryRecord[];
+  composerPreferences: ComposerPreferenceRecord[];
 }
 
 export interface ThreadReadView {
@@ -201,6 +202,23 @@ export interface ComposerPreferences {
   effort: string | null;
   approvalPolicy: ComposerApprovalPolicy;
   sandbox: ComposerSandboxSelection;
+}
+
+export interface ComposerPreferenceRecord extends ComposerPreferences {
+  nativeThreadId: string;
+  updatedAt: string;
+}
+
+export interface ComposerRequestDiagnostics {
+  nativeThreadId: string;
+  localRunId: string;
+  requestedAt: string;
+  model: string | null;
+  effort: string | null;
+  approvalPolicy: ComposerApprovalPolicy | null;
+  sandboxPolicy: NativeSandboxPolicy | null;
+  inputCapability: "text";
+  attachments: "unsupported/deferred";
 }
 
 export type NativeSandboxPolicy =

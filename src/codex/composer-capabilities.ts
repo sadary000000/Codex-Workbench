@@ -66,6 +66,25 @@ export function defaultComposerPreferences(capabilities: ComposerCapabilities | 
   };
 }
 
+export interface ComposerPreferenceValidation {
+  valid: boolean;
+  unavailable: string[];
+}
+
+export function validateComposerPreferencesAgainstCapabilities(
+  preferences: ComposerPreferences,
+  capabilities: ComposerCapabilities,
+): ComposerPreferenceValidation {
+  const unavailable: string[] = [];
+  const model = preferences.model ? capabilities.models.find((entry) => entry.model === preferences.model) : null;
+  if (preferences.model && !model) unavailable.push(`model:${preferences.model}`);
+  if (preferences.effort) {
+    const effortSupported = model?.supportedReasoningEfforts.some((entry) => entry.reasoningEffort === preferences.effort) ?? false;
+    if (!effortSupported) unavailable.push(`effort:${preferences.effort}`);
+  }
+  return { valid: unavailable.length === 0, unavailable };
+}
+
 export function buildNativeTurnOptions(preferences: ComposerPreferences, cwd: string): NativeTurnOptions {
   const options: NativeTurnOptions = {
     approvalPolicy: preferences.approvalPolicy,

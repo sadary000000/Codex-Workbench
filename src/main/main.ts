@@ -25,6 +25,9 @@ const IPC = Object.freeze({
   read: "native-runtime:read",
   turn: "native-runtime:turn",
   composerCapabilities: "native-runtime:composer-capabilities",
+  composerRequest: "native-runtime:composer-request",
+  composerPreferencesGet: "persistence:composer-preferences:get",
+  composerPreferencesSave: "persistence:composer-preferences:save",
   interrupt: "native-runtime:interrupt",
   close: "native-runtime:close",
   persistenceInspect: "persistence:inspect",
@@ -199,6 +202,10 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
       });
       if (createdRuntime) send(IPC.state, createdRuntime.snapshot());
       return response;
+    },
+    onTurnStartRequest: (request) => {
+      logger.info("composer_turn_start_request", request);
+      send(IPC.composerRequest, request);
     },
     onProcessExit: (exitCode, stderr) => {
       logger.warn("app_server_process_exit", { exitCode, stderr: stderr.slice(-2_000) });
@@ -658,6 +665,34 @@ function registerIpc(): void {
         throw error;
       }
       return ok(await runtime.discoverComposerCapabilities());
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.composerPreferencesGet, async (_event, nativeThreadId: unknown) => {
+    try {
+      if (typeof nativeThreadId !== "string" || !nativeThreadId.trim()) throw new Error("Native Thread ID is required.");
+      return ok(await getPersistence().getComposerPreferences(nativeThreadId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.composerPreferencesSave, async (_event, nativeThreadId: unknown, preferences: unknown) => {
+    try {
+      if (typeof nativeThreadId !== "string" || !nativeThreadId.trim() || preferences === null || typeof preferences !== "object" || Array.isArray(preferences)) {
+        throw new Error("Composer preference input is invalid.");
+      }
+      const value = preferences as Record<string, unknown>;
+      if ((value.model !== null && typeof value.model !== "string") || (value.effort !== null && typeof value.effort !== "string") || (value.approvalPolicy !== "never" && value.approvalPolicy !== "on-request") || (value.sandbox !== "read-only" && value.sandbox !== "workspace-write")) {
+        throw new Error("Composer preference values are invalid.");
+      }
+      return ok(await getPersistence().saveComposerPreferences({
+        nativeThreadId,
+        model: value.model as string | null,
+        effort: value.effort as string | null,
+        approvalPolicy: value.approvalPolicy,
+        sandbox: value.sandbox,
+      }));
     } catch (error) {
       return fail(error);
     }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildNativeTurnOptions, defaultComposerPreferences, normalizeComposerCapabilities, parseComposerPreferences } from "../src/codex/composer-capabilities.ts";
+import { buildNativeTurnOptions, defaultComposerPreferences, normalizeComposerCapabilities, parseComposerPreferences, validateComposerPreferencesAgainstCapabilities } from "../src/codex/composer-capabilities.ts";
 
 test("normalizes model/list and selects the native default effort", () => {
   const capabilities = normalizeComposerCapabilities({ data: [{ id: "m1", model: "m1", displayName: "Model One", isDefault: true, defaultReasoningEffort: "high", supportedReasoningEfforts: [{ reasoningEffort: "low", description: "fast" }, { reasoningEffort: "high" }], inputModalities: ["text", "image"] }] });
@@ -14,4 +14,10 @@ test("maps per-thread Composer preferences to one native turn request", () => {
   assert.deepEqual(options, { model: "m1", effort: "high", approvalPolicy: "on-request", sandboxPolicy: { type: "workspaceWrite", networkAccess: false, writableRoots: ["C:/project"] } });
   assert.deepEqual(parseComposerPreferences({ model: null, effort: null, approvalPolicy: "never", sandbox: "read-only" }), { model: null, effort: null, approvalPolicy: "never", sandbox: "read-only" });
   assert.throws(() => parseComposerPreferences({ model: "m1", approvalPolicy: "untrusted", sandbox: "read-only" }));
+});
+
+test("identifies unsupported saved model and effort without replacing their values", () => {
+  const capabilities = normalizeComposerCapabilities({ data: [{ id: "m1", model: "m1", isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: "low" }] }] });
+  const validation = validateComposerPreferencesAgainstCapabilities({ model: "removed", effort: "removed", approvalPolicy: "never", sandbox: "read-only" }, capabilities);
+  assert.deepEqual(validation, { valid: false, unavailable: ["model:removed", "effort:removed"] });
 });

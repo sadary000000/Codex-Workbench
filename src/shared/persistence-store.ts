@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import type {
   PromptRecoveryRecord,
   PromptRecoveryStatus,
+  ComposerPreferenceRecord,
+  ComposerPreferences,
   ProjectRecord,
   RuntimeErrorInfo,
   DisplayTitleSource,
@@ -55,7 +57,8 @@ export type PersistenceErrorCode =
   | "THREAD_PROJECT_CONFLICT"
   | "PROMPT_INVALID"
   | "PROMPT_ID_DUPLICATE"
-  | "PROMPT_NOT_FOUND";
+  | "PROMPT_NOT_FOUND"
+  | "COMPOSER_PREFERENCE_INVALID";
 
 export class PersistenceStoreError extends Error {
   readonly code: PersistenceErrorCode;
@@ -115,6 +118,10 @@ export interface PromptRecoveryPatch {
   status?: PromptRecoveryStatus;
   turnId?: string | null;
   lastError?: RuntimeErrorInfo | null;
+}
+
+export interface ComposerPreferenceInput extends ComposerPreferences {
+  nativeThreadId: string;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -182,7 +189,7 @@ function pathKey(value: string): string {
 }
 
 function emptyDocument(now: string): WorkbenchPersistenceDocument {
-  return { version: 1, updatedAt: now, projects: [], threads: [], prompts: [] };
+  return { version: 1, updatedAt: now, projects: [], threads: [], prompts: [], composerPreferences: [] };
 }
 
 function normalizeProject(value: unknown): ProjectRecord | null {
@@ -281,10 +288,33 @@ function normalizePrompt(value: unknown): PromptRecoveryRecord | null {
   };
 }
 
+function normalizeComposerPreference(value: unknown): ComposerPreferenceRecord | null {
+  const candidate = record(value);
+  if (!candidate) return null;
+  const nativeThreadId = boundedString(candidate.nativeThreadId, MAX_ID_LENGTH);
+  const model = candidate.model === null ? null : boundedString(candidate.model, 240);
+  const effort = candidate.effort === null ? null : boundedString(candidate.effort, 64);
+  const approvalPolicy = candidate.approvalPolicy;
+  const sandbox = candidate.sandbox;
+  const updatedAt = timestamp(candidate.updatedAt);
+  if (
+    !nativeThreadId ||
+    (candidate.model !== null && !model) ||
+    (candidate.effort !== null && !effort) ||
+    (approvalPolicy !== "never" && approvalPolicy !== "on-request") ||
+    (sandbox !== "read-only" && sandbox !== "workspace-write") ||
+    !updatedAt
+  ) return null;
+  return { nativeThreadId, model, effort, approvalPolicy, sandbox, updatedAt };
+}
+
 export function normalizePersistenceDocument(value: unknown): WorkbenchPersistenceDocument | null {
   const candidate = record(value);
   if (!candidate || candidate.version !== 1 || !timestamp(candidate.updatedAt)) return null;
   if (!Array.isArray(candidate.projects) || !Array.isArray(candidate.threads) || !Array.isArray(candidate.prompts)) return null;
+  // STAGE F adds this top-level collection. Missing on older v1 files means
+  // "never saved", not an invalid document and not a request to use a default.
+  if (candidate.composerPreferences !== undefined && !Array.isArray(candidate.composerPreferences)) return null;
 
   const projects: ProjectRecord[] = [];
   const projectIds = new Set<string>();
@@ -319,12 +349,22 @@ export function normalizePersistenceDocument(value: unknown): WorkbenchPersisten
     promptIds.add(prompt.localRunId);
   }
 
+  const composerPreferences: ComposerPreferenceRecord[] = [];
+  const preferenceThreadIds = new Set<string>();
+  for (const value of (candidate.composerPreferences ?? [])) {
+    const preference = normalizeComposerPreference(value);
+    if (!preference || preferenceThreadIds.has(preference.nativeThreadId) || !threadIds.has(preference.nativeThreadId)) return null;
+    composerPreferences.push(preference);
+    preferenceThreadIds.add(preference.nativeThreadId);
+  }
+
   return {
     version: 1,
     updatedAt: candidate.updatedAt as string,
     projects,
     threads,
     prompts,
+    composerPreferences,
   };
 }
 
@@ -480,6 +520,40 @@ export class V1PersistenceStore {
     const id = boundedString(nativeThreadId, MAX_ID_LENGTH);
     if (!id) return null;
     return clone((await this.read()).threads.find((thread) => thread.nativeThreadId === id) ?? null);
+  }
+
+  async getComposerPreferences(nativeThreadId: string): Promise<ComposerPreferenceRecord | null> {
+    const id = boundedString(nativeThreadId, MAX_ID_LENGTH);
+    if (!id) return null;
+    return clone((await this.read()).composerPreferences.find((preference) => preference.nativeThreadId === id) ?? null);
+  }
+
+  async saveComposerPreferences(input: ComposerPreferenceInput): Promise<ComposerPreferenceRecord> {
+    const nativeThreadId = boundedString(input.nativeThreadId, MAX_ID_LENGTH);
+    const model = input.model === null ? null : boundedString(input.model, 240);
+    const effort = input.effort === null ? null : boundedString(input.effort, 64);
+    const approvalPolicy = input.approvalPolicy;
+    const sandbox = input.sandbox;
+    if (
+      !nativeThreadId ||
+      (input.model !== null && !model) ||
+      (input.effort !== null && !effort) ||
+      (approvalPolicy !== "never" && approvalPolicy !== "on-request") ||
+      (sandbox !== "read-only" && sandbox !== "workspace-write")
+    ) {
+      throw new PersistenceStoreError("COMPOSER_PREFERENCE_INVALID", "Composer preference input is invalid.", this.filePath);
+    }
+    return this.mutate((document) => {
+      if (!document.threads.some((thread) => thread.nativeThreadId === nativeThreadId)) {
+        throw new PersistenceStoreError("THREAD_PROJECTION_NOT_FOUND", "Composer preference Thread projection does not exist.", this.filePath);
+      }
+      const now = this.now();
+      const next: ComposerPreferenceRecord = { nativeThreadId, model, effort, approvalPolicy, sandbox, updatedAt: now };
+      const existing = document.composerPreferences.find((preference) => preference.nativeThreadId === nativeThreadId);
+      if (existing) Object.assign(existing, next);
+      else document.composerPreferences.push(next);
+      return clone(next);
+    });
   }
 
   async ensureThreadProjection(input: EnsureThreadProjectionInput): Promise<ThreadProjection> {

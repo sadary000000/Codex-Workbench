@@ -1,9 +1,9 @@
 # Codex Workbench V1：Conversation Map 初始化
 
 日期：2026-08-18
-阶段：STAGE F — Composer Capability + Approval
+阶段：STAGE F FIX — Composer 配置持久化 + Diagnostics 可观测性
 状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E PASS / FROZEN；STAGE F ◉ 进行中
-范围：当前 Codex Workbench V1 开发对话
+范围：当前 Codex Workbench V1 开发对话；不进入 STAGE G
 
 ## 1. 文档定位
 
@@ -87,8 +87,8 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 └── 原生 title / displayTitle fallback、用户重命名和克制的左侧运行状态已完成；用户人工 GUI 验收 PASS，阶段冻结
 ● STAGE E — Thread Header + Conversation Message Stream
 └── Header 与 Native Thread/Turn/Item 默认 UI 投影完成；用户人工 GUI 验收 PASS，阶段冻结
-◉ STAGE F — Composer Capability + Approval
-└── Composer 能力审计已完成，真实 request mapping 与 Approval broker 接入已实现；等待最终 Gate/人工 Approval 验收，不提前进入
+◉ STAGE F FIX — Composer 配置持久化 + Diagnostics 可观测性
+└── 解决按 Native Thread 持久化下一 Turn 偏好、恢复校验和真实 turn/start Requested/Sent 参数观测；等待 GPT 审查与人工复测
 ○ STAGE G
 └── NOT_STARTED；不在本阶段范围内
 ```
@@ -113,7 +113,7 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | STAGE C — UI Projection / Diagnostics 分层 | ● | 默认 UI 隐藏协议噪声；Developer / Diagnostics 提供 Thread/Turn/Item 定位、原始快照、按 Thread 隔离的事件日志和错误详情；自动化 Gate 与用户人工验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、`docs\STAGE-C-UI-PROJECTION-DIAGNOSTICS.md` |
 | STAGE D — Thread 标题 + 左侧导航状态 | ● | 原生 title 优先、displayTitle fallback、用户重命名和左侧轻量运行 indicator；一次 Turn 失败不污染 Thread 身份；用户人工 GUI 验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.2.docx`、`docs\STAGE-D-THREAD-TITLE-NAVIGATION-STATE.md` |
 | STAGE E — Thread Header + Conversation Message Stream | ● | Header、User/Assistant、Thinking/Processing、Command/Tool、File、Search/Web、Approval 和 Turn 状态的轻量 UI projection 已实现；用户人工 GUI 验收 PASS，阶段冻结 | `docs\STAGE-E-THREAD-HEADER-CONVERSATION-STREAM.md` |
-| STAGE F — Composer Capability + Approval | ◉ | 先审计真实 App Server capability，再按支持项接入 Composer 与 Approval；等待本阶段 Gate | `docs\STAGE-F-COMPOSER-CAPABILITY-AUDIT.md`、`docs\STAGE-F-COMPOSER-CAPABILITY-APPROVAL.md` |
+| STAGE F FIX — Composer 配置持久化 + Diagnostics 可观测性 | ◉ | 继承 STAGE F capability/Approval，补齐按 Native Thread 的偏好重启恢复、过期值 fail-closed 和 Main/Runtime 精确 turn/start 请求 Diagnostics；不进入 STAGE G | `docs\STAGE-F-FIX-COMPOSER-PERSISTENCE-DIAGNOSTICS.md` |
 
 ## 5. Phase 0–4 阶段证据摘要
 

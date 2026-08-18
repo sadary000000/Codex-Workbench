@@ -12,7 +12,7 @@ import { AppServerClientError } from "../src/codex/app-server-client.ts";
 import { NativeThreadRuntime } from "../src/codex/native-thread-runtime.ts";
 import { MAP_DYNAMIC_TOOL_SPEC } from "../src/codex/map-tool.ts";
 import { V1PersistenceStore } from "../src/shared/persistence-store.ts";
-import type { JsonRpcMessage } from "../src/shared/runtime-types.ts";
+import type { ComposerRequestDiagnostics, JsonRpcMessage } from "../src/shared/runtime-types.ts";
 
 interface FakeState {
   turns: Array<{ id: string; status: string; items: unknown[] }>;
@@ -202,7 +202,7 @@ class FakeClient implements AppServerClientPort {
   }
 }
 
-async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string; threadReadUnmaterialized?: boolean; threadReadNoRollout?: boolean; threadStartNoRollout?: boolean; threadTitle?: string; threadName?: string } = {}) {
+async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string; threadReadUnmaterialized?: boolean; threadReadNoRollout?: boolean; threadStartNoRollout?: boolean; threadTitle?: string; threadName?: string; onTurnStartRequest?: (request: ComposerRequestDiagnostics) => void } = {}) {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-test-"));
   const state: FakeState = {
     turns: [],
@@ -234,6 +234,7 @@ async function createRuntime(mismatch = false, options: { turnStartErrorCode?: s
     projectId: options.projectId,
     clientFactory: factory,
     onEvent: (event) => events.push({ method: event.method, params: event.params }),
+    onTurnStartRequest: options.onTurnStartRequest,
   });
   return { runtime, state, events, persistence, stateFile: join(root, "native-thread-binding.json") };
 }
@@ -295,6 +296,28 @@ test("discovers Composer capabilities and forwards options without changing Nati
     approvalPolicy: "on-request",
     sandboxPolicy: { type: "readOnly", networkAccess: false },
   });
+  await harness.runtime.close();
+});
+
+test("emits exact Composer turn/start diagnostics before the request is sent", async () => {
+  const requests: ComposerRequestDiagnostics[] = [];
+  const harness = await createRuntime(false, { onTurnStartRequest: (request) => requests.push(request) });
+  await harness.runtime.start();
+  await harness.runtime.startTurn("  exact request  ", {
+    model: "fake-model",
+    effort: "medium",
+    approvalPolicy: "on-request",
+    sandboxPolicy: { type: "workspaceWrite", networkAccess: false, writableRoots: ["C:/fake/project"] },
+  });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.nativeThreadId, "native-thread");
+  assert.match(requests[0]?.localRunId ?? "", /^[0-9a-f-]{36}$/);
+  assert.equal(requests[0]?.model, "fake-model");
+  assert.equal(requests[0]?.effort, "medium");
+  assert.equal(requests[0]?.approvalPolicy, "on-request");
+  assert.deepEqual(requests[0]?.sandboxPolicy, { type: "workspaceWrite", networkAccess: false, writableRoots: ["C:/fake/project"] });
+  assert.equal(requests[0]?.inputCapability, "text");
+  assert.equal(requests[0]?.attachments, "unsupported/deferred");
   await harness.runtime.close();
 });
 
