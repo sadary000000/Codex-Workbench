@@ -4,6 +4,12 @@
 官方阶段名称：`UI Projection / Diagnostics 分层`  
 基线：`26652c9 docs: freeze stage b after manual acceptance`
 
+## status
+
+- Automated Gate: PASS。
+- Manual GUI Acceptance: PASS（用户已明确确认当前未发现问题）。
+- Stage C Status: PASS / FROZEN。
+
 ## 1. scope_resolution
 
 ```text
@@ -105,9 +111,9 @@ STAGE C 将“协议事实”和“用户默认界面”分层：普通 Thread W
 - `npm run test:real:multi-thread`：PASS；输出 `STAGE_A_MULTI_THREAD`，两个 Thread 的 Turn 均 completed，A/B event marker 分离。
 - 本阶段只改 Renderer 展示层，没有新增或伪造 App Server smoke；以上是真实 App Server 回归结果，不是 GUI 自动化结果。
 
-## 11. manual_acceptance_required
+## 11. manual_acceptance
 
-以下项目需要用户人工打开构建后的应用确认，本报告不把它们写成已通过：
+用户已完成 STAGE C 人工检查，并明确确认当前未发现问题。本报告只记录该确认，不编造额外逐项观察：
 
 1. 默认 Thread 页面不显示完整 Native Thread ID、Turn ID、Item ID、raw JSON 和协议级状态。
 2. 展开 `Developer / Diagnostics` 后能找到当前 Thread/Turn/Item、最近错误、thread/read 原始快照和原始事件日志；点击定位能回到对应消息。
@@ -150,5 +156,5 @@ none。
 
 ## 17. gate
 
-内部 Gate：`READY_FOR_GPT_REVIEW`。  
-本阶段不进入 STAGE D；等待 GPT 审查和用户第 11 节人工验收。
+内部 Gate：`PASS / FROZEN`。
+STAGE C 已冻结；STAGE D 已获授权启动，STAGE E 保持 NOT_STARTED。
