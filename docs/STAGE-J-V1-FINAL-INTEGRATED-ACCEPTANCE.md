@@ -1,7 +1,7 @@
 # Codex Workbench V1 — STAGE J 最终集成验收 / Release Candidate
 
 日期：2026-08-19
-状态：`STAGE J RC READY / V1 FINAL MANUAL ACCEPTANCE PENDING`
+状态：`STAGE J PACKAGE PROVENANCE FIX IN PROGRESS / STANDARD REPACKAGE PENDING`
 范围：STAGE A–I 最终集成审计、最小可靠性修复、全量自动化/真实 App Server 回归、最终打包与文档收口。
 
 > 本报告不写 `V1 FINAL FROZEN`。STAGE J 自动化与真实回归 Gate 已完成；最终冻结仍等待用户最后一次人工总体验收。
@@ -155,6 +155,17 @@ Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth�
 - 该 EXE 是当前最终修复提交生成的固定 `dist/package` RC，不使用旧 artifact 冒充。
 - package 前生成的 package-local `user-data/logs` 已移动到可恢复备份目录 `C:\Users\sadar\AppData\Local\Temp\codex-workbench-v1-package-user-data-backup-20260819`，未删除用户文件。
 
+### GPT review FIX — package provenance
+
+GPT 审查指出 STAGE H 与 STAGE J 的 EXE SHA-256 相同，需要排除 stale package。复核结果如下：
+
+- Git ancestry 通过：`552c28c → 09cd467 → 7a3738b`；`09cd467` 确实是当前源码祖先。
+- `scripts/package-win.mjs` 复制 `node_modules/electron/dist/electron.exe` 后只重命名为 `Codex Workbench V1.exe`；因此固定 Electron 外壳的 SHA 相同是预期行为，不能单独证明复用了旧 app。
+- 从当前源码使用临时输出目录重建成功：`C:\Users\sadar\AppData\Local\Temp\codex-workbench-v1-stage-j-package-20260819`。
+- 标准包与临时重建包的 `dist/main/main.js` SHA 均为 `36B796FF0B886EAF27A3448F07283A23A303AB513A4717CC0C1AF1DBE7437209`；`dist/renderer/renderer.js` SHA 均为 `D03F52E8EF2E61EAB52442C288F17D027F509EF4B9AA9A29822467716A32B38D`；`package.json` SHA 均为 `1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F`。
+- 标准包 `resources/app/dist/main/main.js:311` 包含 `if (currentNativeThreadId === id)`；临时重建包同样包含。临时包 Renderer 还包含 `selectedNativeThreadId === operationThreadId` 与失败 draft 保留逻辑。
+- 结论：不存在 stale app 证据，`09cd467` 已进入当前标准包的 app resources；但正式 `npm run build` / `npm run package:win` 被正在运行的目标 EXE 锁定，标准路径仍需在关闭 EXE 后重新写入并复核。
+
 ## 11. security / Git scope
 
 - secret scan PASS；没有发现 API key、private key、Token、Cookie、password 或测试凭据被纳入变更。
@@ -212,15 +223,17 @@ Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth�
 STAGE J Automated Final Gate: PASS
 STAGE J Real App Server Gate: PASS
 STAGE J Architecture / Scope Audit: PASS
-STAGE J Package Gate: PASS
+STAGE J Package Gate: PROVENANCE FIX IN PROGRESS
+STAGE J Temporary Rebuild Provenance: PASS
+STAGE J Standard Repackage: BLOCKED_BY_RUNNING_EXE
 STAGE J Security / Git Scope Gate: PASS
 STAGE J Manual Final Acceptance: PENDING
-STAGE J: RC READY
-V1 FINAL MANUAL ACCEPTANCE: PENDING
+STAGE J: FIX_REQUIRED / STANDARD_REPACKAGE_PENDING
+V1 FINAL MANUAL ACCEPTANCE: NOT_STARTED
 STAGE K: NOT_STARTED / FORBIDDEN
 ```
 
-等待用户最后一次总体验收；在用户明确确认之前，不写 `V1 FINAL FROZEN`。
+关闭目标 `Codex Workbench V1.exe` 后重跑标准 package 并复核 SHA/包内资源；在此之前不开始最终人工验收，也不写 `V1 FINAL FROZEN`。
 
 ## 16. requested handoff fields
 
@@ -243,7 +256,7 @@ stage_status:
   G: PASS / FROZEN
   H: AUTOMATED/REAL PASS; FINAL MANUAL MERGED INTO J
   I: PASS / FROZEN (user-confirmed)
-  J: RC READY / FINAL MANUAL ACCEPTANCE PENDING
+  J: PACKAGE PROVENANCE FIX IN PROGRESS / STANDARD REPACKAGE PENDING
 
 architecture_final: PASS
 identity_final: PASS
@@ -274,9 +287,9 @@ subagents: Nash/Poincare/Singer/Bacon/Kuhn all naturally completed, reviewed, ad
 running_subagents_at_gate: 0
 accepted_limitations: legacy sparse-state migration edges, no Electron GUI harness, maintenance sidecar boundary, package provenance not embedded
 deferred_items: Attachment; final GUI Approval/Explorer and final integrated manual acceptance; STAGE I user-confirmed stage-level GUI only
-blockers: none for RC; final user acceptance is required
-manual_final_acceptance_required: yes
-gate: RC_READY_FOR_USER_FINAL_ACCEPTANCE
+blockers: standard package rebuild blocked by running D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe; close target EXE then rerun package
+manual_final_acceptance_required: not_started_until_standard_repackage
+gate: FIX_REQUIRED_PACKAGE_PROVENANCE
 ```
 
 完成本报告后 STOP；不进入 STAGE K。
