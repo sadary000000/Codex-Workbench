@@ -14,6 +14,7 @@ import { ProjectMapManager } from "./project-map-manager.ts";
 import { RuntimeRegistry } from "./runtime-registry.ts";
 import { markThreadUnavailable } from "./thread-availability.ts";
 import { isComposerTargetValid } from "../shared/thread-target.ts";
+import { buildNativeTurnOptions, parseComposerPreferences } from "../codex/composer-capabilities.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -23,6 +24,7 @@ const IPC = Object.freeze({
   resume: "native-runtime:resume",
   read: "native-runtime:read",
   turn: "native-runtime:turn",
+  composerCapabilities: "native-runtime:composer-capabilities",
   interrupt: "native-runtime:interrupt",
   close: "native-runtime:close",
   persistenceInspect: "persistence:inspect",
@@ -608,16 +610,16 @@ function registerIpc(): void {
       return fail(error);
     }
   });
-  ipcMain.handle(IPC.turn, async (_event, prompt: unknown, nativeThreadId: unknown) => {
+  ipcMain.handle(IPC.turn, async (_event, prompt: unknown, nativeThreadId: unknown, preferences: unknown) => {
     let activeRuntime: NativeThreadRuntime | null = null;
-    const requestedThreadId = typeof nativeThreadId === "string" && nativeThreadId.trim() ? nativeThreadId.trim() : currentNativeThreadId;
+    const requestedThreadId = typeof nativeThreadId === "string" && nativeThreadId.trim() ? nativeThreadId.trim() : null;
     try {
       if (!requestedThreadId || requestedThreadId !== currentNativeThreadId) {
         const error = new Error("Composer target does not match the currently selected Native Thread.") as Error & { code: string };
         error.code = "THREAD_TARGET_MISMATCH";
         throw error;
       }
-      activeRuntime = getRuntime(typeof nativeThreadId === "string" ? nativeThreadId : null);
+      activeRuntime = getRuntime(requestedThreadId);
       if (!isComposerTargetValid({
         requestedThreadId,
         selectedThreadId: currentNativeThreadId,
@@ -628,7 +630,8 @@ function registerIpc(): void {
         error.code = "THREAD_TARGET_MISMATCH";
         throw error;
       }
-      const operation = activeRuntime.startTurn(typeof prompt === "string" ? prompt : "");
+      const parsedPreferences = parseComposerPreferences(preferences);
+      const operation = activeRuntime.startTurn(typeof prompt === "string" ? prompt : "", buildNativeTurnOptions(parsedPreferences, activeRuntime.workingDirectory));
       send(IPC.state, activeRuntime.snapshot());
       const result = await operation;
       send(IPC.state, activeRuntime.snapshot());
@@ -637,6 +640,25 @@ function registerIpc(): void {
       if (activeRuntime) send(IPC.state, activeRuntime.snapshot());
       const failedThreadId = activeRuntime?.nativeThreadId ?? requestedThreadId;
       if (failedThreadId && isNoRolloutError(error)) return markUnavailableNativeThread(failedThreadId, error).catch((unavailable) => fail(unavailable));
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.composerCapabilities, async (_event, nativeThreadId: unknown) => {
+    try {
+      const requestedThreadId = typeof nativeThreadId === "string" ? nativeThreadId.trim() : "";
+      if (!requestedThreadId || requestedThreadId !== currentNativeThreadId) {
+        const error = new Error("Composer capability target does not match the selected Native Thread.") as Error & { code: string };
+        error.code = "THREAD_TARGET_MISMATCH";
+        throw error;
+      }
+      const runtime = getRuntime(requestedThreadId);
+      if (!isComposerTargetValid({ requestedThreadId, selectedThreadId: currentNativeThreadId, runtimeThreadId: runtime.nativeThreadId, runtimeState: runtime.state })) {
+        const error = new Error("Composer capabilities require a ready Runtime target.") as Error & { code: string };
+        error.code = "THREAD_TARGET_MISMATCH";
+        throw error;
+      }
+      return ok(await runtime.discoverComposerCapabilities());
+    } catch (error) {
       return fail(error);
     }
   });

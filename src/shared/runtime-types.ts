@@ -168,3 +168,48 @@ export interface RuntimeErrorInfo {
   stderr: string;
   cause?: string;
 }
+
+export type ComposerApprovalPolicy = "never" | "on-request";
+export type ComposerSandboxSelection = "read-only" | "workspace-write";
+
+export interface ComposerReasoningEffort {
+  reasoningEffort: string;
+  description: string | null;
+}
+
+export interface ComposerModelCapability {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string | null;
+  isDefault: boolean;
+  defaultReasoningEffort: string | null;
+  supportedReasoningEfforts: ComposerReasoningEffort[];
+  inputModalities: string[];
+}
+
+export interface ComposerCapabilities {
+  source: "app-server";
+  models: ComposerModelCapability[];
+  defaultModel: string | null;
+  attachments: "schema-only";
+  discoveredAt: string;
+}
+
+export interface ComposerPreferences {
+  model: string | null;
+  effort: string | null;
+  approvalPolicy: ComposerApprovalPolicy;
+  sandbox: ComposerSandboxSelection;
+}
+
+export type NativeSandboxPolicy =
+  | { type: "readOnly"; networkAccess?: boolean }
+  | { type: "workspaceWrite"; networkAccess?: boolean; writableRoots?: string[] };
+
+export interface NativeTurnOptions {
+  model?: string;
+  effort?: string;
+  approvalPolicy?: ComposerApprovalPolicy;
+  sandboxPolicy?: NativeSandboxPolicy;
+}

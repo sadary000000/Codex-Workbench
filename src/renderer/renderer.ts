@@ -7,6 +7,8 @@ import type {
   ThreadProjection,
   ThreadReadView,
   TurnResult,
+  ComposerCapabilities,
+  ComposerPreferences,
 } from "../shared/runtime-types.ts";
 import type { ConversationMapStatus, MapNode, MapSourceRef, ProjectMapMaintenanceView, ProjectMapStatus } from "../shared/map-types.ts";
 import { normalizeNativeEvent, type NormalizedNativeEvent } from "../shared/native-event-normalizer.ts";
@@ -16,6 +18,7 @@ import { isNearLatest } from "./workspace-scroll.ts";
 import { normalizeUserDisplayTitle, resolveThreadTitle } from "./thread-title.ts";
 import { operationStatusLabel, runtimeStateLabel, shouldRenderDefaultEvent, userFacingErrorMessage } from "./ui-projection.ts";
 import { projectLiveEvent, projectReadItem, projectTurnState, type MessageProjection } from "./message-projection.ts";
+import { defaultComposerPreferences } from "../codex/composer-capabilities.ts";
 
 interface IpcEnvelope<T = unknown> {
   ok: boolean;
@@ -45,7 +48,8 @@ interface V1Api {
   startThread(): Promise<IpcEnvelope<RuntimeSnapshot>>;
   resumeThread(nativeThreadId: string): Promise<IpcEnvelope<ThreadNavigationResult>>;
   readThread(): Promise<IpcEnvelope<ThreadReadView>>;
-  startTurn(prompt: string, nativeThreadId?: string | null): Promise<IpcEnvelope<TurnResult>>;
+  startTurn(prompt: string, nativeThreadId: string, preferences: ComposerPreferences): Promise<IpcEnvelope<TurnResult>>;
+  getComposerCapabilities(nativeThreadId: string): Promise<IpcEnvelope<ComposerCapabilities>>;
   interruptTurn(nativeThreadId?: string | null): Promise<IpcEnvelope<{ ok: true; turnId: string }>>;
   respondToServerRequest(nativeThreadId: string, requestId: string | number, response: unknown): Promise<IpcEnvelope<unknown>>;
   onEvent(listener: (payload: NativeEvent) => void): () => void;
@@ -91,6 +95,11 @@ const startThreadButton = document.querySelector<HTMLButtonElement>("#start-thre
 const readThreadButton = document.querySelector<HTMLButtonElement>("#read-thread")!;
 const interruptButton = document.querySelector<HTMLButtonElement>("#interrupt-turn")!;
 const startTurnButton = document.querySelector<HTMLButtonElement>("#start-turn")!;
+const composerModelElement = document.querySelector<HTMLSelectElement>("#composer-model")!;
+const composerEffortElement = document.querySelector<HTMLSelectElement>("#composer-effort")!;
+const composerApprovalElement = document.querySelector<HTMLSelectElement>("#composer-approval")!;
+const composerSandboxElement = document.querySelector<HTMLSelectElement>("#composer-sandbox")!;
+const composerCapabilityNoteElement = document.querySelector<HTMLElement>("#composer-capability-note")!;
 const appShellElement = document.querySelector<HTMLElement>("#app-shell")!;
 const mapPanelElement = document.querySelector<HTMLElement>("#map-panel")!;
 const mapPanelStatusElement = document.querySelector<HTMLElement>("#map-panel-status")!;
@@ -147,6 +156,8 @@ const diagnosticsErrorsByThread = new Map<string, RuntimeErrorInfo>();
 let globalDiagnosticsLog = "";
 const runtimeStates = new Map<string, RuntimeSnapshot>();
 const turnOperationThreads = new Set<string>();
+const composerCapabilitiesByThread = new Map<string, ComposerCapabilities>();
+const composerPreferencesByThread = new Map<string, ComposerPreferences>();
 let followLatest = true;
 let mapStatus: ConversationMapStatus | null = null;
 let projectMapStatus: ProjectMapStatus | null = null;
@@ -155,6 +166,64 @@ let mapScope: "conversation" | "project" = "conversation";
 let draftThreadId: string | null | undefined;
 let threadTransitionInFlight = false;
 let threadViewGeneration = 0;
+
+function composerPreferences(nativeThreadId: string): ComposerPreferences {
+  const existing = composerPreferencesByThread.get(nativeThreadId);
+  if (existing) return existing;
+  const preferences = defaultComposerPreferences(composerCapabilitiesByThread.get(nativeThreadId) ?? null);
+  composerPreferencesByThread.set(nativeThreadId, preferences);
+  return preferences;
+}
+
+function selectedModelCapability(nativeThreadId: string): ComposerCapabilities["models"][number] | null {
+  const preferences = composerPreferences(nativeThreadId);
+  return composerCapabilitiesByThread.get(nativeThreadId)?.models.find((model) => model.model === preferences.model) ?? null;
+}
+
+function renderComposerOptions(nativeThreadId: string | null): void {
+  const capabilities = nativeThreadId ? composerCapabilitiesByThread.get(nativeThreadId) ?? null : null;
+  const preferences = nativeThreadId ? composerPreferences(nativeThreadId) : null;
+  composerModelElement.replaceChildren();
+  if (!capabilities || !capabilities.models.length || !preferences) {
+    composerModelElement.append(new Option(capabilities ? "无可用模型" : "等待能力发现", ""));
+    composerModelElement.disabled = true;
+    composerEffortElement.replaceChildren(new Option("跟随模型", ""));
+    composerEffortElement.disabled = true;
+  } else {
+    for (const model of capabilities.models) composerModelElement.append(new Option(model.displayName || model.model, model.model, false, model.model === preferences.model));
+    composerModelElement.disabled = false;
+    const capability = selectedModelCapability(nativeThreadId!);
+    composerEffortElement.replaceChildren();
+    const efforts = capability?.supportedReasoningEfforts ?? [];
+    if (!efforts.length) composerEffortElement.append(new Option("跟随模型", ""));
+    for (const effort of efforts) composerEffortElement.append(new Option(effort.reasoningEffort, effort.reasoningEffort, false, effort.reasoningEffort === preferences.effort));
+    composerEffortElement.disabled = false;
+  }
+  composerApprovalElement.value = preferences?.approvalPolicy ?? "never";
+  composerSandboxElement.value = preferences?.sandbox ?? "read-only";
+  const active = Boolean(nativeThreadId && turnOperationThreads.has(nativeThreadId));
+  composerApprovalElement.disabled = !nativeThreadId || active;
+  composerSandboxElement.disabled = !nativeThreadId || active;
+  composerCapabilityNoteElement.textContent = capabilities
+    ? `已发现 ${capabilities.models.length} 个模型；选项仅影响下一条 Native Turn。附件输入暂未开放。`
+    : "正在读取 App Server 能力；文本发送仍可使用，选项仅影响下一条 Native Turn。";
+}
+
+async function refreshComposerCapabilities(nativeThreadId: string, generation: number): Promise<void> {
+  const result = await consume("composer.capabilities", api.getComposerCapabilities(nativeThreadId));
+  if (!result || generation !== threadViewGeneration || selectedNativeThreadId !== nativeThreadId) return;
+  composerCapabilitiesByThread.set(nativeThreadId, result);
+  const current = composerPreferencesByThread.get(nativeThreadId);
+  const discoveredDefault = defaultComposerPreferences(result);
+  if (!current || !result.models.some((model) => model.model === current.model)) {
+    composerPreferencesByThread.set(nativeThreadId, {
+      ...discoveredDefault,
+      approvalPolicy: current?.approvalPolicy ?? discoveredDefault.approvalPolicy,
+      sandbox: current?.sandbox ?? discoveredDefault.sandbox,
+    });
+  }
+  renderComposerOptions(nativeThreadId);
+}
 
 function resetWorkspaceScroll(): void {
   followLatest = true;
@@ -1001,6 +1070,7 @@ function renderState(state: RuntimeSnapshot): void {
   if (state.lastError) showError(state.lastError);
   renderNavigation();
   renderMapPanel();
+  renderComposerOptions(state.nativeThreadId);
 }
 
 function renderNoSelectedThread(): void {
@@ -1033,6 +1103,7 @@ function renderNoSelectedThread(): void {
   renderNavigation();
   renderThreadWorkspace();
   renderMapPanel();
+  renderComposerOptions(null);
 }
 
 async function consume<T>(label: string, operation: Promise<IpcEnvelope<T>>): Promise<T | null> {
@@ -1131,7 +1202,8 @@ async function selectThread(nativeThreadId: string): Promise<void> {
       renderThreadWorkspace();
       const loaded = await loadThreadView();
       await refreshNavigation();
-      if (loaded) {
+      if (loaded && result.snapshot.nativeThreadId) {
+        await refreshComposerCapabilities(result.snapshot.nativeThreadId, generation);
         await refreshMapStatus(generation, result.snapshot.nativeThreadId, result.projection.projectId);
         completed = true;
       } else {
@@ -1193,7 +1265,8 @@ async function createNativeThread(projectId: string | null): Promise<void> {
       renderThreadWorkspace();
       const loaded = await loadThreadView();
       await refreshNavigation();
-      if (loaded) {
+      if (loaded && result.snapshot.nativeThreadId) {
+        await refreshComposerCapabilities(result.snapshot.nativeThreadId, generation);
         await refreshMapStatus(generation, result.snapshot.nativeThreadId, result.projection.projectId);
         completed = true;
       }
@@ -1234,6 +1307,7 @@ async function startPersistedThread(silentExpectedMissing: boolean): Promise<voi
     renderState(result);
     await loadThreadView();
     await refreshNavigation();
+    if (result.nativeThreadId) await refreshComposerCapabilities(result.nativeThreadId, threadViewGeneration);
   } catch (error) {
     appendOutput("runtime.start exception", error);
     showError({ name: "RendererError", code: "RENDERER_OPERATION_FAILED", message: String(error), exitCode: null, stderr: "" });
@@ -1407,6 +1481,27 @@ interruptButton.addEventListener("click", async () => {
   const result = await consume("turn.interrupt", api.interruptTurn(nativeThreadId));
   if (result) showStatus("已请求停止");
 });
+composerModelElement.addEventListener("change", () => {
+  const nativeThreadId = selectedNativeThreadId;
+  if (!nativeThreadId) return;
+  const preferences = composerPreferences(nativeThreadId);
+  preferences.model = composerModelElement.value || null;
+  const capability = selectedModelCapability(nativeThreadId);
+  preferences.effort = capability?.defaultReasoningEffort ?? capability?.supportedReasoningEfforts[0]?.reasoningEffort ?? null;
+  renderComposerOptions(nativeThreadId);
+});
+composerEffortElement.addEventListener("change", () => {
+  if (!selectedNativeThreadId) return;
+  composerPreferences(selectedNativeThreadId).effort = composerEffortElement.value || null;
+});
+composerApprovalElement.addEventListener("change", () => {
+  if (!selectedNativeThreadId) return;
+  composerPreferences(selectedNativeThreadId).approvalPolicy = composerApprovalElement.value === "on-request" ? "on-request" : "never";
+});
+composerSandboxElement.addEventListener("change", () => {
+  if (!selectedNativeThreadId) return;
+  composerPreferences(selectedNativeThreadId).sandbox = composerSandboxElement.value === "workspace-write" ? "workspace-write" : "read-only";
+});
 startTurnButton.addEventListener("click", async (event) => {
   event.preventDefault();
   const prompt = promptElement.value;
@@ -1439,7 +1534,7 @@ startTurnButton.addEventListener("click", async (event) => {
   turnOperationThreads.add(nativeThreadId);
   renderState(latestState ?? { state: "TURN_RUNNING", nativeThreadId, activeTurnId: null, localRunId: null, cwd: "", initialized: false, processId: null, processExited: true, exitCode: null, lastError: null });
   showStatus("消息已发送，等待回复…");
-  const result = await consume("turn.start", api.startTurn(prompt, nativeThreadId));
+  const result = await consume("turn.start", api.startTurn(prompt, nativeThreadId, composerPreferences(nativeThreadId)));
   turnOperationThreads.delete(nativeThreadId);
   if (result) {
     appendOutput("turn.result", result);

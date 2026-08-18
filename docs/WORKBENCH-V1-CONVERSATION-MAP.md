@@ -88,7 +88,7 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 ● STAGE E — Thread Header + Conversation Message Stream
 └── Header 与 Native Thread/Turn/Item 默认 UI 投影完成；用户人工 GUI 验收 PASS，阶段冻结
 ◉ STAGE F — Composer Capability + Approval
-└── Composer 能力审计、真实 request mapping 与 Approval 闭环实现中；本阶段完成后停止，不提前进入
+└── Composer 能力审计已完成，真实 request mapping 与 Approval broker 接入已实现；等待最终 Gate/人工 Approval 验收，不提前进入
 ○ STAGE G
 └── NOT_STARTED；不在本阶段范围内
 ```
@@ -240,6 +240,8 @@ STAGE E 正式名称为 `Thread Header + Conversation Message Stream`，只处�
 ### 6.6 STAGE F 当前范围
 
 STAGE F 正式名称为 `Composer Capability + Approval`，必须先读取真实 App Server schema，再接入真实支持的 Model、Reasoning、Permission/Sandbox、Composer context、Send/Stop 和 Approval 闭环；Attachment 只有在 Runtime 可靠支持时才实现，否则明确 UNSUPPORTED/DEFERRED。所有设置按 Thread 隔离，只作为下一 Turn request preference，不冒充 Native Thread authoritative state。
+
+当前实现与审计证据记录在 `docs/STAGE-F-COMPOSER-CAPABILITY-AUDIT.md` 和 `docs/STAGE-F-COMPOSER-CAPABILITY-APPROVAL.md`；真实审批 Allow/Deny 仍需用户 GUI 验收。
 
 ### 6.7 下一步计划
 

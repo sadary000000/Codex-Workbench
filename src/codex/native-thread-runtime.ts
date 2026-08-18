@@ -13,7 +13,9 @@ import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-
 import { parseThreadReadResponse } from "../shared/thread-read-model.ts";
 import type { DynamicToolSpec } from "./map-tool.ts";
 import { MAP_THREAD_START_HINT } from "./map-tool.ts";
+import { normalizeComposerCapabilities } from "./composer-capabilities.ts";
 import type {
+  ComposerCapabilities,
   JsonRpcMessage,
   NativeEvent,
   PromptRecoveryStatus,
@@ -22,6 +24,7 @@ import type {
   RuntimeState,
   ThreadReadView,
   TurnResult,
+  NativeTurnOptions,
 } from "../shared/runtime-types.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -184,6 +187,10 @@ export class NativeThreadRuntime {
     this.onProcessExit = options.onProcessExit;
     this.persistence = options.persistence ?? null;
     this.projectIdValue = options.projectId;
+  }
+
+  get workingDirectory(): string {
+    return this.cwd;
   }
 
   get nativeThreadId(): string | null { return this.nativeThreadIdValue; }
@@ -446,7 +453,13 @@ export class NativeThreadRuntime {
     }
   }
 
-  async startTurn(prompt: string): Promise<TurnResult> {
+  async discoverComposerCapabilities(): Promise<ComposerCapabilities> {
+    if (!this.client || !this.initialized) throw this.fail("THREAD_NOT_READY", "Native Thread is not ready.");
+    const response = await this.client.request("model/list", { limit: 100, includeHidden: false }, this.timeoutMs);
+    return normalizeComposerCapabilities(response);
+  }
+
+  async startTurn(prompt: string, options: NativeTurnOptions = {}): Promise<TurnResult> {
     const text = prompt.trim();
     if (!text) throw this.fail("PROMPT_REQUIRED", "Prompt is required.");
     if (text.length > MAX_PROMPT_LENGTH) throw this.fail("PROMPT_TOO_LONG", "Prompt exceeds the Phase 1 limit.");
@@ -466,6 +479,7 @@ export class NativeThreadRuntime {
       const response = await this.client.request("turn/start", {
         threadId: nativeThreadId,
         input: [{ type: "text", text }],
+        ...options,
       }, this.timeoutMs);
       const responseNativeThreadId = responseThreadId(response);
       if (responseNativeThreadId && responseNativeThreadId !== nativeThreadId) {

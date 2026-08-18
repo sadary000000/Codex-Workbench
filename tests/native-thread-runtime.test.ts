@@ -23,6 +23,7 @@ interface FakeState {
   threadStartIndex: number;
   activeThreadId: string;
   threadStartParams?: Record<string, unknown>;
+  turnStartParams?: Record<string, unknown>;
   threadStartNoRollout?: boolean;
   initializeParams?: Record<string, unknown>;
   turnStartErrorCode?: string;
@@ -113,6 +114,7 @@ class FakeClient implements AppServerClientPort {
       };
     }
     if (method === "turn/start") {
+      this.state.turnStartParams = params;
       if (this.state.processExitOnTurnStart) {
         this.onProcessExit?.(17, "fake process exit");
         const error = new Error("fake app server exited") as Error & { code: string; exitCode: number; stderr: string };
@@ -149,6 +151,9 @@ class FakeClient implements AppServerClientPort {
         this.emit({ method: "turn/completed", params: { threadId: this.state.activeThreadId, turn } });
       }
       return {};
+    }
+    if (method === "model/list") {
+      return { data: [{ id: "fake-model", model: "fake-model", displayName: "Fake Model", isDefault: true, defaultReasoningEffort: "medium", supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "medium" }], inputModalities: ["text"] }] };
     }
     throw new Error(`Unexpected fake method: ${method}`);
   }
@@ -268,6 +273,29 @@ test("starts one Native Thread, runs two Turns, reads it, and resumes without a 
   assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownState, "ready");
   assert.deepEqual(await first.persistence.listRecoverablePrompts("native-thread"), []);
   await second.close();
+});
+
+test("discovers Composer capabilities and forwards options without changing Native identity", async () => {
+  const harness = await createRuntime();
+  await harness.runtime.start();
+  const capabilities = await harness.runtime.discoverComposerCapabilities();
+  assert.equal(capabilities.defaultModel, "fake-model");
+  const result = await harness.runtime.startTurn("configured", {
+    model: "fake-model",
+    effort: "medium",
+    approvalPolicy: "on-request",
+    sandboxPolicy: { type: "readOnly", networkAccess: false },
+  });
+  assert.equal(result.nativeThreadId, "native-thread");
+  assert.deepEqual(harness.state.turnStartParams, {
+    threadId: "native-thread",
+    input: [{ type: "text", text: "configured" }],
+    model: "fake-model",
+    effort: "medium",
+    approvalPolicy: "on-request",
+    sandboxPolicy: { type: "readOnly", networkAccess: false },
+  });
+  await harness.runtime.close();
 });
 
 test("treats an unmaterialized Thread read as an empty ready view", async () => {

@@ -126,6 +126,11 @@
       textarea:focus, input:focus { border-color: #6b8f82; box-shadow: 0 0 0 2px #315d4d55; }
       textarea { min-height: 74px; max-height: 220px; resize: vertical; }
       .composer-toolbar, .row { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+      .composer-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+      .composer-option { display: grid; gap: 3px; min-width: 0; }
+      .composer-option label { color: #888; font-size: 10px; }
+      .composer-option select { min-width: 0; width: 100%; padding: 6px 7px; border: 1px solid #464646; border-radius: 6px; background: #1d1d1d; color: #ddd; font-size: 11px; }
+      .composer-capability-note { color: #777; font-size: 10px; }
       .composer-hint { flex: 1; color: #888; font-size: 11px; }
       .debug-button { padding: 7px 10px; border: 1px solid #4b4b4b; border-radius: 6px; background: #343434; color: #eee; font-size: 12px; }
       .debug-button:hover { background: #414141; }
@@ -234,6 +239,13 @@
           <button id="jump-latest" class="jump-latest" type="button" hidden>跳到最新</button>
         </section>
         <form id="composer" class="composer">
+          <div class="composer-options" aria-label="本轮 Composer 选项">
+            <div class="composer-option"><label for="composer-model">模型</label><select id="composer-model"><option value="">加载中…</option></select></div>
+            <div class="composer-option"><label for="composer-effort">推理强度</label><select id="composer-effort"><option value="">跟随模型</option></select></div>
+            <div class="composer-option"><label for="composer-approval">审批</label><select id="composer-approval"><option value="never">不请求审批</option><option value="on-request">需要时请求审批</option></select></div>
+            <div class="composer-option"><label for="composer-sandbox">沙箱</label><select id="composer-sandbox"><option value="read-only">只读</option><option value="workspace-write">项目可写</option></select></div>
+          </div>
+          <div id="composer-capability-note" class="composer-capability-note">选项仅影响下一条回复；对话身份和历史仍由 Codex App Server 管理。</div>
           <textarea id="prompt" placeholder="发送消息。断开时，输入会保留用于恢复。" aria-label="Message input"></textarea>
           <div class="composer-toolbar"><span class="composer-hint">发送消息</span><button id="interrupt-turn" class="debug-button stop-button" type="button">停止</button><button id="start-turn" class="debug-button send-button" type="submit">发送</button></div>
         </form>

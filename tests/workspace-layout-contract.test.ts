@@ -13,12 +13,17 @@ test("workspace layout keeps the conversation container separate from the compos
   const threadStart = html.indexOf('id="thread-workspace"', conversationStart);
   const jumpStart = html.indexOf('id="jump-latest"', conversationStart);
   const composerStart = html.indexOf('<form id="composer"');
+  const composer = html.slice(composerStart, html.indexOf("</form>", composerStart));
 
   assert.ok(conversationStart >= 0, "workspace conversation shell must exist");
   assert.ok(conversationEnd > conversationStart, "workspace conversation shell must close");
   assert.ok(threadStart > conversationStart && threadStart < conversationEnd, "conversation stream must be inside the shell");
   assert.ok(jumpStart > conversationStart && jumpStart < conversationEnd, "jump control must overlay the conversation shell");
   assert.ok(composerStart > conversationEnd, "composer must be outside the conversation document flow");
+  assert.match(composer, /composer-model/);
+  assert.match(composer, /composer-effort/);
+  assert.match(composer, /composer-approval/);
+  assert.match(composer, /composer-sandbox/);
 });
 
 test("workspace CSS makes the conversation the bounded primary scroll area", () => {
