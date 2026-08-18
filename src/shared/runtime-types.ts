@@ -52,6 +52,8 @@ export type ThreadProjectionState =
   | "failed"
   | "unavailable";
 
+export type DisplayTitleSource = "user" | "auto";
+
 export interface ProjectRecord {
   projectId: string;
   name: string;
@@ -66,7 +68,10 @@ export interface ThreadProjection {
   projectId: string | null;
   cwd: string;
   pinned: boolean;
-  title: string | null;
+  /** User-controlled UI metadata; never a Runtime or Conversation identity. */
+  displayTitle: string | null;
+  /** Distinguishes an explicit rename from a deterministic UI fallback. */
+  displayTitleSource: DisplayTitleSource | null;
   createdAt: string;
   updatedAt: string;
   lastKnownState: ThreadProjectionState;

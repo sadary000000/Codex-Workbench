@@ -36,3 +36,13 @@ test("renderer derives follow mode from the selected conversation scroll positio
   assert.match(renderer, /const preservedScrollTop = threadWorkspaceElement\.scrollTop;/);
   assert.match(renderer, /const maxScrollTop = Math\.max\(0, threadWorkspaceElement\.scrollHeight - threadWorkspaceElement\.clientHeight\)/);
 });
+
+test("stage D projects titles and activity state without making turn failure a Thread label", () => {
+  assert.match(html, /id="rename-thread"/);
+  assert.match(html, /id="thread-rename-dialog"/);
+  assert.match(renderer, /resolveThreadTitle\(/);
+  assert.match(renderer, /api\.updateThreadProjection\(nativeThreadId, \{[\s\S]*displayTitle[\s\S]*displayTitleSource/);
+  assert.match(renderer, /return \{ className: "idle", label: "" \};/);
+  assert.match(renderer, /nativeTitlesByThread\.set\(expectedThreadId/);
+  assert.match(renderer, /autoTitlesByThread\.set\(expectedThreadId/);
+});

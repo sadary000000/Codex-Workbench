@@ -84,7 +84,7 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 ● STAGE C — UI Projection / Diagnostics 分层
 └── 默认 UI 隐藏协议噪声；Developer / Diagnostics 可按 Native Thread 定位原始信息；自动化 Gate 与用户人工验收 PASS，阶段冻结
 ◉ STAGE D — Thread 标题 + 左侧导航状态
-└── 原生 title / displayTitle fallback、用户重命名和克制的左侧运行状态正在实现
+└── 原生 title / displayTitle fallback、用户重命名和克制的左侧运行状态已完成内部实现，等待 GPT/用户验收
 ○ STAGE E
 └── NOT_STARTED；本阶段完成后停止，不提前进入
 ```
@@ -107,7 +107,7 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | STAGE A — Multi-Thread Runtime / Writer Conflict / Post-Acceptance Fix | ● | 多 Thread Runtime、writer conflict、orphan fail-closed、restart reopen 和 active-thread truth 已通过 GPT 审查 | `docs\STAGE-A-MULTI-THREAD-RUNTIME.md`、`docs\STAGE-A-POST-ACCEPTANCE-FIX.md` |
 | STAGE B — Workspace Scroll / Composer 基础 | ● | Header、Conversation 主滚动容器、常驻 Composer、底部跟随、上滚保护和 Jump to latest 已完成；自动化 Gate 与用户 GUI 验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、本阶段报告 |
 | STAGE C — UI Projection / Diagnostics 分层 | ● | 默认 UI 隐藏协议噪声；Developer / Diagnostics 提供 Thread/Turn/Item 定位、原始快照、按 Thread 隔离的事件日志和错误详情；自动化 Gate 与用户人工验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、`docs\STAGE-C-UI-PROJECTION-DIAGNOSTICS.md` |
-| STAGE D — Thread 标题 + 左侧导航状态 | ◉ | 原生 title 优先、displayTitle fallback、用户重命名和左侧轻量运行 indicator；一次 Turn 失败不污染 Thread 身份；本阶段实现中 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx` |
+| STAGE D — Thread 标题 + 左侧导航状态 | ◉ | 原生 title 优先、displayTitle fallback、用户重命名和左侧轻量运行 indicator；一次 Turn 失败不污染 Thread 身份；内部实现完成，等待 GPT/用户验收 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.2.docx` |
 
 ## 5. Phase 0–4 阶段证据摘要
 
@@ -232,7 +232,7 @@ STAGE D 正式名称为 `Thread 标题 + 左侧导航状态`，只处理 Thread 
 | 7 | ● | STAGE A 多 Thread Runtime / Writer Conflict / Post-Acceptance Fix 已通过 GPT 审查 |
 | 8 | ● | STAGE B Workspace Scroll / Composer 基础完成；GPT 审查 PASS，用户人工 GUI 验收 PASS，阶段冻结 |
 | 9 | ● | STAGE C UI Projection / Diagnostics 分层完成；GPT 审查 PASS，用户人工验收 PASS，阶段冻结 |
-| 10 | ◉ | STAGE D Thread 标题 + 左侧导航状态开始实现 |
+| 10 | ◉ | STAGE D Thread 标题 + 左侧导航状态内部实现完成，等待 GPT/用户验收 |
 | 11 | ○ | STAGE E：NOT_STARTED；不在本轮范围内 |
 
 STAGE D 完成内部 Gate 后停止并提交 GPT 审查；STAGE E 及历史 Phase 7 保持 `NOT_STARTED`，本轮不进入下一阶段。

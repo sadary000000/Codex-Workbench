@@ -13,6 +13,7 @@ import { normalizeNativeEvent, type NativeVisibleEventKind, type NormalizedNativ
 import { buildNavigationModel, type NavigationModel } from "./navigation-model.ts";
 import { isComposerTargetValid } from "../shared/thread-target.ts";
 import { isNearLatest } from "./workspace-scroll.ts";
+import { normalizeUserDisplayTitle, resolveThreadTitle } from "./thread-title.ts";
 import { defaultEventLabel, operationStatusLabel, runtimeStateLabel, shouldRenderDefaultEvent, userFacingErrorMessage } from "./ui-projection.ts";
 
 interface IpcEnvelope<T = unknown> {
@@ -115,6 +116,13 @@ const projectCwdElement = document.querySelector<HTMLInputElement>("#project-cwd
 const projectCreateErrorElement = document.querySelector<HTMLElement>("#project-create-error")!;
 const projectCreateCancelButton = document.querySelector<HTMLButtonElement>("#project-create-cancel")!;
 const projectCreateSubmitButton = document.querySelector<HTMLButtonElement>("#project-create-submit")!;
+const renameThreadButton = document.querySelector<HTMLButtonElement>("#rename-thread")!;
+const threadRenameDialog = document.querySelector<HTMLDialogElement>("#thread-rename-dialog")!;
+const threadRenameForm = document.querySelector<HTMLFormElement>("#thread-rename-form")!;
+const threadRenameInput = document.querySelector<HTMLInputElement>("#thread-rename-input")!;
+const threadRenameErrorElement = document.querySelector<HTMLElement>("#thread-rename-error")!;
+const threadRenameCancelButton = document.querySelector<HTMLButtonElement>("#thread-rename-cancel")!;
+const threadRenameSubmitButton = document.querySelector<HTMLButtonElement>("#thread-rename-submit")!;
 const writerConflictDialog = document.querySelector<HTMLDialogElement>("#writer-conflict-dialog")!;
 const writerConflictCloseButton = document.querySelector<HTMLButtonElement>("#writer-conflict-close")!;
 const writerConflictMessage = document.querySelector<HTMLElement>("#writer-conflict-message")!;
@@ -126,6 +134,8 @@ let selectedNativeThreadId: string | null = null;
 let threadUnavailableId: string | null = null;
 let currentProjection: ThreadProjection | null = null;
 let threadView: ThreadReadView | null = null;
+const nativeTitlesByThread = new Map<string, string | null>();
+const autoTitlesByThread = new Map<string, string | null>();
 let navigation: NavigationModel = { pinned: [], projects: [], recent: [] };
 let liveEvents = new Map<string, NormalizedNativeEvent>();
 let pendingApprovals = new Map<string, NativeServerRequestEvent>();
@@ -263,23 +273,51 @@ function hasSelectedNativeThread(): boolean {
 function runtimeDisplayState(thread: ThreadProjection): { className: string; label: string } {
   if (thread.lastKnownState === "unavailable") return { className: "unavailable", label: "不可用" };
   const runtime = runtimeStates.get(thread.nativeThreadId);
-  if (runtime?.lastError?.code === "WRITER_CONFLICT") return { className: "recovery_required", label: "待重试" };
-  if (runtime?.state === "WAITING_USER") return { className: "waiting_user", label: "等待确认" };
-  if (runtimeIsActive(runtime)) return { className: "running", label: "运行中" };
-  if (runtime?.state === "STARTING") return { className: "starting", label: "启动中" };
-  if (runtime?.state === "DISCONNECTED") return { className: "disconnected", label: "已断开" };
-  if (runtime?.state === "RECOVERY_REQUIRED") return { className: "recovery_required", label: "需恢复" };
-  if (runtime?.state === "FAILED") return { className: "failed", label: "失败" };
-  if (thread.lastError?.code === "WRITER_CONFLICT") return { className: "recovery_required", label: "待重试" };
-  if (thread.lastKnownState === "ready" && thread.lastError) return { className: "recovery_required", label: "待重试" };
-  return {
-    className: thread.lastKnownState,
-    label: thread.lastKnownState === "ready" ? "就绪" : thread.lastKnownState,
-  };
+  if (runtime?.lastError?.code === "WRITER_CONFLICT" || thread.lastError?.code === "WRITER_CONFLICT") {
+    return { className: "recovery_required", label: "!" };
+  }
+  if (runtime?.state === "WAITING_USER") return { className: "waiting_user", label: "◐" };
+  if (runtimeIsActive(runtime)) return { className: "running", label: "●" };
+  if (runtime?.state === "STARTING") return { className: "starting", label: "…" };
+  if (runtime?.state === "DISCONNECTED") return { className: "disconnected", label: "!" };
+  if (runtime?.state === "RECOVERY_REQUIRED") return { className: "recovery_required", label: "!" };
+  if (!runtime && (thread.lastKnownState === "disconnected" || thread.lastKnownState === "recovery_required")) {
+    return { className: thread.lastKnownState, label: "!" };
+  }
+  // READY, COMPLETED-like projection state, and a single failed Turn are not
+  // Thread identity. Their details remain in the selected workspace/diagnostics.
+  return { className: "idle", label: "" };
+}
+
+function firstUserMessageTitle(view: ThreadReadView | null): string | null {
+  if (!view) return null;
+  for (const turn of view.turns) {
+    for (const item of turn.items) {
+      const type = typeof item.type === "string" ? item.type.toLowerCase().replaceAll("_", "") : "";
+      if (type !== "usermessage" && type !== "userinput") continue;
+      const value = plainText(item.text) ?? plainText(item.input);
+      if (value?.trim()) return value;
+    }
+  }
+  return null;
 }
 
 function threadLabel(thread: ThreadProjection): string {
-  return thread.title?.trim() || "未命名对话";
+  return resolveThreadTitle({
+    displayTitle: thread.displayTitle,
+    displayTitleSource: thread.displayTitleSource,
+    nativeTitle: nativeTitlesByThread.get(thread.nativeThreadId),
+    firstUserMessage: autoTitlesByThread.get(thread.nativeThreadId),
+  });
+}
+
+function replaceNavigationProjection(updated: ThreadProjection): void {
+  const replace = (thread: ThreadProjection): ThreadProjection => thread.nativeThreadId === updated.nativeThreadId ? updated : thread;
+  navigation = {
+    pinned: navigation.pinned.map(replace),
+    projects: navigation.projects.map((group) => ({ ...group, threads: group.threads.map(replace) })),
+    recent: navigation.recent.map(replace),
+  };
 }
 
 function appendEmpty(container: HTMLElement, message: string): void {
@@ -304,6 +342,8 @@ function createThreadEntry(thread: ThreadProjection): HTMLElement {
   const displayState = runtimeDisplayState(thread);
   state.className = `thread-entry-state state-${displayState.className}`;
   state.textContent = displayState.label;
+  state.setAttribute("aria-label", displayState.className === "idle" ? "无活动" : displayState.className);
+  state.title = displayState.className === "idle" ? "无活动" : displayState.className;
   button.append(title, state);
   button.addEventListener("click", () => { void selectThread(thread.nativeThreadId); });
 
@@ -641,6 +681,12 @@ function createTurnView(turn: ThreadReadView["turns"][number]): HTMLElement {
   title.textContent = "本轮对话";
   heading.append(title);
   wrapper.append(heading);
+  const turnStatus = displayStatus(turn.status)?.toLowerCase().replaceAll("_", "") ?? "";
+  if (turn.error !== null && turn.error !== undefined || /fail|error/.test(turnStatus)) {
+    appendBody(wrapper, "本轮执行失败；详情请在 Developer / Diagnostics 查看。" );
+  } else if (/interrupt|cancel/.test(turnStatus)) {
+    appendBody(wrapper, "本轮已中断。" );
+  }
   for (const item of turn.items) wrapper.append(createReadItemCard(item, turn.id));
   if (!turn.items.length) appendBody(wrapper, "本轮暂未包含可展示内容。");
   return wrapper;
@@ -836,8 +882,7 @@ function renderState(state: RuntimeSnapshot): void {
   const selected = [...navigation.pinned, ...navigation.recent, ...navigation.projects.flatMap((group) => group.threads)]
     .find((thread) => thread.nativeThreadId === state.nativeThreadId);
   if (selected) currentProjection = selected;
-  const nativeTitle = threadView?.title?.trim();
-  selectedThreadElement.textContent = nativeTitle || (selected ? threadLabel(selected) : state.nativeThreadId ? "未命名对话" : "未选择对话");
+  selectedThreadElement.textContent = selected ? threadLabel(selected) : state.nativeThreadId ? "新对话" : "未选择对话";
   threadKindElement.textContent = currentProjection?.projectId ? "项目对话" : state.nativeThreadId ? "独立对话" : "对话";
   const active = runtimeIsActive(state);
   const runtimeTarget = state.nativeThreadId ? runtimeStates.get(state.nativeThreadId) : null;
@@ -849,6 +894,7 @@ function renderState(state: RuntimeSnapshot): void {
   });
   interruptButton.disabled = !state.activeTurnId;
   startTurnButton.disabled = !targetValid || active;
+  renameThreadButton.disabled = !selected;
   if (state.lastError) showError(state.lastError);
   renderNavigation();
   renderMapPanel();
@@ -876,6 +922,7 @@ function renderNoSelectedThread(): void {
   threadKindElement.textContent = threadUnavailableId ? "对话 · 不可用" : "对话";
   interruptButton.disabled = true;
   startTurnButton.disabled = true;
+  renameThreadButton.disabled = true;
   resetWorkspaceScroll();
   renderNavigation();
   renderThreadWorkspace();
@@ -919,6 +966,20 @@ async function loadThreadView(clearLive = true): Promise<boolean> {
   if (generation !== threadViewGeneration || latestState?.nativeThreadId !== expectedThreadId) return false;
   threadView = result;
   if (expectedThreadId) {
+    const nativeTitle = result.title?.trim() || null;
+    const autoTitle = firstUserMessageTitle(result);
+    nativeTitlesByThread.set(expectedThreadId, nativeTitle);
+    autoTitlesByThread.set(expectedThreadId, autoTitle);
+    if (!nativeTitle && autoTitle && currentProjection && currentProjection.displayTitleSource !== "user") {
+      const autoProjection = await consume("thread.auto-title", api.updateThreadProjection(expectedThreadId, {
+        displayTitle: autoTitle,
+        displayTitleSource: "auto",
+      }));
+      if (autoProjection) {
+        currentProjection = autoProjection;
+        replaceNavigationProjection(autoProjection);
+      }
+    }
     activateThreadBuffers(expectedThreadId);
     if (clearLive) liveEvents.clear();
   } else if (clearLive) {
@@ -1080,6 +1141,43 @@ async function togglePinned(thread: ThreadProjection): Promise<void> {
   if (result) await refreshNavigation();
 }
 
+function openThreadRenameDialog(): void {
+  if (!currentProjection) return;
+  threadRenameErrorElement.hidden = true;
+  threadRenameErrorElement.textContent = "";
+  threadRenameInput.value = threadLabel(currentProjection);
+  threadRenameSubmitButton.disabled = false;
+  threadRenameCancelButton.disabled = false;
+  threadRenameDialog.showModal();
+  threadRenameInput.focus();
+  threadRenameInput.select();
+}
+
+async function submitThreadRename(): Promise<void> {
+  const nativeThreadId = currentProjection?.nativeThreadId ?? selectedNativeThreadId;
+  if (!nativeThreadId) return;
+  const displayTitle = normalizeUserDisplayTitle(threadRenameInput.value);
+  threadRenameSubmitButton.disabled = true;
+  threadRenameCancelButton.disabled = true;
+  const result = await consume("thread.rename", api.updateThreadProjection(nativeThreadId, {
+    displayTitle,
+    displayTitleSource: displayTitle ? "user" : null,
+  }));
+  if (!result) {
+    threadRenameErrorElement.textContent = "重命名失败，请查看上方错误和 Diagnostics。";
+    threadRenameErrorElement.hidden = false;
+    threadRenameSubmitButton.disabled = false;
+    threadRenameCancelButton.disabled = false;
+    return;
+  }
+  currentProjection = result;
+  replaceNavigationProjection(result);
+  threadRenameDialog.close();
+  await refreshNavigation();
+  if (latestState) renderState(latestState);
+  showStatus(displayTitle ? "Thread 标题已更新。" : "已清除自定义标题，将恢复原生/自动标题。" );
+}
+
 function openProjectCreateDialog(): void {
   projectNameElement.value = "新项目";
   projectCwdElement.value = latestState?.cwd ?? "";
@@ -1180,6 +1278,12 @@ projectCreateForm.addEventListener("submit", (event) => {
   void submitProjectCreate();
 });
 projectCreateCancelButton.addEventListener("click", () => projectCreateDialog.close());
+renameThreadButton.addEventListener("click", openThreadRenameDialog);
+threadRenameForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitThreadRename();
+});
+threadRenameCancelButton.addEventListener("click", () => threadRenameDialog.close());
 writerConflictCloseButton.addEventListener("click", () => writerConflictDialog.close());
 startThreadButton.addEventListener("click", async () => {
   await startPersistedThread(false);

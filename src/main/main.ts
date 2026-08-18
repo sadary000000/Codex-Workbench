@@ -534,14 +534,18 @@ function registerIpc(): void {
         throw new Error("Thread projection update input is invalid.");
       }
       const value = patch as Record<string, unknown>;
-      const update: { pinned?: boolean; title?: string | null } = {};
+      const update: { pinned?: boolean; displayTitle?: string | null; displayTitleSource?: "user" | "auto" | null } = {};
       if ("pinned" in value) {
         if (typeof value.pinned !== "boolean") throw new Error("Pinned state is invalid.");
         update.pinned = value.pinned;
       }
-      if ("title" in value) {
-        if (value.title !== null && typeof value.title !== "string") throw new Error("Thread title is invalid.");
-        update.title = value.title as string | null;
+      if ("displayTitle" in value) {
+        if (value.displayTitle !== null && typeof value.displayTitle !== "string") throw new Error("Thread display title is invalid.");
+        update.displayTitle = value.displayTitle as string | null;
+      }
+      if ("displayTitleSource" in value) {
+        if (value.displayTitleSource !== null && value.displayTitleSource !== "user" && value.displayTitleSource !== "auto") throw new Error("Thread display title source is invalid.");
+        update.displayTitleSource = value.displayTitleSource as "user" | "auto" | null;
       }
       if (!Object.keys(update).length) throw new Error("Thread projection update is empty.");
       return ok(await getPersistence().updateThreadProjection(nativeThreadId, update));

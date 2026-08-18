@@ -135,3 +135,38 @@ test("pins a Thread as a shortcut without changing Project or Standalone ownersh
   assert.deepEqual((await store.listThreads(project.projectId)).map((thread) => thread.nativeThreadId), ["project-thread"]);
   assert.deepEqual((await store.listThreads(null)).map((thread) => thread.nativeThreadId), ["standalone-thread"]);
 });
+
+test("persists displayTitle as UI metadata and reads the legacy title key without changing identity", async () => {
+  const { root, store } = await createStore();
+  const projection = await store.ensureThreadProjection({
+    nativeThreadId: "native-title-thread",
+    cwd: "C:/titles",
+    displayTitle: "初始标题",
+    displayTitleSource: "user",
+  });
+  assert.equal(projection.displayTitle, "初始标题");
+  const renamed = await store.updateThreadProjection(projection.nativeThreadId, { displayTitle: "用户重命名", displayTitleSource: "user" });
+  assert.equal(renamed.displayTitle, "用户重命名");
+  assert.equal(renamed.displayTitleSource, "user");
+  const automatic = await store.updateThreadProjection(projection.nativeThreadId, { displayTitle: "自动标题", displayTitleSource: "auto" });
+  assert.equal(automatic.displayTitleSource, "auto");
+  const cleared = await store.updateThreadProjection(projection.nativeThreadId, { displayTitle: null });
+  assert.equal(cleared.displayTitle, null);
+  assert.equal(cleared.displayTitleSource, null);
+
+  const filePath = join(root, "workbench-state.json");
+  const persisted = JSON.parse(await readFile(filePath, "utf8")) as { threads: Array<Record<string, unknown>> };
+  assert.equal(persisted.threads[0]?.displayTitle, null);
+  assert.equal("title" in (persisted.threads[0] ?? {}), false);
+
+  const legacyThread = { ...persisted.threads[0] };
+  delete legacyThread.displayTitle;
+  delete legacyThread.displayTitleSource;
+  legacyThread.title = "旧标题";
+  await writeFile(filePath, JSON.stringify({ ...persisted, threads: [legacyThread] }), "utf8");
+  const reopened = new V1PersistenceStore(filePath);
+  const migrated = await reopened.getThreadProjection(projection.nativeThreadId);
+  assert.equal(migrated?.displayTitle, "旧标题");
+  assert.equal(migrated?.displayTitleSource, "user");
+  assert.equal(migrated?.nativeThreadId, projection.nativeThreadId);
+});

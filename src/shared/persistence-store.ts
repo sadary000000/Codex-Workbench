@@ -6,6 +6,7 @@ import type {
   PromptRecoveryStatus,
   ProjectRecord,
   RuntimeErrorInfo,
+  DisplayTitleSource,
   ThreadProjection,
   ThreadProjectionState,
   WorkbenchPersistenceDocument,
@@ -87,7 +88,8 @@ export interface EnsureThreadProjectionInput {
   cwd: string;
   projectId?: string | null;
   pinned?: boolean;
-  title?: string | null;
+  displayTitle?: string | null;
+  displayTitleSource?: DisplayTitleSource | null;
   lastKnownState?: ThreadProjectionState;
   lastKnownTurnId?: string | null;
   lastError?: RuntimeErrorInfo | null;
@@ -96,7 +98,8 @@ export interface EnsureThreadProjectionInput {
 export interface ThreadProjectionPatch {
   projectId?: string | null;
   pinned?: boolean;
-  title?: string | null;
+  displayTitle?: string | null;
+  displayTitleSource?: DisplayTitleSource | null;
   lastKnownState?: ThreadProjectionState;
   lastKnownTurnId?: string | null;
   lastError?: RuntimeErrorInfo | null;
@@ -201,7 +204,16 @@ function normalizeThread(value: unknown): ThreadProjection | null {
   const nativeThreadId = boundedString(candidate.nativeThreadId, MAX_ID_LENGTH);
   const projectId = candidate.projectId === null ? null : boundedString(candidate.projectId, MAX_ID_LENGTH);
   const cwd = boundedString(candidate.cwd, MAX_PATH_LENGTH);
-  const title = candidate.title === null ? null : boundedString(candidate.title, MAX_TITLE_LENGTH);
+  // Read the pre-STAGE-D `title` key once for backward compatibility, but
+  // write the normalized projection with the explicit displayTitle name.
+  const rawDisplayTitle = "displayTitle" in candidate ? candidate.displayTitle : candidate.title;
+  const displayTitle = rawDisplayTitle === null ? null : boundedString(rawDisplayTitle, MAX_TITLE_LENGTH);
+  const rawDisplayTitleSource = "displayTitleSource" in candidate
+    ? candidate.displayTitleSource
+    : ("displayTitle" in candidate ? (displayTitle ? "user" : null) : (displayTitle ? "user" : null));
+  const displayTitleSource = rawDisplayTitleSource === null || rawDisplayTitleSource === undefined
+    ? null
+    : rawDisplayTitleSource;
   const createdAt = timestamp(candidate.createdAt);
   const updatedAt = timestamp(candidate.updatedAt);
   const lastKnownState = candidate.lastKnownState;
@@ -212,7 +224,9 @@ function normalizeThread(value: unknown): ThreadProjection | null {
     (candidate.projectId !== null && !projectId) ||
     !cwd ||
     typeof candidate.pinned !== "boolean" ||
-    (candidate.title !== null && !title) ||
+    (rawDisplayTitle !== null && !displayTitle) ||
+    (displayTitle === null && displayTitleSource !== null) ||
+    (displayTitleSource !== null && displayTitleSource !== "user" && displayTitleSource !== "auto") ||
     !createdAt ||
     !updatedAt ||
     !THREAD_STATES.has(lastKnownState as ThreadProjectionState) ||
@@ -224,7 +238,8 @@ function normalizeThread(value: unknown): ThreadProjection | null {
     projectId: projectId ?? null,
     cwd,
     pinned: candidate.pinned,
-    title: title ?? null,
+    displayTitle: displayTitle ?? null,
+    displayTitleSource,
     createdAt,
     updatedAt,
     lastKnownState: lastKnownState as ThreadProjectionState,
@@ -329,7 +344,8 @@ function normalizeThreadInput(input: EnsureThreadProjectionInput): {
   cwd: string;
   projectId: string | null | undefined;
   pinned?: boolean;
-  title?: string | null;
+  displayTitle?: string | null;
+  displayTitleSource?: DisplayTitleSource | null;
   lastKnownState?: ThreadProjectionState;
   lastKnownTurnId?: string | null;
   lastError?: RuntimeErrorInfo | null;
@@ -339,7 +355,8 @@ function normalizeThreadInput(input: EnsureThreadProjectionInput): {
   const projectId = input.projectId === undefined || input.projectId === null
     ? input.projectId
     : boundedString(input.projectId, MAX_ID_LENGTH);
-  const title = input.title === undefined || input.title === null ? input.title : boundedString(input.title, MAX_TITLE_LENGTH);
+  const displayTitle = input.displayTitle === undefined || input.displayTitle === null ? input.displayTitle : boundedString(input.displayTitle, MAX_TITLE_LENGTH);
+  const displayTitleSource = input.displayTitleSource === undefined || input.displayTitleSource === null ? input.displayTitleSource : input.displayTitleSource;
   const lastKnownTurnId = input.lastKnownTurnId === undefined || input.lastKnownTurnId === null
     ? input.lastKnownTurnId
     : boundedString(input.lastKnownTurnId, MAX_ID_LENGTH);
@@ -348,12 +365,14 @@ function normalizeThreadInput(input: EnsureThreadProjectionInput): {
     !nativeThreadId ||
     !cwd ||
     (input.projectId !== undefined && input.projectId !== null && !projectId) ||
-    (input.title !== undefined && input.title !== null && !title) ||
+    (input.displayTitle !== undefined && input.displayTitle !== null && !displayTitle) ||
+    (input.displayTitle !== undefined && input.displayTitle === null && displayTitleSource !== undefined && displayTitleSource !== null) ||
+    (displayTitleSource !== undefined && displayTitleSource !== null && displayTitleSource !== "user" && displayTitleSource !== "auto") ||
     (input.lastKnownTurnId !== undefined && input.lastKnownTurnId !== null && !lastKnownTurnId) ||
     (input.lastKnownState !== undefined && !THREAD_STATES.has(input.lastKnownState)) ||
     (input.lastError !== undefined && lastError === undefined)
   ) throw new Error("Thread projection input is invalid.");
-  return { nativeThreadId, cwd, projectId, pinned: input.pinned, title, lastKnownState: input.lastKnownState, lastKnownTurnId, lastError };
+  return { nativeThreadId, cwd, projectId, pinned: input.pinned, displayTitle, displayTitleSource, lastKnownState: input.lastKnownState, lastKnownTurnId, lastError };
 }
 
 function clone<T>(value: T): T {
@@ -490,7 +509,8 @@ export class V1PersistenceStore {
         const now = this.now();
         existing.updatedAt = now;
         if (normalized.pinned !== undefined) existing.pinned = normalized.pinned;
-        if (normalized.title !== undefined) existing.title = normalized.title;
+        if (normalized.displayTitle !== undefined) existing.displayTitle = normalized.displayTitle;
+        if (normalized.displayTitleSource !== undefined) existing.displayTitleSource = normalized.displayTitleSource;
         if (normalized.lastKnownState !== undefined) existing.lastKnownState = normalized.lastKnownState;
         if (normalized.lastKnownTurnId !== undefined) existing.lastKnownTurnId = normalized.lastKnownTurnId;
         if (normalized.lastError !== undefined) existing.lastError = normalized.lastError;
@@ -502,7 +522,8 @@ export class V1PersistenceStore {
         projectId: projectId ?? null,
         cwd: normalized.cwd,
         pinned: normalized.pinned ?? false,
-        title: normalized.title ?? null,
+        displayTitle: normalized.displayTitle ?? null,
+        displayTitleSource: normalized.displayTitleSource ?? null,
         createdAt: now,
         updatedAt: now,
         lastKnownState: normalized.lastKnownState ?? "unknown",
@@ -526,9 +547,16 @@ export class V1PersistenceStore {
     if (patch.projectId !== undefined && patch.projectId !== null && !normalizedProjectId) {
       throw new PersistenceStoreError("THREAD_PROJECTION_INVALID", "Project ID is invalid.", this.filePath);
     }
-    const normalizedTitle = patch.title === undefined || patch.title === null ? patch.title : boundedString(patch.title, MAX_TITLE_LENGTH);
-    if (patch.title !== undefined && patch.title !== null && !normalizedTitle) {
+    const normalizedDisplayTitle = patch.displayTitle === undefined || patch.displayTitle === null ? patch.displayTitle : boundedString(patch.displayTitle, MAX_TITLE_LENGTH);
+    const normalizedDisplayTitleSource = patch.displayTitleSource === undefined || patch.displayTitleSource === null ? patch.displayTitleSource : patch.displayTitleSource;
+    if (patch.displayTitle !== undefined && patch.displayTitle !== null && !normalizedDisplayTitle) {
       throw new PersistenceStoreError("THREAD_PROJECTION_INVALID", "Thread title is invalid.", this.filePath);
+    }
+    if (patch.displayTitle !== undefined && patch.displayTitle === null && normalizedDisplayTitleSource !== undefined && normalizedDisplayTitleSource !== null) {
+      throw new PersistenceStoreError("THREAD_PROJECTION_INVALID", "Display title source requires a display title.", this.filePath);
+    }
+    if (normalizedDisplayTitleSource !== undefined && normalizedDisplayTitleSource !== null && normalizedDisplayTitleSource !== "user" && normalizedDisplayTitleSource !== "auto") {
+      throw new PersistenceStoreError("THREAD_PROJECTION_INVALID", "Display title source is invalid.", this.filePath);
     }
     const normalizedTurnId = patch.lastKnownTurnId === undefined || patch.lastKnownTurnId === null
       ? patch.lastKnownTurnId
@@ -543,6 +571,13 @@ export class V1PersistenceStore {
     return this.mutate((document) => {
       const thread = document.threads.find((candidate) => candidate.nativeThreadId === id);
       if (!thread) throw new PersistenceStoreError("THREAD_PROJECTION_NOT_FOUND", "Thread projection does not exist.", this.filePath);
+      const nextDisplayTitle = normalizedDisplayTitle === undefined ? thread.displayTitle : normalizedDisplayTitle;
+      const nextDisplayTitleSource = normalizedDisplayTitleSource === undefined
+        ? (normalizedDisplayTitle === null ? null : thread.displayTitleSource)
+        : normalizedDisplayTitleSource;
+      if (nextDisplayTitle === null && nextDisplayTitleSource !== null) {
+        throw new PersistenceStoreError("THREAD_PROJECTION_INVALID", "Display title source requires a display title.", this.filePath);
+      }
       if (normalizedProjectId !== undefined) {
         if (normalizedProjectId !== null) {
           const project = document.projects.find((candidate) => candidate.projectId === normalizedProjectId);
@@ -554,7 +589,8 @@ export class V1PersistenceStore {
         thread.projectId = normalizedProjectId;
       }
       if (patch.pinned !== undefined) thread.pinned = patch.pinned;
-      if (normalizedTitle !== undefined) thread.title = normalizedTitle ?? null;
+      if (normalizedDisplayTitle !== undefined) thread.displayTitle = normalizedDisplayTitle ?? null;
+      if (normalizedDisplayTitleSource !== undefined || normalizedDisplayTitle === null) thread.displayTitleSource = nextDisplayTitleSource;
       if (patch.lastKnownState !== undefined) thread.lastKnownState = patch.lastKnownState;
       if (normalizedTurnId !== undefined) thread.lastKnownTurnId = normalizedTurnId ?? null;
       if (normalizedErrorValue !== undefined) thread.lastError = normalizedErrorValue ?? null;

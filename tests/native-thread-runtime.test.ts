@@ -30,6 +30,8 @@ interface FakeState {
   turnStartThreadId?: string;
   threadReadUnmaterialized?: boolean;
   threadReadNoRollout?: boolean;
+  threadTitle?: string;
+  threadName?: string;
   threadResumeWriterConflict?: boolean;
 }
 
@@ -100,7 +102,15 @@ class FakeClient implements AppServerClientPort {
           `JSON-RPC -32600: no rollout found for thread id ${params.threadId}`,
         );
       }
-      return { thread: { id: this.mismatch ? "other-thread" : params.threadId, status: { type: "idle" }, turns: this.state.turns } };
+      return {
+        thread: {
+          id: this.mismatch ? "other-thread" : params.threadId,
+          ...(this.state.threadTitle ? { title: this.state.threadTitle } : {}),
+          ...(this.state.threadName ? { name: this.state.threadName } : {}),
+          status: { type: "idle" },
+          turns: this.state.turns,
+        },
+      };
     }
     if (method === "turn/start") {
       if (this.state.processExitOnTurnStart) {
@@ -187,7 +197,7 @@ class FakeClient implements AppServerClientPort {
   }
 }
 
-async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string; threadReadUnmaterialized?: boolean; threadReadNoRollout?: boolean; threadStartNoRollout?: boolean } = {}) {
+async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string; threadReadUnmaterialized?: boolean; threadReadNoRollout?: boolean; threadStartNoRollout?: boolean; threadTitle?: string; threadName?: string } = {}) {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-test-"));
   const state: FakeState = {
     turns: [],
@@ -203,6 +213,8 @@ async function createRuntime(mismatch = false, options: { turnStartErrorCode?: s
     turnStartThreadId: options.turnStartThreadId,
     threadReadUnmaterialized: options.threadReadUnmaterialized,
     threadReadNoRollout: options.threadReadNoRollout,
+    threadTitle: options.threadTitle,
+    threadName: options.threadName,
   };
   const events: JsonRpcMessage[] = [];
   const persistence = new V1PersistenceStore(join(root, "workbench-state.json"));
@@ -273,6 +285,18 @@ test("treats an unmaterialized Thread read as an empty ready view", async () => 
   assert.equal(harness.runtime.snapshot().lastError, null);
   assert.equal((await harness.persistence.getThreadProjection("native-thread"))?.lastKnownState, "ready");
   await harness.runtime.close();
+});
+
+test("preserves the Native title from thread/read and falls back to name", async () => {
+  const titled = await createRuntime(false, { threadTitle: "Native title" });
+  await titled.runtime.start();
+  assert.equal((await titled.runtime.readThread()).title, "Native title");
+  await titled.runtime.close();
+
+  const named = await createRuntime(false, { threadName: "Native name" });
+  await named.runtime.start();
+  assert.equal((await named.runtime.readThread()).title, "Native name");
+  await named.runtime.close();
 });
 
 test("treats the no-rollout empty Thread response as an empty ready view", async () => {
