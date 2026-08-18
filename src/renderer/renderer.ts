@@ -1304,8 +1304,10 @@ async function consume<T>(label: string, operation: Promise<IpcEnvelope<T>>, tar
         // Persist the draft before clearing the selected UI. A failed read/turn
         // must never leave the old prompt targeting a different Thread.
         localStorage.setItem(draftKey(operationThreadId), promptElement.value);
-        threadUnavailableId = operationThreadId;
-        renderNoSelectedThread();
+        if (selectedNativeThreadId === operationThreadId) {
+          threadUnavailableId = operationThreadId;
+          renderNoSelectedThread();
+        }
       }
       return null;
     }
@@ -1951,7 +1953,11 @@ composerFormElement.addEventListener("submit", async (event) => {
       }
       await consume("runtime.state", api.getState()).then((state) => { if (state) renderState(state); });
     } else {
-      localStorage.removeItem(draftKey(nativeThreadId));
+      if (result.status === "completed" || result.status === "interrupted") {
+        localStorage.removeItem(draftKey(nativeThreadId));
+      } else {
+        localStorage.setItem(draftKey(nativeThreadId), prompt);
+      }
       await refreshNavigation();
     }
   } else {

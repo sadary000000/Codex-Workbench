@@ -326,11 +326,11 @@ async function markUnavailableNativeThread(nativeThreadId: string, cause: unknow
     stateUpdateError = error;
     logger.error("missing_native_thread_projection_mark_failed", { nativeThreadId: id, error: errorInfo(error).message });
   }
-  // A failed target must never leave the previous Thread as an implicit
-  // Composer target. The old runtime may remain alive in RuntimeRegistry, but
-  // the selected Main-process target is now intentionally empty until the
-  // user explicitly selects a valid Thread again.
-  currentNativeThreadId = null;
+  // Fail closed only when the failed target is still selected. A background
+  // Thread may become unavailable after the user has already switched to a
+  // different Thread; clearing the global target in that case would silently
+  // disrupt the valid selected Thread.
+  if (currentNativeThreadId === id) currentNativeThreadId = null;
   if (stateUpdateError) throw stateUpdateError;
   throw unavailableNativeThreadError(id, cause);
 }
