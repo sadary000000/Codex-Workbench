@@ -135,7 +135,8 @@ composer requested nativeThreadId
 - Newton：只读审计了 orphan cleanup、binding 顺序、Renderer rollback、缺失测试；结果已整合。
 - Parfit：只读审计了重启时 binding 未自动 resume、writer conflict 投影污染；结果已整合。
 - 两个子代理均未写产品文件；审查整合后关闭。Gate 时 `running_subagents = 0`。
-- 旧 donor `D:\办公\AI\Auto_Agent`：未修改，最终状态保持 clean。
+- 真正旧 donor `D:\办公\AI\Codex_Workbench`：本阶段只读核对，未修改；核对时保留其已有的用户未提交状态（`src/codex/app-server-adapter.ts`、`src/codex/app-server-capabilities.ts`、`src/codex/app-server-client.ts`、`src/p0-02-runner.ts`、`src/codex/codex-process-environment.ts`、`tests/codex-process-environment.test.ts` 及相关文档），因此不能声称 donor clean。
+- `D:\办公\AI\Auto_Agent`：本阶段未修改，核对时 `git status` clean。
 
 ## 10. 范围边界与已知限制
 
