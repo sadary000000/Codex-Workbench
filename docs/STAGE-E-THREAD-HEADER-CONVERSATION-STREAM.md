@@ -4,6 +4,13 @@
 
 `Thread Header + Conversation Message Stream`
 
+## freeze_status
+
+- Automated Gate: PASS
+- Manual GUI Acceptance: PASS（用户已明确确认 `STAGE E Manual Acceptance: PASS`）
+- Stage E Status: PASS / FROZEN
+- Stage F: 已获授权进入实现；本报告不补写未由用户逐项提供的人工观察。
+
 ## scope_resolution
 
 ```text
@@ -205,6 +212,6 @@ Codex 只列清单，不把 CLI/static test 冒充 GUI PASS。用户需在最新
 
 ## gate
 
-`READY_FOR_GPT_REVIEW`
+`PASS / FROZEN`
 
-Stage E 内部实现、自动化检查和真实串行 smoke 已完成；Conversation Map 已更新为 `STAGE D → ●`、`STAGE E → ◉`、`STAGE F → ○ NOT_STARTED`。完成本轮后停止，不进入 STAGE F。
+Stage E 已由用户完成 GUI 验收并明确确认通过；本报告仅冻结该结论，不补写未由用户确认的逐项人工观察。Conversation Map 已进入 Stage F 实现状态。

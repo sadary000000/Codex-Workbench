@@ -1,8 +1,8 @@
 # Codex Workbench V1：Conversation Map 初始化
 
 日期：2026-08-18
-阶段：STAGE E — Thread Header + Conversation Message Stream
-状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E ◉ 进行中
+阶段：STAGE F — Composer Capability + Approval
+状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E PASS / FROZEN；STAGE F ◉ 进行中
 范围：当前 Codex Workbench V1 开发对话
 
 ## 1. 文档定位
@@ -85,10 +85,12 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 └── 默认 UI 隐藏协议噪声；Developer / Diagnostics 可按 Native Thread 定位原始信息；自动化 Gate 与用户人工验收 PASS，阶段冻结
 ● STAGE D — Thread 标题 + 左侧导航状态
 └── 原生 title / displayTitle fallback、用户重命名和克制的左侧运行状态已完成；用户人工 GUI 验收 PASS，阶段冻结
-◉ STAGE E — Thread Header + Conversation Message Stream
-└── Header 与 Native Thread/Turn/Item 默认 UI 投影实现完成，等待 GPT/用户人工验收
-○ STAGE F
-└── NOT_STARTED；本阶段完成后停止，不提前进入
+● STAGE E — Thread Header + Conversation Message Stream
+└── Header 与 Native Thread/Turn/Item 默认 UI 投影完成；用户人工 GUI 验收 PASS，阶段冻结
+◉ STAGE F — Composer Capability + Approval
+└── Composer 能力审计、真实 request mapping 与 Approval 闭环实现中；本阶段完成后停止，不提前进入
+○ STAGE G
+└── NOT_STARTED；不在本阶段范围内
 ```
 
 ## 4. 节点详情与来源
@@ -110,7 +112,8 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | STAGE B — Workspace Scroll / Composer 基础 | ● | Header、Conversation 主滚动容器、常驻 Composer、底部跟随、上滚保护和 Jump to latest 已完成；自动化 Gate 与用户 GUI 验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、本阶段报告 |
 | STAGE C — UI Projection / Diagnostics 分层 | ● | 默认 UI 隐藏协议噪声；Developer / Diagnostics 提供 Thread/Turn/Item 定位、原始快照、按 Thread 隔离的事件日志和错误详情；自动化 Gate 与用户人工验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、`docs\STAGE-C-UI-PROJECTION-DIAGNOSTICS.md` |
 | STAGE D — Thread 标题 + 左侧导航状态 | ● | 原生 title 优先、displayTitle fallback、用户重命名和左侧轻量运行 indicator；一次 Turn 失败不污染 Thread 身份；用户人工 GUI 验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.2.docx`、`docs\STAGE-D-THREAD-TITLE-NAVIGATION-STATE.md` |
-| STAGE E — Thread Header + Conversation Message Stream | ◉ | Header、User/Assistant、Thinking/Processing、Command/Tool、File、Search/Web、Approval 和 Turn 状态的轻量 UI projection 已实现；等待 GPT/用户人工验收 | `docs\STAGE-E-THREAD-HEADER-CONVERSATION-STREAM.md` |
+| STAGE E — Thread Header + Conversation Message Stream | ● | Header、User/Assistant、Thinking/Processing、Command/Tool、File、Search/Web、Approval 和 Turn 状态的轻量 UI projection 已实现；用户人工 GUI 验收 PASS，阶段冻结 | `docs\STAGE-E-THREAD-HEADER-CONVERSATION-STREAM.md` |
+| STAGE F — Composer Capability + Approval | ◉ | 先审计真实 App Server capability，再按支持项接入 Composer 与 Approval；等待本阶段 Gate | `docs\STAGE-F-COMPOSER-CAPABILITY-AUDIT.md`、`docs\STAGE-F-COMPOSER-CAPABILITY-APPROVAL.md` |
 
 ## 5. Phase 0–4 阶段证据摘要
 
@@ -223,7 +226,7 @@ STAGE D 正式名称为 `Thread 标题 + 左侧导航状态`，只处理 Thread 
 - nativeThreadId 继续只在 Developer / Diagnostics 展示，Thread identity、RuntimeRegistry、Composer target 和 Map source 不变。
 - 用户已完成 STAGE D 人工 GUI 验收，并明确确认 `PASS`；阶段结论为 PASS / FROZEN。
 
-### 6.5 STAGE E 当前范围
+### 6.5 STAGE E 已完成与冻结
 
 STAGE E 正式名称为 `Thread Header + Conversation Message Stream`，只处理 Thread Workspace 的 Header 产品化和 Native Thread/Turn/Item 的默认 UI 投影：
 
@@ -232,8 +235,13 @@ STAGE E 正式名称为 `Thread Header + Conversation Message Stream`，只处�
 - Thinking/Processing、Command/Tool、File、Search/Web、Approval 和 failed/interrupted/reconnect 按真实 Native 状态做紧凑投影与按需展开；
 - Unknown Native Item 安全降级；保持 Stage B 滚动/Composer、Stage C Diagnostics/source anchor、Stage A 多 Thread 隔离；
 - 不建立 Conversation、Transcript、Assistant cache、Task、Agent、Context 等第二事实源，不进入 Stage F。
+- 用户已明确确认 `STAGE E Manual Acceptance: PASS`；阶段结论为 PASS / FROZEN。
 
-### 6.6 下一步计划
+### 6.6 STAGE F 当前范围
+
+STAGE F 正式名称为 `Composer Capability + Approval`，必须先读取真实 App Server schema，再接入真实支持的 Model、Reasoning、Permission/Sandbox、Composer context、Send/Stop 和 Approval 闭环；Attachment 只有在 Runtime 可靠支持时才实现，否则明确 UNSUPPORTED/DEFERRED。所有设置按 Thread 隔离，只作为下一 Turn request preference，不冒充 Native Thread authoritative state。
+
+### 6.7 下一步计划
 
 | 顺序 | 状态 | 动作 |
 | --- | --- | --- |
@@ -247,10 +255,11 @@ STAGE E 正式名称为 `Thread Header + Conversation Message Stream`，只处�
 | 8 | ● | STAGE B Workspace Scroll / Composer 基础完成；GPT 审查 PASS，用户人工 GUI 验收 PASS，阶段冻结 |
 | 9 | ● | STAGE C UI Projection / Diagnostics 分层完成；GPT 审查 PASS，用户人工验收 PASS，阶段冻结 |
 | 10 | ● | STAGE D Thread 标题 + 左侧导航状态完成；用户人工 GUI 验收 PASS，阶段冻结 |
-| 11 | ◉ | STAGE E Thread Header + Conversation Message Stream 实现完成，等待 GPT/用户人工验收 |
-| 12 | ○ | STAGE F：NOT_STARTED；不在本轮范围内 |
+| 11 | ● | STAGE E Thread Header + Conversation Message Stream 完成；用户人工 GUI 验收 PASS，阶段冻结 |
+| 12 | ◉ | STAGE F Composer Capability + Approval 实现中，完成后等待 GPT/用户人工验收 |
+| 13 | ○ | STAGE G：NOT_STARTED；不在本轮范围内 |
 
-STAGE E 完成内部 Gate 后停止并提交 GPT 审查；STAGE F 及历史 Phase 7 保持 `NOT_STARTED`，本轮不进入下一阶段。
+STAGE F 完成内部 Gate 后停止并提交 GPT 审查；STAGE G 及历史 Phase 7 保持 `NOT_STARTED`，本轮不进入下一阶段。
 
 ## 7. 已冻结的产品规则
 
