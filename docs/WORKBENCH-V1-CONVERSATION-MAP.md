@@ -1,9 +1,9 @@
 # Codex Workbench V1：Conversation Map 初始化
 
 日期：2026-08-18
-阶段：STAGE F FIX — Composer 配置持久化 + Diagnostics 可观测性
-状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E PASS / FROZEN；STAGE F ◉ 进行中
-范围：当前 Codex Workbench V1 开发对话；不进入 STAGE G
+阶段：STAGE G — Project 生命周期 + 主界面收敛
+状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E PASS / FROZEN；STAGE F PASS / FROZEN；STAGE G ◉ 进行中；STAGE H NOT_STARTED
+范围：当前 Codex Workbench V1 开发对话；不进入 STAGE H
 
 ## 1. 文档定位
 
@@ -87,9 +87,11 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 └── 原生 title / displayTitle fallback、用户重命名和克制的左侧运行状态已完成；用户人工 GUI 验收 PASS，阶段冻结
 ● STAGE E — Thread Header + Conversation Message Stream
 └── Header 与 Native Thread/Turn/Item 默认 UI 投影完成；用户人工 GUI 验收 PASS，阶段冻结
-◉ STAGE F FIX — Composer 配置持久化 + Diagnostics 可观测性
-└── 解决按 Native Thread 持久化下一 Turn 偏好、恢复校验和真实 turn/start Requested/Sent 参数观测；等待 GPT 审查与人工复测
-○ STAGE G
+● STAGE F — Composer Capability + Approval + FIX
+└── capability、Approval、Requested/Sent Diagnostics 与 per-Thread preference 重启恢复已通过自动化和用户人工验收，阶段冻结
+◉ STAGE G — Project 生命周期 + 主界面收敛
+└── Project 日常生命周期、Thread ownership 安全边界和稳定 Workspace 的宽度/边框/状态色/密度收敛进行中
+○ STAGE H
 └── NOT_STARTED；不在本阶段范围内
 ```
 
@@ -113,7 +115,8 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | STAGE C — UI Projection / Diagnostics 分层 | ● | 默认 UI 隐藏协议噪声；Developer / Diagnostics 提供 Thread/Turn/Item 定位、原始快照、按 Thread 隔离的事件日志和错误详情；自动化 Gate 与用户人工验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、`docs\STAGE-C-UI-PROJECTION-DIAGNOSTICS.md` |
 | STAGE D — Thread 标题 + 左侧导航状态 | ● | 原生 title 优先、displayTitle fallback、用户重命名和左侧轻量运行 indicator；一次 Turn 失败不污染 Thread 身份；用户人工 GUI 验收 PASS，阶段冻结 | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.2.docx`、`docs\STAGE-D-THREAD-TITLE-NAVIGATION-STATE.md` |
 | STAGE E — Thread Header + Conversation Message Stream | ● | Header、User/Assistant、Thinking/Processing、Command/Tool、File、Search/Web、Approval 和 Turn 状态的轻量 UI projection 已实现；用户人工 GUI 验收 PASS，阶段冻结 | `docs\STAGE-E-THREAD-HEADER-CONVERSATION-STREAM.md` |
-| STAGE F FIX — Composer 配置持久化 + Diagnostics 可观测性 | ◉ | 继承 STAGE F capability/Approval，补齐按 Native Thread 的偏好重启恢复、过期值 fail-closed 和 Main/Runtime 精确 turn/start 请求 Diagnostics；不进入 STAGE G | `docs\STAGE-F-FIX-COMPOSER-PERSISTENCE-DIAGNOSTICS.md` |
+| STAGE F — Composer Capability + Approval + FIX | ● | capability、Approval、Requested/Sent Diagnostics 和按 Native Thread 的 preference 重启恢复已完成；用户人工验收 PASS，阶段冻结 | `docs\STAGE-F-COMPOSER-CAPABILITY-APPROVAL.md`、`docs\STAGE-F-FIX-COMPOSER-PERSISTENCE-DIAGNOSTICS.md` |
+| STAGE G — Project 生命周期 + 主界面收敛 | ◉ | Project 生命周期与主界面 P1 收敛实现中；不删除磁盘目录，不替换 Native Thread identity | `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.2.docx`、STAGE G 执行指令 |
 
 ## 5. Phase 0–4 阶段证据摘要
 
@@ -241,7 +244,7 @@ STAGE E 正式名称为 `Thread Header + Conversation Message Stream`，只处�
 
 STAGE F 正式名称为 `Composer Capability + Approval`，必须先读取真实 App Server schema，再接入真实支持的 Model、Reasoning、Permission/Sandbox、Composer context、Send/Stop 和 Approval 闭环；Attachment 只有在 Runtime 可靠支持时才实现，否则明确 UNSUPPORTED/DEFERRED。所有设置按 Thread 隔离，只作为下一 Turn request preference，不冒充 Native Thread authoritative state。
 
-当前实现与审计证据记录在 `docs/STAGE-F-COMPOSER-CAPABILITY-AUDIT.md` 和 `docs/STAGE-F-COMPOSER-CAPABILITY-APPROVAL.md`；真实审批 Allow/Deny 仍需用户 GUI 验收。
+当前实现与审计证据记录在 `docs/STAGE-F-COMPOSER-CAPABILITY-AUDIT.md`、`docs/STAGE-F-COMPOSER-CAPABILITY-APPROVAL.md` 和 `docs/STAGE-F-FIX-COMPOSER-PERSISTENCE-DIAGNOSTICS.md`；用户已确认 STAGE F 与 STAGE F FIX 人工验收 PASS，阶段冻结。
 
 ### 6.7 下一步计划
 
@@ -258,10 +261,11 @@ STAGE F 正式名称为 `Composer Capability + Approval`，必须先读取真实
 | 9 | ● | STAGE C UI Projection / Diagnostics 分层完成；GPT 审查 PASS，用户人工验收 PASS，阶段冻结 |
 | 10 | ● | STAGE D Thread 标题 + 左侧导航状态完成；用户人工 GUI 验收 PASS，阶段冻结 |
 | 11 | ● | STAGE E Thread Header + Conversation Message Stream 完成；用户人工 GUI 验收 PASS，阶段冻结 |
-| 12 | ◉ | STAGE F Composer Capability + Approval 实现中，完成后等待 GPT/用户人工验收 |
-| 13 | ○ | STAGE G：NOT_STARTED；不在本轮范围内 |
+| 12 | ● | STAGE F Composer Capability + Approval + FIX 完成；GPT/用户人工验收 PASS，阶段冻结 |
+| 13 | ◉ | STAGE G Project 生命周期 + 主界面收敛进行中；完成后等待 GPT/用户人工验收 |
+| 14 | ○ | STAGE H：NOT_STARTED；不在本轮范围内 |
 
-STAGE F 完成内部 Gate 后停止并提交 GPT 审查；STAGE G 及历史 Phase 7 保持 `NOT_STARTED`，本轮不进入下一阶段。
+STAGE G 完成内部 Gate 后停止并提交 GPT 审查；STAGE H 及历史 Phase 7 保持 `NOT_STARTED`，本轮不进入下一阶段。
 
 ## 7. 已冻结的产品规则
 

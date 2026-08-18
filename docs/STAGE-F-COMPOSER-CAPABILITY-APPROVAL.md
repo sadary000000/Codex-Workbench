@@ -1,8 +1,18 @@
 # STAGE F — Composer Capability + Approval
 
 日期：2026-08-18  
-状态：实现完成，等待 GPT 审查与人工 Approval 验收  
-范围：不进入 STAGE G
+状态：PASS / FROZEN
+范围：STAGE F capability/Approval 与 STAGE F FIX 已完成；不进入 STAGE G
+
+## 0. STAGE F / STAGE F FIX freeze result
+
+- Automated Gate: PASS。
+- Manual GUI Acceptance: PASS（用户已明确确认）。
+- STAGE F FIX: PASS（用户已明确确认）。
+- Diagnostics Requested/Sent 可观测性人工复测通过。
+- Model / Reasoning / Approval / Sandbox per-thread preference 重启恢复人工复测通过。
+- Attachment 仍为 `deferred/unsupported`，不算失败。
+- Stage F Status: PASS / FROZEN。
 
 ## 1. scope_resolution
 
@@ -91,9 +101,9 @@ Approval 仍是 Native server request，不新增本地权限协议。现有 bro
 
 - 真实审批 Allow/Deny 尚未在自动 smoke 中稳定触发；不阻塞原生 broker 接入，但阻塞“真实 GUI Approval 全闭环”声明，需人工验收。
 - 附件 picker 与 localImage/audio/skill/mention 延后。
-- 本地 preference 是会话内按 Thread 缓存，重启后不恢复为 Native settings；这是避免建立第二事实源的刻意边界。
+- Composer preference 仍不是 Native authoritative state；STAGE F FIX 已将 Workbench 的下一 Turn preference 按 `nativeThreadId` 持久化并在重启后恢复。附件能力继续 deferred。
 
 ## 10. gate
 
-实现与自动化内部 Gate：READY_FOR_GPT_REVIEW。  
-Stage F 完成后停止，不进入 Stage G。
+实现、自动化和用户人工 Gate：PASS / FROZEN。
+Stage F 已冻结；允许进入 STAGE G，不进入 STAGE H。
