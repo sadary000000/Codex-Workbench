@@ -37,5 +37,20 @@ test("Main process validates the selected cwd and does not expose path editing",
   assert.match(main, /shell\.openPath\(cwd\)/);
   assert.match(main, /getPersistence\(\)\.removeProject\(projectId\)/);
   assert.match(main, /getProjectMaps\(\)\.removeProjectMetadata\(projectId\)/);
+  assert.match(main, /existing\.state === "DISCONNECTED"/);
+  assert.match(main, /await existing\.close\(\)/);
+  assert.match(main, /if \(projection\.projectId\)/);
+  assert.match(main, /validateProjectDirectory\(project\.cwd\)/);
+  assert.match(main, /metadataCleanup/);
   assert.doesNotMatch(main, /updateProject\([^\n]*cwd/);
+});
+
+test("reliability paths fail closed and preserve the active Thread truth", () => {
+  assert.match(renderer, /NATIVE_THREAD_UNAVAILABLE/);
+  assert.match(renderer, /renderNoSelectedThread\(\)/);
+  assert.match(renderer, /result\.status === "completed" \|\| result\.status === "interrupted"/);
+  assert.match(renderer, /localStorage\.setItem\(draftKey\(operationThreadId\)/);
+  assert.match(main, /existing\.state === "FAILED"/);
+  assert.match(main, /existing\.state === "RECOVERY_REQUIRED"/);
+  assert.match(main, /cancelPendingNativeApprovals\(requestedThreadId\)/);
 });

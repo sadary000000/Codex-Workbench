@@ -123,6 +123,15 @@ test("rejects duplicate identity and keeps the previous valid document after a f
   assert.equal((await store.getThreadProjection("native-thread"))?.nativeThreadId, "native-thread");
 });
 
+test("rejects canonical cwd aliases at the persistence boundary", async () => {
+  const { store } = await createStore();
+  await store.createProject({ projectId: "canonical-project", name: "Canonical", cwd: "C:/canonical/project" });
+  await assert.rejects(
+    store.createProject({ name: "Alias", cwd: "C:/canonical/child/../project" }),
+    (error: unknown) => error instanceof PersistenceStoreError && error.code === "PROJECT_CWD_CONFLICT",
+  );
+});
+
 test("pins a Thread as a shortcut without changing Project or Standalone ownership", async () => {
   const { store } = await createStore();
   const project = await store.createProject({ name: "Pinned", cwd: "C:/pinned" });

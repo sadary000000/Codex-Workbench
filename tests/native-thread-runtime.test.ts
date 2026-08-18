@@ -15,7 +15,7 @@ import { V1PersistenceStore } from "../src/shared/persistence-store.ts";
 import type { ComposerRequestDiagnostics, JsonRpcMessage } from "../src/shared/runtime-types.ts";
 
 interface FakeState {
-  turns: Array<{ id: string; status: string; items: unknown[] }>;
+  turns: Array<{ id: string; status: string; items: unknown[]; error?: unknown }>;
   startCalls: number;
   nextTurn: number;
   requestMethods: string[];
@@ -34,6 +34,7 @@ interface FakeState {
   threadTitle?: string;
   threadName?: string;
   threadResumeWriterConflict?: boolean;
+  turnCompletionStatus?: "completed" | "failed";
 }
 
 class FakeClient implements AppServerClientPort {
@@ -128,7 +129,7 @@ class FakeClient implements AppServerClientPort {
         error.code = this.state.turnStartErrorCode;
         throw error;
       }
-      const turn: { id: string; status: string; items: unknown[] } = {
+      const turn: { id: string; status: string; items: unknown[]; error?: unknown } = {
         id: `turn-${++this.state.nextTurn}`,
         status: "inProgress",
         items: [],
@@ -137,8 +138,11 @@ class FakeClient implements AppServerClientPort {
       queueMicrotask(() => {
         this.emit({ method: "turn/started", params: { threadId: this.state.activeThreadId, turn } });
         if (params.input?.[0]?.text === "LONG") return;
-        turn.status = "completed";
-        turn.items = [{ id: `item-${turn.id}`, type: "agentMessage", phase: "final_answer", text: "FAKE_FINAL" }];
+        turn.status = this.state.turnCompletionStatus ?? "completed";
+        turn.items = turn.status === "completed"
+          ? [{ id: `item-${turn.id}`, type: "agentMessage", phase: "final_answer", text: "FAKE_FINAL" }]
+          : [];
+        if (turn.status === "failed") turn.error = { code: "FAKE_TURN_FAILED", message: "fake terminal failure" };
         this.emit({ method: "item/agentMessage/delta", params: { threadId: this.state.activeThreadId, turnId: turn.id, itemId: `item-${turn.id}`, delta: "FAKE_FINAL" } });
         this.emit({ method: "turn/completed", params: { threadId: this.state.activeThreadId, turn } });
       });
@@ -202,7 +206,7 @@ class FakeClient implements AppServerClientPort {
   }
 }
 
-async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string; threadReadUnmaterialized?: boolean; threadReadNoRollout?: boolean; threadStartNoRollout?: boolean; threadTitle?: string; threadName?: string; onTurnStartRequest?: (request: ComposerRequestDiagnostics) => void } = {}) {
+async function createRuntime(mismatch = false, options: { turnStartErrorCode?: string; processExitOnTurnStart?: boolean; projectId?: string | null; threadStartIds?: string[]; turnStartThreadId?: string; threadReadUnmaterialized?: boolean; threadReadNoRollout?: boolean; threadStartNoRollout?: boolean; threadTitle?: string; threadName?: string; turnCompletionStatus?: "completed" | "failed"; onTurnStartRequest?: (request: ComposerRequestDiagnostics) => void } = {}) {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-test-"));
   const state: FakeState = {
     turns: [],
@@ -220,6 +224,7 @@ async function createRuntime(mismatch = false, options: { turnStartErrorCode?: s
     threadReadNoRollout: options.threadReadNoRollout,
     threadTitle: options.threadTitle,
     threadName: options.threadName,
+    turnCompletionStatus: options.turnCompletionStatus,
   };
   const events: JsonRpcMessage[] = [];
   const persistence = new V1PersistenceStore(join(root, "workbench-state.json"));
@@ -271,9 +276,11 @@ test("starts one Native Thread, runs two Turns, reads it, and resumes without a 
   const secondTurn = await second.startTurn("second");
   assert.equal(secondTurn.nativeThreadId, "native-thread");
   assert.equal(first.state.turns.length, 2);
+  assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownTurnId, secondTurn.turnId);
   assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownState, "ready");
   assert.deepEqual(await first.persistence.listRecoverablePrompts("native-thread"), []);
   await second.close();
+  assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownTurnId, secondTurn.turnId);
 });
 
 test("discovers Composer capabilities and forwards options without changing Native identity", async () => {
@@ -517,6 +524,35 @@ test("retains a failed Prompt with a classified recovery error", async () => {
   await harness.runtime.close();
 });
 
+test("serializes concurrent turn starts before the first request reaches App Server", async () => {
+  const harness = await createRuntime();
+  await harness.runtime.start();
+  const originalBeginPrompt = harness.persistence.beginPrompt.bind(harness.persistence);
+  harness.persistence.beginPrompt = async (...args) => {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    return originalBeginPrompt(...args);
+  };
+  const first = harness.runtime.startTurn("first");
+  await assert.rejects(
+    harness.runtime.startTurn("second"),
+    (error: any) => error?.code === "TURN_BUSY",
+  );
+  await first;
+  assert.equal(harness.state.requestMethods.filter((method) => method === "turn/start").length, 1);
+  await harness.runtime.close();
+});
+
+test("keeps a terminal failed Turn prompt available for recovery", async () => {
+  const harness = await createRuntime(false, { turnCompletionStatus: "failed" });
+  await harness.runtime.start();
+  const result = await harness.runtime.startTurn("keep failed prompt");
+  assert.equal(result.status, "failed");
+  const recoverable = await harness.persistence.listRecoverablePrompts("native-thread");
+  assert.equal(recoverable[0]?.prompt, "keep failed prompt");
+  assert.equal(recoverable[0]?.status, "failed");
+  await harness.runtime.close();
+});
+
 test("classifies a process exit during turn/start and preserves recovery metadata", async () => {
   const harness = await createRuntime(false, { processExitOnTurnStart: true });
   await harness.runtime.start();
@@ -530,6 +566,29 @@ test("classifies a process exit during turn/start and preserves recovery metadat
   assert.equal(recoverable[0]?.lastError?.code, "APP_SERVER_PROCESS_EXIT");
   assert.equal((await harness.persistence.getThreadProjection("native-thread"))?.lastKnownState, "disconnected");
   await harness.runtime.close();
+});
+
+test("reopens the same Native Thread after an App Server process exit", async () => {
+  const harness = await createRuntime(false, { processExitOnTurnStart: true });
+  const started = await harness.runtime.start();
+  await assert.rejects(
+    harness.runtime.startTurn("process exit then reopen"),
+    (error: any) => error?.code === "APP_SERVER_PROCESS_EXIT",
+  );
+  await harness.runtime.close();
+
+  harness.state.processExitOnTurnStart = false;
+  const reopened = new NativeThreadRuntime({
+    cwd: "C:/fake/project",
+    stateFile: harness.stateFile,
+    persistence: harness.persistence,
+    clientFactory: (options) => new FakeClient(harness.state, false, options.onProcessExit),
+  });
+  const resumed = await reopened.start();
+  assert.equal(resumed.nativeThreadId, started.nativeThreadId);
+  assert.equal(resumed.state, "READY");
+  assert.ok(harness.state.requestMethods.includes("thread/resume"));
+  await reopened.close();
 });
 
 test("marks an active Prompt for recovery when the Runtime closes, then refuses fabricated restart continuation", async () => {

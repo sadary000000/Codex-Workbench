@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type {
   PromptRecoveryRecord,
   PromptRecoveryStatus,
@@ -194,8 +194,8 @@ function normalizedError(value: unknown): RuntimeErrorInfo | null | undefined {
 }
 
 function pathKey(value: string): string {
-  const trimmed = value.replace(/[\\/]+$/, "");
-  return process.platform === "win32" ? trimmed.toLowerCase() : trimmed;
+  const normalized = resolve(value.replace(/[\\/]+$/, ""));
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function emptyDocument(now: string): WorkbenchPersistenceDocument {

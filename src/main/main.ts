@@ -92,6 +92,7 @@ function getProjectMaps(): ProjectMapManager {
   projectMaps = new ProjectMapManager({
     userDataDirectory: app.getPath("userData"),
     persistence: getPersistence(),
+    validateProjectDirectory,
     onChanged: (status) => send(IPC.projectMapState, status),
   });
   return projectMaps;
@@ -171,12 +172,18 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
       }
       const nativeThreadId = createdRuntime?.nativeThreadId ?? messageThreadId(message);
       if (!nativeThreadId) return failClosedServerRequest(message, null);
+      const messageNativeThreadId = messageThreadId(message);
+      if (messageNativeThreadId && messageNativeThreadId !== nativeThreadId) {
+        return failClosedServerRequest(message, nativeThreadId);
+      }
       const key = rpcKey(nativeThreadId, message.id);
       if (pendingNativeApprovals.has(key)) return failClosedServerRequest(message, nativeThreadId);
+      let timedOut = false;
       const response = await new Promise<unknown>((resolve) => {
         const timer = setTimeout(() => {
           const pending = pendingNativeApprovals.get(key);
           if (!pending) return;
+          timedOut = true;
           pendingNativeApprovals.delete(key);
           const timeoutResponse = pending.method === "item/permissions/requestApproval" ? noAdditionalPermissions() : { decision: "cancel" };
           pending.resolve(timeoutResponse);
@@ -198,7 +205,7 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
           params: message.params ?? null,
         });
       });
-      send(IPC.serverRequest, {
+      if (!timedOut) send(IPC.serverRequest, {
         status: "resolved",
         threadId: nativeThreadId,
         method: message.method,
@@ -345,6 +352,23 @@ async function selectNativeThread(nativeThreadId: string): Promise<void> {
 async function loadRuntimeForThread(nativeThreadId: string): Promise<NativeThreadRuntime> {
   const projection = await getPersistence().getThreadProjection(nativeThreadId);
   if (!projection) throw projectionNotFound(nativeThreadId);
+  if (projection.projectId) {
+    const project = await getPersistence().getProject(projection.projectId);
+    if (!project) {
+      throw new PersistenceStoreError("PROJECT_NOT_FOUND", `Project does not exist: ${projection.projectId}`, getPersistence().path);
+    }
+    await validateProjectDirectory(project.cwd);
+  }
+  const existing = runtimes.get(nativeThreadId);
+  // A process exit leaves the old handle in RuntimeRegistry so background
+  // Threads keep their identity. Explicit reopen must replace that stale
+  // transport and perform a real resume/read instead of reusing DISCONNECTED.
+  if (existing && (existing.state === "DISCONNECTED" || existing.state === "CLOSED" || existing.state === "IDLE" || existing.state === "FAILED" || existing.state === "RECOVERY_REQUIRED")) {
+    runtimes.detach(nativeThreadId, existing);
+    await existing.close().catch((error) => {
+      logger.warn("stale_native_thread_runtime_close_failed", { nativeThreadId, error: errorInfo(error).message });
+    });
+  }
   return runtimes.ensure(nativeThreadId, async () => {
     const candidate = createRuntime({ cwd: projection.cwd, projectId: projection.projectId });
     try {
@@ -404,7 +428,7 @@ async function createNativeThread(projectId: string | null): Promise<ThreadNavig
   if (projectId !== null) {
     const project = await getPersistence().getProject(projectId);
     if (!project) throw new PersistenceStoreError("PROJECT_NOT_FOUND", `Project does not exist: ${projectId}`, getPersistence().path);
-    cwd = project.cwd;
+    cwd = await validateProjectDirectory(project.cwd);
     targetProjectId = project.projectId;
   }
   const candidate = createRuntime({ cwd, projectId: targetProjectId });
@@ -560,12 +584,14 @@ function registerIpc(): void {
       if (typeof projectId !== "string") throw new Error("Project ID is required.");
       await detachLoadedProjectRuntimes(projectId);
       const result = await getPersistence().removeProject(projectId);
+      let metadataCleanup: "cleaned" | "failed" = "cleaned";
       try {
         await getProjectMaps().removeProjectMetadata(projectId);
       } catch (error) {
+        metadataCleanup = "failed";
         logger.warn("project_map_metadata_cleanup_failed", { projectId, error: errorInfo(error).message });
       }
-      return ok(result);
+      return ok({ ...result, metadataCleanup });
     } catch (error) {
       return fail(error);
     }
@@ -766,6 +792,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.interrupt, async (_event, nativeThreadId: unknown) => {
     const requestedThreadId = typeof nativeThreadId === "string" && nativeThreadId.trim() ? nativeThreadId.trim() : currentNativeThreadId;
     try {
+      if (requestedThreadId) cancelPendingNativeApprovals(requestedThreadId);
       return ok(await getRuntime(typeof nativeThreadId === "string" ? nativeThreadId : null).interruptTurn());
     } catch (error) {
       if (requestedThreadId && isNoRolloutError(error)) return markUnavailableNativeThread(requestedThreadId, error).catch((unavailable) => fail(unavailable));

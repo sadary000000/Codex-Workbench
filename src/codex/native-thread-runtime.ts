@@ -175,6 +175,8 @@ export class NativeThreadRuntime {
   private lastErrorValue: RuntimeErrorInfo | null = null;
   private preserveProjectionStateOnCloseValue = false;
   private closing = false;
+  private turnStartInFlight = false;
+  private processFailurePromise: Promise<void> | null = null;
   private sequence = 0;
 
   constructor(options: NativeThreadRuntimeOptions) {
@@ -222,7 +224,7 @@ export class NativeThreadRuntime {
   }
 
   async startNewThread(projectId?: string | null): Promise<RuntimeSnapshot> {
-    if (this.activeTurnValue || this.stateValue === "TURN_RUNNING" || this.stateValue === "WAITING_USER") {
+    if (this.turnStartInFlight || this.activeTurnValue || this.stateValue === "TURN_RUNNING" || this.stateValue === "WAITING_USER") {
       throw this.fail("THREAD_SWITCH_BUSY", "Cannot create a Native Thread while a Turn is running.");
     }
     if (this.stateValue === "STARTING") {
@@ -306,7 +308,8 @@ export class NativeThreadRuntime {
             exitCode,
             stderr: stderr.slice(-8_000),
           };
-          void this.persistProcessFailure(this.lastErrorValue);
+          this.processFailurePromise = this.persistProcessFailure(this.lastErrorValue);
+          void this.processFailurePromise;
           this.onProcessExit?.(exitCode, stderr);
         },
       });
@@ -417,6 +420,7 @@ export class NativeThreadRuntime {
   async resume(nativeThreadId: string): Promise<RuntimeSnapshot> {
     const id = nativeThreadId.trim();
     if (!id) throw this.fail("THREAD_ID_REQUIRED", "nativeThreadId is required for resume.");
+    if (this.turnStartInFlight) throw this.fail("THREAD_SWITCH_BUSY", "Cannot switch Native Thread while a Turn is starting.");
     if (this.stateValue === "READY" || this.stateValue === "TURN_RUNNING" || this.stateValue === "WAITING_USER") {
       if (this.activeTurnValue || this.stateValue === "TURN_RUNNING" || this.stateValue === "WAITING_USER") throw this.fail("THREAD_SWITCH_BUSY", "Cannot switch Native Thread while a Turn is running.");
       this.closing = true;
@@ -446,11 +450,14 @@ export class NativeThreadRuntime {
     } catch (error) {
       const normalized = asError(error);
       const details = errorInfo(normalized);
+      const processExitObserved = this.stateValue === "DISCONNECTED" || this.lastErrorValue?.code === "APP_SERVER_PROCESS_EXIT";
       this.lastErrorValue = details;
       const recoveryRequired = transportRecovery(normalized);
-      this.stateValue = recoveryRequired ? "RECOVERY_REQUIRED" : "FAILED";
+      if (!processExitObserved) this.stateValue = recoveryRequired ? "RECOVERY_REQUIRED" : "FAILED";
       await this.safePersistProjection({
-        ...(isWriterConflictError(normalized) ? {} : { lastKnownState: recoveryRequired ? "recovery_required" : "failed" }),
+        ...(isWriterConflictError(normalized) ? {} : {
+          lastKnownState: processExitObserved ? "disconnected" : recoveryRequired ? "recovery_required" : "failed",
+        }),
         lastError: details,
       });
       throw normalized;
@@ -475,9 +482,10 @@ export class NativeThreadRuntime {
     if (!text) throw this.fail("PROMPT_REQUIRED", "Prompt is required.");
     if (text.length > MAX_PROMPT_LENGTH) throw this.fail("PROMPT_TOO_LONG", "Prompt exceeds the Phase 1 limit.");
     if (!this.client || !this.nativeThreadIdValue || !this.initialized) throw this.fail("THREAD_NOT_READY", "Native Thread is not ready.");
-    if (this.activeTurnValue || this.stateValue === "TURN_RUNNING" || this.stateValue === "WAITING_USER") {
+    if (this.turnStartInFlight || this.activeTurnValue || this.stateValue === "TURN_RUNNING" || this.stateValue === "WAITING_USER") {
       throw this.fail("TURN_BUSY", "A Native Turn is already running.");
     }
+    this.turnStartInFlight = true;
     const localRunId = randomUUID();
     const nativeThreadId = this.nativeThreadIdValue;
     let turnId: string | null = null;
@@ -572,6 +580,8 @@ export class NativeThreadRuntime {
         lastError: details,
       });
       throw normalized;
+    } finally {
+      this.turnStartInFlight = false;
     }
   }
 
@@ -580,6 +590,7 @@ export class NativeThreadRuntime {
       throw this.fail("TURN_NOT_RUNNING", "No Native Turn is running.");
     }
     const turnId = this.activeTurnValue.turnId;
+    const localRunId = this.activeTurnValue.localRunId;
     try {
       await this.client.request("turn/interrupt", {
         threadId: this.nativeThreadIdValue,
@@ -591,18 +602,23 @@ export class NativeThreadRuntime {
       const details = errorInfo(normalized);
       this.lastErrorValue = details;
       if (transportRecovery(normalized)) this.stateValue = "RECOVERY_REQUIRED";
-      await this.safeUpdatePrompt(this.activeTurnValue.localRunId, {
-        status: transportRecovery(normalized) ? "recovery_required" : "failed",
-        turnId,
-        lastError: details,
-      });
-      await this.safePersistProjection({
-        ...(isWriterConflictError(normalized)
-          ? {}
-          : { lastKnownState: transportRecovery(normalized) ? "recovery_required" : "failed" }),
-        lastKnownTurnId: turnId,
-        lastError: details,
-      });
+      // The Turn can complete between the interrupt request and its error
+      // response. In that race do not dereference a cleared active Turn or
+      // overwrite the already terminal projection state.
+      if (this.activeTurnValue?.turnId === turnId) {
+        await this.safeUpdatePrompt(localRunId, {
+          status: transportRecovery(normalized) ? "recovery_required" : "failed",
+          turnId,
+          lastError: details,
+        });
+        await this.safePersistProjection({
+          ...(isWriterConflictError(normalized)
+            ? {}
+            : { lastKnownState: transportRecovery(normalized) ? "recovery_required" : "failed" }),
+          lastKnownTurnId: turnId,
+          lastError: details,
+        });
+      }
       throw normalized;
     }
   }
@@ -611,8 +627,11 @@ export class NativeThreadRuntime {
     const active = this.activeTurnValue;
     const nativeThreadId = this.nativeThreadIdValue;
     this.closing = true;
+    if (this.processFailurePromise) await this.processFailurePromise.catch(() => undefined);
     if (nativeThreadId && (active || this.persistence)) {
-      const details = errorInfo(this.fail("RUNTIME_CLOSED_DURING_TURN", "Runtime closed while a Prompt may still be in flight."));
+      const details = this.lastErrorValue?.code === "APP_SERVER_PROCESS_EXIT"
+        ? this.lastErrorValue
+        : errorInfo(this.fail("RUNTIME_CLOSED_DURING_TURN", "Runtime closed while a Prompt may still be in flight."));
       if (active) await this.safeUpdatePrompt(active.localRunId, { status: "recovery_required", turnId: active.turnId, lastError: details });
       if (this.persistence) {
         await this.safeMarkPrompts(nativeThreadId, "recovery_required", details);
@@ -629,7 +648,10 @@ export class NativeThreadRuntime {
         ...((this.preserveProjectionStateOnCloseValue || this.lastErrorValue?.code === "WRITER_CONFLICT") && !active
           ? {}
           : { lastKnownState: closeProjectionState }),
-        lastKnownTurnId: active?.turnId ?? null,
+        // A normal close is not a new Native Turn. Preserve the last known
+        // completed Turn ID so restart/reopen and Map/source navigation retain
+        // the same local projection facts. Only an active Turn gets a new ID.
+        ...(active ? { lastKnownTurnId: active.turnId } : {}),
         ...(active ? { lastError: details } : {}),
       });
     }
@@ -782,6 +804,7 @@ export class NativeThreadRuntime {
   private emitMessage(message: JsonRpcMessage): void {
     if (!message.method) return;
     const ids = messageIds(message);
+    if (this.nativeThreadIdValue && ids.threadId && ids.threadId !== this.nativeThreadIdValue) return;
     if (message.method === "thread/started" && ids.threadId) this.lastStartedThreadIdValue = ids.threadId;
     const event: NativeEvent = {
       sequence: ++this.sequence,

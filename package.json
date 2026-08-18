@@ -24,7 +24,8 @@
     "test:real:map-pause": "node --experimental-strip-types scripts/real-map-pause-resume-smoke.ts",
     "test:real:composer-capability": "node --experimental-strip-types scripts/real-composer-capability-smoke.ts",
     "test:real:composer-persistence": "node --experimental-strip-types scripts/real-composer-persistence-smoke.ts",
-    "test:real:project-lifecycle": "node --experimental-strip-types scripts/real-project-lifecycle-smoke.ts"
+    "test:real:project-lifecycle": "node --experimental-strip-types scripts/real-project-lifecycle-smoke.ts",
+    "test:real:reliability": "node --experimental-strip-types scripts/real-reliability-smoke.ts"
   },
   "devDependencies": {
     "@types/node": "22.10.2",

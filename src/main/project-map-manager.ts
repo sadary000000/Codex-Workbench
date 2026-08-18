@@ -15,6 +15,7 @@ export interface ProjectMapManagerOptions {
   userDataDirectory: string;
   persistence: V1PersistenceStore;
   command?: string;
+  validateProjectDirectory?: (cwd: string) => Promise<string>;
   onChanged?: (status: ProjectMapStatus) => void;
 }
 
@@ -146,6 +147,7 @@ export class ProjectMapManager {
   private readonly userDataDirectory: string;
   private readonly persistence: V1PersistenceStore;
   private readonly command: string;
+  private readonly validateProjectDirectory: (cwd: string) => Promise<string>;
   private readonly onChanged: ProjectMapManagerOptions["onChanged"];
   private readonly stores = new Map<string, MapStore>();
   private readonly runtimes = new Map<string, NativeThreadRuntime>();
@@ -160,6 +162,7 @@ export class ProjectMapManager {
     this.userDataDirectory = options.userDataDirectory;
     this.persistence = options.persistence;
     this.command = options.command ?? resolveCodexCommand();
+    this.validateProjectDirectory = options.validateProjectDirectory ?? (async (cwd) => cwd);
     this.onChanged = options.onChanged;
   }
 
@@ -203,6 +206,19 @@ export class ProjectMapManager {
       map: null,
       error: { code: "PROJECT_NOT_FOUND", message: `Project does not exist: ${id}` },
     };
+    try {
+      await this.validateProjectDirectory(project.cwd);
+    } catch (error) {
+      return {
+        projectId: id,
+        enabled: false,
+        available: false,
+        maintenanceThreadId: await this.maintenanceThreadId(id),
+        maintenanceRunning: false,
+        map: null,
+        error: errorMeta(error),
+      };
+    }
     const runtime = this.runtimes.get(id);
     const inspection = await this.store(id).inspect();
     const maintenanceId = await this.maintenanceThreadId(id);
@@ -224,6 +240,7 @@ export class ProjectMapManager {
     const id = projectId.trim();
     const project = await this.persistence.getProject(id);
     if (!project) throw new Error(`Project does not exist: ${id}`);
+    await this.validateProjectDirectory(project.cwd);
     await this.store(id).ensure({ kind: "project", projectId: id });
     await this.store(id).enable();
     this.lastErrors.delete(id);
@@ -232,7 +249,9 @@ export class ProjectMapManager {
 
   async pause(projectId: string): Promise<ProjectMapStatus> {
     const id = projectId.trim();
-    if (!(await this.persistence.getProject(id))) throw new Error(`Project does not exist: ${id}`);
+    const project = await this.persistence.getProject(id);
+    if (!project) throw new Error(`Project does not exist: ${id}`);
+    await this.validateProjectDirectory(project.cwd);
     await this.store(id).pause();
     this.lastErrors.delete(id);
     return this.emitStatus(id);
@@ -240,7 +259,9 @@ export class ProjectMapManager {
 
   async resume(projectId: string): Promise<ProjectMapStatus> {
     const id = projectId.trim();
-    if (!(await this.persistence.getProject(id))) throw new Error(`Project does not exist: ${id}`);
+    const project = await this.persistence.getProject(id);
+    if (!project) throw new Error(`Project does not exist: ${id}`);
+    await this.validateProjectDirectory(project.cwd);
     await this.store(id).resume();
     this.lastErrors.delete(id);
     return this.emitStatus(id);
@@ -263,6 +284,7 @@ export class ProjectMapManager {
     const id = projectId.trim();
     const project = await this.persistence.getProject(id);
     if (!project) throw new Error(`Project does not exist: ${id}`);
+    await this.validateProjectDirectory(project.cwd);
     const mapStatus = await this.status(id);
     if (!mapStatus.enabled || !mapStatus.map) throw new MapValidationError("PROJECT_MAP_NOT_ENABLED", "Project Map is not enabled.");
     if (mapStatus.map.sync.paused) throw new MapValidationError("PROJECT_MAP_PAUSED", "Project Map is paused.");
@@ -302,6 +324,7 @@ export class ProjectMapManager {
     const id = projectId.trim();
     const project = await this.persistence.getProject(id);
     if (!project) throw new Error(`Project does not exist: ${id}`);
+    await this.validateProjectDirectory(project.cwd);
     const runtime = await this.ensureRuntime(id, project.cwd);
     const view = await runtime.readThread();
     if (!runtime.nativeThreadId) throw new Error("Maintenance Thread ID is unavailable.");
@@ -524,6 +547,10 @@ export class ProjectMapManager {
   private async ensureRuntime(projectId: string, cwd: string): Promise<NativeThreadRuntime> {
     const existing = this.runtimes.get(projectId);
     if (existing && (existing.state === "READY" || existing.state === "TURN_RUNNING" || existing.state === "WAITING_USER")) return existing;
+    if (existing) {
+      this.runtimes.delete(projectId);
+      await existing.close().catch(() => undefined);
+    }
     const runtime = new NativeThreadRuntime({
       cwd,
       stateFile: this.bindingPath(projectId),

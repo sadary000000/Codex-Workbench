@@ -44,7 +44,7 @@ interface V1Api {
   createProject(input: unknown): Promise<IpcEnvelope<ProjectRecord>>;
   chooseProjectDirectory(): Promise<IpcEnvelope<string | null>>;
   updateProject(projectId: string, patch: unknown): Promise<IpcEnvelope<ProjectRecord>>;
-  removeProject(projectId: string): Promise<IpcEnvelope<{ project: ProjectRecord; detachedNativeThreadIds: string[] }>>;
+  removeProject(projectId: string): Promise<IpcEnvelope<{ project: ProjectRecord; detachedNativeThreadIds: string[]; metadataCleanup: "cleaned" | "failed" }>>;
   openProject(projectId: string): Promise<IpcEnvelope<{ projectId: string; cwd: string }>>;
   listThreads(projectId?: string | null): Promise<IpcEnvelope<ThreadProjection[]>>;
   bindThreadToProject(nativeThreadId: string, projectId: string | null): Promise<IpcEnvelope<ThreadProjection>>;
@@ -1194,18 +1194,26 @@ function renderNoSelectedThread(): void {
 }
 
 async function consume<T>(label: string, operation: Promise<IpcEnvelope<T>>, targetNativeThreadId = currentDiagnosticsThreadId()): Promise<T | null> {
+  const operationThreadId = targetNativeThreadId ?? currentDiagnosticsThreadId();
   try {
     const response = await operation;
-    appendOutput(label, response, targetNativeThreadId);
+    appendOutput(label, response, operationThreadId);
     if (!response.ok) {
-      showError(response.error, targetNativeThreadId);
+      showError(response.error, operationThreadId);
+      if (response.error?.code === "NATIVE_THREAD_UNAVAILABLE" && operationThreadId) {
+        // Persist the draft before clearing the selected UI. A failed read/turn
+        // must never leave the old prompt targeting a different Thread.
+        localStorage.setItem(draftKey(operationThreadId), promptElement.value);
+        threadUnavailableId = operationThreadId;
+        renderNoSelectedThread();
+      }
       return null;
     }
     showStatus(operationStatusLabel(label));
     return response.result ?? null;
   } catch (error) {
-    appendOutput(`${label} exception`, error, targetNativeThreadId);
-    showError({ name: "RendererError", code: "RENDERER_OPERATION_FAILED", message: String(error), exitCode: null, stderr: "" }, targetNativeThreadId);
+    appendOutput(`${label} exception`, error, operationThreadId);
+    showError({ name: "RendererError", code: "RENDERER_OPERATION_FAILED", message: String(error), exitCode: null, stderr: "" }, operationThreadId);
     return null;
   }
 }
@@ -1538,7 +1546,9 @@ async function submitProjectRemove(): Promise<void> {
     projectRemoveDialog.close();
     await refreshNavigation();
     await refreshMapStatus(threadViewGeneration, selectedNativeThreadId, currentProjection?.projectId ?? null);
-    showStatus(`Project 已从 Workbench 移除；${result.detachedNativeThreadIds.length} 个 Thread 已保留并解绑。`);
+    showStatus(result.metadataCleanup === "failed"
+      ? `Project 已移除并安全解绑 ${result.detachedNativeThreadIds.length} 个 Thread，但 Project Map 本地元数据清理失败，请查看 Diagnostics。`
+      : `Project 已从 Workbench 移除；${result.detachedNativeThreadIds.length} 个 Thread 已保留并解绑。`);
   } else {
     projectRemoveErrorElement.textContent = "Project 移除失败，未删除磁盘文件；请查看上方错误和 Diagnostics。";
     projectRemoveErrorElement.hidden = false;
@@ -1772,12 +1782,21 @@ startTurnButton.addEventListener("click", async (event) => {
     appendOutput("turn.result", result, nativeThreadId);
     if (selectedNativeThreadId === nativeThreadId) {
       const readOk = await loadThreadView();
-      if (readOk) {
+      if (readOk && (result.status === "completed" || result.status === "interrupted")) {
         promptElement.value = "";
         clearCurrentDraft();
       } else {
         promptElement.value = prompt;
         persistCurrentDraft(prompt);
+        if (result.status !== "completed" && result.status !== "interrupted") {
+          showError(result.error ?? {
+            name: "TurnNotCompleted",
+            code: "TURN_NOT_COMPLETED",
+            message: "本轮未正常完成，Prompt 已保留，可在恢复后重试。",
+            exitCode: null,
+            stderr: "",
+          }, nativeThreadId);
+        }
       }
       await consume("runtime.state", api.getState()).then((state) => { if (state) renderState(state); });
     } else {

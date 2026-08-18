@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -47,5 +47,34 @@ test("removes Project Map metadata without touching the real Project directory",
   assert.equal(removedStatus.map, null);
   assert.equal(removedStatus.error?.code, "PROJECT_NOT_FOUND");
   await assert.rejects(manager.resume("project-map-remove"), /Project does not exist/);
+  await manager.close();
+});
+
+test("reports an externally missing Project cwd as unavailable without changing persistence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-project-map-missing-cwd-"));
+  const projectCwd = await mkdtemp(join(root, "project-files-"));
+  const persistence = new V1PersistenceStore(join(root, "workbench-state.json"));
+  await persistence.createProject({ projectId: "project-map-missing-cwd", name: "Missing CWD", cwd: projectCwd });
+  const manager = new ProjectMapManager({
+    userDataDirectory: root,
+    persistence,
+    command: "codex",
+    validateProjectDirectory: async (cwd) => {
+      try {
+        await stat(cwd);
+        return cwd;
+      } catch {
+        const error = new Error(`missing cwd: ${cwd}`) as Error & { code: string };
+        error.code = "PROJECT_CWD_NOT_FOUND";
+        throw error;
+      }
+    },
+  });
+  await manager.enable("project-map-missing-cwd");
+  await rm(projectCwd, { recursive: true, force: true });
+  const status = await manager.status("project-map-missing-cwd");
+  assert.equal(status.available, false);
+  assert.equal(status.error?.code, "PROJECT_CWD_NOT_FOUND");
+  assert.equal((await persistence.getProject("project-map-missing-cwd"))?.cwd, projectCwd);
   await manager.close();
 });
