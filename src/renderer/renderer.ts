@@ -12,6 +12,7 @@ import type { ConversationMapStatus, MapNode, MapSourceRef, ProjectMapMaintenanc
 import { normalizeNativeEvent, type NativeVisibleEventKind, type NormalizedNativeEvent } from "../shared/native-event-normalizer.ts";
 import { buildNavigationModel, type NavigationModel } from "./navigation-model.ts";
 import { isComposerTargetValid } from "../shared/thread-target.ts";
+import { isNearLatest } from "./workspace-scroll.ts";
 
 interface IpcEnvelope<T = unknown> {
   ok: boolean;
@@ -137,6 +138,12 @@ let mapScope: "conversation" | "project" = "conversation";
 let draftThreadId: string | null | undefined;
 let threadTransitionInFlight = false;
 let threadViewGeneration = 0;
+
+function resetWorkspaceScroll(): void {
+  followLatest = true;
+  threadWorkspaceElement.scrollTop = 0;
+  jumpLatestButton.hidden = true;
+}
 
 function draftKey(nativeThreadId: string | null): string {
   return `${DRAFT_KEY_PREFIX}${nativeThreadId ?? "unselected"}`;
@@ -719,6 +726,7 @@ async function respondToApproval(request: NativeServerRequestEvent, response: un
 
 function renderThreadWorkspace(): void {
   const shouldFollow = followLatest;
+  const preservedScrollTop = threadWorkspaceElement.scrollTop;
   threadWorkspaceElement.replaceChildren();
   if (!threadView && liveEvents.size === 0 && pendingApprovals.size === 0) {
     const empty = document.createElement("div");
@@ -743,8 +751,17 @@ function renderThreadWorkspace(): void {
   }
   for (const event of liveEvents.values()) threadWorkspaceElement.append(createLiveEventCard(event));
   for (const request of pendingApprovals.values()) threadWorkspaceElement.append(createApprovalCard(request));
-  if (shouldFollow) requestAnimationFrame(() => { threadWorkspaceElement.scrollTop = threadWorkspaceElement.scrollHeight; });
-  jumpLatestButton.hidden = followLatest;
+  requestAnimationFrame(() => {
+    if (shouldFollow && followLatest) {
+      threadWorkspaceElement.scrollTop = threadWorkspaceElement.scrollHeight;
+      return;
+    }
+    if (!followLatest) {
+      const maxScrollTop = Math.max(0, threadWorkspaceElement.scrollHeight - threadWorkspaceElement.clientHeight);
+      threadWorkspaceElement.scrollTop = Math.min(preservedScrollTop, maxScrollTop);
+    }
+  });
+  jumpLatestButton.hidden = shouldFollow;
 }
 
 function renderState(state: RuntimeSnapshot): void {
@@ -807,6 +824,7 @@ function renderNoSelectedThread(): void {
   threadKindElement.textContent = threadUnavailableId ? "Native Thread · 不可用" : "Native Thread";
   interruptButton.disabled = true;
   startTurnButton.disabled = true;
+  resetWorkspaceScroll();
   renderNavigation();
   renderThreadWorkspace();
   renderMapPanel();
@@ -874,6 +892,7 @@ async function selectThread(nativeThreadId: string): Promise<void> {
   const generation = ++threadViewGeneration;
   selectedNativeThreadId = nativeThreadId;
   threadUnavailableId = null;
+  resetWorkspaceScroll();
   // A Thread switch is a navigation transition. Clear the previous Thread view
   // before the IPC call so a failed switch can never display stale turns.
   currentProjection = null;
@@ -937,6 +956,7 @@ async function createNativeThread(projectId: string | null): Promise<void> {
   // A new Thread is a navigation transition. Clear the previous Thread view
   // before the IPC call so a failed creation can never display old turns under
   // the new Thread's error banner.
+  resetWorkspaceScroll();
   currentProjection = null;
   threadView = null;
   activateThreadBuffers(null);
@@ -1089,12 +1109,16 @@ function handleServerRequest(event: NativeServerRequestEvent): void {
 
 promptElement.addEventListener("input", () => persistCurrentDraft(promptElement.value));
 threadWorkspaceElement.addEventListener("scroll", () => {
-  followLatest = threadWorkspaceElement.scrollTop + threadWorkspaceElement.clientHeight >= threadWorkspaceElement.scrollHeight - 80;
+  followLatest = isNearLatest({
+    scrollTop: threadWorkspaceElement.scrollTop,
+    clientHeight: threadWorkspaceElement.clientHeight,
+    scrollHeight: threadWorkspaceElement.scrollHeight,
+  });
   jumpLatestButton.hidden = followLatest;
 });
 jumpLatestButton.addEventListener("click", () => {
   followLatest = true;
-  threadWorkspaceElement.scrollTo({ top: threadWorkspaceElement.scrollHeight, behavior: "smooth" });
+  threadWorkspaceElement.scrollTo({ top: threadWorkspaceElement.scrollHeight, behavior: "auto" });
   jumpLatestButton.hidden = true;
 });
 document.querySelector<HTMLButtonElement>("#new-standalone-thread")!.addEventListener("click", () => { void createNativeThread(null); });

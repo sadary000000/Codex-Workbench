@@ -1,8 +1,8 @@
 # Codex Workbench V1：Conversation Map 初始化
 
 日期：2026-08-17
-阶段：V1 总体验收与 Release Candidate Freeze
-状态：Phase 6 Gate 与 V1 RC 自动化 Gate 均获 GPT PASS；等待用户人工 GUI 验收
+阶段：STAGE B — Workspace Scroll / Composer 基础
+状态：STAGE A 已完成；STAGE B 正在实现，等待 GPT 阶段审查
 范围：当前 Codex Workbench V1 开发对话
 
 ## 1. 文档定位
@@ -74,6 +74,17 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 
 当前主路径是“Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Gate PASS → V1 总体验收 / RC Freeze → 用户人工验收”；Phase 7 保持 NOT_STARTED，只有真实使用后出现并确认的新缺口才考虑开启。
 
+## 3.1 当前 V1 Stage Gate
+
+```text
+● STAGE A — Multi-Thread Runtime / Writer Conflict / Post-Acceptance Fix
+└── 已通过自动化与 GPT 审查；保持 Native Thread identity、RuntimeRegistry 隔离、writer conflict、orphan fail-closed 和 restart reopen 不变量
+◉ STAGE B — Workspace Scroll / Composer 基础
+└── 当前执行：Header + Conversation Scroll Container + 常驻 Composer、底部跟随、上滚保护、Jump to latest
+○ STAGE C 及以后
+└── 暂不进入，等待 STAGE B Gate 与 GPT 审查
+```
+
 ## 4. 节点详情与来源
 
 | 节点 | 状态 | 当前结果 | 主要来源 |
@@ -89,6 +100,8 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | Phase 5 Legacy 筛选 | ● | 四项只读审计完成；分类矩阵完成；实际 donor code migration 为 0；GPT 已 PASS | `docs\PHASE-05-LEGACY-CAPABILITY-MATRIX.md`、`docs\PHASE-05-LEGACY-CAPABILITY-SCREENING.md` |
 | Phase 6 Map 技术实现 | ● | Runtime 能力审计、Schema/Patch、独立 sidecar、Conversation/Project Map、按需 Panel、Gate Fix 和真实 CLI 验证完成；GPT Gate PASS | `docs\PHASE-06-GATE-FIX-REPORT.md`、`docs\PHASE-06-MAP-RUNTIME-CAPABILITY-AUDIT.md` |
 | V1 总体验收 / RC Freeze | ◉ | 自动化集成 Gate 已完成；人工 GUI 验收清单已生成，等待用户实际操作 | `docs\V1-INTEGRATED-ACCEPTANCE.md`、`docs\V1-MANUAL-ACCEPTANCE-CHECKLIST.md` |
+| STAGE A — Multi-Thread Runtime / Writer Conflict / Post-Acceptance Fix | ● | 多 Thread Runtime、writer conflict、orphan fail-closed、restart reopen 和 active-thread truth 已通过 GPT 审查 | `docs\STAGE-A-MULTI-THREAD-RUNTIME.md`、`docs\STAGE-A-POST-ACCEPTANCE-FIX.md` |
+| STAGE B — Workspace Scroll / Composer 基础 | ◉ | 当前实现 Header、Conversation 主滚动容器、常驻 Composer、底部跟随、上滚保护和 Jump to latest；等待最终 Gate | 最新 `指导文档\Workbench_V1_人工验收界面整改与后续计划_2026-08-18_v1.1.docx`、本阶段报告 |
 
 ## 5. Phase 0–4 阶段证据摘要
 
@@ -167,17 +180,17 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 2. 新 V1 以 Codex App Server 的 Native Thread → Native Turn → Native Item 为运行事实。
 3. 先建立可靠性，再建立 Codex 式导航，再实现 Native Thread Workspace。
 4. Phase 4 已通过命令行、单元测试、构建、审计和真实 App Server smoke 验证。
-5. GPT 已审查通过 Phase 4 Gate、Conversation Map、Phase 5 和 Phase 6 Gate Fix；当前进入 V1 总体验收与 RC Freeze。
+5. GPT 已审查通过 Phase 4 Gate、Conversation Map、Phase 5、Phase 6 Gate Fix 和 STAGE A；当前进入 STAGE B Workspace / Composer 基础收敛。
 
 ### 6.2 当前进行中的工作
 
-V1 总体验收与 RC Freeze 当前只做发布阻塞审计、自动化验收和人工 GUI 入口准备：
+STAGE B 当前只处理 Workspace Scroll / Composer 基础，不改变 Native Runtime、Thread identity、Turn/Item truth 或 Map UI：
 
-- 已核实 Codex CLI 0.147.0 的动态工具、Thread/Turn 参数、source ID 和动态调用返回形状；
-- 已按协议证据实现新 Thread dynamic tool 注册；resume Thread 因协议缺少 dynamicTools 而明确标记 `compatibility_fallback`，不宣称原生 same-turn 能力；
-- 已完成有界 Map Schema/Patch/MapStore、Conversation coordinator、Project maintenance runtime、受限 IPC 和按需 Panel；
-- 四项只读子代理均已自然完成、主 Agent 审阅采用并关闭，Gate 前 running subagents = 0；
-- 当前只做最终 check/test/build/smoke/diff/秘密扫描，不扩展到 Phase 7。
+- 已确认最新 v1.1 规划将 STAGE B 定义为 Header + Conversation Scroll Container + 常驻 Composer；该版本替代此前 v1.0 实施顺序；
+- 当前实现收敛为固定视口主布局、Conversation 唯一主要滚动区域、Composer 脱离消息文档流、底部预留、底部跟随、上滚保护和 Jump to latest；
+- STAGE A 的多 Thread 并行、per-thread event/approval、writer conflict、orphan fail-closed、restart reopen 与 active-thread truth 作为回归边界；
+- 本阶段不进入 STAGE C，不新增第二套 Conversation / Transcript / Task / Agent / Context truth；
+- 当前只做契约测试、全量回归、必要真实 App Server smoke、diff/秘密扫描和阶段报告。
 
 ### 6.3 下一步计划
 
@@ -189,9 +202,10 @@ V1 总体验收与 RC Freeze 当前只做发布阻塞审计、自动化验收和
 | 4 | ● | 提交 Phase 5 Gate，GPT 返回 PASS |
 | 5 | ● | Phase 6 Runtime capability audit、最小技术链与实现已完成 |
 | 6 | ● | Phase 6 Gate Fix 结构化报告已获 GPT PASS，Phase 6 冻结 |
-| 7 | ◉ | V1 总体验收与 Release Candidate Freeze；自动化已通过，等待用户人工 GUI 验收 |
+| 7 | ● | STAGE A 多 Thread Runtime / Writer Conflict / Post-Acceptance Fix 已通过 GPT 审查 |
+| 8 | ◉ | STAGE B Workspace Scroll / Composer 基础；完成后提交 GPT 审查并等待人工 GUI 复测 |
 
-Phase 7 保持 `NOT_STARTED`；只有用户真实使用后确认新的产品缺口，才重新开启范围审查。
+STAGE C 及历史 Phase 7 保持 `NOT_STARTED`；只有 STAGE B Gate 通过并获得 GPT 审查后才讨论下一阶段。
 
 ## 7. 已冻结的产品规则
 
