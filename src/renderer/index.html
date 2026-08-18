@@ -25,28 +25,29 @@
         --panel-width: 328px;
       }
       * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100vh; background: #212121; }
+      html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+      body { margin: 0; min-height: 0; background: #212121; }
       button, input, textarea { font: inherit; }
       button { border: 0; color: inherit; cursor: pointer; }
       button:disabled { cursor: not-allowed; opacity: .45; }
-      .app-shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0; min-height: 100vh; overflow: hidden; transition: grid-template-columns .16s ease; }
+      .app-shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0; height: 100vh; min-height: 0; overflow: hidden; overscroll-behavior: none; transition: grid-template-columns .16s ease; }
       .app-shell.map-open { grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--panel-width); }
       .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) 0; }
       .app-shell.sidebar-collapsed.map-open { grid-template-columns: 0 minmax(0, 1fr) var(--panel-width); }
-      .sidebar { display: flex; flex-direction: column; min-width: 0; min-height: 100vh; overflow: hidden; padding: 12px 10px; background: var(--sidebar); border-right: 1px solid #292929; transition: opacity .12s ease, padding .16s ease; }
+      .sidebar { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; padding: 12px 10px; background: var(--sidebar); border-right: 1px solid #292929; transition: opacity .12s ease, padding .16s ease; }
       .app-shell.sidebar-collapsed .sidebar { visibility: hidden; padding-inline: 0; border-right: 0; opacity: 0; pointer-events: none; }
-      .brand { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 0 10px 10px; font-size: 14px; font-weight: 650; }
+      .brand { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; min-height: 38px; padding: 0 10px 10px; font-size: 14px; font-weight: 650; }
       .brand-identity { display: flex; min-width: 0; align-items: center; gap: 9px; overflow: hidden; }
       .brand-identity > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .brand-mark { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 6px; background: #ececec; color: #171717; font-size: 12px; font-weight: 800; }
       .brand-subtitle { color: #8f8f8f; font-size: 11px; font-weight: 400; }
-      .sidebar-actions { display: grid; gap: 6px; margin-bottom: 18px; }
+      .sidebar-actions { display: grid; flex: 0 0 auto; gap: 6px; margin-bottom: 18px; }
       .sidebar-action { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 10px; border-radius: 7px; background: transparent; color: #ececec; text-align: left; }
       .sidebar-action:hover, .thread-entry:hover { background: var(--sidebar-hover); }
       .sidebar-action.primary { background: #2c2c2c; }
       .sidebar-action.primary:hover { background: #3a3a3a; }
       .action-icon { width: 16px; color: #bdbdbd; text-align: center; }
-      #navigation { min-height: 0; min-width: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; padding-right: 2px; scrollbar-gutter: stable; }
+      #navigation { min-height: 0; min-width: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; padding-right: 2px; scrollbar-gutter: stable; overscroll-behavior: contain; }
       .sidebar-section { margin-bottom: 18px; }
       .sidebar-section-header { padding: 0 10px 7px; }
       .sidebar-section-header h2 { margin: 0; color: #858585; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
@@ -77,8 +78,8 @@
       .project-menu-button:hover, .project-add:hover { background: #444; color: #fff; }
       .project-add { width: 23px; height: 23px; border-radius: 5px; background: transparent; color: #a6a6a6; }
       .project-group > .thread-entry-row, .project-group > .sidebar-empty { margin-left: 16px; }
-      .sidebar-footer { margin-top: auto; padding: 12px 10px 2px; color: #666; font-size: 11px; line-height: 1.45; }
-      main { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; height: 100vh; min-width: 0; min-height: 0; overflow: hidden; }
+      .sidebar-footer { flex: 0 0 auto; margin-top: auto; padding: 12px 10px 2px; color: #666; font-size: 11px; line-height: 1.45; }
+      main { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; height: 100%; min-width: 0; min-height: 0; overflow: hidden; overscroll-behavior: none; }
       .workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 72px; padding: 0 clamp(16px, 3vw, 30px); border-bottom: 1px solid var(--border); }
       .workspace-header-main { min-width: 0; }
       .eyebrow { color: #8d8d8d; font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
@@ -97,7 +98,7 @@
       .status-banner { min-height: 34px; margin: 12px 30px 0; padding: 8px 12px; border-radius: 7px; background: #292929; color: #a9a9a9; font-size: 12px; }
       .status-banner.error { color: var(--danger); }
       .workspace-conversation { position: relative; display: flex; min-height: 0; overflow: hidden; }
-      #thread-workspace { min-width: 0; min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; padding: 18px 30px 24px; scroll-behavior: smooth; }
+      #thread-workspace { min-width: 0; min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; padding: 18px 30px 24px; scroll-behavior: smooth; overscroll-behavior: contain; }
       .workspace-empty { display: grid; min-height: 220px; place-items: center; align-content: center; color: #999; text-align: center; }
       .workspace-empty strong { color: #ddd; font-size: 15px; }
       .workspace-empty p { max-width: 560px; margin: 8px 0 0; line-height: 1.6; }
@@ -140,7 +141,7 @@
       .composer { display: grid; gap: 7px; min-height: 0; max-width: var(--content-max-width); width: calc(100% - clamp(32px, 6vw, 60px)); margin: 0 auto 14px; padding: 9px; border: 1px solid #484848; border-radius: 13px; background: #2b2b2b; box-shadow: 0 7px 28px #0003; }
       textarea, input { width: 100%; border: 1px solid #4a4a4a; border-radius: 7px; background: #1d1d1d; color: #eee; padding: 10px; outline: none; }
       textarea:focus, input:focus { border-color: #6b8f82; box-shadow: 0 0 0 2px #315d4d55; }
-      textarea { min-height: 58px; max-height: 240px; resize: vertical; }
+      textarea { min-height: 58px; max-height: 240px; overflow-y: auto; resize: vertical; }
       .composer-toolbar, .row { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
       .composer-toolbar { min-height: 30px; }
       .composer-tools { display: flex; min-width: 0; flex: 1 1 auto; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -161,9 +162,11 @@
       .send-button { background: #10a37f; color: #fff; }
       .send-button:hover { background: #13b88e; }
       .stop-button { color: #f0aaa2; }
-      .debug-panel { min-height: 0; max-height: min(32vh, 360px); margin: 0 clamp(16px, 3vw, 30px) 14px; overflow: auto; border-top: 1px solid #333; color: #aaa; font-size: 12px; }
-      .debug-panel > summary { padding: 8px 0; cursor: pointer; color: #8faaa0; }
-      .debug-grid { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 14px; padding-bottom: 12px; }
+      .debug-panel { min-height: 0; max-height: min(42vh, 420px); margin: 0 clamp(16px, 3vw, 30px) 10px; overflow: hidden; border: 1px solid #333; border-radius: 9px; background: #222; color: #aaa; font-size: 12px; }
+      .debug-panel[open] { display: flex; flex-direction: column; }
+      .debug-panel > summary { flex: 0 0 auto; min-height: 31px; padding: 8px 10px; cursor: pointer; color: #8faaa0; }
+      .debug-panel[open] > summary { border-bottom: 1px solid #333; }
+      .debug-grid { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); min-height: 0; gap: 14px; overflow: auto; padding: 10px 10px 12px; scrollbar-gutter: stable; overscroll-behavior: contain; }
       .diagnostics-index { display: grid; gap: 8px; }
       .diagnostics-index > summary, .diagnostics-raw > summary { cursor: pointer; }
       .diagnostics-index-list { display: grid; gap: 4px; max-height: 180px; margin: 0; padding: 0; overflow: auto; list-style: none; }
@@ -178,7 +181,7 @@
       label { color: #b5b5b5; font-size: 12px; }
       .value { color: #9fd6c0; word-break: break-all; }
       pre#events { min-height: 160px; max-height: 330px; margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word; border-radius: 7px; padding: 11px; background: #1c1c1c; color: #c5d9d0; font: 11px/1.5 ui-monospace, Consolas, monospace; }
-      .map-panel { min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 14px 12px; border-left: 1px solid var(--border); background: #1b1b1b; }
+      .map-panel { width: 100%; height: 100%; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 14px 12px; border-left: 1px solid var(--border); background: #1b1b1b; overscroll-behavior: contain; }
       .map-panel[hidden] { display: none; }
       .map-panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
       .map-panel-title { margin: 0; color: #e4e4e4; font-size: 14px; font-weight: 650; }
@@ -227,15 +230,17 @@
       @media (max-width: 1100px) {
         .app-shell.map-open, .app-shell.sidebar-collapsed.map-open { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
         .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+        .app-shell.sidebar-collapsed.map-open { grid-template-columns: 0 minmax(0, 1fr); }
         .map-panel { position: fixed; z-index: 6; inset: 0 0 0 auto; width: min(88vw, var(--panel-width)); box-shadow: -14px 0 30px #0008; }
+        .app-shell.map-open .composer { position: relative; z-index: 7; }
         .debug-grid { grid-template-columns: 1fr; }
       }
       @media (max-width: 720px) {
         .app-shell, .app-shell.map-open, .app-shell.sidebar-collapsed, .app-shell.sidebar-collapsed.map-open { grid-template-columns: 1fr; }
-        .sidebar { position: fixed; z-index: 7; inset: 0 auto 0 0; width: min(84vw, 280px); min-height: 100vh; border-right: 1px solid #292929; box-shadow: 14px 0 30px #0008; transform: translateX(0); }
+        .sidebar { position: fixed; z-index: 7; inset: 0 auto 0 0; width: min(84vw, 280px); height: 100vh; min-height: 0; border-right: 1px solid #292929; box-shadow: 14px 0 30px #0008; transform: translateX(0); }
         .app-shell.sidebar-collapsed .sidebar { transform: translateX(-105%); }
         #navigation { max-height: none; }
-        main { height: 100vh; }
+        main { height: 100%; }
         .workspace-header { min-height: 66px; }
         .workspace-header-main { max-width: calc(100% - 2px); }
         .header-actions { gap: 5px; }
@@ -275,29 +280,6 @@
           <section id="thread-workspace" aria-label="Conversation stream" tabindex="0"></section>
           <button id="jump-latest" class="jump-latest" type="button" hidden>跳到最新</button>
         </section>
-        <form id="composer" class="composer">
-          <textarea id="prompt" placeholder="发送消息…" aria-label="Message input"></textarea>
-          <div id="composer-capability-note" class="composer-capability-note" hidden></div>
-          <div class="composer-toolbar">
-            <div class="composer-tools" aria-label="Composer 设置">
-              <details id="composer-model-menu" class="composer-popover">
-                <summary id="composer-model-summary">模型 · 推理</summary>
-                <div class="composer-popover-menu">
-                  <label for="composer-model">模型<select id="composer-model"><option value="">加载中…</option></select></label>
-                  <label for="composer-effort">推理强度<select id="composer-effort"><option value="">跟随模型</option></select></label>
-                </div>
-              </details>
-              <details id="composer-access-menu" class="composer-popover">
-                <summary id="composer-access-summary">访问权限</summary>
-                <div class="composer-popover-menu">
-                  <label for="composer-approval">审批<select id="composer-approval"><option value="never">不请求审批</option><option value="on-request">需要时请求审批</option></select></label>
-                  <label for="composer-sandbox">沙箱<select id="composer-sandbox"><option value="read-only">只读</option><option value="workspace-write">项目可写</option></select></label>
-                </div>
-              </details>
-            </div>
-            <div class="composer-actions"><button id="interrupt-turn" class="debug-button stop-button" type="button" hidden>停止</button><button id="start-turn" class="debug-button send-button" type="submit">发送</button></div>
-          </div>
-        </form>
         <details id="debug-panel" class="debug-panel">
           <summary>Developer / Diagnostics</summary>
           <section class="debug-grid" aria-label="Developer Diagnostics">
@@ -328,6 +310,29 @@
             </section>
           </section>
         </details>
+        <form id="composer" class="composer">
+          <textarea id="prompt" placeholder="发送消息…" aria-label="Message input"></textarea>
+          <div id="composer-capability-note" class="composer-capability-note" hidden></div>
+          <div class="composer-toolbar">
+            <div class="composer-tools" aria-label="Composer 设置">
+              <details id="composer-model-menu" class="composer-popover">
+                <summary id="composer-model-summary">模型 · 推理</summary>
+                <div class="composer-popover-menu">
+                  <label for="composer-model">模型<select id="composer-model"><option value="">加载中…</option></select></label>
+                  <label for="composer-effort">推理强度<select id="composer-effort"><option value="">跟随模型</option></select></label>
+                </div>
+              </details>
+              <details id="composer-access-menu" class="composer-popover">
+                <summary id="composer-access-summary">访问权限</summary>
+                <div class="composer-popover-menu">
+                  <label for="composer-approval">审批<select id="composer-approval"><option value="never">不请求审批</option><option value="on-request">需要时请求审批</option></select></label>
+                  <label for="composer-sandbox">沙箱<select id="composer-sandbox"><option value="read-only">只读</option><option value="workspace-write">项目可写</option></select></label>
+                </div>
+              </details>
+            </div>
+            <div class="composer-actions"><button id="interrupt-turn" class="debug-button stop-button" type="button" hidden>停止</button><button id="start-turn" class="debug-button send-button" type="submit">发送</button></div>
+          </div>
+        </form>
       </main>
       <aside id="map-panel" class="map-panel" aria-label="Map" hidden>
         <div class="map-panel-header">

@@ -9,7 +9,7 @@ const renderer = readFileSync(resolve(root, "src/renderer/renderer.ts"), "utf8")
 
 test("workspace layout keeps the conversation container separate from the composer", () => {
   const conversationStart = html.indexOf('<section class="workspace-conversation"');
-  const conversationEnd = html.indexOf('</section>\n        <form id="composer"', conversationStart);
+  const conversationEnd = html.indexOf('</section>\n        <details id="debug-panel"', conversationStart);
   const threadStart = html.indexOf('id="thread-workspace"', conversationStart);
   const jumpStart = html.indexOf('id="jump-latest"', conversationStart);
   const composerStart = html.indexOf('<form id="composer"');
@@ -27,11 +27,12 @@ test("workspace layout keeps the conversation container separate from the compos
 });
 
 test("workspace CSS makes the conversation the bounded primary scroll area", () => {
-  assert.match(html, /main\s*\{[^}]*height:\s*100vh;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
+  assert.match(html, /main\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
   assert.match(html, /\.workspace-conversation\s*\{[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
   assert.match(html, /#thread-workspace\s*\{[^}]*min-height:\s*0;[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s);
   assert.match(html, /\.jump-latest\s*\{[^}]*position:\s*absolute;/s);
-  assert.match(html, /\.debug-panel\s*\{[^}]*max-height:\s*min\(32vh, 360px\);[^}]*overflow:\s*auto;/s);
+  assert.match(html, /\.debug-panel\s*\{[^}]*max-height:\s*min\(42vh, 420px\);[^}]*overflow:\s*hidden;/s);
+  assert.match(html, /\.debug-grid\s*\{[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s);
 });
 
 test("renderer derives follow mode from the selected conversation scroll position", () => {

@@ -195,6 +195,7 @@ const runtimeStates = new Map<string, RuntimeSnapshot>();
 const turnOperationThreads = new Set<string>();
 const composerCapabilitiesByThread = new Map<string, ComposerCapabilities>();
 const composerCapabilityFailuresByThread = new Set<string>();
+const composerCapabilityLoadingByThread = new Set<string>();
 const composerPreferencesByThread = new Map<string, ComposerPreferences>();
 const composerPreferencesLoadedByThread = new Set<string>();
 const unavailableComposerPreferencesByThread = new Map<string, string[]>();
@@ -225,15 +226,12 @@ function renderComposerSummaries(): void {
   const model = composerModelElement.selectedOptions[0]?.textContent?.trim();
   const effort = composerEffortElement.selectedOptions[0]?.textContent?.trim();
   const modelLabel = model && model !== "等待能力发现" && model !== "无可用模型" ? model : "模型";
-  const effortLabel = effort && effort !== "跟随模型" ? effort : "推理";
+  const effortLabel = effort && !["跟随模型", "加载中…"].includes(effort) ? effort : "跟随模型";
   composerModelSummaryElement.textContent = `${modelLabel} · ${effortLabel}`;
   composerModelSummaryElement.title = `${modelLabel} · ${effortLabel}`;
   const approvalLabel = composerApprovalElement.value === "on-request" ? "需批准" : "不请求审批";
   const sandboxLabel = composerSandboxElement.value === "workspace-write" ? "项目可写" : "只读";
-  composerAccessSummaryElement.textContent = [
-    composerApprovalElement.value === "on-request" ? approvalLabel : null,
-    sandboxLabel,
-  ].filter(Boolean).join(" · ");
+  composerAccessSummaryElement.textContent = [approvalLabel, sandboxLabel].join(" · ");
   composerAccessSummaryElement.title = `${approvalLabel} · ${sandboxLabel}`;
 }
 
@@ -259,11 +257,13 @@ function updateComposerActionState(): void {
   const preferences = nativeThreadId ? composerPreferencesByThread.get(nativeThreadId) : null;
   const unavailable = nativeThreadId ? unavailableComposerPreferencesByThread.get(nativeThreadId) ?? [] : [];
   const capabilityFailure = nativeThreadId ? composerCapabilityFailuresByThread.has(nativeThreadId) : false;
-  const capabilityBlocksSend = unavailable.length > 0 || Boolean(capabilityFailure && (preferences?.model || preferences?.effort));
+  const capabilityLoading = nativeThreadId ? composerCapabilityLoadingByThread.has(nativeThreadId) : false;
+  const capabilityBlocksSend = capabilityLoading || unavailable.length > 0 || Boolean(capabilityFailure && (preferences?.model || preferences?.effort));
   startTurnButton.disabled = !targetValid || active || capabilityBlocksSend;
   startTurnButton.hidden = active;
-  interruptButton.disabled = !active || interruptInFlight;
-  interruptButton.hidden = !active;
+  const canInterrupt = Boolean(state?.activeTurnId) && active;
+  interruptButton.disabled = !canInterrupt || interruptInFlight;
+  interruptButton.hidden = !canInterrupt;
 }
 
 async function restoreComposerPreferences(nativeThreadId: string): Promise<void> {
@@ -320,37 +320,45 @@ function renderComposerOptions(nativeThreadId: string | null): void {
   composerSandboxElement.disabled = !nativeThreadId || active;
   const unavailable = nativeThreadId ? unavailableComposerPreferencesByThread.get(nativeThreadId) ?? [] : [];
   const capabilityFailure = nativeThreadId ? composerCapabilityFailuresByThread.has(nativeThreadId) : false;
+  const capabilityLoading = nativeThreadId ? composerCapabilityLoadingByThread.has(nativeThreadId) : false;
   composerCapabilityNoteElement.textContent = unavailable.length
     ? `已保存选项不可用：${unavailable.join(", ")}；请选择有效值后再发送。`
+    : capabilityLoading
+      ? "正在读取 Composer 能力…"
     : capabilityFailure
       ? "Composer 能力暂不可用；请查看上方状态后重试。"
       : "";
-  composerCapabilityNoteElement.hidden = unavailable.length === 0 && !capabilityFailure;
+  composerCapabilityNoteElement.hidden = unavailable.length === 0 && !capabilityLoading && !capabilityFailure;
   renderComposerSummaries();
   updateComposerActionState();
 }
 
 async function refreshComposerCapabilities(nativeThreadId: string, generation: number): Promise<void> {
-  await restoreComposerPreferences(nativeThreadId);
-  const result = await consume("composer.capabilities", api.getComposerCapabilities(nativeThreadId));
-  if (!result) {
-    composerCapabilityFailuresByThread.add(nativeThreadId);
+  composerCapabilityLoadingByThread.add(nativeThreadId);
+  if (generation === threadViewGeneration && selectedNativeThreadId === nativeThreadId) renderComposerOptions(nativeThreadId);
+  try {
+    await restoreComposerPreferences(nativeThreadId);
+    const result = await consume("composer.capabilities", api.getComposerCapabilities(nativeThreadId), nativeThreadId);
+    if (!result) {
+      composerCapabilityFailuresByThread.add(nativeThreadId);
+      return;
+    }
+    if (generation !== threadViewGeneration || selectedNativeThreadId !== nativeThreadId) return;
+    composerCapabilityFailuresByThread.delete(nativeThreadId);
+    composerCapabilitiesByThread.set(nativeThreadId, result);
+    const current = composerPreferencesByThread.get(nativeThreadId);
+    const discoveredDefault = defaultComposerPreferences(result);
+    if (!composerPreferencesLoadedByThread.has(nativeThreadId) || !current) {
+      composerPreferencesByThread.set(nativeThreadId, {
+        ...discoveredDefault,
+      });
+    }
+    const effective = composerPreferences(nativeThreadId);
+    unavailableComposerPreferencesByThread.set(nativeThreadId, validateComposerPreferencesAgainstCapabilities(effective, result).unavailable);
+  } finally {
+    composerCapabilityLoadingByThread.delete(nativeThreadId);
     if (generation === threadViewGeneration && selectedNativeThreadId === nativeThreadId) renderComposerOptions(nativeThreadId);
-    return;
   }
-  if (generation !== threadViewGeneration || selectedNativeThreadId !== nativeThreadId) return;
-  composerCapabilityFailuresByThread.delete(nativeThreadId);
-  composerCapabilitiesByThread.set(nativeThreadId, result);
-  const current = composerPreferencesByThread.get(nativeThreadId);
-  const discoveredDefault = defaultComposerPreferences(result);
-  if (!composerPreferencesLoadedByThread.has(nativeThreadId) || !current) {
-    composerPreferencesByThread.set(nativeThreadId, {
-      ...discoveredDefault,
-    });
-  }
-  const effective = composerPreferences(nativeThreadId);
-  unavailableComposerPreferencesByThread.set(nativeThreadId, validateComposerPreferencesAgainstCapabilities(effective, result).unavailable);
-  renderComposerOptions(nativeThreadId);
 }
 
 function resetWorkspaceScroll(): void {
@@ -369,6 +377,7 @@ function syncDraftForThread(nativeThreadId: string | null): void {
   const scoped = localStorage.getItem(draftKey(nativeThreadId));
   if (scoped !== null) {
     promptElement.value = scoped;
+    resizePromptTextarea();
     return;
   }
   const legacy = localStorage.getItem(LEGACY_DRAFT_KEY);
@@ -376,9 +385,11 @@ function syncDraftForThread(nativeThreadId: string | null): void {
     localStorage.setItem(draftKey(nativeThreadId), legacy);
     localStorage.removeItem(LEGACY_DRAFT_KEY);
     promptElement.value = legacy;
+    resizePromptTextarea();
     return;
   }
   promptElement.value = "";
+  resizePromptTextarea();
 }
 
 function persistCurrentDraft(value: string): void {
@@ -398,11 +409,12 @@ function diagnosticsDisplayThreadId(): string | null {
 }
 
 function renderDiagnosticsLog(): void {
+  const wasAtLatest = eventsElement.scrollHeight - eventsElement.scrollTop - eventsElement.clientHeight <= 24;
   const nativeThreadId = diagnosticsDisplayThreadId();
   eventsElement.textContent = nativeThreadId
     ? (diagnosticsLogsByThread.get(nativeThreadId) ?? "")
     : globalDiagnosticsLog;
-  eventsElement.scrollTop = eventsElement.scrollHeight;
+  if (wasAtLatest) eventsElement.scrollTop = eventsElement.scrollHeight;
 }
 
 function appendOutput(label: string, payload: unknown, nativeThreadId = currentDiagnosticsThreadId()): void {
@@ -424,6 +436,8 @@ function appendOutput(label: string, payload: unknown, nativeThreadId = currentD
 function showError(error: RuntimeErrorInfo | undefined, targetNativeThreadId?: string | null): void {
   const nativeThreadId = targetNativeThreadId ?? currentDiagnosticsThreadId() ?? threadUnavailableId;
   if (nativeThreadId && error) diagnosticsErrorsByThread.set(nativeThreadId, error);
+  const selectedThreadId = currentDiagnosticsThreadId() ?? threadUnavailableId;
+  if (nativeThreadId && selectedThreadId && nativeThreadId !== selectedThreadId) return;
   if (error?.code === "WRITER_CONFLICT" && !writerConflictDialog.open) {
     writerConflictMessage.textContent = error.message;
     writerConflictDialog.showModal();
@@ -463,6 +477,14 @@ function runtimeIsActive(state: RuntimeSnapshot | undefined | null): boolean {
     || state.state === "WAITING_USER";
 }
 
+function resizePromptTextarea(): void {
+  promptElement.style.height = "auto";
+  const maxHeight = Number.parseFloat(getComputedStyle(promptElement).maxHeight) || 240;
+  const nextHeight = Math.min(Math.max(promptElement.scrollHeight, 58), maxHeight);
+  promptElement.style.height = `${nextHeight}px`;
+  promptElement.style.overflowY = promptElement.scrollHeight > maxHeight ? "auto" : "hidden";
+}
+
 function headerRuntimeState(state: RuntimeSnapshot): { label: string; className: string; hidden: boolean } {
   switch (state.state) {
     case "TURN_RUNNING": return { label: "运行中", className: "runtime-active", hidden: false };
@@ -491,7 +513,7 @@ function hasSelectedNativeThread(): boolean {
 }
 
 function runtimeDisplayState(thread: ThreadProjection): { className: string; label: string } {
-  if (thread.lastKnownState === "unavailable") return { className: "unavailable", label: "不可用" };
+  if (thread.lastKnownState === "unavailable") return { className: "unavailable", label: "!" };
   const runtime = runtimeStates.get(thread.nativeThreadId);
   if (runtime?.lastError?.code === "WRITER_CONFLICT" || thread.lastError?.code === "WRITER_CONFLICT") {
     return { className: "recovery_required", label: "!" };
@@ -562,8 +584,13 @@ function createThreadEntry(thread: ThreadProjection): HTMLElement {
   const displayState = runtimeDisplayState(thread);
   state.className = `thread-entry-state state-${displayState.className}`;
   state.textContent = displayState.label;
-  state.setAttribute("aria-label", displayState.className === "idle" ? "无活动" : displayState.className);
-  state.title = displayState.className === "idle" ? "无活动" : displayState.className;
+  const stateLabel = displayState.className === "idle"
+    ? "无活动"
+    : displayState.className === "unavailable"
+      ? "不可用"
+      : displayState.className;
+  state.setAttribute("aria-label", stateLabel);
+  state.title = stateLabel;
   button.append(title, state);
   button.addEventListener("click", () => { void selectThread(thread.nativeThreadId); });
 
@@ -1238,6 +1265,7 @@ function renderNoSelectedThread(): void {
   activateThreadBuffers(null);
   syncDraftForThread(null);
   promptElement.value = "";
+  resizePromptTextarea();
   stateElement.textContent = "";
   stateElement.hidden = true;
   stateElement.className = "runtime-pill";
@@ -1306,7 +1334,13 @@ async function loadThreadView(clearLive = true): Promise<boolean> {
   const generation = threadViewGeneration;
   const expectedThreadId = latestState?.nativeThreadId ?? null;
   const result = await consume("thread.read", api.readThread());
-  if (!result) return false;
+  if (!result) {
+    await refreshNavigation();
+    if (expectedThreadId && diagnosticsErrorsByThread.has(expectedThreadId)) {
+      showError(diagnosticsErrorsByThread.get(expectedThreadId), expectedThreadId);
+    }
+    return false;
+  }
   if (generation !== threadViewGeneration || latestState?.nativeThreadId !== expectedThreadId) return false;
   threadView = result;
   if (expectedThreadId) {
@@ -1696,7 +1730,11 @@ function handleServerRequest(event: NativeServerRequestEvent): void {
   renderThreadWorkspace();
 }
 
-promptElement.addEventListener("input", () => persistCurrentDraft(promptElement.value));
+promptElement.addEventListener("input", () => {
+  resizePromptTextarea();
+  persistCurrentDraft(promptElement.value);
+});
+resizePromptTextarea();
 threadWorkspaceElement.addEventListener("scroll", () => {
   followLatest = isNearLatest({
     scrollTop: threadWorkspaceElement.scrollTop,
@@ -1786,7 +1824,7 @@ readThreadButton.addEventListener("click", () => { void loadThreadView(); });
 interruptButton.addEventListener("click", async () => {
   if (interruptInFlight) return;
   const nativeThreadId = latestState?.nativeThreadId;
-  if (!nativeThreadId) {
+  if (!nativeThreadId || !latestState?.activeTurnId) {
     showError({ name: "ThreadNotSelected", code: "THREAD_NOT_SELECTED", message: "请先选择一个对话。", exitCode: null, stderr: "" });
     return;
   }
@@ -1896,6 +1934,7 @@ composerFormElement.addEventListener("submit", async (event) => {
       const readOk = await loadThreadView();
       if (readOk && (result.status === "completed" || result.status === "interrupted")) {
         promptElement.value = "";
+        resizePromptTextarea();
         clearCurrentDraft();
       } else {
         promptElement.value = prompt;
