@@ -93,7 +93,7 @@ GATE: 机器契约/回归与真实 Runtime smoke 完成；GUI 行为保留人工
 - `git diff --check`：PASS。
 - changed-file secret scan：PASS，未发现高风险 token/private-key 模式。
 - `npm run build`：最终 PASS；用户关闭锁定进程后默认 `dist` 输出已重新生成。
-- `npm run package:win`：最终 PASS；当前统一产物为 `D:\办公\AI\Codex_Workbench_V1\dist\Codex Workbench V1.exe`。打包脚本会先重新 build，再覆盖生成该根目录 EXE；Electron runtime/resources 与 EXE 同处 `dist`，不再使用 `dist/package` 作为用户入口。
+- `npm run package:win`：最终 PASS；当前统一产物为 `D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe`。打包脚本会先重新 build，再覆盖生成该路径下的 EXE。
 - 此前一次默认 build 的 Windows `EBUSY` 已确认是运行中 packaged EXE 的文件锁；关闭进程后重跑 build/package 已通过。
 
 ## real_appserver_smoke
