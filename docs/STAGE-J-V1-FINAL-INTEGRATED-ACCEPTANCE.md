@@ -1,10 +1,12 @@
 # Codex Workbench V1 — STAGE J 最终集成验收 / Release Candidate
 
 日期：2026-08-19
-状态：`STAGE J RC READY / V1 FINAL MANUAL ACCEPTANCE PENDING`
+状态：`STAGE J RC READY / FINAL MANUAL ACCEPTANCE PENDING / ROUND 1 FIX APPLIED`
 范围：STAGE A–I 最终集成审计、最小可靠性修复、全量自动化/真实 App Server 回归、最终打包与文档收口。
 
 > 本报告不写 `V1 FINAL FROZEN`。STAGE J 自动化与真实回归 Gate 已完成；最终冻结仍等待用户最后一次人工总体验收。
+
+> Final Manual Acceptance Round 1 已发现并完成三项最小 FIX：Thread 切换、Composer 提交语义、Approval/Sandbox 文案。当前仍不能写 `V1 FINAL FROZEN`，需要用户对这三项做最终人工复测。
 
 ## 1. scope resolution
 
@@ -75,6 +77,32 @@ Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth�
 - failed/interrupted Turn：不会永久污染 Thread；Composer target 与运行 target 不一致时禁止发送。
 - Stop、Approval、live events 和 Diagnostics 按 nativeThreadId 隔离。
 
+## 4A. final manual acceptance round 1 fixes
+
+本轮针对用户人工验收中发现的三个可用性问题完成最小修复，修复提交：
+
+`df711d8` — `fix: unblock thread switching and refine composer submission`
+
+### FIX-1 — 运行中 Thread 切换不应被全局阻塞
+
+- 根因：Renderer 选择 Thread 复用了全局 `threadTransitionInFlight` 门控；A 运行时会阻止 B/C 点击，且 Main 的异步切换可能覆盖较新的选择绑定。
+- 修复：选择操作立即更新当前选择并采用 generation/target latest-wins；Main 增加切换序列，过期切换不能回写最后选择；普通 Runtime resume 不再自行持久化全局 selected binding，由 Main 的最新选择统一持有。
+- 发送仍 fail-closed：切换未得到对应 Runtime 确认前，Composer 禁止 `turn/start`；不创建替代 Thread、不替换 `nativeThreadId`。
+- 新增确定性 A/B/C 50-cycle pressure contract；与现有真实 multi-thread smoke 一起验证后台运行和输出归属。
+
+### FIX-2 — Composer 在权威接受点清空，失败可恢复且不串 Thread
+
+- 旧行为：等待完整 terminal Turn 后才清空可见 Prompt，长任务期间用户误以为未提交。
+- 新行为：只有 App Server `turn/start` 成功返回、响应 Thread ID 与当前目标匹配，并建立 `{localRunId, turnId}` 后，才清空当前可见 Prompt。
+- `turn/start` 拒绝时保留原 Prompt；接受后 terminal failed/recovery 时，仅当用户没有产生更新草稿才恢复已提交 Prompt；若已有新草稿则保留新草稿。
+- 每个 `nativeThreadId` 独立保存 submitted/recovery snapshot、completion 和 draft revision；A/B 不互相清空、恢复或覆盖 Prompt。快速完成先到达的 completion 也按 Thread 缓存后收敛。
+
+### FIX-3 — Approval 与 Sandbox 语义明确化
+
+- UI 改为 `Approval（确认策略）` 与 `Sandbox（执行范围）`，选项分别为 `从不请求审批 / 按需请求审批`、`只读 / 工作区写入`。
+- Tooltip 明确 Sandbox 是 Codex 技术执行范围，Approval 是是否请求用户确认；`从不请求审批` 不等于扩大 Sandbox 权限。
+- 底层协议映射未改变；当前没有添加或声称不存在的 `danger-full-access` 能力。
+
 ## 5. multi-thread / workspace / responsive
 
 - A/B 并行 real smoke PASS；不同 Thread 不再因 active Turn 触发旧式 `THREAD_SWITCH_BUSY`，切换不会关闭后台 Runtime。
@@ -106,6 +134,9 @@ Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth�
 | 后台 A no-rollout/unavailable 清空选中 B | UI/active truth 可能被错误清空 | `09cd467` 条件化 Main selected target 清理 |
 | 后台失败 Turn 删除自己的 draft | 失败 Prompt 可能静默丢失 | `09cd467` 按 terminal status 清理/保留 draft |
 | 后台 unavailable 事件清空 B Renderer | selected/runtime 表现可能不一致 | `09cd467` 仅 selected operation 清空 UI |
+| 运行中 A 阻塞 B/C Thread 切换 | 多 Thread 并行时无法导航，过期切换可能覆盖选择 | `df711d8` latest-wins selection + Main switch sequence；50-cycle contract |
+| Composer 等待 terminal Turn 才清空 Prompt | 长任务期间提交语义不清晰，失败恢复边界不明确 | `df711d8` `TurnAcceptance` 与 per-thread submitted/recovery snapshot |
+| Approval / Sandbox 文案容易被理解为同一权限概念 | 用户可能误解“从不请求审批”为完整访问 | `df711d8` 分层标签、选项和 tooltip；协议映射不变 |
 
 没有发现需要扩大 Scope 的新一级功能或阻塞性 P1；本阶段没有顺手重做冻结模块。
 
@@ -114,17 +145,17 @@ Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth�
 | 验证 | 结果 |
 | --- | --- |
 | `npm run check` | PASS |
-| `npm test` | PASS，116/116 |
+| `npm test` | PASS，122/122 |
 | `npm run build` | PASS |
 | `npm run package:win` | PASS |
 | `npm audit --omit=dev` | PASS，0 vulnerabilities |
 | `git diff --check` | PASS，无 whitespace error |
 | secret scan | PASS，覆盖 src/scripts/docs/package metadata |
-| Stage J contract | PASS，3/3 |
+| Stage J contract | PASS，原有 3/3；本轮新增/更新 4/4；总计 7/7 |
 
 ### real smoke matrix
 
-以下正式 real smoke 均在最终修复后完成。`project-map` 首次遇到测试状态中的 transient failed Turn，清理测试脚本创建的残留 `.real-smoke` 绑定后重跑 PASS；基础 `test:real` 首次遇到 TLS/stream disconnected，使用测试清理开关重跑 PASS。首次异常未隐藏，最终 Gate 采用成功重跑结果。
+以下正式 real smoke 均在最终修复后完成。基础 `test:real` 首次命中仓库 `.real-smoke` 中已失效的历史 Thread 绑定（`no rollout found`），没有归因于本轮代码；使用隔离临时 state 目录和 cleanup 开关重跑 PASS。其他测试状态清理/重跑均保留在证据中，首次异常未隐藏，最终 Gate 采用成功重跑结果。
 
 | 命令 | 最终结果 |
 | --- | --- |
@@ -147,12 +178,13 @@ Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth�
 ## 10. final release candidate package
 
 - 固定路径：[Codex Workbench V1.exe](D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe)。
-- package 创建时间：`2026-08-19T07:35:02.8427754+08:00`。
+- 本轮标准 package resource 更新时间：`2026-08-19T08:27:40+08:00`；Electron 外壳文件时间戳由打包来源保持为固定值。
 - 文件大小：`225441792` bytes。
 - SHA-256：`31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC`。
-- 代码来源：`09cd467b12937f0642d8b8b67a6fb763d23a301f`。
+- 代码来源：`df711d8`（`fix: unblock thread switching and refine composer submission`）。
 - metadata：`name=codex-workbench-v1`、`version=0.1.0`、`type=module`、`main=dist/main/main.js`。
 - 该 EXE 是当前最终修复提交生成的固定 `dist/package` RC，不使用旧 artifact 冒充。
+- 当前 app resource hashes：`main.js=105D4BDE83998D7BEFD5C67792FBA45C821559C4E7BB31BC93E86B4A3231D96C`、`renderer.js=E7AFC23228B42844760544DC5751220B98E679219F49C29F72DC281E40DEC534`、`package.json=1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F`。
 - package 前生成的 package-local `user-data/logs` 已移动到可恢复备份目录 `C:\Users\sadar\AppData\Local\Temp\codex-workbench-v1-package-user-data-backup-20260819`，未删除用户文件。
 
 ### GPT review FIX — package provenance
@@ -182,8 +214,11 @@ GPT 审查指出 STAGE H 与 STAGE J 的 EXE SHA-256 相同，需要排除 stale
 | Singer | UI / Layout Final Audit | 是 | shell/sidebar/workspace/diagnostics/composer/responsive PASS | code/resource/contract/build evidence | completed；审核后关闭 |
 | Bacon | Persistence / Project Final Audit | 是 | ownership/filesystem safety PASS；记录 state migration 边界 | persistence/project smokes + source audit | completed；审核后关闭 |
 | Kuhn | Test / Package / Security Final Audit | 是 | matrix/package/security/git boundary PASS；记录 GUI/metadata 限制 | final matrix/hash/audit/scan | completed；审核后关闭 |
+| Averroes | Thread selection / active truth audit | 是 | 确认全局 selection gate 与 Main pointer race；采用 latest-wins/sequence 修复 | source audit + contract + real multi-thread | completed；审核后关闭 |
+| Ohm | Composer acceptance / recovery audit | 是 | 确认 `turn/start` acceptance 与 terminal completion 必须分离；采用 per-thread snapshot 方案 | source audit + 122 tests + workspace/recovery smokes | completed；审核后关闭 |
+| Rawls | Approval / Sandbox semantics audit | 是 | 确认协议映射无须改变；采用分层标签与安全 tooltip | source audit + final-fix contract | completed；审核后关闭 |
 
-`running_subagents_at_gate: 0`。五个子代理均自然完成、由主 Agent 审核整合后关闭，没有因等待时间提前终止。
+`running_subagents_at_gate: 0`。八个子代理均自然完成、由主 Agent 审核整合后关闭，没有因等待时间提前终止。
 
 ## 13. accepted limitations / deferred items
 
@@ -216,6 +251,9 @@ GPT 审查指出 STAGE H 与 STAGE J 的 EXE SHA-256 相同，需要排除 stale
 14. Map source jump 定位到正确 Native Turn/Item，Diagnostics source trace 对应。
 15. 点击失败或 Thread 不可用时禁止 wrong-thread send；当前实际 active Thread 清晰。
 16. 任何恢复/切换都不静默替换 nativeThreadId，不创建隐藏 replacement Thread。
+17. 运行 A 时连续点击 B/C 50 次，最终选择与 Composer target 一致，且可发送到正确 Thread；切换不被全局门控阻塞。
+18. 发送长任务时确认 `turn/start` 被权威接受后 Prompt 立即清空；拒绝时 Prompt 保留；接受后失败时无更新草稿才恢复，A/B 草稿互不影响。
+19. Composer 中 `Approval（确认策略）` 与 `Sandbox（执行范围）` 的标签/tooltip 不产生“从不审批=完整访问”的误解，底层 Requested/Sent Diagnostics 仍可追溯。
 
 ## 15. final gate
 
@@ -227,8 +265,9 @@ STAGE J Package Gate: PASS
 STAGE J Temporary Rebuild Provenance: PASS
 STAGE J Standard Repackage: PASS
 STAGE J Security / Git Scope Gate: PASS
+STAGE J Final Manual Acceptance Round 1: FIX APPLIED
 STAGE J Manual Final Acceptance: PENDING
-STAGE J: RC READY
+STAGE J: RC READY / FINAL MANUAL ACCEPTANCE PENDING AFTER ROUND 1 FIX
 V1 FINAL MANUAL ACCEPTANCE: PENDING
 STAGE K: NOT_STARTED / FORBIDDEN
 ```
@@ -242,8 +281,8 @@ STAGE K: NOT_STARTED / FORBIDDEN
 stage: STAGE J
 official_stage_name: V1 Final Integrated Acceptance / Release Freeze
 stage_i_freeze_commit: 370b9b56eb5d9dc1b03f4d3d600eb6e29aec5cec
-base_commit: 552c28c
-implementation_or_fix_commit: 09cd467b12937f0642d8b8b67a6fb763d23a301f
+base_commit: d0f0b31
+implementation_or_fix_commit: df711d8
 final_report_commit: 207b06dc80fd8c033c4978fb12eccfb4cb31b4b0 (document-introducing commit)
 
 stage_status:
@@ -269,24 +308,24 @@ project_lifecycle_final: PASS by smoke/contract evidence; final GUI acceptance p
 diagnostics_map_final: PASS
 persistence_final: PASS with sparse legacy migration limitations recorded
 
-bugs_found: 2 P1 cross-thread state/draft pollution issues
-fixes_applied: 09cd467; 3 Stage J contract tests; full regression rerun
-tests: check PASS; 116/116 tests PASS; build PASS; package PASS; audit 0 vulnerabilities; diff-check PASS; secret scan PASS
+bugs_found: 2 P1 cross-thread state/draft pollution issues + 3 Round 1 manual UX defects
+fixes_applied: 09cd467; df711d8; 3 existing Stage J contracts + 4 Round 1 final-fix contracts; full regression rerun
+tests: check PASS; 122/122 tests PASS; build PASS; package PASS; audit 0 vulnerabilities; diff-check PASS; secret scan PASS
 real_smoke_matrix: all required real smokes PASS after documented transient/test-state cleanup reruns
 
 package:
   path: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
   sha256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
-  source_commit: 09cd467b12937f0642d8b8b67a6fb763d23a301f
+  source_commit: df711d8
 
 security: PASS
 git_scope: PASS; only intended product fix/docs commits, user files untouched
 local_user_files_status: preserved and untracked; not added/modified/deleted
 legacy_project_status: D:\办公\AI\Codex_Workbench read-only; pre-existing dirty baseline preserved; no reset/clean/stash/checkout/commit
-subagents: Nash/Poincare/Singer/Bacon/Kuhn all naturally completed, reviewed, adopted as applicable, then closed
+subagents: Nash/Poincare/Singer/Bacon/Kuhn/Averroes/Ohm/Rawls all naturally completed, reviewed, adopted as applicable, then closed
 running_subagents_at_gate: 0
 accepted_limitations: legacy sparse-state migration edges, no Electron GUI harness, maintenance sidecar boundary, package provenance not embedded
-deferred_items: Attachment; final GUI Approval/Explorer and final integrated manual acceptance; STAGE I user-confirmed stage-level GUI only
+deferred_items: Attachment; final GUI Approval/Explorer and final integrated manual acceptance; STAGE I user-confirmed stage-level GUI only; Round 1 fixes require user retest
 blockers: none for RC; final user acceptance is required
 manual_final_acceptance_required: yes
 gate: RC_READY_FOR_USER_FINAL_ACCEPTANCE
