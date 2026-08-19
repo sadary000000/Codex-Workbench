@@ -1,12 +1,12 @@
 # Codex Workbench V1 — STAGE J 最终集成验收 / Release Candidate
 
 日期：2026-08-19
-状态：`STAGE J RC READY / FINAL MANUAL ACCEPTANCE PENDING / ROUND 1 FIX APPLIED`
-范围：STAGE A–I 最终集成审计、最小可靠性修复、全量自动化/真实 App Server 回归、最终打包与文档收口。
+状态：`STAGE J PASS / FROZEN / V1 FINAL FROZEN`
+范围：STAGE A–J 最终集成审计、最小可靠性修复、全量自动化/真实 App Server 回归、最终打包、最终人工验收与冻结收口。
 
-> 本报告不写 `V1 FINAL FROZEN`。STAGE J 自动化与真实回归 Gate 已完成；最终冻结仍等待用户最后一次人工总体验收。
+> 本报告记录最终冻结状态。Automated Final Gate、Real App Server Smoke Matrix、Package Provenance 和 Final Manual Acceptance 均为 PASS。
 
-> Final Manual Acceptance Round 1 已发现并完成三项最小 FIX：Thread 切换、Composer 提交语义、Approval/Sandbox 文案。当前仍不能写 `V1 FINAL FROZEN`，需要用户对这三项做最终人工复测。
+> 最终人工验收依据仅为用户明确确认：`V1 最终人工验收通过`。
 
 ## 1. scope resolution
 
@@ -25,6 +25,17 @@ Codex App Server → V1 Runtime 主路径
 
 Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth、Agent lifecycle truth、Context truth 或 Exec-history reconstruction。Project Map 的维护 Thread 是明确隔离的 sidecar/maintenance runtime，不是用户 Thread 的替代身份。
 
+### final product baseline
+
+```text
+Native Thread = 唯一 Conversation identity
+Native Turn / Native Item = 唯一消息/运行事实
+Codex App Server = Runtime 主路径
+Workbench = 产品壳 + UI projection + minimal persistence/recovery + Map enhancement
+```
+
+明确不存在：second conversation truth、transcript truth、task truth、hidden replacement Thread、exec-history reconstruction。
+
 ## 2. stage status
 
 | 阶段 | 最终状态 | 说明 |
@@ -36,16 +47,16 @@ Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth�
 | E | PASS / FROZEN | Thread Header / Conversation Stream |
 | F | PASS / FROZEN | Composer Capability / Approval / Persistence |
 | G | PASS / FROZEN | Project lifecycle / ownership / safety；UI convergence 已在 I 处理 |
-| H | AUTOMATED/REAL PASS；FINAL MANUAL MERGED INTO J | 不独立声称用户人工 PASS |
+| H | PASS / FROZEN | 剩余人工验收并入 STAGE J，已由用户最终 V1 验收关闭 |
 | I | PASS / FROZEN | 用户明确确认 `STAGE I FIX 测试通过` |
-| J | FINAL RC — AWAITING USER FINAL ACCEPTANCE | 本报告完成自动化/真实回归收口 |
+| J | PASS / FROZEN | 自动化、真实 App Server、Package Provenance 和最终人工验收均 PASS |
 
 ### STAGE I / H freeze records
 
 - STAGE I FIX Automated / Implementation Gate：PASS。
 - STAGE I Manual GUI Acceptance：PASS；唯一人工依据是用户明确确认 `STAGE I FIX 测试通过`，没有补写未经用户陈述的逐项观察。
 - STAGE I 冻结提交：`370b9b56eb5d9dc1b03f4d3d600eb6e29aec5cec`。
-- STAGE H 保持 `Automated Gate: PASS`、`Real App Server Gate: PASS`、`Manual Functional Acceptance: PENDING`；剩余人工验收并入 J，状态为 `PASS_AUTOMATED / MANUAL_MERGED_TO_STAGE_J`，没有伪造 H 独立用户 PASS。
+- STAGE H：`PASS / FROZEN`。Remaining H manual acceptance was incorporated into STAGE J final manual acceptance and is now closed by the user's final V1 acceptance.
 
 ## 3. architecture / identity final audit
 
@@ -102,6 +113,16 @@ Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth�
 - UI 改为 `Approval（确认策略）` 与 `Sandbox（执行范围）`，选项分别为 `从不请求审批 / 按需请求审批`、`只读 / 工作区写入`。
 - Tooltip 明确 Sandbox 是 Codex 技术执行范围，Approval 是是否请求用户确认；`从不请求审批` 不等于扩大 Sandbox 权限。
 - 底层协议映射未改变；当前没有添加或声称不存在的 `danger-full-access` 能力。
+
+## 4B. final manual acceptance and freeze
+
+- Automated Final Gate：PASS。
+- Real App Server Smoke Matrix：PASS。
+- Package Provenance：PASS；Electron 外壳 SHA 固定，应用来源通过打包后的 app resources hashes 核验。
+- Final Manual Acceptance：PASS。
+- 人工验收依据：用户明确确认 `V1 最终人工验收通过`；本报告不扩写未经用户陈述的逐项观察。
+- STAGE J Status：`PASS / FROZEN`。
+- V1 Status：`FINAL FROZEN`。
 
 ## 5. multi-thread / workspace / responsive
 
@@ -184,6 +205,7 @@ Workbench 没有重新建立 Conversation truth、Transcript truth、Task truth�
 - 代码来源：`df711d8`（`fix: unblock thread switching and refine composer submission`）。
 - metadata：`name=codex-workbench-v1`、`version=0.1.0`、`type=module`、`main=dist/main/main.js`。
 - 该 EXE 是当前最终修复提交生成的固定 `dist/package` RC，不使用旧 artifact 冒充。
+- Electron outer EXE is a fixed shell. Application provenance is verified through packaged app resources.
 - 当前 app resource hashes：`main.js=105D4BDE83998D7BEFD5C67792FBA45C821559C4E7BB31BC93E86B4A3231D96C`、`renderer.js=E7AFC23228B42844760544DC5751220B98E679219F49C29F72DC281E40DEC534`、`package.json=1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F`。
 - package 前生成的 package-local `user-data/logs` 已移动到可恢复备份目录 `C:\Users\sadar\AppData\Local\Temp\codex-workbench-v1-package-user-data-backup-20260819`，未删除用户文件。
 
@@ -265,14 +287,14 @@ STAGE J Package Gate: PASS
 STAGE J Temporary Rebuild Provenance: PASS
 STAGE J Standard Repackage: PASS
 STAGE J Security / Git Scope Gate: PASS
-STAGE J Final Manual Acceptance Round 1: FIX APPLIED
-STAGE J Manual Final Acceptance: PENDING
-STAGE J: RC READY / FINAL MANUAL ACCEPTANCE PENDING AFTER ROUND 1 FIX
-V1 FINAL MANUAL ACCEPTANCE: PENDING
-STAGE K: NOT_STARTED / FORBIDDEN
+STAGE J Final Manual Acceptance: PASS
+STAGE H: PASS / FROZEN
+STAGE J: PASS / FROZEN
+V1: FINAL FROZEN
+STAGE K: NOT_CREATED
 ```
 
-标准 package provenance 已复核；等待用户最后一次总体验收。在用户明确确认之前不写 `V1 FINAL FROZEN`。
+标准 package provenance 已复核；用户已明确确认最终人工验收通过，V1 正式冻结。不得创建 STAGE K。
 
 ## 16. requested handoff fields
 
@@ -293,9 +315,9 @@ stage_status:
   E: PASS / FROZEN
   F: PASS / FROZEN
   G: PASS / FROZEN
-  H: AUTOMATED/REAL PASS; FINAL MANUAL MERGED INTO J
+  H: PASS / FROZEN
   I: PASS / FROZEN (user-confirmed)
-  J: RC READY / FINAL MANUAL ACCEPTANCE PENDING
+  J: PASS / FROZEN
 
 architecture_final: PASS
 identity_final: PASS
@@ -326,9 +348,10 @@ subagents: Nash/Poincare/Singer/Bacon/Kuhn/Averroes/Ohm/Rawls all naturally comp
 running_subagents_at_gate: 0
 accepted_limitations: legacy sparse-state migration edges, no Electron GUI harness, maintenance sidecar boundary, package provenance not embedded
 deferred_items: Attachment; final GUI Approval/Explorer and final integrated manual acceptance; STAGE I user-confirmed stage-level GUI only; Round 1 fixes require user retest
-blockers: none for RC; final user acceptance is required
-manual_final_acceptance_required: yes
-gate: RC_READY_FOR_USER_FINAL_ACCEPTANCE
+blockers: none
+manual_final_acceptance: PASS; user explicitly confirmed “V1 最终人工验收通过”
+v1_status: FINAL_FROZEN
+gate: V1_FINAL_FROZEN
 ```
 
-完成本报告后 STOP；不进入 STAGE K。
+完成本报告后 STOP；不创建 STAGE K。

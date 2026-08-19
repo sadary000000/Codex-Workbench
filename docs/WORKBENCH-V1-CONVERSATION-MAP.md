@@ -2,8 +2,8 @@
 
 日期：2026-08-19
 阶段：STAGE J — V1 Final Integrated Acceptance / Release Freeze
-状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E PASS / FROZEN；STAGE F PASS / FROZEN；STAGE G PASS / FROZEN；STAGE H Automated/Real PASS、Manual Acceptance merged into STAGE J；STAGE I PASS / FROZEN；STAGE J ◉ FINAL RC — AWAITING USER FINAL ACCEPTANCE
-范围：当前 Codex Workbench V1 最终 RC 收口；不进入 STAGE K
+状态：STAGE A PASS / FROZEN；STAGE B PASS / FROZEN；STAGE C PASS / FROZEN；STAGE D PASS / FROZEN；STAGE E PASS / FROZEN；STAGE F PASS / FROZEN；STAGE G PASS / FROZEN；STAGE H PASS / FROZEN；STAGE I PASS / FROZEN；STAGE J PASS / FROZEN；V1 FINAL FROZEN
+范围：Codex Workbench V1 最终冻结记录；STAGE K NOT_CREATED
 
 ## 1. 文档定位
 
@@ -65,14 +65,15 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 │   ├── ● Conversation Map coordinator、Project Map runtime 完成
 │   ├── ● 按需 Map Panel、source jump 与受限 IPC 完成
 │   └── ● Phase 6 Gate：GPT PASS，正式冻结
-├── ◉ V1 总体验收 / Release Candidate Freeze
+├── ● V1 总体验收 / Release Candidate Freeze
 │   ├── ● 自动化集成验收与真实 CLI smoke
-│   └── ● STAGE B 用户人工 GUI 验收已完成
+│   ├── ● STAGE H 剩余人工功能验收并入 STAGE J
+│   └── ● 用户明确确认 V1 最终人工验收通过，V1 FINAL FROZEN
 └── ○ Phase 7：真实使用后的增强（NOT_STARTED）
     └── 只有真实缺口证明必要时再讨论 Workflow、Review、Git 等扩展
 ```
 
-当前主路径是“Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Gate PASS → V1 总体验收 / RC Freeze → 用户人工验收”；Phase 7 保持 NOT_STARTED，只有真实使用后出现并确认的新缺口才考虑开启。
+当前主路径已完成：“Phase 4 PASS → Conversation Map PASS → Phase 5 PASS → Phase 6 Gate PASS → STAGE A–J PASS / FROZEN → V1 FINAL FROZEN”。后续阶段未创建，等待用户下一条明确指令。
 
 ## 3.1 当前 V1 Stage Gate
 
@@ -92,11 +93,11 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 ● STAGE G — Project 生命周期 + 主界面收敛
 └── Project lifecycle 与 Native Thread ownership/safety 用户验收通过；UI convergence 明确 deferred，作为 ACCEPTED UX GAP 延后 STAGE I
 ● STAGE H — 人工回归验收 / Reliability Hardening
-└── Automated/Real Gate PASS；Manual Acceptance PENDING，剩余人工功能验收合并到 STAGE J，不独立声称用户 PASS
+└── PASS / FROZEN；剩余人工验收已并入 STAGE J，并由用户最终 V1 验收关闭
 ● STAGE I — App Shell / Sidebar / Workspace / Compact Composer 优化
 └── STAGE I FIX Automated/Implementation Gate PASS；用户明确确认“STAGE I FIX 测试通过”；PASS / FROZEN
-◉ STAGE J — V1 Final Integrated Acceptance / Release Freeze
-└── Final RC 自动化/真实回归与文档收口进行中；等待用户最后一次总体验收
+● STAGE J — V1 Final Integrated Acceptance / Release Freeze
+└── PASS / FROZEN；Final Manual Acceptance PASS；V1 FINAL FROZEN
 ```
 
 ## 4. 节点详情与来源
@@ -121,9 +122,9 @@ Map 的语义判断仍属于 Codex；Workbench 在未来只负责调用、准备
 | STAGE E — Thread Header + Conversation Message Stream | ● | Header、User/Assistant、Thinking/Processing、Command/Tool、File、Search/Web、Approval 和 Turn 状态的轻量 UI projection 已实现；用户人工 GUI 验收 PASS，阶段冻结 | `docs\STAGE-E-THREAD-HEADER-CONVERSATION-STREAM.md` |
 | STAGE F — Composer Capability + Approval + FIX | ● | capability、Approval、Requested/Sent Diagnostics 和按 Native Thread 的 preference 重启恢复已完成；用户人工验收 PASS，阶段冻结 | `docs\STAGE-F-COMPOSER-CAPABILITY-APPROVAL.md`、`docs\STAGE-F-FIX-COMPOSER-PERSISTENCE-DIAGNOSTICS.md` |
 | STAGE G — Project 生命周期 + 主界面收敛 | ● | Project lifecycle 与 Native Thread ownership/safety 用户验收通过；UI convergence 显式 deferred 为 ACCEPTED UX GAP，延后 STAGE I | `docs\STAGE-G-PROJECT-LIFECYCLE-UI-CONVERGENCE.md`、STAGE G 冻结指令 |
-| STAGE H — 人工回归验收 / Reliability Hardening | ●/merged | Automated/Real Gate PASS；Manual Functional Acceptance PENDING，剩余人工验收合并到 STAGE J | `docs\STAGE-H-RELIABILITY-REGRESSION-ACCEPTANCE.md` |
+| STAGE H — 人工回归验收 / Reliability Hardening | ● | Automated/Real Gate PASS；剩余人工验收合并到 STAGE J，并由用户最终 V1 验收关闭 | `docs\STAGE-H-RELIABILITY-REGRESSION-ACCEPTANCE.md` |
 | STAGE I — App Shell / Sidebar / Workspace / Compact Composer 优化 | ● | STAGE I FIX 自动化/实现 Gate PASS；用户明确确认阶段级 GUI 测试通过；PASS / FROZEN | `docs\STAGE-I-FIX-LAYOUT-SCROLL-DIAGNOSTICS-COMPOSER.md`、`docs\STAGE-I-APP-SHELL-COMPACT-COMPOSER.md` |
-| STAGE J — V1 Final Integrated Acceptance / Release Freeze | ◉ | Final RC 收口、全量自动/真实回归与最终文档审计；等待用户最后一次总体验收 | `docs\STAGE-J-V1-FINAL-INTEGRATED-ACCEPTANCE.md` |
+| STAGE J — V1 Final Integrated Acceptance / Release Freeze | ● | Automated/Real/Package Provenance/Final Manual Acceptance PASS；V1 FINAL FROZEN | `docs\STAGE-J-V1-FINAL-INTEGRATED-ACCEPTANCE.md` |
 
 ## 5. Phase 0–4 阶段证据摘要
 
@@ -270,11 +271,11 @@ STAGE F 正式名称为 `Composer Capability + Approval`，必须先读取真实
 | 11 | ● | STAGE E Thread Header + Conversation Message Stream 完成；用户人工 GUI 验收 PASS，阶段冻结 |
 | 12 | ● | STAGE F Composer Capability + Approval + FIX 完成；GPT/用户人工验收 PASS，阶段冻结 |
 | 13 | ● | STAGE G Project lifecycle / ownership / safety 通过；UI convergence deferred to STAGE I |
-| 14 | ●/deferred | STAGE H Automated/Real Gate PASS；Manual Functional Acceptance DEFERRED/PENDING BY USER |
+| 14 | ● | STAGE H Automated/Real Gate PASS；剩余人工验收已并入 STAGE J 并关闭 |
 | 15 | ● | STAGE I FIX 已完成并由用户确认测试通过，阶段冻结 |
-| 16 | ◉ | STAGE J Final RC：等待用户最后一次总体验收 |
+| 16 | ● | STAGE J PASS / FROZEN；用户明确确认 `V1 最终人工验收通过` |
 
-STAGE G 已冻结；UI convergence 作为 ACCEPTED UX GAP 已由 STAGE I 处理。STAGE H 的 Automated/Real Gate 已通过，剩余人工功能验收合并到 STAGE J；STAGE I 已由用户确认阶段级 GUI 测试通过并冻结。当前进入 STAGE J Final RC，等待用户最后一次总体验收，不进入 STAGE K。
+STAGE G 已冻结；UI convergence 作为 ACCEPTED UX GAP 已由 STAGE I 处理。STAGE H 的剩余人工功能验收已合并到 STAGE J，并由用户明确确认 `V1 最终人工验收通过` 后关闭。STAGE I、STAGE J 均 PASS / FROZEN，V1 FINAL FROZEN；STAGE K NOT_CREATED。
 
 ## 7. 已冻结的产品规则
 
