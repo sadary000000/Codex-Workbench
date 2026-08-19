@@ -40,6 +40,23 @@ const channels = Object.freeze({
   projectMapUpdate: "project-map:update",
   projectMapMaintenanceRead: "project-map:maintenance-read",
   projectMapState: "project-map:state",
+  webGptState: "webgpt:state",
+  webGptOpenWorkspace: "webgpt:open-workspace",
+  webGptOpenHome: "webgpt:open-home",
+  webGptOpenChat: "webgpt:open-chat",
+  webGptBounds: "webgpt:bounds",
+  webGptVisible: "webgpt:visible",
+  webGptCurrentUrl: "webgpt:current-url",
+  webGptPageState: "webgpt:page-state",
+  webGptScreenshot: "webgpt:screenshot",
+  webGptRequestUserControl: "webgpt:request-user-control",
+  webGptReturnAutomationControl: "webgpt:return-automation-control",
+  webGptPause: "webgpt:pause",
+  webGptHealth: "webgpt:health",
+  webGptBack: "webgpt:back",
+  webGptForward: "webgpt:forward",
+  webGptReload: "webgpt:reload",
+  webGptOpenExternal: "webgpt:open-external",
 });
 
 function listen(channel: string, listener: (payload: unknown) => void): () => void {
@@ -89,4 +106,24 @@ contextBridge.exposeInMainWorld("codexWorkbenchV1", Object.freeze({
   onState: (listener: (payload: unknown) => void) => listen(channels.state, listener),
   onMapState: (listener: (payload: unknown) => void) => listen(channels.mapState, listener),
   onProjectMapState: (listener: (payload: unknown) => void) => listen(channels.projectMapState, listener),
+}));
+
+contextBridge.exposeInMainWorld("codexWorkbenchWebGPT", Object.freeze({
+  openWebGptWorkspace: () => ipcRenderer.invoke(channels.webGptOpenWorkspace),
+  openWebGptHome: () => ipcRenderer.invoke(channels.webGptOpenHome),
+  openWebGptChat: (url: string) => ipcRenderer.invoke(channels.webGptOpenChat, String(url ?? "").slice(0, 2_000)),
+  setWebGptBounds: (bounds: unknown) => ipcRenderer.invoke(channels.webGptBounds, bounds),
+  setWebGptVisible: (visible: boolean) => ipcRenderer.invoke(channels.webGptVisible, visible === true),
+  getWebGptCurrentUrl: () => ipcRenderer.invoke(channels.webGptCurrentUrl),
+  getWebGptPageState: () => ipcRenderer.invoke(channels.webGptPageState),
+  takeWebGptScreenshot: () => ipcRenderer.invoke(channels.webGptScreenshot),
+  requestWebGptUserControl: () => ipcRenderer.invoke(channels.webGptRequestUserControl),
+  returnWebGptAutomationControl: () => ipcRenderer.invoke(channels.webGptReturnAutomationControl),
+  pauseWebGpt: () => ipcRenderer.invoke(channels.webGptPause),
+  getWebGptHealth: () => ipcRenderer.invoke(channels.webGptHealth),
+  webGptBack: () => ipcRenderer.invoke(channels.webGptBack),
+  webGptForward: () => ipcRenderer.invoke(channels.webGptForward),
+  reloadWebGpt: () => ipcRenderer.invoke(channels.webGptReload),
+  openWebGptExternal: () => ipcRenderer.invoke(channels.webGptOpenExternal),
+  onWebGptState: (listener: (payload: unknown) => void) => listen(channels.webGptState, listener),
 }));

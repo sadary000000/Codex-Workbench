@@ -24,6 +24,7 @@ import { operationStatusLabel, runtimeStateLabel, shouldRenderDefaultEvent, user
 import { projectLiveEvent, projectReadItem, projectTurnState, type MessageProjection } from "./message-projection.ts";
 import { defaultComposerPreferences, validateComposerPreferencesAgainstCapabilities } from "../codex/composer-capabilities.ts";
 import { beginThreadSelection, isCurrentThreadSelection, type ThreadSelectionRequest } from "./thread-selection.ts";
+import type { WebGptPageState, WebGptState } from "../features/webgpt/types.ts";
 
 interface IpcEnvelope<T = unknown> {
   ok: boolean;
@@ -82,11 +83,32 @@ interface V1Api {
   onProjectMapState(listener: (payload: ProjectMapStatus) => void): () => void;
 }
 
+interface WebGptApi {
+  openWebGptWorkspace(): Promise<IpcEnvelope<WebGptState>>;
+  openWebGptHome(): Promise<IpcEnvelope<WebGptState>>;
+  openWebGptChat(url: string): Promise<IpcEnvelope<WebGptState>>;
+  setWebGptBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<IpcEnvelope<{ updated: boolean }>>;
+  setWebGptVisible(visible: boolean): Promise<IpcEnvelope<WebGptState>>;
+  getWebGptCurrentUrl(): Promise<IpcEnvelope<string>>;
+  getWebGptPageState(): Promise<IpcEnvelope<WebGptPageState>>;
+  takeWebGptScreenshot(): Promise<IpcEnvelope<unknown>>;
+  requestWebGptUserControl(): Promise<IpcEnvelope<WebGptState>>;
+  returnWebGptAutomationControl(): Promise<IpcEnvelope<WebGptState>>;
+  pauseWebGpt(): Promise<IpcEnvelope<WebGptState>>;
+  getWebGptHealth(): Promise<IpcEnvelope<unknown>>;
+  webGptBack(): Promise<IpcEnvelope<WebGptState>>;
+  webGptForward(): Promise<IpcEnvelope<WebGptState>>;
+  reloadWebGpt(): Promise<IpcEnvelope<WebGptState>>;
+  openWebGptExternal(): Promise<IpcEnvelope<{ url: string }>>;
+  onWebGptState(listener: (payload: WebGptState) => void): () => void;
+}
+
 declare global {
-  interface Window { codexWorkbenchV1: V1Api; }
+  interface Window { codexWorkbenchV1: V1Api; codexWorkbenchWebGPT: WebGptApi; }
 }
 
 const api = window.codexWorkbenchV1;
+const webGptApi = window.codexWorkbenchWebGPT;
 const stateElement = document.querySelector<HTMLSpanElement>("#runtime-state")!;
 const threadElement = document.querySelector<HTMLSpanElement>("#thread-id")!;
 const turnElement = document.querySelector<HTMLSpanElement>("#turn-id")!;
@@ -172,6 +194,24 @@ const threadRenameSubmitButton = document.querySelector<HTMLButtonElement>("#thr
 const writerConflictDialog = document.querySelector<HTMLDialogElement>("#writer-conflict-dialog")!;
 const writerConflictCloseButton = document.querySelector<HTMLButtonElement>("#writer-conflict-close")!;
 const writerConflictMessage = document.querySelector<HTMLElement>("#writer-conflict-message")!;
+const openWebGptButton = document.querySelector<HTMLButtonElement>("#open-webgpt")!;
+const webGptWorkspaceElement = document.querySelector<HTMLElement>("#webgpt-workspace")!;
+const webGptBrowserHostElement = document.querySelector<HTMLElement>("#webgpt-browser-host")!;
+const webGptUrlElement = document.querySelector<HTMLInputElement>("#webgpt-url")!;
+const webGptPageTitleElement = document.querySelector<HTMLElement>("#webgpt-page-title")!;
+const webGptPageUrlElement = document.querySelector<HTMLElement>("#webgpt-page-url")!;
+const webGptPageStateElement = document.querySelector<HTMLElement>("#webgpt-page-state")!;
+const webGptPageErrorElement = document.querySelector<HTMLElement>("#webgpt-page-error")!;
+const webGptModeElement = document.querySelector<HTMLElement>("#webgpt-mode")!;
+const webGptUrlForm = document.querySelector<HTMLFormElement>("#webgpt-url-form")!;
+const webGptBackButton = document.querySelector<HTMLButtonElement>("#webgpt-back")!;
+const webGptForwardButton = document.querySelector<HTMLButtonElement>("#webgpt-forward")!;
+const webGptReloadButton = document.querySelector<HTMLButtonElement>("#webgpt-reload")!;
+const webGptUserControlButton = document.querySelector<HTMLButtonElement>("#webgpt-user-control")!;
+const webGptAutoControlButton = document.querySelector<HTMLButtonElement>("#webgpt-auto-control")!;
+const webGptPauseButton = document.querySelector<HTMLButtonElement>("#webgpt-pause")!;
+const webGptOpenExternalButton = document.querySelector<HTMLButtonElement>("#webgpt-open-external")!;
+const closeWebGptButton = document.querySelector<HTMLButtonElement>("#close-webgpt")!;
 
 const DRAFT_KEY_PREFIX = "codex-workbench-v1-native-thread-draft:";
 const LEGACY_DRAFT_KEY = "codex-workbench-v1-native-thread-draft";
@@ -222,6 +262,84 @@ let threadTransitionInFlight = false;
 let pendingSelectedThreadId: string | null = null;
 let threadViewGeneration = 0;
 let interruptInFlight = false;
+let webGptState: WebGptState | null = null;
+let webGptOpen = false;
+let webGptBoundsFrame = 0;
+
+const webGptModeLabels: Record<WebGptState["mode"], string> = {
+  USER_CONTROL: "用户控制",
+  AUTO_CONTROL: "自动控制（基础）",
+  PAUSED: "已暂停",
+};
+
+function renderWebGptState(state: WebGptState | null): void {
+  if (!state) return;
+  webGptState = state;
+  const page = state.page;
+  webGptModeElement.textContent = webGptModeLabels[state.mode];
+  webGptModeElement.className = `webgpt-mode mode-${state.mode === "AUTO_CONTROL" ? "auto" : state.mode === "PAUSED" ? "paused" : "user"}`;
+  webGptModeElement.title = `Session：${state.sessionPath}\n自动化能力：本阶段仅提供基础壳`;
+  webGptPageTitleElement.textContent = state.title || "WebGPT Workspace";
+  webGptPageUrlElement.textContent = state.url ? ` · ${state.url}` : "";
+  if (document.activeElement !== webGptUrlElement) webGptUrlElement.value = state.url;
+  webGptPageErrorElement.hidden = !state.error;
+  webGptPageErrorElement.textContent = state.error ?? "";
+  webGptPageStateElement.textContent = page.loginRequired
+    ? "需要登录"
+    : page.generating
+      ? "页面正在生成"
+      : page.composerFound
+        ? "页面就绪"
+        : state.ready
+          ? "页面已加载"
+          : "加载中";
+  webGptBackButton.disabled = !state.url;
+  webGptForwardButton.disabled = !state.url;
+  webGptReloadButton.disabled = !state.url;
+  openWebGptButton.setAttribute("aria-current", webGptOpen ? "page" : "false");
+}
+
+function syncWebGptBounds(): void {
+  if (webGptBoundsFrame) cancelAnimationFrame(webGptBoundsFrame);
+  webGptBoundsFrame = requestAnimationFrame(() => {
+    webGptBoundsFrame = 0;
+    if (!webGptOpen || webGptWorkspaceElement.hidden) return;
+    const rect = webGptBrowserHostElement.getBoundingClientRect();
+    void webGptApi.setWebGptBounds({
+      x: Math.max(0, Math.round(rect.left)),
+      y: Math.max(0, Math.round(rect.top)),
+      width: Math.max(0, Math.round(rect.width)),
+      height: Math.max(0, Math.round(rect.height)),
+    });
+  });
+}
+
+async function showWebGptWorkspace(): Promise<void> {
+  webGptOpen = true;
+  webGptWorkspaceElement.hidden = false;
+  openWebGptButton.setAttribute("aria-current", "page");
+  if (mapOpen) {
+    mapOpen = false;
+    renderMapPanel();
+  }
+  syncWebGptBounds();
+  const result = await consume("webgpt.open-workspace", webGptApi.openWebGptWorkspace());
+  if (result) renderWebGptState(result);
+  syncWebGptBounds();
+}
+
+async function hideWebGptWorkspace(): Promise<void> {
+  webGptOpen = false;
+  webGptWorkspaceElement.hidden = true;
+  openWebGptButton.setAttribute("aria-current", "false");
+  await webGptApi.setWebGptVisible(false);
+}
+
+async function runWebGptCommand(label: string, operation: Promise<IpcEnvelope<WebGptState>>): Promise<void> {
+  const result = await consume(label, operation);
+  if (result) renderWebGptState(result);
+  syncWebGptBounds();
+}
 
 function composerPreferences(nativeThreadId: string): ComposerPreferences {
   const existing = composerPreferencesByThread.get(nativeThreadId);
@@ -623,7 +741,10 @@ function createThreadEntry(thread: ThreadProjection): HTMLElement {
   state.setAttribute("aria-label", stateLabel);
   state.title = stateLabel;
   button.append(title, state);
-  button.addEventListener("click", () => { void selectThread(thread.nativeThreadId); });
+  button.addEventListener("click", () => {
+    if (webGptOpen) void hideWebGptWorkspace();
+    void selectThread(thread.nativeThreadId);
+  });
 
   const pin = document.createElement("button");
   pin.type = "button";
@@ -1859,8 +1980,39 @@ jumpLatestButton.addEventListener("click", () => {
   threadWorkspaceElement.scrollTo({ top: threadWorkspaceElement.scrollHeight, behavior: "auto" });
   jumpLatestButton.hidden = true;
 });
-document.querySelector<HTMLButtonElement>("#new-standalone-thread")!.addEventListener("click", () => { void createNativeThread(null); });
-document.querySelector<HTMLButtonElement>("#new-project")!.addEventListener("click", openProjectCreateDialog);
+document.querySelector<HTMLButtonElement>("#new-standalone-thread")!.addEventListener("click", () => {
+  if (webGptOpen) void hideWebGptWorkspace();
+  void createNativeThread(null);
+});
+document.querySelector<HTMLButtonElement>("#new-project")!.addEventListener("click", () => {
+  if (webGptOpen) void hideWebGptWorkspace();
+  openProjectCreateDialog();
+});
+openWebGptButton.addEventListener("click", () => { void showWebGptWorkspace(); });
+closeWebGptButton.addEventListener("click", () => { void hideWebGptWorkspace(); });
+webGptUrlForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const value = webGptUrlElement.value.trim();
+  if (!value) return;
+  if (/^https:\/\/(www\.)?chatgpt\.com\/?$/i.test(value)) {
+    await runWebGptCommand("webgpt.open-home", webGptApi.openWebGptHome());
+  } else {
+    await runWebGptCommand("webgpt.open-chat", webGptApi.openWebGptChat(value));
+  }
+});
+webGptBackButton.addEventListener("click", () => { void runWebGptCommand("webgpt.back", webGptApi.webGptBack()); });
+webGptForwardButton.addEventListener("click", () => { void runWebGptCommand("webgpt.forward", webGptApi.webGptForward()); });
+webGptReloadButton.addEventListener("click", () => { void runWebGptCommand("webgpt.reload", webGptApi.reloadWebGpt()); });
+webGptUserControlButton.addEventListener("click", () => { void runWebGptCommand("webgpt.user-control", webGptApi.requestWebGptUserControl()); });
+webGptAutoControlButton.addEventListener("click", () => { void runWebGptCommand("webgpt.auto-control", webGptApi.returnWebGptAutomationControl()); });
+webGptPauseButton.addEventListener("click", () => { void runWebGptCommand("webgpt.pause", webGptApi.pauseWebGpt()); });
+webGptOpenExternalButton.addEventListener("click", async () => {
+  const result = await consume("webgpt.open-external", webGptApi.openWebGptExternal());
+  if (result) showStatus(`已交给默认浏览器打开：${result.url}`);
+});
+const webGptResizeObserver = new ResizeObserver(() => syncWebGptBounds());
+webGptResizeObserver.observe(webGptBrowserHostElement);
+window.addEventListener("resize", () => syncWebGptBounds());
 projectChooseDirectoryButton.addEventListener("click", () => { void chooseProjectDirectory(); });
 projectCreateForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2205,6 +2357,7 @@ api.onProjectMapState((status) => {
   projectMapStatus = status;
   renderMapPanel();
 });
+webGptApi.onWebGptState((state) => renderWebGptState(state));
 api.onState((state) => {
   // RuntimeRegistry may continue emitting state for a background Thread after
   // a selected Thread became unavailable. Record it for sidebar diagnostics,

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
@@ -16,6 +16,7 @@ import { markThreadUnavailable } from "./thread-availability.ts";
 import { isComposerTargetValid } from "../shared/thread-target.ts";
 import { buildNativeTurnOptions, parseComposerPreferences } from "../codex/composer-capabilities.ts";
 import { validateProjectDirectory } from "../shared/project-path.ts";
+import { WebGptWorkspace, type WebGptBounds } from "../features/webgpt/index.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -59,6 +60,23 @@ const IPC = Object.freeze({
   projectMapUpdate: "project-map:update",
   projectMapMaintenanceRead: "project-map:maintenance-read",
   projectMapState: "project-map:state",
+  webGptState: "webgpt:state",
+  webGptOpenWorkspace: "webgpt:open-workspace",
+  webGptOpenHome: "webgpt:open-home",
+  webGptOpenChat: "webgpt:open-chat",
+  webGptBounds: "webgpt:bounds",
+  webGptVisible: "webgpt:visible",
+  webGptCurrentUrl: "webgpt:current-url",
+  webGptPageState: "webgpt:page-state",
+  webGptScreenshot: "webgpt:screenshot",
+  webGptRequestUserControl: "webgpt:request-user-control",
+  webGptReturnAutomationControl: "webgpt:return-automation-control",
+  webGptPause: "webgpt:pause",
+  webGptHealth: "webgpt:health",
+  webGptBack: "webgpt:back",
+  webGptForward: "webgpt:forward",
+  webGptReload: "webgpt:reload",
+  webGptOpenExternal: "webgpt:open-external",
 });
 
 let mainWindow: BrowserWindow | null = null;
@@ -68,6 +86,7 @@ let threadSwitchSequence = 0;
 let persistence: V1PersistenceStore | null = null;
 let conversationMaps: ConversationMapCoordinator | null = null;
 let projectMaps: ProjectMapManager | null = null;
+let webGptWorkspace: WebGptWorkspace | null = null;
 let quittingForExit = false;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
 
@@ -98,6 +117,17 @@ function getProjectMaps(): ProjectMapManager {
     onChanged: (status) => send(IPC.projectMapState, status),
   });
   return projectMaps;
+}
+
+function getWebGptWorkspace(): WebGptWorkspace {
+  if (webGptWorkspace) return webGptWorkspace;
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error("WebGPT Workspace requires a ready Workbench window.");
+  webGptWorkspace = new WebGptWorkspace({
+    mainWindow,
+    userDataDirectory: app.getPath("userData"),
+    onState: (state) => send(IPC.webGptState, state),
+  });
+  return webGptWorkspace;
 }
 
 interface RuntimeTarget {
@@ -291,7 +321,7 @@ async function detachLoadedProjectRuntimes(projectId: string): Promise<void> {
   }
 }
 
-function ok(result: unknown): { ok: true; result: unknown } {
+function ok<T>(result: T): { ok: true; result: T } {
   return { ok: true, result };
 }
 
@@ -299,6 +329,23 @@ function fail(error: unknown): { ok: false; error: ReturnType<typeof errorInfo> 
   const normalized = errorInfo(error);
   logger.error("ipc_operation_failed", normalized);
   return { ok: false, error: normalized };
+}
+
+function assertWebGptSender(sender: WebContents): void {
+  if (!mainWindow || mainWindow.isDestroyed() || sender !== mainWindow.webContents) {
+    const error = new Error("WebGPT IPC sender is not the Workbench shell.") as Error & { code: string };
+    error.code = "WEBGPT_IPC_SENDER_REJECTED";
+    throw error;
+  }
+}
+
+async function webGptCall<T>(sender: WebContents, operation: () => Promise<T> | T): Promise<{ ok: true; result: T } | { ok: false; error: ReturnType<typeof errorInfo> }> {
+  try {
+    assertWebGptSender(sender);
+    return ok(await operation());
+  } catch (error) {
+    return fail(error);
+  }
 }
 
 function projectionNotFound(nativeThreadId: string): PersistenceStoreError {
@@ -548,6 +595,28 @@ function registerIpc(): void {
       return fail(error);
     }
   });
+  ipcMain.handle(IPC.webGptOpenWorkspace, (event) => webGptCall(event.sender, () => getWebGptWorkspace().openWorkspace()));
+  ipcMain.handle(IPC.webGptOpenHome, (event) => webGptCall(event.sender, () => getWebGptWorkspace().openHome()));
+  ipcMain.handle(IPC.webGptOpenChat, (event, url: unknown) => webGptCall(event.sender, () => {
+    if (typeof url !== "string") throw new Error("WebGPT Chat URL is required.");
+    return getWebGptWorkspace().openChat(url);
+  }));
+  ipcMain.handle(IPC.webGptBounds, (event, bounds: unknown) => webGptCall(event.sender, () => {
+    getWebGptWorkspace().setBounds(bounds as WebGptBounds);
+    return { updated: true };
+  }));
+  ipcMain.handle(IPC.webGptVisible, (event, visible: unknown) => webGptCall(event.sender, () => getWebGptWorkspace().setVisible(visible === true)));
+  ipcMain.handle(IPC.webGptCurrentUrl, (event) => webGptCall(event.sender, () => getWebGptWorkspace().getCurrentUrl()));
+  ipcMain.handle(IPC.webGptPageState, (event) => webGptCall(event.sender, () => getWebGptWorkspace().getPageState()));
+  ipcMain.handle(IPC.webGptScreenshot, (event) => webGptCall(event.sender, () => getWebGptWorkspace().takeScreenshot()));
+  ipcMain.handle(IPC.webGptRequestUserControl, (event) => webGptCall(event.sender, () => getWebGptWorkspace().requestUserControl()));
+  ipcMain.handle(IPC.webGptReturnAutomationControl, (event) => webGptCall(event.sender, () => getWebGptWorkspace().returnAutomationControl()));
+  ipcMain.handle(IPC.webGptPause, (event) => webGptCall(event.sender, () => getWebGptWorkspace().pauseAutomation()));
+  ipcMain.handle(IPC.webGptHealth, (event) => webGptCall(event.sender, () => getWebGptWorkspace().getHealthStatus()));
+  ipcMain.handle(IPC.webGptBack, (event) => webGptCall(event.sender, () => getWebGptWorkspace().goBack()));
+  ipcMain.handle(IPC.webGptForward, (event) => webGptCall(event.sender, () => getWebGptWorkspace().goForward()));
+  ipcMain.handle(IPC.webGptReload, (event) => webGptCall(event.sender, () => getWebGptWorkspace().reload()));
+  ipcMain.handle(IPC.webGptOpenExternal, (event) => webGptCall(event.sender, () => getWebGptWorkspace().openExternalCurrentUrl()));
   ipcMain.handle(IPC.projectList, async () => {
     try {
       return ok(await getPersistence().listProjects());
@@ -870,6 +939,7 @@ app.on("before-quit", (event) => {
       cancelPendingNativeApprovals();
       await runtimes.closeAll();
       if (projectMaps) await projectMaps.close();
+      if (webGptWorkspace) webGptWorkspace.close();
     } catch (error) {
       logError(logger, "runtime_shutdown_failed", error);
     } finally {

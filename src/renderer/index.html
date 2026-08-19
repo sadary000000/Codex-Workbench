@@ -79,7 +79,7 @@
       .project-add { width: 23px; height: 23px; border-radius: 5px; background: transparent; color: #a6a6a6; }
       .project-group > .thread-entry-row, .project-group > .sidebar-empty { margin-left: 16px; }
       .sidebar-footer { flex: 0 0 auto; margin-top: auto; padding: 12px 10px 2px; color: #666; font-size: 11px; line-height: 1.45; }
-      main { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; height: 100%; min-width: 0; min-height: 0; overflow: hidden; overscroll-behavior: none; }
+      main { position: relative; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; height: 100%; min-width: 0; min-height: 0; overflow: hidden; overscroll-behavior: none; }
       .workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 72px; padding: 0 clamp(16px, 3vw, 30px); border-bottom: 1px solid var(--border); }
       .workspace-header-main { min-width: 0; }
       .eyebrow { color: #8d8d8d; font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
@@ -227,6 +227,27 @@
       .map-source:hover, .map-source:focus-visible { border-color: #6eaa8c; outline: none; }
       .map-node-children { display: grid; gap: 3px; margin-left: 16px; padding-left: 6px; border-left: 1px solid #333; }
       .map-empty { padding: 18px 8px; color: #777; font-size: 12px; line-height: 1.5; }
+      .webgpt-workspace { position: absolute; z-index: 8; inset: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; background: #212121; }
+      .webgpt-workspace[hidden] { display: none; }
+      .webgpt-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); background: #242424; }
+      .webgpt-toolbar-group { display: flex; min-width: 0; align-items: center; gap: 6px; }
+      .webgpt-toolbar .debug-button { min-width: 32px; padding: 6px 8px; }
+      .webgpt-url-form { display: flex; min-width: 0; gap: 6px; }
+      .webgpt-url-form input { min-width: 0; height: 30px; padding: 6px 9px; border-radius: 6px; color: #d8e7df; font: 11px ui-monospace, Consolas, monospace; }
+      .webgpt-mode { color: #9dd8bd; font-size: 11px; white-space: nowrap; }
+      .webgpt-mode.mode-auto { color: #efc77a; }
+      .webgpt-mode.mode-paused { color: #999; }
+      .webgpt-page-meta { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; padding: 6px 16px; border-bottom: 1px solid #343434; background: #1d1d1d; color: #999; font-size: 11px; }
+      .webgpt-page-meta-main { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .webgpt-page-meta-title { color: #ddd; }
+      .webgpt-page-meta-error { color: var(--danger); }
+      .webgpt-browser-host { min-width: 0; min-height: 0; overflow: hidden; background: #fff; }
+      .webgpt-browser-placeholder { display: grid; height: 100%; place-items: center; color: #666; background: #f5f5f5; font-size: 13px; }
+      .webgpt-entry[aria-current="page"] { border: 1px solid #3f806a; background: #21483a; }
+      @media (max-width: 900px) {
+        .webgpt-toolbar { grid-template-columns: 1fr auto; }
+        .webgpt-url-form { grid-column: 1 / -1; grid-row: 2; }
+      }
       @media (max-width: 1100px) {
         .app-shell.map-open, .app-shell.sidebar-collapsed.map-open { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
         .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
@@ -262,6 +283,7 @@
         <div class="sidebar-actions">
           <button id="new-standalone-thread" class="sidebar-action primary" type="button"><span class="action-icon">＋</span><span>新建 Thread</span></button>
           <button id="new-project" class="sidebar-action" type="button"><span class="action-icon">▦</span><span>新建 Project</span></button>
+          <button id="open-webgpt" class="sidebar-action webgpt-entry" type="button" aria-current="false"><span class="action-icon">◉</span><span>WebGPT</span></button>
         </div>
         <nav id="navigation" aria-label="Pinned Projects Recent"></nav>
         <div class="sidebar-footer">Codex-shaped Workspace · V1<br>开发者诊断按需打开</div>
@@ -332,7 +354,34 @@
             </div>
             <div class="composer-actions"><button id="interrupt-turn" class="debug-button stop-button" type="button" hidden>停止</button><button id="start-turn" class="debug-button send-button" type="submit">发送</button></div>
           </div>
-        </form>
+          </form>
+        <section id="webgpt-workspace" class="webgpt-workspace" aria-label="WebGPT Browser Workspace" hidden>
+          <header class="webgpt-toolbar">
+            <div class="webgpt-toolbar-group">
+              <button id="webgpt-back" class="debug-button" type="button" title="后退" aria-label="后退">←</button>
+              <button id="webgpt-forward" class="debug-button" type="button" title="前进" aria-label="前进">→</button>
+              <button id="webgpt-reload" class="debug-button" type="button" title="重新加载" aria-label="重新加载">↻</button>
+            </div>
+            <form id="webgpt-url-form" class="webgpt-url-form">
+              <input id="webgpt-url" type="url" autocomplete="off" spellcheck="false" aria-label="WebGPT 当前 URL" placeholder="https://chatgpt.com/">
+              <button class="debug-button" type="submit">打开</button>
+            </form>
+            <div class="webgpt-toolbar-group">
+              <span id="webgpt-mode" class="webgpt-mode mode-paused" role="status">已暂停</span>
+              <button id="webgpt-user-control" class="debug-button" type="button">用户接管</button>
+              <button id="webgpt-auto-control" class="debug-button" type="button">恢复自动</button>
+              <button id="webgpt-pause" class="debug-button" type="button">暂停</button>
+              <button id="webgpt-open-external" class="debug-button" type="button">在 Edge 中打开</button>
+              <button id="close-webgpt" class="debug-button" type="button">关闭</button>
+            </div>
+          </header>
+          <div id="webgpt-page-meta" class="webgpt-page-meta" role="status" aria-live="polite">
+            <div class="webgpt-page-meta-main"><span id="webgpt-page-title" class="webgpt-page-meta-title">WebGPT Workspace</span><span id="webgpt-page-url"></span></div>
+            <span id="webgpt-page-state">等待打开页面</span>
+            <span id="webgpt-page-error" class="webgpt-page-meta-error" hidden></span>
+          </div>
+          <div id="webgpt-browser-host" class="webgpt-browser-host" aria-label="真实 ChatGPT 网页"><div class="webgpt-browser-placeholder">正在准备 WebGPT 页面…</div></div>
+        </section>
       </main>
       <aside id="map-panel" class="map-panel" aria-label="Map" hidden>
         <div class="map-panel-header">
