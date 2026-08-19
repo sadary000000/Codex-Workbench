@@ -15,12 +15,14 @@ test("stage J keeps the selected Main Thread when a background Thread becomes un
   );
 });
 
-test("stage J only clears a background draft after a terminal successful Turn", () => {
+test("stage J clears only the visible draft at acceptance and clears the scoped copy after terminal success", () => {
   assert.match(
     renderer,
-    /if \(result\.status === "completed" \|\| result\.status === "interrupted"\) \{\s*localStorage\.removeItem\(draftKey\(nativeThreadId\)\);\s*\} else \{\s*localStorage\.setItem\(draftKey\(nativeThreadId\), prompt\);/s,
-    "failed or unknown background Turns must preserve their scoped Prompt",
+    /const successful = event\.result\?\.status === "completed" \|\| event\.result\?\.status === "interrupted"[\s\S]*?if \(!hasNewerDraft && successful\) \{[\s\S]*?clearDraftForThread\(nativeThreadId\)/,
+    "accepted Prompt recovery must remain independent from the visible draft",
   );
+  assert.match(renderer, /submittedPromptSnapshotsByThread\.set\(nativeThreadId/);
+  assert.match(renderer, /api\.onTurnResult\(handleTurnCompletion\)/);
 });
 
 test("stage J only clears the selected UI for an unavailable selected Thread", () => {

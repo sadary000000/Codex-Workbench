@@ -1,11 +1,13 @@
 import type {
   NativeEvent,
+  NativeTurnCompletionEvent,
   ProjectRecord,
   RuntimeErrorInfo,
   RuntimeSnapshot,
   ThreadNavigationResult,
   ThreadProjection,
   ThreadReadView,
+  TurnAcceptance,
   TurnResult,
   ComposerCapabilities,
   ComposerPreferences,
@@ -21,6 +23,7 @@ import { normalizeUserDisplayTitle, resolveThreadTitle } from "./thread-title.ts
 import { operationStatusLabel, runtimeStateLabel, shouldRenderDefaultEvent, userFacingErrorMessage } from "./ui-projection.ts";
 import { projectLiveEvent, projectReadItem, projectTurnState, type MessageProjection } from "./message-projection.ts";
 import { defaultComposerPreferences, validateComposerPreferencesAgainstCapabilities } from "../codex/composer-capabilities.ts";
+import { beginThreadSelection, isCurrentThreadSelection, type ThreadSelectionRequest } from "./thread-selection.ts";
 
 interface IpcEnvelope<T = unknown> {
   ok: boolean;
@@ -54,7 +57,7 @@ interface V1Api {
   startThread(): Promise<IpcEnvelope<RuntimeSnapshot>>;
   resumeThread(nativeThreadId: string): Promise<IpcEnvelope<ThreadNavigationResult>>;
   readThread(): Promise<IpcEnvelope<ThreadReadView>>;
-  startTurn(prompt: string, nativeThreadId: string, preferences: ComposerPreferences): Promise<IpcEnvelope<TurnResult>>;
+  startTurn(prompt: string, nativeThreadId: string, preferences: ComposerPreferences): Promise<IpcEnvelope<TurnAcceptance>>;
   getComposerCapabilities(nativeThreadId: string): Promise<IpcEnvelope<ComposerCapabilities>>;
   getComposerPreferences(nativeThreadId: string): Promise<IpcEnvelope<ComposerPreferenceRecord | null>>;
   saveComposerPreferences(nativeThreadId: string, preferences: ComposerPreferences): Promise<IpcEnvelope<ComposerPreferenceRecord>>;
@@ -63,6 +66,7 @@ interface V1Api {
   onEvent(listener: (payload: NativeEvent) => void): () => void;
   onServerRequest(listener: (payload: NativeServerRequestEvent) => void): () => void;
   onComposerRequest(listener: (payload: ComposerRequestDiagnostics) => void): () => void;
+  onTurnResult(listener: (payload: NativeTurnCompletionEvent) => void): () => void;
   onState(listener: (payload: RuntimeSnapshot) => void): () => void;
   getMapStatus(nativeThreadId?: string): Promise<IpcEnvelope<ConversationMapStatus>>;
   enableMap(nativeThreadId?: string): Promise<IpcEnvelope<ConversationMapStatus>>;
@@ -193,6 +197,15 @@ const diagnosticsErrorsByThread = new Map<string, RuntimeErrorInfo>();
 let globalDiagnosticsLog = "";
 const runtimeStates = new Map<string, RuntimeSnapshot>();
 const turnOperationThreads = new Set<string>();
+interface SubmittedPromptSnapshot {
+  prompt: string;
+  localRunId: string;
+  turnId: string;
+  draftRevision: number;
+}
+const submittedPromptSnapshotsByThread = new Map<string, SubmittedPromptSnapshot>();
+const pendingTurnCompletionsByThread = new Map<string, NativeTurnCompletionEvent>();
+const draftRevisionByThread = new Map<string, number>();
 const composerCapabilitiesByThread = new Map<string, ComposerCapabilities>();
 const composerCapabilityFailuresByThread = new Set<string>();
 const composerCapabilityLoadingByThread = new Set<string>();
@@ -206,6 +219,7 @@ let mapOpen = false;
 let mapScope: "conversation" | "project" = "conversation";
 let draftThreadId: string | null | undefined;
 let threadTransitionInFlight = false;
+let pendingSelectedThreadId: string | null = null;
 let threadViewGeneration = 0;
 let interruptInFlight = false;
 
@@ -229,10 +243,17 @@ function renderComposerSummaries(): void {
   const effortLabel = effort && !["跟随模型", "加载中…"].includes(effort) ? effort : "跟随模型";
   composerModelSummaryElement.textContent = `${modelLabel} · ${effortLabel}`;
   composerModelSummaryElement.title = `${modelLabel} · ${effortLabel}`;
-  const approvalLabel = composerApprovalElement.value === "on-request" ? "需批准" : "不请求审批";
-  const sandboxLabel = composerSandboxElement.value === "workspace-write" ? "项目可写" : "只读";
-  composerAccessSummaryElement.textContent = [approvalLabel, sandboxLabel].join(" · ");
-  composerAccessSummaryElement.title = `${approvalLabel} · ${sandboxLabel}`;
+  const approvalLabel = composerApprovalElement.value === "on-request" ? "按需请求审批" : "从不请求审批";
+  const sandboxLabel = composerSandboxElement.value === "workspace-write" ? "工作区写入" : "只读";
+  const policyHint = "Sandbox 决定 Codex 技术上能做什么；Approval 决定遇到需要审批或升级时是否向你请求。Approval 不会自动扩大 Sandbox 权限。";
+  composerAccessSummaryElement.textContent = [sandboxLabel, approvalLabel].join(" · ");
+  composerAccessSummaryElement.title = `${policyHint} 当前：${approvalLabel} · ${sandboxLabel}`;
+  composerApprovalElement.title = composerApprovalElement.value === "on-request"
+    ? "Approval：需要时显示原生确认卡，由你选择接受或拒绝；不会扩大 Sandbox 执行范围。"
+    : "Approval：本轮不请求交互确认；不等于自动允许写入或执行，也不会扩大 Sandbox 执行范围。";
+  composerSandboxElement.title = composerSandboxElement.value === "workspace-write"
+    ? "Sandbox：仅当前工作目录可写；网络访问仍关闭。"
+    : "Sandbox：本轮请求为只读；不会修改工作区文件。";
 }
 
 function setSidebarCollapsed(collapsed: boolean): void {
@@ -248,12 +269,14 @@ function updateComposerActionState(): void {
   const nativeThreadId = state?.nativeThreadId ?? null;
   const runtimeTarget = nativeThreadId ? runtimeStates.get(nativeThreadId) : null;
   const active = runtimeIsActive(state);
-  const targetValid = isComposerTargetValid({
-    requestedThreadId: nativeThreadId,
-    selectedThreadId: selectedNativeThreadId,
-    runtimeThreadId: runtimeTarget?.nativeThreadId,
-    runtimeState: runtimeTarget?.state,
-  });
+  const targetValid = pendingSelectedThreadId === nativeThreadId
+    ? false
+    : isComposerTargetValid({
+      requestedThreadId: nativeThreadId,
+      selectedThreadId: selectedNativeThreadId,
+      runtimeThreadId: runtimeTarget?.nativeThreadId,
+      runtimeState: runtimeTarget?.state,
+    });
   const preferences = nativeThreadId ? composerPreferencesByThread.get(nativeThreadId) : null;
   const unavailable = nativeThreadId ? unavailableComposerPreferencesByThread.get(nativeThreadId) ?? [] : [];
   const capabilityFailure = nativeThreadId ? composerCapabilityFailuresByThread.has(nativeThreadId) : false;
@@ -396,8 +419,16 @@ function persistCurrentDraft(value: string): void {
   localStorage.setItem(draftKey(draftThreadId ?? null), value);
 }
 
-function clearCurrentDraft(): void {
-  localStorage.removeItem(draftKey(draftThreadId ?? null));
+function clearDraftForThread(nativeThreadId: string): void {
+  localStorage.removeItem(draftKey(nativeThreadId));
+}
+
+function currentDraftRevision(nativeThreadId: string): number {
+  return draftRevisionByThread.get(nativeThreadId) ?? 0;
+}
+
+function markDraftEdited(nativeThreadId: string): void {
+  draftRevisionByThread.set(nativeThreadId, currentDraftRevision(nativeThreadId) + 1);
 }
 
 function currentDiagnosticsThreadId(): string | null {
@@ -1211,12 +1242,12 @@ function renderThreadWorkspace(): void {
 
 function renderState(state: RuntimeSnapshot): void {
   if (state.nativeThreadId) {
-    threadUnavailableId = null;
     runtimeStates.set(state.nativeThreadId, state);
     if (selectedNativeThreadId && state.nativeThreadId !== selectedNativeThreadId) {
       renderNavigation();
       return;
     }
+    threadUnavailableId = null;
     selectedNativeThreadId = state.nativeThreadId;
     activateThreadBuffers(state.nativeThreadId);
   }
@@ -1260,6 +1291,7 @@ function renderState(state: RuntimeSnapshot): void {
 function renderNoSelectedThread(): void {
   latestState = null;
   selectedNativeThreadId = null;
+  pendingSelectedThreadId = null;
   currentProjection = null;
   threadView = null;
   activateThreadBuffers(null);
@@ -1303,7 +1335,9 @@ async function consume<T>(label: string, operation: Promise<IpcEnvelope<T>>, tar
       if (response.error?.code === "NATIVE_THREAD_UNAVAILABLE" && operationThreadId) {
         // Persist the draft before clearing the selected UI. A failed read/turn
         // must never leave the old prompt targeting a different Thread.
-        localStorage.setItem(draftKey(operationThreadId), promptElement.value);
+        if (selectedNativeThreadId === operationThreadId && draftThreadId === operationThreadId) {
+          localStorage.setItem(draftKey(operationThreadId), promptElement.value);
+        }
         if (selectedNativeThreadId === operationThreadId) {
           threadUnavailableId = operationThreadId;
           renderNoSelectedThread();
@@ -1383,18 +1417,15 @@ function closeProjectMenuDialog(): void {
 }
 
 async function selectThread(nativeThreadId: string): Promise<void> {
-  if (threadTransitionInFlight) {
-    showError({ name: "ThreadSwitchBusy", code: "THREAD_SWITCH_BUSY", message: "正在切换对话，请等待当前切换完成。", exitCode: null, stderr: "" });
-    return;
-  }
   const previousState = latestState;
   const previousProjection = currentProjection;
   const previousThreadView = threadView;
   const previousNativeThreadId = selectedNativeThreadId ?? latestState?.nativeThreadId ?? null;
   persistCurrentDraft(promptElement.value);
-  threadTransitionInFlight = true;
-  const generation = ++threadViewGeneration;
+  const selection: ThreadSelectionRequest = beginThreadSelection(++threadViewGeneration, nativeThreadId);
+  const generation = selection.generation;
   selectedNativeThreadId = nativeThreadId;
+  pendingSelectedThreadId = nativeThreadId;
   threadUnavailableId = null;
   resetWorkspaceScroll();
   // A Thread switch is a navigation transition. Clear the previous Thread view
@@ -1402,12 +1433,26 @@ async function selectThread(nativeThreadId: string): Promise<void> {
   currentProjection = null;
   threadView = null;
   activateThreadBuffers(nativeThreadId);
+  latestState = runtimeStates.get(nativeThreadId) ?? {
+    state: "STARTING",
+    nativeThreadId,
+    activeTurnId: null,
+    localRunId: null,
+    cwd: "",
+    initialized: false,
+    processId: null,
+    processExited: true,
+    exitCode: null,
+    lastError: null,
+  };
+  renderState(latestState);
   renderThreadWorkspace();
   let completed = false;
   let failedTarget = false;
   try {
     const result = await consume("native-thread.switch", api.switchThread(nativeThreadId));
-    if (result && generation === threadViewGeneration) {
+    if (result && isCurrentThreadSelection(selection, threadViewGeneration, selectedNativeThreadId)) {
+      pendingSelectedThreadId = null;
       selectedNativeThreadId = result.snapshot.nativeThreadId;
       currentProjection = result.projection;
       threadView = null;
@@ -1423,17 +1468,19 @@ async function selectThread(nativeThreadId: string): Promise<void> {
       } else {
         failedTarget = true;
       }
-    } else if (generation === threadViewGeneration) {
+    } else if (isCurrentThreadSelection(selection, threadViewGeneration, selectedNativeThreadId)) {
       failedTarget = true;
       await refreshNavigation();
     }
   } finally {
-    if (!completed && generation === threadViewGeneration) {
+    if (!completed && isCurrentThreadSelection(selection, threadViewGeneration, selectedNativeThreadId)) {
       if (failedTarget) {
+        pendingSelectedThreadId = null;
         threadUnavailableId = nativeThreadId;
         renderNoSelectedThread();
       } else {
         selectedNativeThreadId = previousNativeThreadId;
+        pendingSelectedThreadId = null;
         latestState = previousState;
         currentProjection = previousProjection;
         threadView = previousThreadView;
@@ -1442,7 +1489,6 @@ async function selectThread(nativeThreadId: string): Promise<void> {
         else renderThreadWorkspace();
       }
     }
-    threadTransitionInFlight = false;
   }
 }
 
@@ -1732,8 +1778,51 @@ function handleServerRequest(event: NativeServerRequestEvent): void {
   renderThreadWorkspace();
 }
 
+function handleTurnCompletion(event: NativeTurnCompletionEvent): void {
+  const nativeThreadId = event.nativeThreadId;
+  const submitted = submittedPromptSnapshotsByThread.get(nativeThreadId);
+  if (!submitted) {
+    pendingTurnCompletionsByThread.set(nativeThreadId, event);
+    return;
+  }
+  appendOutput("turn.result", event.result ?? event.error, nativeThreadId);
+  submittedPromptSnapshotsByThread.delete(nativeThreadId);
+  turnOperationThreads.delete(nativeThreadId);
+  const hasNewerDraft = currentDraftRevision(nativeThreadId) !== submitted.draftRevision;
+  const successful = event.result?.status === "completed" || event.result?.status === "interrupted";
+  if (!hasNewerDraft && successful) {
+    clearDraftForThread(nativeThreadId);
+  } else if (!hasNewerDraft) {
+    const error = event.error ?? event.result?.error ?? {
+      name: "TurnNotCompleted",
+      code: "TURN_NOT_COMPLETED",
+      message: "本轮未正常完成，Prompt 已保留，可在恢复后重试。",
+      exitCode: null,
+      stderr: "",
+    };
+    if (selectedNativeThreadId === nativeThreadId) {
+      promptElement.value = submitted.prompt;
+      resizePromptTextarea();
+      persistCurrentDraft(submitted.prompt);
+    } else {
+      localStorage.setItem(draftKey(nativeThreadId), submitted.prompt);
+    }
+    showError(error, nativeThreadId);
+  } else if (selectedNativeThreadId === nativeThreadId) {
+    persistCurrentDraft(promptElement.value);
+  }
+  if (selectedNativeThreadId === nativeThreadId) {
+    renderComposerOptions(nativeThreadId);
+    void loadThreadView();
+    void consume("runtime.state", api.getState()).then((state) => { if (state) renderState(state); });
+  } else {
+    void refreshNavigation();
+  }
+}
+
 promptElement.addEventListener("input", () => {
   resizePromptTextarea();
+  if (draftThreadId) markDraftEdited(draftThreadId);
   persistCurrentDraft(promptElement.value);
 });
 resizePromptTextarea();
@@ -1884,7 +1973,7 @@ composerFormElement.addEventListener("submit", async (event) => {
     return;
   }
   const runtimeTarget = runtimeStates.get(nativeThreadId);
-  if (!isComposerTargetValid({
+  if (pendingSelectedThreadId === nativeThreadId || !isComposerTargetValid({
     requestedThreadId: nativeThreadId,
     selectedThreadId: selectedNativeThreadId,
     runtimeThreadId: runtimeTarget?.nativeThreadId,
@@ -1925,42 +2014,38 @@ composerFormElement.addEventListener("submit", async (event) => {
     return;
   }
   if (turnOperationThreads.has(nativeThreadId)) return;
+  const submittedDraftRevision = currentDraftRevision(nativeThreadId);
   turnOperationThreads.add(nativeThreadId);
   renderState(latestState ?? { state: "TURN_RUNNING", nativeThreadId, activeTurnId: null, localRunId: null, cwd: "", initialized: false, processId: null, processExited: true, exitCode: null, lastError: null });
   showStatus("消息已发送，等待回复…");
   const result = await consume("turn.start", api.startTurn(prompt, nativeThreadId, preferences), nativeThreadId);
-  turnOperationThreads.delete(nativeThreadId);
   if (result) {
-    appendOutput("turn.result", result, nativeThreadId);
-    if (selectedNativeThreadId === nativeThreadId) {
-      const readOk = await loadThreadView();
-      if (readOk && (result.status === "completed" || result.status === "interrupted")) {
+    submittedPromptSnapshotsByThread.set(nativeThreadId, {
+      prompt,
+      localRunId: result.localRunId,
+      turnId: result.turnId,
+      draftRevision: submittedDraftRevision,
+    });
+    if (selectedNativeThreadId === nativeThreadId
+      && currentDraftRevision(nativeThreadId) === submittedDraftRevision
+      && promptElement.value === prompt) {
         promptElement.value = "";
         resizePromptTextarea();
-        clearCurrentDraft();
-      } else {
-        promptElement.value = prompt;
-        persistCurrentDraft(prompt);
-        if (result.status !== "completed" && result.status !== "interrupted") {
-          showError(result.error ?? {
-            name: "TurnNotCompleted",
-            code: "TURN_NOT_COMPLETED",
-            message: "本轮未正常完成，Prompt 已保留，可在恢复后重试。",
-            exitCode: null,
-            stderr: "",
-          }, nativeThreadId);
-        }
-      }
-      await consume("runtime.state", api.getState()).then((state) => { if (state) renderState(state); });
+        clearDraftForThread(nativeThreadId);
+    } else if (selectedNativeThreadId === nativeThreadId) {
+      persistCurrentDraft(promptElement.value);
     } else {
-      if (result.status === "completed" || result.status === "interrupted") {
-        localStorage.removeItem(draftKey(nativeThreadId));
-      } else {
-        localStorage.setItem(draftKey(nativeThreadId), prompt);
-      }
-      await refreshNavigation();
+      clearDraftForThread(nativeThreadId);
     }
+    const pendingCompletion = pendingTurnCompletionsByThread.get(nativeThreadId);
+    if (pendingCompletion) {
+      pendingTurnCompletionsByThread.delete(nativeThreadId);
+      queueMicrotask(() => handleTurnCompletion(pendingCompletion));
+    }
+    renderComposerOptions(nativeThreadId);
+    showStatus("Prompt 已提交，正在生成；输入框已清空，可继续编辑草稿。");
   } else {
+    turnOperationThreads.delete(nativeThreadId);
     localStorage.setItem(draftKey(nativeThreadId), prompt);
     if (selectedNativeThreadId === nativeThreadId) {
       promptElement.value = prompt;
@@ -2103,6 +2188,7 @@ closeMaintenanceDialogButton.addEventListener("click", () => maintenanceDialog.c
 
 api.onEvent(addLiveEvent);
 api.onServerRequest(handleServerRequest);
+api.onTurnResult(handleTurnCompletion);
 api.onComposerRequest((event) => {
   appendOutput("composer.turn-start.requested", event, event.nativeThreadId);
   if (event.nativeThreadId === selectedNativeThreadId) showStatus("已发送 Native Turn（Requested / Sent 参数已记录）");

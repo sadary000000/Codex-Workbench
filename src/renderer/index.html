@@ -323,10 +323,10 @@
                 </div>
               </details>
               <details id="composer-access-menu" class="composer-popover">
-                <summary id="composer-access-summary">访问权限</summary>
+                <summary id="composer-access-summary" title="确认策略（Approval）决定是否请求确认；执行范围（Sandbox）决定本轮可操作范围。确认策略不会扩大执行范围。">运行策略</summary>
                 <div class="composer-popover-menu">
-                  <label for="composer-approval">审批<select id="composer-approval"><option value="never">不请求审批</option><option value="on-request">需要时请求审批</option></select></label>
-                  <label for="composer-sandbox">沙箱<select id="composer-sandbox"><option value="read-only">只读</option><option value="workspace-write">项目可写</option></select></label>
+                  <label for="composer-approval" title="Approval：控制本轮是否显示原生审批卡；不会扩大 Sandbox 执行范围。">Approval（确认策略）<select id="composer-approval" title="从不请求审批：Codex 不会弹出审批请求。这不会自动扩大 Sandbox 权限；超出当前 Sandbox 的操作会被拒绝或需要改用其它可行方案。"><option value="never">从不请求审批</option><option value="on-request">按需请求审批</option></select></label>
+                  <label for="composer-sandbox" title="Sandbox：控制本轮文件与运行范围；不改变 Approval 策略。">Sandbox（执行范围）<select id="composer-sandbox" title="Sandbox：决定本轮可操作范围，不改变 Approval 策略。"><option value="read-only">只读</option><option value="workspace-write">工作区写入</option></select></label>
                 </div>
               </details>
             </div>

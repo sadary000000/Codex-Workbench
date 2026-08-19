@@ -24,6 +24,7 @@ import type {
   RuntimeSnapshot,
   RuntimeState,
   ThreadReadView,
+  TurnAcceptance,
   TurnResult,
   NativeTurnOptions,
 } from "../shared/runtime-types.ts";
@@ -45,6 +46,8 @@ export interface NativeThreadRuntimeOptions {
   onProcessExit?: (exitCode: number | null, stderr: string) => void;
   persistence?: V1PersistenceStore;
   projectId?: string | null;
+  /** Main owns the selected-thread binding when multiple runtimes resume concurrently. */
+  persistBindingOnResume?: boolean;
 }
 
 interface ActiveTurn {
@@ -162,6 +165,7 @@ export class NativeThreadRuntime {
   private readonly dynamicTools: DynamicToolSpec[];
   private readonly onProcessExit: NativeThreadRuntimeOptions["onProcessExit"];
   private readonly persistence: V1PersistenceStore | null;
+  private readonly persistBindingOnResume: boolean;
   private projectIdValue: string | null | undefined;
   private client: AppServerClientPort | null = null;
   private unsubscribe = (): void => undefined;
@@ -193,6 +197,7 @@ export class NativeThreadRuntime {
     this.onProcessExit = options.onProcessExit;
     this.persistence = options.persistence ?? null;
     this.projectIdValue = options.projectId;
+    this.persistBindingOnResume = options.persistBindingOnResume ?? true;
   }
 
   get workingDirectory(): string {
@@ -349,7 +354,7 @@ export class NativeThreadRuntime {
           lastKnownTurnId: read.turns.at(-1)?.id ?? null,
           lastError: null,
         });
-        if (!persisted || (explicitResume && persistedId !== requestedId)) {
+        if (this.persistBindingOnResume && (!persisted || (explicitResume && persistedId !== requestedId))) {
           await saveThreadBinding(this.stateFile, {
             version: 1,
             nativeThreadId: requestedId,
@@ -478,6 +483,20 @@ export class NativeThreadRuntime {
   }
 
   async startTurn(prompt: string, options: NativeTurnOptions = {}): Promise<TurnResult> {
+    const operation = await this.startTurnAccepted(prompt, options);
+    return operation.completion;
+  }
+
+  /**
+   * Starts a Native Turn and resolves as soon as App Server acknowledges
+   * `turn/start`. The completion remains owned by this Runtime so persistence,
+   * state, and Native events continue to converge after the UI has accepted
+   * and cleared its visible draft.
+   */
+  async startTurnAccepted(prompt: string, options: NativeTurnOptions = {}): Promise<{
+    acceptance: TurnAcceptance;
+    completion: Promise<TurnResult>;
+  }> {
     const text = prompt.trim();
     if (!text) throw this.fail("PROMPT_REQUIRED", "Prompt is required.");
     if (text.length > MAX_PROMPT_LENGTH) throw this.fail("PROMPT_TOO_LONG", "Prompt exceeds the Phase 1 limit.");
@@ -520,9 +539,47 @@ export class NativeThreadRuntime {
       if (!turnId) throw this.fail("TURN_ID_MISSING", "turn/start did not return a Turn ID.");
       this.activeTurnValue = { localRunId, turnId };
       if (this.persistence) {
-        await this.persistence.updatePrompt(localRunId, { status: "running", turnId });
+        await this.safeUpdatePrompt(localRunId, { status: "running", turnId });
       }
-      const terminal = await this.client.waitForNotification(
+      this.turnStartInFlight = false;
+      const acceptance: TurnAcceptance = {
+        accepted: true,
+        localRunId,
+        nativeThreadId,
+        turnId,
+      };
+      return {
+        acceptance,
+        completion: this.completeTurn(localRunId, nativeThreadId, turnId),
+      };
+    } catch (error) {
+      this.activeTurnValue = null;
+      const normalized = asError(error);
+      const details = errorInfo(normalized);
+      const recoveryRequired = transportRecovery(normalized) || this.stateValue === "DISCONNECTED" || this.closing;
+      const promptStatus: PromptRecoveryStatus = recoveryRequired ? "recovery_required" : "failed";
+      await this.safeUpdatePrompt(localRunId, { status: promptStatus, turnId, lastError: details });
+      if (this.stateValue !== "DISCONNECTED" && this.stateValue !== "RECOVERY_REQUIRED") {
+        this.stateValue = recoveryRequired ? "RECOVERY_REQUIRED" : "FAILED";
+      }
+      this.lastErrorValue = details;
+      const failureState: RuntimeState = this.stateValue;
+      await this.safePersistProjection({
+        ...(isWriterConflictError(normalized)
+          ? {}
+          : { lastKnownState: failureState === "DISCONNECTED" ? "disconnected" : recoveryRequired ? "recovery_required" : "failed" }),
+        lastKnownTurnId: turnId,
+        lastError: details,
+      });
+      throw normalized;
+    } finally {
+      this.turnStartInFlight = false;
+    }
+  }
+
+  private async completeTurn(localRunId: string, nativeThreadId: string, turnId: string): Promise<TurnResult> {
+    try {
+      const terminal = await this.client!.waitForNotification(
         "turn/completed",
         (message) => messageIds(message).threadId === nativeThreadId && messageIds(message).turnId === turnId,
         this.timeoutMs,
@@ -580,8 +637,6 @@ export class NativeThreadRuntime {
         lastError: details,
       });
       throw normalized;
-    } finally {
-      this.turnStartInFlight = false;
     }
   }
 

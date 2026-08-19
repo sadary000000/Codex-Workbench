@@ -161,6 +161,21 @@ export interface TurnResult {
   error: RuntimeErrorInfo | null;
 }
 
+/** Authoritative acknowledgement returned after App Server accepts turn/start. */
+export interface TurnAcceptance {
+  accepted: true;
+  localRunId: string;
+  nativeThreadId: string;
+  turnId: string;
+}
+
+/** Renderer-facing completion notification for a previously accepted Turn. */
+export interface NativeTurnCompletionEvent {
+  nativeThreadId: string;
+  result: TurnResult | null;
+  error: RuntimeErrorInfo | null;
+}
+
 export interface RuntimeErrorInfo {
   name: string;
   code: string | null;

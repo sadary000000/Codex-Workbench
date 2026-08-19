@@ -68,8 +68,8 @@ test("stage I composer uses compact popovers and one action slot", () => {
   assert.match(composer, /<button id="start-turn"[^>]*type="submit"/);
   assert.match(composer, /<label for="composer-model">[\s\S]*?<select id="composer-model">/);
   assert.match(composer, /<label for="composer-effort">[\s\S]*?<select id="composer-effort">/);
-  assert.match(composer, /<label for="composer-approval">[\s\S]*?<select id="composer-approval">/);
-  assert.match(composer, /<label for="composer-sandbox">[\s\S]*?<select id="composer-sandbox">/);
+  assert.match(composer, /<label for="composer-approval"[^>]*>[\s\S]*?<select id="composer-approval"/);
+  assert.match(composer, /<label for="composer-sandbox"[^>]*>[\s\S]*?<select id="composer-sandbox"/);
   assert.match(html, /\.composer\s*\{[^}]*max-width:\s*var\(--content-max-width\)/s);
   assert.match(html, /textarea\s*\{[^}]*max-height:\s*240px;/s);
 });

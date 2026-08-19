@@ -48,7 +48,8 @@ test("Main process validates the selected cwd and does not expose path editing",
 test("reliability paths fail closed and preserve the active Thread truth", () => {
   assert.match(renderer, /NATIVE_THREAD_UNAVAILABLE/);
   assert.match(renderer, /renderNoSelectedThread\(\)/);
-  assert.match(renderer, /result\.status === "completed" \|\| result\.status === "interrupted"/);
+  assert.match(renderer, /const successful = event\.result\?\.status === "completed" \|\| event\.result\?\.status === "interrupted"/);
+  assert.match(renderer, /clearDraftForThread\(nativeThreadId\)/);
   assert.match(renderer, /localStorage\.setItem\(draftKey\(operationThreadId\)/);
   assert.match(main, /existing\.state === "FAILED"/);
   assert.match(main, /existing\.state === "RECOVERY_REQUIRED"/);

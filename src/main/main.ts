@@ -8,7 +8,7 @@ import { createLogger, logError, type Logger } from "../shared/logger.ts";
 import { isNativeApprovalMethod, isValidNativeApprovalResponse, noAdditionalPermissions } from "../shared/native-approval.ts";
 import { PersistenceStoreError, V1PersistenceStore } from "../shared/persistence-store.ts";
 import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
-import type { JsonRpcMessage, RuntimeSnapshot, ThreadNavigationResult } from "../shared/runtime-types.ts";
+import type { JsonRpcMessage, NativeTurnCompletionEvent, RuntimeSnapshot, ThreadNavigationResult } from "../shared/runtime-types.ts";
 import { ConversationMapCoordinator } from "./map-coordinator.ts";
 import { ProjectMapManager } from "./project-map-manager.ts";
 import { RuntimeRegistry } from "./runtime-registry.ts";
@@ -25,6 +25,7 @@ const IPC = Object.freeze({
   resume: "native-runtime:resume",
   read: "native-runtime:read",
   turn: "native-runtime:turn",
+  turnResult: "native-runtime:turn-result",
   composerCapabilities: "native-runtime:composer-capabilities",
   composerRequest: "native-runtime:composer-request",
   composerPreferencesGet: "persistence:composer-preferences:get",
@@ -63,6 +64,7 @@ const IPC = Object.freeze({
 let mainWindow: BrowserWindow | null = null;
 const runtimes = new RuntimeRegistry<NativeThreadRuntime>();
 let currentNativeThreadId: string | null = null;
+let threadSwitchSequence = 0;
 let persistence: V1PersistenceStore | null = null;
 let conversationMaps: ConversationMapCoordinator | null = null;
 let projectMaps: ProjectMapManager | null = null;
@@ -148,6 +150,10 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
     stateFile: join(userData, "native-thread-binding.json"),
     persistence: getPersistence(),
     projectId: target.projectId,
+    // The selected binding is committed by selectNativeThread after the
+    // latest switch request wins. Concurrent runtime resumes must not race
+    // on this single historical binding file.
+    persistBindingOnResume: false,
     onEvent: (event) => {
       logger.info("native_event", { method: event.method, threadId: event.threadId, turnId: event.turnId, itemId: event.itemId });
       send(IPC.event, event);
@@ -346,6 +352,9 @@ async function selectNativeThread(nativeThreadId: string): Promise<void> {
     createdAt: now,
     updatedAt: now,
   });
+  // A completed create/start selection also supersedes any older async
+  // switch request; prevent that stale request from committing afterward.
+  threadSwitchSequence += 1;
   currentNativeThreadId = nativeThreadId;
 }
 
@@ -408,11 +417,12 @@ async function startCurrentRuntime(): Promise<NativeThreadRuntime> {
 async function switchNativeThread(nativeThreadId: string): Promise<ThreadNavigationResult> {
   const id = nativeThreadId.trim();
   if (!id) throw new Error("nativeThreadId is required for switch.");
+  const sequence = ++threadSwitchSequence;
   const projection = await getPersistence().getThreadProjection(id);
   if (!projection) throw projectionNotFound(id);
   try {
     const candidate = await loadRuntimeForThread(id);
-    await selectNativeThread(id);
+    if (sequence === threadSwitchSequence) await selectNativeThread(id);
     const currentProjection = await getPersistence().getThreadProjection(id);
     if (!currentProjection) throw projectionNotFound(id);
     return { snapshot: candidate.snapshot(), projection: currentProjection };
@@ -730,11 +740,18 @@ function registerIpc(): void {
         throw error;
       }
       const parsedPreferences = parseComposerPreferences(preferences);
-      const operation = activeRuntime.startTurn(typeof prompt === "string" ? prompt : "", buildNativeTurnOptions(parsedPreferences, activeRuntime.workingDirectory));
+      const operation = await activeRuntime.startTurnAccepted(typeof prompt === "string" ? prompt : "", buildNativeTurnOptions(parsedPreferences, activeRuntime.workingDirectory));
       send(IPC.state, activeRuntime.snapshot());
-      const result = await operation;
-      send(IPC.state, activeRuntime.snapshot());
-      return ok(result);
+      void operation.completion.then((result) => {
+        const completion: NativeTurnCompletionEvent = { nativeThreadId: result.nativeThreadId, result, error: null };
+        send(IPC.turnResult, completion);
+        send(IPC.state, activeRuntime?.snapshot() ?? emptyRuntimeSnapshot());
+      }).catch((error) => {
+        const completion: NativeTurnCompletionEvent = { nativeThreadId: requestedThreadId, result: null, error: errorInfo(error) };
+        send(IPC.turnResult, completion);
+        send(IPC.state, activeRuntime?.snapshot() ?? emptyRuntimeSnapshot());
+      });
+      return ok(operation.acceptance);
     } catch (error) {
       if (activeRuntime) send(IPC.state, activeRuntime.snapshot());
       const failedThreadId = activeRuntime?.nativeThreadId ?? requestedThreadId;

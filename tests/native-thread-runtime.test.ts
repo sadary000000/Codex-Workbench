@@ -306,6 +306,40 @@ test("discovers Composer capabilities and forwards options without changing Nati
   await harness.runtime.close();
 });
 
+test("returns authoritative Turn acceptance before terminal completion", async () => {
+  const harness = await createRuntime(false, { turnCompletionStatus: "completed" });
+  await harness.runtime.start();
+  const operation = await harness.runtime.startTurnAccepted("LONG");
+  assert.equal(operation.acceptance.accepted, true);
+  assert.equal(operation.acceptance.nativeThreadId, "native-thread");
+  assert.equal(operation.acceptance.turnId, harness.runtime.snapshot().activeTurnId);
+  assert.equal(harness.runtime.snapshot().localRunId, operation.acceptance.localRunId);
+
+  let completed = false;
+  void operation.completion.then(() => { completed = true; });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(completed, false, "acceptance must not wait for turn/completed");
+
+  await harness.runtime.interruptTurn();
+  const result = await operation.completion;
+  assert.equal(result.status, "interrupted");
+  assert.equal(result.nativeThreadId, operation.acceptance.nativeThreadId);
+  await harness.runtime.close();
+});
+
+test("keeps the recovery record when an accepted Turn later fails", async () => {
+  const harness = await createRuntime(false, { turnCompletionStatus: "failed" });
+  await harness.runtime.start();
+  const operation = await harness.runtime.startTurnAccepted("accepted but failed");
+  const result = await operation.completion;
+  assert.equal(result.status, "failed");
+  const recoverable = await harness.persistence.listRecoverablePrompts("native-thread");
+  assert.equal(recoverable[0]?.prompt, "accepted but failed");
+  assert.equal(recoverable[0]?.turnId, operation.acceptance.turnId);
+  assert.equal(recoverable[0]?.status, "failed");
+  await harness.runtime.close();
+});
+
 test("emits exact Composer turn/start diagnostics before the request is sent", async () => {
   const requests: ComposerRequestDiagnostics[] = [];
   const harness = await createRuntime(false, { onTurnStartRequest: (request) => requests.push(request) });
