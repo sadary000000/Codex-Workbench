@@ -41,6 +41,7 @@ const channels = Object.freeze({
   projectMapMaintenanceRead: "project-map:maintenance-read",
   projectMapState: "project-map:state",
   webGptState: "webgpt:state",
+  webGptOpenRequest: "webgpt:open-request",
   webGptOpenWorkspace: "webgpt:open-workspace",
   webGptOpenHome: "webgpt:open-home",
   webGptOpenChat: "webgpt:open-chat",
@@ -126,4 +127,5 @@ contextBridge.exposeInMainWorld("codexWorkbenchWebGPT", Object.freeze({
   reloadWebGpt: () => ipcRenderer.invoke(channels.webGptReload),
   openWebGptExternal: () => ipcRenderer.invoke(channels.webGptOpenExternal),
   onWebGptState: (listener: (payload: unknown) => void) => listen(channels.webGptState, listener),
+  onWebGptOpenRequest: (listener: () => void) => listen(channels.webGptOpenRequest, () => listener()),
 }));

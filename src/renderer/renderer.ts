@@ -101,6 +101,7 @@ interface WebGptApi {
   reloadWebGpt(): Promise<IpcEnvelope<WebGptState>>;
   openWebGptExternal(): Promise<IpcEnvelope<{ url: string }>>;
   onWebGptState(listener: (payload: WebGptState) => void): () => void;
+  onWebGptOpenRequest(listener: () => void): () => void;
 }
 
 declare global {
@@ -314,7 +315,7 @@ function syncWebGptBounds(): void {
   });
 }
 
-async function showWebGptWorkspace(): Promise<void> {
+function revealWebGptWorkspace(): void {
   webGptOpen = true;
   webGptWorkspaceElement.hidden = false;
   openWebGptButton.setAttribute("aria-current", "page");
@@ -323,6 +324,10 @@ async function showWebGptWorkspace(): Promise<void> {
     renderMapPanel();
   }
   syncWebGptBounds();
+}
+
+async function showWebGptWorkspace(): Promise<void> {
+  revealWebGptWorkspace();
   const result = await consume("webgpt.open-workspace", webGptApi.openWebGptWorkspace());
   if (result) renderWebGptState(result);
   syncWebGptBounds();
@@ -2357,7 +2362,12 @@ api.onProjectMapState((status) => {
   projectMapStatus = status;
   renderMapPanel();
 });
-webGptApi.onWebGptState((state) => renderWebGptState(state));
+webGptApi.onWebGptState((state) => {
+  if (state.visible && !webGptOpen) revealWebGptWorkspace();
+  renderWebGptState(state);
+  if (state.visible) syncWebGptBounds();
+});
+webGptApi.onWebGptOpenRequest(() => { void showWebGptWorkspace(); });
 api.onState((state) => {
   // RuntimeRegistry may continue emitting state for a background Thread after
   // a selected Thread became unavailable. Record it for sidebar diagnostics,

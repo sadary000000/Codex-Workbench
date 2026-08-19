@@ -1,5 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from "electron";
-import { join, dirname } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { extname, isAbsolute, join, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
 import { MAP_DYNAMIC_TOOL_SPEC, MAP_TOOL_CALL_METHOD } from "../codex/map-tool.ts";
@@ -17,9 +19,12 @@ import { isComposerTargetValid } from "../shared/thread-target.ts";
 import { buildNativeTurnOptions, parseComposerPreferences } from "../codex/composer-capabilities.ts";
 import { validateProjectDirectory } from "../shared/project-path.ts";
 import { WebGptWorkspace, type WebGptBounds } from "../features/webgpt/index.ts";
+import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
+import { WEBGPT_CONTROL_PROTOCOL_VERSION, WebGptControlServer, controlDescriptorPath, createControlDescriptor, publishControlDescriptor, removeControlDescriptor, runWebGptCli, type WebGptControlDescriptor, type WebGptControlIdentity, type WebGptControlRequest, type WebGptControlResponse } from "./webgpt-control.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const workbenchInstanceId = randomUUID();
 const IPC = Object.freeze({
   state: "native-runtime:state",
   start: "native-runtime:start",
@@ -61,6 +66,7 @@ const IPC = Object.freeze({
   projectMapMaintenanceRead: "project-map:maintenance-read",
   projectMapState: "project-map:state",
   webGptState: "webgpt:state",
+  webGptOpenRequest: "webgpt:open-request",
   webGptOpenWorkspace: "webgpt:open-workspace",
   webGptOpenHome: "webgpt:open-home",
   webGptOpenChat: "webgpt:open-chat",
@@ -88,10 +94,220 @@ let conversationMaps: ConversationMapCoordinator | null = null;
 let projectMaps: ProjectMapManager | null = null;
 let webGptWorkspace: WebGptWorkspace | null = null;
 let quittingForExit = false;
+let pendingWebGptCommand: WebGptExternalCommand | null = null;
+let workbenchReady = false;
+let webGptControlServer: WebGptControlServer | null = null;
+let webGptControlDescriptorFile: string | null = null;
+let webGptRuntimeId: string | null = null;
+let webGptControlRevision = 0;
+let webGptControlQueue: Promise<void> = Promise.resolve();
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
 
 function send(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function forwardPendingWebGptCommand(): void {
+  if (!pendingWebGptCommand || !mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.webContents.isLoadingMainFrame()) return;
+  const command = pendingWebGptCommand;
+  pendingWebGptCommand = null;
+  focusMainWindow();
+  if (command.type === "open-workspace") {
+    send(IPC.webGptOpenRequest, { source: "command-line" });
+  }
+}
+
+function requestWebGptCommand(command: WebGptExternalCommand): void {
+  pendingWebGptCommand = command;
+  forwardPendingWebGptCommand();
+}
+
+function controlOk(command: string, result: unknown): WebGptControlResponse {
+  return { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: "pending", ok: true, command, result };
+}
+
+function controlFail(command: string, code: string, message: string): WebGptControlResponse {
+  return { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: "pending", ok: false, command, error: { code, message } };
+}
+
+function controlIdentity(): WebGptControlIdentity {
+  return {
+    workbenchInstanceId,
+    webgptRuntimeId: webGptRuntimeId,
+    sessionKey: "default",
+    revision: webGptControlRevision,
+  };
+}
+
+function attachControlIdentity(request: WebGptControlRequest, response: WebGptControlResponse): WebGptControlResponse {
+  return { ...response, requestId: request.requestId, identity: controlIdentity() };
+}
+
+function codedError(code: string, message: string): Error & { code: string } {
+  const error = new Error(message) as Error & { code: string };
+  error.code = code;
+  return error;
+}
+
+function pathWithin(root: string, candidate: string): boolean {
+  const child = relative(resolve(root), resolve(candidate));
+  return child.length > 0 && child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child);
+}
+
+function validateScreenshotPath(rawPath: string): string {
+  const value = rawPath.trim();
+  if (!value || extname(value).toLowerCase() !== ".png") throw codedError("SCREENSHOT_OUTPUT_INVALID", "截图输出路径必须是 .png 文件。");
+  const candidate = resolve(value);
+  const roots = [process.cwd(), app.getPath("userData"), app.getPath("temp")];
+  if (!roots.some((root) => pathWithin(root, candidate))) {
+    throw codedError("SCREENSHOT_OUTPUT_OUTSIDE_ALLOWLIST", "截图输出路径必须位于当前工作目录、Workbench userData 或系统临时目录内。");
+  }
+  const sessionRoot = join(app.getPath("userData"), "webgpt", "session");
+  if (pathWithin(sessionRoot, candidate)) throw codedError("SCREENSHOT_OUTPUT_SESSION_PATH", "不能把截图写入 WebGPT Session 目录。");
+  return candidate;
+}
+
+function publicWebGptState(state: import("../features/webgpt/types.ts").WebGptState): Record<string, unknown> {
+  return {
+    visible: state.visible,
+    ready: state.ready,
+    mode: state.mode,
+    url: state.url,
+    title: state.title,
+    page: state.page,
+    error: state.error,
+  };
+}
+
+async function webGptStatusResult(): Promise<Record<string, unknown>> {
+  if (!webGptWorkspace) {
+    return {
+      workbench: workbenchReady ? "READY" : "STARTING",
+      webgpt: "UNAVAILABLE",
+      controlOwner: null,
+      currentUrl: "",
+      pageTitle: "",
+      pageHealthy: false,
+      page: null,
+    };
+  }
+  const health = await webGptWorkspace.getHealthStatus();
+  const page = await webGptWorkspace.getPageState();
+  const pageHealthy = health.visible
+    && !health.loading
+    && !health.error
+    && Boolean(health.url)
+    && !page.loginRequired
+    && page.onChatPage
+    && page.composerFound
+    && !page.url.startsWith("chrome-error://");
+  return {
+    workbench: workbenchReady ? "READY" : "STARTING",
+    webgpt: health.error ? "UNHEALTHY" : pageHealthy ? "READY" : "UNAVAILABLE",
+    controlOwner: health.mode,
+    currentUrl: health.url,
+    pageTitle: health.title,
+    pageHealthy,
+    page,
+  };
+}
+
+async function handleWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {
+  let response: WebGptControlResponse;
+  try {
+    if (request.command !== "webgpt.status" && !workbenchReady) {
+      response = controlFail(request.command, "WORKBENCH_NOT_READY", "Workbench 窗口尚未完成加载。");
+    } else if (request.command === "webgpt.status") {
+      response = controlOk(request.command, await webGptStatusResult());
+    } else if (request.command === "webgpt.open") {
+      const state = await getWebGptWorkspace().openWorkspace();
+      response = controlOk(request.command, publicWebGptState(state));
+    } else if (request.command === "webgpt.current") {
+      const result = await webGptStatusResult();
+      response = result.webgpt !== "READY"
+        ? controlFail(request.command, "WEBGPT_UNAVAILABLE", "WebGPT 页面当前不可用或尚未打开。")
+        : controlOk(request.command, result);
+    } else if (request.command === "webgpt.control.user") {
+      const state = await getWebGptWorkspace().requestUserControl();
+      response = controlOk(request.command, publicWebGptState(state));
+    } else if (request.command === "webgpt.control.auto") {
+      const state = await getWebGptWorkspace().returnAutomationControl();
+      response = controlOk(request.command, publicWebGptState(state));
+    } else if (request.command === "webgpt.screenshot") {
+      if (!request.out) {
+        response = controlFail(request.command, "SCREENSHOT_OUTPUT_REQUIRED", "screenshot 必须提供 --out <png-path>。");
+      } else {
+        const outputPath = validateScreenshotPath(request.out);
+        const screenshot = await getWebGptWorkspace().takeScreenshot();
+        const image = Buffer.from(screenshot.data, "base64");
+        if (image.byteLength > 25 * 1024 * 1024) throw codedError("SCREENSHOT_OUTPUT_TOO_LARGE", "截图超过 25 MB 限制。");
+        try {
+          await writeFile(outputPath, image, { flag: "wx" });
+        } catch (error) {
+          if ((error as { code?: string })?.code === "EEXIST") throw codedError("SCREENSHOT_OUTPUT_EXISTS", "截图输出文件已存在，为避免覆盖已拒绝写入。");
+          throw error;
+        }
+        response = controlOk(request.command, {
+          path: outputPath,
+          width: screenshot.width,
+          height: screenshot.height,
+          mimeType: screenshot.mimeType,
+          sha256: createHash("sha256").update(image).digest("hex"),
+          bytes: image.byteLength,
+        });
+      }
+    } else {
+      response = controlFail(request.command, "CONTROL_COMMAND_UNSUPPORTED", "不支持的 WebGPT Control Plane 命令。");
+    }
+  } catch (error) {
+    const normalized = errorInfo(error);
+    const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "WEBGPT_COMMAND_FAILED";
+    response = controlFail(request.command, code, normalized.message);
+  }
+  return attachControlIdentity(request, response);
+}
+
+function enqueueWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {
+  const result = webGptControlQueue.then(() => handleWebGptControlRequest(request));
+  webGptControlQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+function cliOutput(invocation: WebGptCliCommand, response: WebGptControlResponse): string {
+  if (invocation.json) return `${JSON.stringify(response)}\n`;
+  if (response.ok) return `${response.command}: OK\n${JSON.stringify(response.result ?? null, null, 2)}\n`;
+  return `${response.command}: ERROR [${response.error?.code ?? "UNKNOWN"}] ${response.error?.message ?? "未知错误"}\n`;
+}
+
+async function runCliInvocation(invocation: WebGptCliInvocation): Promise<never> {
+  if (invocation.kind === "error") {
+    const response: WebGptControlResponse = {
+      version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+      requestId: randomUUID(),
+      ok: false,
+      command: "webgpt",
+      error: { code: "CLI_INVALID_ARGUMENT", message: invocation.message },
+    };
+    const parseError = response.error ?? { code: "CLI_INVALID_ARGUMENT", message: invocation.message };
+    const output = invocation.json ? `${JSON.stringify(response)}\n` : `${response.command}: ERROR [${parseError.code}] ${parseError.message}\n`;
+    await new Promise<void>((resolveOutput) => (invocation.json ? process.stdout : process.stderr).write(output, () => resolveOutput()));
+    process.exit(2);
+  }
+  if (invocation.kind !== "command") process.exit(2);
+  await app.whenReady();
+  const response = await runWebGptCli(invocation.command, process.execPath, controlDescriptorPath(app.getPath("userData")));
+  const output = cliOutput(invocation.command, response);
+  const stream = invocation.command.json || response.ok ? process.stdout : process.stderr;
+  await new Promise<void>((resolveOutput) => stream.write(output, () => resolveOutput()));
+  process.exit(response.ok ? 0 : 1);
 }
 
 function runtimeCwd(): string {
@@ -122,10 +338,14 @@ function getProjectMaps(): ProjectMapManager {
 function getWebGptWorkspace(): WebGptWorkspace {
   if (webGptWorkspace) return webGptWorkspace;
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error("WebGPT Workspace requires a ready Workbench window.");
+  webGptRuntimeId = randomUUID();
   webGptWorkspace = new WebGptWorkspace({
     mainWindow,
     userDataDirectory: app.getPath("userData"),
-    onState: (state) => send(IPC.webGptState, state),
+    onState: (state) => {
+      webGptControlRevision += 1;
+      send(IPC.webGptState, state);
+    },
   });
   return webGptWorkspace;
 }
@@ -900,6 +1120,7 @@ function registerIpc(): void {
 }
 
 function createWindow(): void {
+  workbenchReady = false;
   mainWindow = new BrowserWindow({
     width: 1_120,
     height: 760,
@@ -912,44 +1133,95 @@ function createWindow(): void {
       sandbox: false,
     },
   });
+  mainWindow.webContents.on("did-finish-load", () => {
+    workbenchReady = true;
+    forwardPendingWebGptCommand();
+  });
   void mainWindow.loadFile(join(__dirname, "..", "renderer", "index.html"));
-  mainWindow.on("closed", () => { mainWindow = null; });
+  mainWindow.on("closed", () => {
+    workbenchReady = false;
+    mainWindow = null;
+  });
 }
 
-process.on("uncaughtException", (error) => logError(logger, "uncaught_exception", error));
-process.on("unhandledRejection", (error) => logError(logger, "unhandled_rejection", error));
+async function startWebGptControlPlane(): Promise<void> {
+  const descriptor: WebGptControlDescriptor = createControlDescriptor(workbenchInstanceId);
+  const server = new WebGptControlServer({ handler: enqueueWebGptControlRequest, endpoint: descriptor.endpoint, authToken: descriptor.authToken });
+  const descriptorFile = controlDescriptorPath(app.getPath("userData"));
+  try {
+    await server.start();
+    await publishControlDescriptor(descriptorFile, descriptor);
+    webGptControlServer = server;
+    webGptControlDescriptorFile = descriptorFile;
+    logger.info("webgpt_control_plane_ready", { protocolVersion: WEBGPT_CONTROL_PROTOCOL_VERSION });
+  } catch (error) {
+    await server.close().catch(() => undefined);
+    logger.error("webgpt_control_plane_start_failed", { error: errorInfo(error).message });
+  }
+}
 
-registerIpc();
+const cliInvocation = parseWebGptCliInvocation(process.argv);
 
-app.whenReady().then(() => {
-  logger.info("app_ready", { cwd: runtimeCwd(), version: app.getVersion() });
-  createWindow();
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+if (cliInvocation.kind !== "not-cli") {
+  void runCliInvocation(cliInvocation).catch(async (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    await new Promise<void>((resolveOutput) => process.stderr.write(`webgpt: ERROR [CLI_UNHANDLED] ${message}\n`, () => resolveOutput()));
+    process.exit(1);
   });
-}).catch((error) => logError(logger, "app_start_failed", error));
+} else {
+  const initialWebGptCommand = parseWebGptExternalCommand(process.argv);
+  const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
-app.on("before-quit", (event) => {
-  if (quittingForExit) return;
-  event.preventDefault();
-  quittingForExit = true;
-  cancelPendingNativeApprovals();
-  void (async () => {
-    try {
+  if (!hasSingleInstanceLock) {
+    app.quit();
+  } else {
+    pendingWebGptCommand = initialWebGptCommand;
+    app.on("second-instance", (_event, commandLine) => {
+      const command = parseWebGptExternalCommand(commandLine);
+      if (command) requestWebGptCommand(command);
+      else focusMainWindow();
+    });
+
+    process.on("uncaughtException", (error) => logError(logger, "uncaught_exception", error));
+    process.on("unhandledRejection", (error) => logError(logger, "unhandled_rejection", error));
+
+    registerIpc();
+
+    app.whenReady().then(() => {
+      logger.info("app_ready", { cwd: runtimeCwd(), version: app.getVersion(), webGptCommand: initialWebGptCommand?.type ?? null });
+      createWindow();
+      void startWebGptControlPlane();
+      app.on("activate", () => {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+        else forwardPendingWebGptCommand();
+      });
+    }).catch((error) => logError(logger, "app_start_failed", error));
+
+    app.on("before-quit", (event) => {
+      if (quittingForExit) return;
+      event.preventDefault();
+      quittingForExit = true;
       cancelPendingNativeApprovals();
-      await runtimes.closeAll();
-      if (projectMaps) await projectMaps.close();
-      if (webGptWorkspace) webGptWorkspace.close();
-    } catch (error) {
-      logError(logger, "runtime_shutdown_failed", error);
-    } finally {
-      // The second before-quit event is allowed through by quittingForExit;
-      // recovery writes have completed before Electron exits.
-      app.quit();
-    }
-  })();
-});
+      void (async () => {
+        try {
+          cancelPendingNativeApprovals();
+          if (webGptControlServer) await webGptControlServer.close();
+          if (webGptControlDescriptorFile) await removeControlDescriptor(webGptControlDescriptorFile);
+          await runtimes.closeAll();
+          if (projectMaps) await projectMaps.close();
+          if (webGptWorkspace) webGptWorkspace.close();
+        } catch (error) {
+          logError(logger, "runtime_shutdown_failed", error);
+        } finally {
+          // The second before-quit event is allowed through by quittingForExit;
+          // recovery writes have completed before Electron exits.
+          app.quit();
+        }
+      })();
+    });
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+    app.on("window-all-closed", () => {
+      if (process.platform !== "darwin") app.quit();
+    });
+  }
+}

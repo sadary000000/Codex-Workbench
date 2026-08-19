@@ -173,7 +173,11 @@ export class WebGptWorkspace implements WebGptPublicService {
     try {
       const value = await this.view.webContents.executeJavaScript(WEBGPT_PAGE_PROBE_SCRIPT);
       const page = normalizePageState(value, this.view.webContents.getURL() || this.state.url);
-      this.patchState({ page, url: page.url || this.view.webContents.getURL(), title: page.title || this.state.title, ready: true, error: null });
+      if (page.url.startsWith("chrome-error://")) {
+        this.patchState({ page, ready: false, error: this.state.error ?? "WebGPT 页面加载失败。" });
+      } else {
+        this.patchState({ page, url: page.url || this.view.webContents.getURL(), title: page.title || this.state.title, ready: true, error: null });
+      }
       return page;
     } catch (error) {
       this.setError(`读取 WebGPT 页面状态失败：${String(error)}`);
@@ -205,7 +209,8 @@ export class WebGptWorkspace implements WebGptPublicService {
   async openWorkspace(): Promise<WebGptState> {
     if (this.closed) throw new Error("WebGPT Workspace 已关闭。");
     this.setVisible(true);
-    if (!this.view.webContents.getURL()) {
+    const currentUrl = this.view.webContents.getURL();
+    if (!currentUrl || currentUrl.startsWith("chrome-error://") || this.state.error) {
       await this.load(WEBGPT_HOME_URL);
     }
     this.patchState({ mode: "USER_CONTROL" });
