@@ -1,6 +1,6 @@
 # Codex Workbench WebGPT — WEB-5 阶段审查材料
 
-> 当前审查状态：`FIX_REQUIRED / PROJECT_CLI_REAL_GATE_NOT_COMPLETED`。本轮 focused fix 已修复 Control Plane timeout/response 契约并取得结构化 Project 响应；但真实 Project `workts` 仍未取得 active/context/route PASS，因此没有继续发送 WEB-5 真实 Prompt。
+> 当前审查状态：`WEB-5 FINAL REAL GATE / PASS_CANDIDATE`。历史 Project CLI focused gate 已通过；本轮在真实打包 EXE 上完成了 In-flight interruption → restart → no-resend 与 Role wrong-chat recovery 两项最终证据。Gate A 最终允许状态为 `RECOVERY_REQUIRED`，Gate B 为无 Prompt 的真实目标恢复；没有自动提交 GPT。
 
 ## 1. Executive Summary
 
@@ -19,7 +19,7 @@
 - 测试期间 ChatGPT 网页出现“请求过于频繁”提示；本地日志记录了 54 条独立请求记录，其中 43 条到达网页提交动作。该事实已单独记录，后续没有继续触发真实网页请求。
 - V1 Frozen Core 的 Native Thread / Turn / Item、Runtime、Project、Composer、Map、Manual Mode 没有建立第二事实源，也没有改变其身份规则。
 
-本地阶段结论：`READY_FOR_GPT_REVIEW`，自动化部分 PASS；当前 Project CLI focused real Gate 结论为 `FIX_REQUIRED`。此前网页限流仍作为历史安全事实保留，本轮没有新增真实 Prompt。本轮审核包由用户手动提交 GPT；本 Agent 不自动发送网页请求或提交审查。
+本地阶段结论：`READY_FOR_GPT_REVIEW`，自动化部分 PASS，两个最终真实 Gate 已取得受限范围内的 PASS 证据。历史网页限流仍作为安全事实保留；本轮 Gate A 只新增 1 次真实 Prompt，Gate B 没有发送 Prompt。本轮审核包由用户手动提交 GPT；本 Agent 不自动发送网页请求或提交审查。
 
 ## 2. Scope Resolution
 
@@ -433,6 +433,99 @@ gate_result: BLOCKED_BY_RATE_LIMIT
 waiting_state: WAITING_FOR_GPT_REVIEW
 ```
 
+## 24. WEB-5 Final Real Gate — current superseding evidence
+
+本节 supersede 第 13.2、13.3、17.1、18、21、22 节中关于“本轮未执行最终 Gate”的状态。历史运行记录仍保留，当前结论只基于本节和机器可读证据：
+
+`docs/WEBGPT-WEB5-FINAL-REAL-GATE-EVIDENCE.json`
+
+### 24.1 Gate A — in-flight interruption → restart → no resend
+
+本 Gate 使用标准打包 EXE，通过 Node `execFile` 调用 CLI；只在 ChatGPT Project `workts` 上新增 1 次真实 Prompt，未触发限流提示。测试 hook 仅在本地显式启用，用于在真实网页已经出现 User 消息、且页面正在生成时暂停 Owned Workbench 进程；hook 不记录 Prompt 正文。
+
+```text
+requestId: wgpt-6f363f58-139b-4eab-899b-53e94c3e5ee7
+idempotencyKey: WEBGPT_WEB5_FINAL_INFLIGHT_1787227170573_f33ad78b
+project: workts
+baselineUserCount: 0
+markerObservedUserCount: 1
+markerObservedGenerating: true
+interruptedAt: 2026-08-20T12:00:09.921Z
+restartAt: 2026-08-20T12:01:12.121Z
+sameRequestId: YES
+returnedRequestIdAfterRestart: wgpt-6f363f58-139b-4eab-899b-53e94c3e5ee7
+duplicatePromptCount: 0
+finalState: RECOVERY_REQUIRED
+finalError: REQUEST_NOT_VERIFIABLE
+```
+
+恢复后的同 key `send` 只重新查询同一 Request，返回相同 `requestId`；没有产生第二条网页 User Prompt，也没有创建替代 Request/Chat。随后 `request status` / `control auto` 将该请求保留在 fail-closed recovery 路径，没有盲目重发。
+
+允许的最终状态是 `COMPLETED`、`RECOVERY_REQUIRED` 或 `INDETERMINATE`，因此本 Gate 的“禁止重复发送”目标为 `PASS`。限制是：该测试从 Project 作用域空白 Chat 开始，强制重启后页面仍停留在 Project route，未提供稳定 `/c/<id>`，所以恢复核对最终为 `REQUEST_NOT_VERIFIABLE`；这不等同于重复发送，也不宣称最终回答完成。中断前的真实页面 marker 已观察到唯一新增 User，`duplicatePromptCount=0` 由 marker、幂等重连和 Request journal 共同确定。
+
+### 24.2 Gate B — Role wrong-chat recovery
+
+本 Gate 不发送 Prompt。它用已存在且稳定的 Role 绑定做真实导航恢复：
+
+```text
+Project context open: workts → PASS
+Role: PLANNER
+Chat A (bound target): https://chatgpt.com/c/6a865d2c-69fc-83ee-9845-1c236f19d7b9
+Chat B (wrong current page): https://chatgpt.com/c/6a865d36-a53c-83ee-aa28-d4cbd50c85b3
+```
+
+执行证据：
+
+1. 读取 PLANNER binding，记录 Chat A。
+2. 真实 `role open --role reviewer` 导航到 Chat B。
+3. `current` 确认当前页面就是 Chat B，页面健康、Composer 可见。
+4. 交还 `AUTO_CONTROL` 后执行 `role open --role planner`，要求按绑定重新定位。
+5. `current` 确认页面回到 Chat A；再次读取 binding，URL 和状态未改变。
+
+```text
+wrongChatPromptCount: 0
+silentRoleRebind: NO
+roleBindingChanged: NO
+bindingBefore: Chat A
+bindingAfter: Chat A
+promptSent: NO
+globalNewChatClicked: NO
+Gate B: PASS
+```
+
+这是真实的无 Prompt target-recovery 证据：当前页面错误时，Role open 使用绑定的 Chat A，而不是把 Chat B 当作目标。当前 Role Registry 使用 Workbench Project ID `371c3fb8-30ac-4943-9584-1915045ea34d`；CLI 没有暴露 Web Project 内部 ID，但同一次运行的 `project open --name workts` 已取得目标 Project route/context PASS。没有修改 binding、没有静默 rebind、没有创建 Chat。
+
+### 24.3 Final budget / safety boundary
+
+```text
+MAX_NEW_REAL_PROMPTS: 2
+USED: 1
+REMAINING: 1
+Gate B additional prompts: 0
+rate-limit observed during this final run: NO
+historical rate-limit observed: YES
+```
+
+观察到历史“请求过于频繁”后，本轮没有循环重试、没有扫描历史 Chat、没有并发 Prompt、没有多账号绕过，也没有自动打开/上传审核包。没有 Cookie、Token、密码、完整 Prompt 或网页回答正文进入报告。
+
+### 24.4 Final Gate Output
+
+```text
+[CODEX_WORKBENCH_STAGE_REVIEW_READY]
+
+stage: WEB-5 Final Real Gate
+inflight: PASS
+sameRequestId: YES
+duplicatePromptCount: 0
+roleRecovery: PASS
+wrongChatPromptCount: 0
+automatedTests: PASS (166/166; check/build/package/audit/diff/secret scan PASS)
+reviewPackage: D:\办公\AI\Codex_Workbench_V1\dist\review\WEBGPT-WEB5-STAGE-REVIEW-PACKAGE.zip
+nextAction: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
+```
+
+本轮仍停在 WEB-5；不进入 WEB-6。产品代码未修改，只新增审查脚本、最终证据 JSON、报告和审核包内容。
+
 ## 21. Final closure addendum — Project CLI real smoke
 
 本次按最终闭环指令，对标准打包 EXE 和目标 Project `workts` 只做了一次无 Prompt 的最小真实验证。详细机器证据见：
@@ -581,3 +674,127 @@ GLOBAL_NEW_CHAT_CLICKED: NO
 AUTOMATED_TESTS: PASS (166/166)
 GATE_RESULT: PASS
 ```
+
+## 25. WEB-5 Final Freeze Metadata
+
+本节是最终冻结收口记录，supersede 早期报告中尚未完成最终 Gate 的状态；不改变任何产品实现。
+
+### 25.1 Executive Summary
+
+```yaml
+stage: WEB-5 Request Recovery, Idempotency & Control Ownership Hardening
+result: PASS_CANDIDATE
+v1_core_changed: NO
+automation_layer_changed: NO
+next_stage_candidate: WEB-6 Automation Architecture Design
+freeze_scope: report, evidence, audit scripts, review package only
+```
+
+### 25.2 Architecture Boundary
+
+```text
+V1 Frozen Core
+    |
+    +-- WebGPT Feature
+          |
+          +-- Electron Browser Runtime
+          +-- CLI
+          +-- Control Plane
+          +-- Request Manager
+          +-- Role Registry
+```
+
+WebGPT 是 V1 上的扩展能力，不是第二套 Codex，也没有建立第二套 Conversation truth。Native Thread / Turn / Item、V1 Runtime Registry、Project、Composer 和 Map 均未改动。WebGPT 只通过单一 Electron Browser Runtime、受限页面元数据、Request Manager 和显式 Role binding 提供网页能力。
+
+### 25.3 Automated Verification / Provenance
+
+验证时间：`2026-08-20T21:23:31+08:00`（冻结前工作树核对时间；最终构建验证在同一收口窗口完成）。
+
+```text
+npm run check: PASS
+npm test: PASS (166/166)
+npm run build: PASS
+npm run package:win: PASS
+npm audit --omit=dev: PASS (0 vulnerabilities)
+git diff --check: PASS
+secret scan: PASS (no credential pattern match)
+```
+
+```text
+base_commit_before_freeze: 87f432d
+web5_implementation_commit: 8e15807
+freeze_commit: supplied in final handoff after the docs-only freeze commit
+review_package_commit: same docs-only freeze commit
+```
+
+`freeze_commit` 不写入自身 ZIP manifest，避免自引用 hash；最终 Git commit hash、审核包 SHA-256 和当前 `git status` 在本次交付回执中给出。
+
+### 25.4 Project CLI / Real Gate Summary
+
+```text
+projectName: workts
+project_open: PASS
+project_new_chat: PASS
+matchCount: 1
+contextMatch: true
+projectRoute: true
+composerFound: true
+promptSent: false (Project CLI gate)
+globalNewChatClicked: false
+
+inflight_safety: PASS
+sameRequestId: YES
+duplicatePromptCount: 0
+role_safety: PASS
+wrong_chat_prompt_count: 0
+silent_role_rebind: NO
+```
+
+Gate A 的最终允许恢复状态为 `RECOVERY_REQUIRED / REQUEST_NOT_VERIFIABLE`，目标是验证 `NO RESEND`，不是强制恢复为 `COMPLETED`。Gate B 使用 Chat B → 绑定 Chat A 的真实无 Prompt recovery，未创建 Chat、未改 Role binding。
+
+### 25.5 Deferred to Future Stages
+
+以下只记录，不在本轮修复：
+
+| Deferred issue | Current state | Future boundary |
+| --- | --- | --- |
+| Recovery 完整恢复 | `RECOVERY_REQUIRED`；Project 空白 Chat 的 `/c/<id>` identity 不稳定 | Chat identity hardening |
+| Planner continuation | 未实现自动继续执行 | Automation Layer |
+| Multi-account | `DEFERRED` | Future account/session design |
+| Multi-session | `DEFERRED` | Future runtime/session design |
+| RateLimitGuard | 目前只有本轮保护策略，未产品化 | Automation Infrastructure |
+
+这些 Deferred Issue 不构成当前产品代码变更，也不改变本次 `PASS_CANDIDATE` 资料冻结结论。
+
+### 25.6 Final Review Package Contents / Exclusions
+
+审核包：
+
+```text
+D:\办公\AI\Codex_Workbench_V1\dist\review\WEBGPT-WEB5-STAGE-REVIEW-PACKAGE.zip
+```
+
+包含最终报告、`WEBGPT-WEB5-FINAL-REAL-GATE-EVIDENCE.json`、Gate summary、历史 real smoke evidence、Project CLI report、最终 Gate 审计脚本、相关 WebGPT source/tests 和 build/package 元数据。
+
+明确不包含 Cookie、Token、Browser profile、密码、用户私人聊天内容、完整 Prompt、网页回答正文、request journal、`dist-stage-a/`、用户 `指导文档/*.docx` 或任何旧 donor 文件。
+
+### 25.7 Freeze Output
+
+```text
+[CODEX_WORKBENCH_WEB5_FREEZE_READY]
+
+stage: WEB-5 Final Freeze
+result: PASS_CANDIDATE
+automated_tests: PASS
+project_cli: PASS
+inflight_safety: PASS
+role_safety: PASS
+v1_core_changed: NO
+review_report: D:\办公\AI\Codex_Workbench_V1\docs\WEBGPT-WEB5-STAGE-REVIEW.md
+review_package: D:\办公\AI\Codex_Workbench_V1\dist\review\WEBGPT-WEB5-STAGE-REVIEW-PACKAGE.zip
+implementation_commit: 8e15807
+freeze_commit: FINAL_HANDOFF_COMMIT
+next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
+```
+
+冻结完成后停止，不自动打开 ChatGPT、不自动上传、不等待 GPT、不进入 WEB-6。

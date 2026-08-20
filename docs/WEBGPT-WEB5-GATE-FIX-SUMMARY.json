@@ -31,20 +31,28 @@
     "blocker": null
   },
   "web5RealGates": {
-    "inflightInterruption": "NOT_RUN_FOCUSED_PROJECT_CLI_SCOPE",
-    "restartNoResend": "NOT_RUN_FOCUSED_PROJECT_CLI_SCOPE",
-    "roleWrongChatRecovery": "NOT_RUN_FOCUSED_PROJECT_CLI_SCOPE",
-    "sameKeyAfterRestart": "NOT_RUN_FOCUSED_PROJECT_CLI_SCOPE",
-    "duplicateCount": "NOT_PROVABLE"
+    "inflightInterruption": "PASS",
+    "restartNoResend": "PASS",
+    "roleWrongChatRecovery": "PASS",
+    "sameKeyAfterRestart": "PASS",
+    "duplicateCount": 0,
+    "evidence": "docs/WEBGPT-WEB5-FINAL-REAL-GATE-EVIDENCE.json",
+    "gateResult": "PASS_CANDIDATE",
+    "limitations": [
+      "Gate A recovery ended RECOVERY_REQUIRED / REQUEST_NOT_VERIFIABLE because the Project blank Chat did not expose a stable /c/<id> after forced restart.",
+      "Gate B is a no-Prompt explicit role.open navigation recovery; binding remained unchanged."
+    ]
   },
   "promptBudget": {
-    "maxNewRealPrompts": 0,
-    "usedDuringFocusedGate": 0
+    "maxNewRealPrompts": 2,
+    "usedDuringFinalGate": 1,
+    "remaining": 1
   },
   "rateLimit": {
     "previouslyObserved": true,
     "reobservedDuringFocusedGate": false,
-    "newPromptStopped": true
+    "newPromptStopped": true,
+    "observedDuringFinalGate": false
   },
   "v1CoreBehaviorChanged": false,
   "package": {
@@ -56,5 +64,5 @@
       "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F"
     }
   },
-  "localResult": "PASS_PROJECT_CLI_DOM_GATE"
+  "localResult": "PASS_CANDIDATE_WEB5_FINAL_REAL_GATE"
 }

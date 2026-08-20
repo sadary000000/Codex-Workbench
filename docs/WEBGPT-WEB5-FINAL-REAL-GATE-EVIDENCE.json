@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "stage": "WEB-5 Final Real Gate",
+  "result": "PASS_CANDIDATE",
+  "projectName": "workts",
+  "promptBudget": {
+    "maxNewRealPrompts": 2,
+    "used": 1,
+    "remaining": 1,
+    "rateLimitObservedDuringFinalGate": false,
+    "previousRateLimitObserved": true
+  },
+  "gateA": {
+    "status": "PASS",
+    "criterion": "in-flight interruption -> restart -> no resend",
+    "requestId": "wgpt-6f363f58-139b-4eab-899b-53e94c3e5ee7",
+    "idempotencyKey": "WEBGPT_WEB5_FINAL_INFLIGHT_1787227170573_f33ad78b",
+    "sameRequestId": true,
+    "duplicatePromptCount": 0,
+    "baselineUserCount": 0,
+    "markerObservedUserCount": 1,
+    "markerObservedGenerating": true,
+    "interruptedAt": "2026-08-20T12:00:09.921Z",
+    "restartAt": "2026-08-20T12:01:12.121Z",
+    "sameKeyAfterRestart": {
+      "returnedRequestId": "wgpt-6f363f58-139b-4eab-899b-53e94c3e5ee7",
+      "state": "RECOVERY_REQUIRED",
+      "errorCode": "WORKBENCH_RESTARTED"
+    },
+    "finalState": "RECOVERY_REQUIRED",
+    "finalErrorCode": "REQUEST_NOT_VERIFIABLE",
+    "noResend": true,
+    "promptBodyLogged": false,
+    "limitation": "Project 作用域空白 Chat 在强制重启后没有稳定 /c/<id> URL；恢复核对因此返回 REQUEST_NOT_VERIFIABLE。该允许的恢复终态不影响同 key 同 requestId 与零重复发送证据，也不宣称最终回答完成。"
+  },
+  "gateB": {
+    "status": "PASS",
+    "criterion": "role wrong-chat recovery",
+    "role": "PLANNER",
+    "workbenchProjectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+    "chatA": "https://chatgpt.com/c/6a865d2c-69fc-83ee-9845-1c236f19d7b9",
+    "chatB": "https://chatgpt.com/c/6a865d36-a53c-83ee-aa28-d4cbd50c85b3",
+    "projectContextOpen": "PASS",
+    "currentBeforeRecovery": "https://chatgpt.com/c/6a865d36-a53c-83ee-aa28-d4cbd50c85b3",
+    "currentAfterRecovery": "https://chatgpt.com/c/6a865d2c-69fc-83ee-9845-1c236f19d7b9",
+    "wrongChatPromptCount": 0,
+    "silentRoleRebind": false,
+    "roleBindingChanged": false,
+    "bindingBefore": "https://chatgpt.com/c/6a865d2c-69fc-83ee-9845-1c236f19d7b9",
+    "bindingAfter": "https://chatgpt.com/c/6a865d2c-69fc-83ee-9845-1c236f19d7b9",
+    "promptSent": false,
+    "globalNewChatClicked": false,
+    "recoveryMode": "explicit role.open navigation recovery from Chat B to bound Chat A",
+    "limitation": "当前 Role Registry 使用 Workbench Project ID；CLI 不暴露 Web Project 的内部 ID。该运行同时执行 project open --name workts 并取得目标 Project route/context PASS；Role 绑定未被替换。"
+  },
+  "safety": {
+    "promptBodiesLogged": false,
+    "cookiesTokensOrCredentialsLogged": false,
+    "newChatCreatedByGate": false,
+    "historySidebarScanned": false,
+    "globalNewChatClicked": false,
+    "v1ProductCodeChanged": false,
+    "newSoftwareOrPluginInstalled": false,
+    "web5OnlyAuditScriptsAndReviewDocsChanged": true
+  },
+  "auditScripts": [
+    "scripts/real-webgpt-web5-final-real-gate.ts",
+    "scripts/real-webgpt-web5-role-wrong-chat-gate.ts"
+  ],
+  "automatedBaseline": {
+    "npmRunCheck": "PASS",
+    "npmTest": "PASS (166/166)",
+    "npmRunBuild": "PASS",
+    "npmRunPackageWin": "PASS",
+    "npmAuditOmitDev": "PASS (0 vulnerabilities)",
+    "gitDiffCheck": "PASS",
+    "secretScan": "PASS"
+  },
+  "reviewPackage": {
+    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\review\\WEBGPT-WEB5-STAGE-REVIEW-PACKAGE.zip",
+    "sha256": null,
+    "sha256Note": "Archive SHA-256 is supplied in the final handoff; it is not embedded in the archive manifest to avoid self-referential provenance.",
+    "entryCount": 35
+  },
+  "nextAction": "USER_SUBMIT_REVIEW_PACKAGE_TO_GPT"
+}
