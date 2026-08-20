@@ -37,6 +37,14 @@ test("WebGPT WEB-3 CLI parser keeps request and prompt inputs explicit", () => {
     kind: "command",
     command: { name: "webgpt.open-chat", json: false, url: "https://chatgpt.com/c/test" },
   });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "project", "open", "--name", "workts", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.project.open", json: true, projectName: "workts" },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "project", "new-chat", "--name", "workts"]), {
+    kind: "command",
+    command: { name: "webgpt.project.new-chat", json: false, projectName: "workts" },
+  });
   assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "send", "--file", "prompt.md", "--json"]), {
     kind: "command",
     command: { name: "webgpt.send", json: true, file: "prompt.md" },
@@ -50,6 +58,8 @@ test("WebGPT WEB-3 CLI parser keeps request and prompt inputs explicit", () => {
     command: { name: "webgpt.result", json: true, targetRequestId: "wgpt-1", out: "result.txt" },
   });
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "send", "--text", "x", "--file", "p.md"]).kind, "error");
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "project", "open", "--name", ""]).kind, "error");
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "project", "open", "--name", "workts", "--new-chat"]).kind, "error");
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "result", "--request-id", "wgpt-1", "--timeout-ms", "1"]).kind, "error");
 });
 

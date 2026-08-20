@@ -89,6 +89,25 @@ test("WebGPT WEB-4 Control Plane validates Project Role routing at the boundary"
   assert.equal("error" in mismatchedSend && mismatchedSend.error?.code, "PROJECT_ROLE_REQUIRED");
 });
 
+test("WebGPT Project navigation Control Plane requires a bounded project name", () => {
+  const parsed = parseWebGptControlRequest({
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "project-1",
+    command: "webgpt.project.open",
+    projectName: " workts ",
+  });
+  assert.deepEqual(parsed, {
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "project-1",
+    command: "webgpt.project.open",
+    projectName: "workts",
+  });
+  const missingName = parseWebGptControlRequest({ version: 1, requestId: "project-2", command: "webgpt.project.new-chat" });
+  assert.equal("error" in missingName && missingName.error?.code, "PROJECT_NAME_REQUIRED");
+  const unexpectedName = parseWebGptControlRequest({ version: 1, requestId: "project-3", command: "webgpt.status", projectName: "workts" });
+  assert.equal("error" in unexpectedName && unexpectedName.error?.code, "CONTROL_FIELD_UNSUPPORTED");
+});
+
 test("WebGPT Control Plane uses a published per-instance descriptor and authenticated socket", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-control-"));
   const descriptorFile = controlDescriptorPath(directory);

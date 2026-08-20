@@ -103,6 +103,61 @@ export const WEBGPT_CREATE_CHAT_SCRIPT = `(() => {
   return { clicked: true };
 })()`;
 
+export function buildWebGptOpenProjectScript(projectName: string): string {
+  return `((expectedName) => {
+  const visible = (element) => {
+    if (!(element instanceof Element)) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  };
+  const label = (element) => String(element.getAttribute("aria-label") || element.getAttribute("title") || element.innerText || element.textContent || "").replace(/\\s+/g, " ").trim();
+  const candidates = [...document.querySelectorAll("a, button, [role=\\"link\\"], [role=\\"button\\"], [role=\\"treeitem\\"]")];
+  const matches = candidates.filter((element) => visible(element) && label(element) === expectedName);
+  if (matches.length === 0) return { clicked: false, projectName: expectedName, matchCount: 0, url: location.href };
+  if (matches.length > 1) return { clicked: false, ambiguous: true, projectName: expectedName, matchCount: matches.length, url: location.href };
+  const candidate = matches[0];
+  const target = candidate.closest("a, button, [role=\\"link\\"], [role=\\"button\\"], [role=\\"treeitem\\"]") || candidate;
+  target.click();
+  return {
+    clicked: true,
+    projectName: expectedName,
+    matchCount: matches.length,
+    matchedText: label(candidate),
+    href: target instanceof HTMLAnchorElement ? target.href : null,
+    url: location.href,
+  };
+})(${JSON.stringify(projectName)})`;
+}
+
+export function buildWebGptProjectProbeScript(projectName: string): string {
+  return `((expectedName) => {
+  const visible = (element) => {
+    if (!(element instanceof Element)) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  };
+  const label = (element) => String(element.getAttribute("aria-label") || element.getAttribute("title") || element.innerText || element.textContent || "").replace(/\\s+/g, " ").trim();
+  const candidates = [...document.querySelectorAll("a, button, [role=\\"link\\"], [role=\\"button\\"], [role=\\"treeitem\\"]")]
+    .filter((element) => visible(element) && label(element) === expectedName);
+  const candidate = candidates[0] || null;
+  const target = candidate?.closest("a, button, [role=\\"link\\"], [role=\\"button\\"], [role=\\"treeitem\\"]") || candidate;
+  const active = Boolean(target && (target.getAttribute("aria-current") === "page"
+    || target.getAttribute("data-state") === "active"
+    || target.getAttribute("data-active") === "true"
+    || target.closest("[aria-current=\\"page\\"], [data-state=\\"active\\"], [data-active=\\"true\\"]")));
+  return {
+    projectName: expectedName,
+    matchCount: candidates.length,
+    active,
+    href: target instanceof HTMLAnchorElement ? target.href : null,
+    url: location.href,
+    projectRoute: /\\/project\\//i.test(location.pathname),
+  };
+})(${JSON.stringify(projectName)})`;
+}
+
 function pageScriptArgument(value: string): string {
   return JSON.stringify(value);
 }

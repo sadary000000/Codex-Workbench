@@ -28,6 +28,7 @@ export interface WebGptControlRequest {
   out?: string;
   url?: string;
   text?: string;
+  projectName?: string;
   projectId?: string;
   role?: WebGptRole;
   replace?: boolean;
@@ -70,6 +71,8 @@ const COMMANDS = new Set<WebGptCliCommandName>([
   "webgpt.control.auto",
   "webgpt.new-chat",
   "webgpt.open-chat",
+  "webgpt.project.open",
+  "webgpt.project.new-chat",
   "webgpt.role.list",
   "webgpt.role.status",
   "webgpt.role.new",
@@ -150,6 +153,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (record.out !== undefined && (typeof record.out !== "string" || record.out.length > 4_096)) return controlError("CONTROL_OUTPUT_PATH_INVALID", "截图输出路径无效。", record.command, requestId);
   if (record.url !== undefined && (typeof record.url !== "string" || record.url.length > 2_048)) return controlError("CONTROL_URL_INVALID", "WebGPT URL 无效。", record.command, requestId);
   if (record.text !== undefined && (typeof record.text !== "string" || record.text.length > 2_000_000)) return controlError("CONTROL_PROMPT_TOO_LARGE", "Prompt 无效或过大。", record.command, requestId);
+  if (record.projectName !== undefined && (typeof record.projectName !== "string" || !record.projectName.trim() || record.projectName.length > 256)) return controlError("PROJECT_NAME_INVALID", "Project 名称必须是 1 到 256 个字符。", record.command, requestId);
   if (record.projectId !== undefined && (typeof record.projectId !== "string" || !record.projectId.trim() || record.projectId.length > 256)) return controlError("PROJECT_REQUIRED", "Project ID 无效。", record.command, requestId);
   const role = record.role === undefined ? undefined : roleValue(record.role);
   if (record.role !== undefined && !role) return controlError("ROLE_UNSUPPORTED", "Role 必须是 requirement、planner 或 reviewer。", record.command, requestId);
@@ -169,6 +173,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (command === "webgpt.send" && ((record.projectId !== undefined) !== (role !== undefined))) return controlError("PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 projectId 和 role。", command, requestId);
   if (command === "webgpt.request.status" && typeof record.targetRequestId !== "string") return controlError("REQUEST_ID_REQUIRED", "request status 必须提供 requestId。", command, requestId);
   if (command === "webgpt.request.list" && record.active !== true) return controlError("REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。", command, requestId);
+  if (["webgpt.project.open", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
   if (record.idempotencyKey !== undefined && command !== "webgpt.send") return controlError("CONTROL_IDEMPOTENCY_UNSUPPORTED", "idempotencyKey 只支持 send。", command, requestId);
   if (record.replace !== undefined && command !== "webgpt.role.new" && command !== "webgpt.role.bind") return controlError("CONTROL_REPLACE_INVALID", "replace 只支持 role new/bind。", command, requestId);
   const allowedByCommand: Record<string, readonly string[]> = {
@@ -180,6 +185,8 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.control.auto": [],
     "webgpt.new-chat": [],
     "webgpt.open-chat": ["url"],
+    "webgpt.project.open": ["projectName"],
+    "webgpt.project.new-chat": ["projectName"],
     "webgpt.role.list": ["projectId"],
     "webgpt.role.status": ["projectId", "role"],
     "webgpt.role.new": ["projectId", "role", "replace"],
@@ -201,6 +208,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     ...(typeof record.out === "string" ? { out: record.out } : {}),
     ...(typeof record.url === "string" ? { url: record.url } : {}),
     ...(typeof record.text === "string" ? { text: record.text } : {}),
+    ...(typeof record.projectName === "string" ? { projectName: record.projectName.trim() } : {}),
     ...(typeof record.projectId === "string" ? { projectId: record.projectId.trim() } : {}),
     ...(role ? { role } : {}),
     ...(typeof record.replace === "boolean" ? { replace: record.replace } : {}),
@@ -427,6 +435,7 @@ async function requestFromCommand(command: WebGptCliCommand): Promise<WebGptCont
     ...(command.out ? { out: command.out } : {}),
     ...(command.url ? { url: command.url } : {}),
     ...(text !== undefined ? { text } : {}),
+    ...(command.projectName ? { projectName: command.projectName } : {}),
     ...(command.projectId ? { projectId: command.projectId } : {}),
     ...(command.role ? { role: command.role } : {}),
     ...(command.replace ? { replace: true } : {}),

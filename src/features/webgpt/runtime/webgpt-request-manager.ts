@@ -82,6 +82,20 @@ export class WebGptRequestManager {
     return { chatUrl: state.url, page: state.page, mode: state.mode };
   }
 
+  async openProject(projectName: string): Promise<Record<string, unknown>> {
+    await this.ready();
+    this.assertNavigationIdle();
+    await this.ensureAutomationControl();
+    return this.workspace.openProjectForAutomation(projectName);
+  }
+
+  async createChatInProject(projectName: string): Promise<Record<string, unknown>> {
+    await this.ready();
+    this.assertNavigationIdle();
+    await this.ensureAutomationControl();
+    return this.workspace.createChatInProjectForAutomation(projectName);
+  }
+
   async findIdempotent(prompt: string, metadata: WebGptRequestMetadata, idempotencyKey?: string): Promise<WebGptRequestRecord | null> {
     await this.ready();
     const key = normalizeIdempotencyKey(idempotencyKey);

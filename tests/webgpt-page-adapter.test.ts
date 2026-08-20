@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   isAllowedWebGptNavigation,
+  buildWebGptOpenProjectScript,
+  buildWebGptProjectProbeScript,
   isTransientWebGptResponse,
   normalizeChatUrl,
   normalizePageState,
@@ -56,4 +58,13 @@ test("WebGPT completion ignores visible thinking placeholders", () => {
   assert.equal(isTransientWebGptResponse("正在思考"), true);
   assert.equal(isTransientWebGptResponse("Thinking..."), true);
   assert.equal(isTransientWebGptResponse("WEBGPT_WEB3_OK"), false);
+});
+
+test("Project navigation scripts use exact bounded names and expose no page content", () => {
+  const openScript = buildWebGptOpenProjectScript("workts");
+  const probeScript = buildWebGptProjectProbeScript("workts");
+  assert.match(openScript, /workts/);
+  assert.match(probeScript, /workts/);
+  assert.doesNotMatch(openScript, /document\.body\.innerText/);
+  assert.doesNotMatch(probeScript, /document\.body\.innerText/);
 });

@@ -127,6 +127,8 @@ export interface WebGptPublicService {
   openWorkspace(): Promise<WebGptState>;
   openHome(): Promise<WebGptState>;
   openChat(url: string): Promise<WebGptState>;
+  openProjectForAutomation(projectName: string): Promise<Record<string, unknown>>;
+  createChatInProjectForAutomation(projectName: string): Promise<Record<string, unknown>>;
   getCurrentUrl(): Promise<string>;
   getPageState(): Promise<WebGptPageState>;
   takeScreenshot(): Promise<WebGptScreenshot>;

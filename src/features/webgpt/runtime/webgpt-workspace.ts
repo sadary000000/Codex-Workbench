@@ -1,5 +1,5 @@
 import { shell, WebContentsView, type BaseWindow, type Rectangle, type Session } from "electron";
-import { buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
+import { buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
 import { createWebGptSession, webGptSessionPath } from "../session/webgpt-session.ts";
 import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import type {
@@ -275,6 +275,71 @@ export class WebGptWorkspace implements WebGptPublicService {
     await this.waitForComposer();
     this.assertAutomationEpoch(epoch);
     return this.state;
+  }
+
+  async openProjectForAutomation(projectName: string): Promise<Record<string, unknown>> {
+    if (this.closed) throw this.codedError("WEBGPT_CLOSED", "WebGPT Workspace 已关闭。");
+    const name = projectName.trim();
+    if (!name || name.length > 256) throw this.codedError("PROJECT_NAME_REQUIRED", "Project 名称必须是 1 到 256 个字符。");
+    const epoch = this.requireAutomationEpoch();
+    this.setVisible(true);
+    const currentUrl = this.view.webContents.getURL();
+    if (!currentUrl || currentUrl.startsWith("chrome-error://") || this.state.error) await this.load(WEBGPT_HOME_URL);
+    let beforeUrl = this.view.webContents.getURL() || this.state.url;
+    let result = await this.view.webContents.executeJavaScript(buildWebGptOpenProjectScript(name)) as Record<string, unknown>;
+    if (result.ambiguous === true) throw this.codedError("PROJECT_NAME_AMBIGUOUS", `当前页面存在多个同名 Project：${name}`);
+    if (result.clicked !== true && beforeUrl !== WEBGPT_HOME_URL) {
+      await this.load(WEBGPT_HOME_URL);
+      beforeUrl = this.view.webContents.getURL() || this.state.url;
+      result = await this.view.webContents.executeJavaScript(buildWebGptOpenProjectScript(name)) as Record<string, unknown>;
+    }
+    this.assertAutomationEpoch(epoch);
+    if (result.clicked !== true) {
+      throw this.codedError("PROJECT_NOT_FOUND", `未在当前 ChatGPT 页面找到 Project：${name}`);
+    }
+    const candidateHref = typeof (result as { href?: unknown }).href === "string" ? (result as { href: string }).href : "";
+    let expectedUrl = "";
+    if (candidateHref) {
+      try { expectedUrl = normalizeWebGptUrl(candidateHref); } catch { /* page navigation will fail closed below */ }
+    }
+    const deadline = Date.now() + 10_000;
+    let actualUrl = this.view.webContents.getURL() || this.state.url;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      this.assertAutomationEpoch(epoch);
+      actualUrl = this.view.webContents.getURL() || this.state.url;
+      const normalizedActual = (() => { try { return normalizeWebGptUrl(actualUrl); } catch { return actualUrl; } })();
+      if ((expectedUrl && normalizedActual === expectedUrl) || (!expectedUrl && actualUrl !== beforeUrl)) break;
+    }
+    const normalizedActual = (() => { try { return normalizeWebGptUrl(actualUrl); } catch { return actualUrl; } })();
+    const projectProbe = await this.view.webContents.executeJavaScript(buildWebGptProjectProbeScript(name)) as Record<string, unknown>;
+    const projectIsActive = projectProbe.active === true;
+    if ((expectedUrl && normalizedActual !== expectedUrl && !projectIsActive) || (!expectedUrl && actualUrl === beforeUrl) || projectProbe.matchCount !== 1 || (!projectIsActive && projectProbe.projectRoute !== true)) {
+      throw this.codedError("PROJECT_NAVIGATION_NOT_CONFIRMED", `Project 已点击但未确认进入目标 Project：${name}`);
+    }
+    const page = await this.waitForComposer();
+    this.assertAutomationEpoch(epoch);
+    return { projectName: name, projectUrl: normalizedActual, projectProbe, page: page.page, mode: this.state.mode };
+  }
+
+  async createChatInProjectForAutomation(projectName: string): Promise<Record<string, unknown>> {
+    const project = await this.openProjectForAutomation(projectName);
+    const state = await this.createChat();
+    const projectProbe = await this.view.webContents.executeJavaScript(buildWebGptProjectProbeScript(projectName.trim())) as Record<string, unknown>;
+    const chatUrl = await this.getCurrentUrl();
+    let normalizedChatUrl = "";
+    try { normalizedChatUrl = normalizeChatUrl(chatUrl); } catch { /* fail closed below */ }
+    if (!normalizedChatUrl || projectProbe.matchCount !== 1 || (projectProbe.active !== true && projectProbe.projectRoute !== true)) {
+      throw this.codedError("PROJECT_CHAT_CONTEXT_NOT_CONFIRMED", `未能确认新 Chat 仍位于目标 Project：${projectName}`);
+    }
+    return {
+      projectName,
+      projectUrl: project.projectUrl,
+      chatUrl: normalizedChatUrl,
+      projectProbe,
+      page: state.page,
+      mode: state.mode,
+    };
   }
 
   async getCurrentUrl(): Promise<string> {

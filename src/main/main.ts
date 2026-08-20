@@ -270,6 +270,12 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "webgpt.open-chat") {
       if (!request.url) response = controlFail(request.command, "CHAT_URL_REQUIRED", "open-chat 必须提供 ChatGPT Chat URL。");
       else response = controlOk(request.command, await getWebGptRequestManager().openChat(request.url));
+    } else if (request.command === "webgpt.project.open") {
+      if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project open 必须提供 Project 名称。");
+      else response = controlOk(request.command, await getWebGptRequestManager().openProject(request.projectName));
+    } else if (request.command === "webgpt.project.new-chat") {
+      if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project new-chat 必须提供 Project 名称。");
+      else response = controlOk(request.command, await getWebGptRequestManager().createChatInProject(request.projectName));
     } else if (request.command === "webgpt.role.list") {
       if (!request.projectId) response = controlFail(request.command, "PROJECT_REQUIRED", "role list 必须提供 Project ID。");
       else response = controlOk(request.command, await getWebGptRoleService().list(request.projectId));
