@@ -361,9 +361,22 @@ export class WebGptRequestManager {
       this.emit(record);
       if (this.workspace.getControlMode() !== "AUTO_CONTROL") throw this.codedError("WEBGPT_USER_CONTROL", "用户已在 Prompt 提交前接管 WebGPT。");
       await this.validateTarget?.(this.clone(record));
+      try {
+        await this.workspace.beginNetworkObservation({
+          requestId: record.requestId,
+          idempotencyKey: record.idempotencyKey,
+          expectedChatUrl: record.targetChatUrl,
+          captureStartedAt: Date.now(),
+          submittedAt: null,
+        });
+      } catch {
+        // Network observation is an acceleration layer. Any debugger or
+        // observer failure must leave the legacy Page Probe path available.
+      }
       const submitted = await this.workspace.submitPrompt(prompt, record.targetChatUrl ?? undefined);
       record.chatUrl = safeChatUrl(submitted.chatUrl) || submitted.chatUrl;
       const submittedAt = new Date().toISOString();
+      try { this.workspace.markNetworkSubmitted(record.requestId, Date.parse(submittedAt)); } catch { /* fallback remains authoritative */ }
       record.submittedAt = submittedAt;
       record.state = "SUBMITTED";
       const confirmedPage = isWebGptInterruptionTestHookEnabled()
@@ -394,7 +407,7 @@ export class WebGptRequestManager {
       // the SPA location still reports the home route; treating that inferred
       // URL as a hard target would create a false TARGET_CHAT_CHANGED recovery.
       const expectedChatUrl = record.targetChatUrl ?? undefined;
-      const completed = await this.workspace.waitForResponse(submitted.baseline, 120_000, expectedChatUrl);
+      const completed = await this.workspace.waitForResponse(submitted.baseline, 120_000, expectedChatUrl, record.requestId);
       // ChatGPT may navigate from the home page to the newly-created /c/<id>
       // route only after the first response has completed. Persist the final
       // observed URL so request records identify the actual native web chat.
@@ -412,7 +425,7 @@ export class WebGptRequestManager {
       const message = error instanceof Error ? error.message : String(error);
       if (code === "WEBGPT_USER_CONTROL" && record.state === "SUBMITTING" && record.submittedAt === null) {
         await this.pauseBeforeSubmit(record);
-      } else if (code === "WEBGPT_RESPONSE_TIMEOUT" || code === "PROMPT_NOT_SUBMITTED" || code === "TARGET_CHAT_CHANGED" || code === "ROLE_CHAT_MISMATCH" || code === "PAGE_ADAPTER_UNHEALTHY" || code === "COMPOSER_NOT_READY" || code === "WEBGPT_LOGIN_REQUIRED") {
+      } else if (code === "WEBGPT_RESPONSE_TIMEOUT" || code === "PROMPT_NOT_SUBMITTED" || code === "TARGET_CHAT_CHANGED" || code === "ROLE_CHAT_MISMATCH" || code === "PAGE_ADAPTER_UNHEALTHY" || code === "COMPOSER_NOT_READY" || code === "WEBGPT_LOGIN_REQUIRED" || code === "WEBGPT_USER_CONTROL") {
         await this.markRecovery(record, code, message);
       } else {
         await this.fail(record, code, message);

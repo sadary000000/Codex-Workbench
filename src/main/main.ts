@@ -239,6 +239,8 @@ async function webGptStatusResult(): Promise<Record<string, unknown>> {
     pageTitle: health.title,
     pageHealthy,
     page,
+    networkObserver: health.networkObserver ?? webGptWorkspace.getNetworkObserverDiagnostics(),
+    networkWait: health.networkWait ?? null,
     activeRequests: webGptRequestManager ? await webGptRequestManager.activeSummary() : [],
   };
 }

@@ -3,6 +3,9 @@ import { buildWebGptInspectProjectScript, buildWebGptOpenProjectScript, buildWeb
 import { createWebGptSession, webGptSessionPath } from "../session/webgpt-session.ts";
 import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import { projectOperationBudgetMs, type WebGptProjectClickResult, type WebGptProjectOperationCommand, type WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
+import { WebGptNetworkObserver } from "../network/network-observer.ts";
+import { WebGptCompletionProbeScheduler } from "../network/completion-scheduler.ts";
+import type { WebGptNetworkObservationContext, WebGptNetworkObserverDiagnostics, WebGptNetworkWaitDiagnostics } from "../network/network-types.ts";
 import type {
   WebGptBounds,
   WebGptHealthStatus,
@@ -63,6 +66,8 @@ export class WebGptWorkspace implements WebGptPublicService {
   private readonly sessionPath: string;
   private readonly view: WebContentsView;
   private readonly onState: (state: WebGptState) => void;
+  private readonly networkObserver: WebGptNetworkObserver;
+  private lastNetworkWaitDiagnostics: WebGptNetworkWaitDiagnostics | null = null;
   private state: WebGptState;
   private bounds: Rectangle = ZERO_BOUNDS;
   private attached = false;
@@ -83,6 +88,7 @@ export class WebGptWorkspace implements WebGptPublicService {
         sandbox: true,
       },
     });
+    this.networkObserver = new WebGptNetworkObserver(this.view.webContents);
     this.state = {
       visible: false,
       ready: false,
@@ -123,11 +129,13 @@ export class WebGptWorkspace implements WebGptPublicService {
       this.setError("已阻止 WebGPT 重定向到未允许的站点。");
     });
     contents.on("did-navigate", (_event, url) => {
+      this.networkObserver.invalidate("navigation");
       this.patchState({ url, error: null, ready: false });
       void this.refreshPageState();
     });
     contents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
       if (!isMainFrame) return;
+      this.networkObserver.invalidate("in_page_navigation");
       this.patchState({ url, error: null });
       void this.refreshPageState();
     });
@@ -138,6 +146,7 @@ export class WebGptWorkspace implements WebGptPublicService {
     });
     contents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return;
+      this.networkObserver.invalidate("page_load_failed");
       this.patchState({ ready: false, url: validatedURL || this.state.url, error: `${errorDescription} (${errorCode})` });
     });
   }
@@ -286,6 +295,7 @@ export class WebGptWorkspace implements WebGptPublicService {
 
   private prepareManualNavigation(): void {
     if (this.state.mode === "AUTO_CONTROL") throw this.codedError("WEBGPT_AUTOMATION_ACTIVE", "自动请求正在控制 WebGPT；请先交还用户控制后再导航。");
+    this.networkObserver.invalidate("manual_navigation");
     this.controlEpoch += 1;
     this.patchState({ mode: "USER_CONTROL" });
   }
@@ -324,6 +334,7 @@ export class WebGptWorkspace implements WebGptPublicService {
     if (!currentUrl || currentUrl.startsWith("chrome-error://") || this.state.error) {
       await this.load(WEBGPT_HOME_URL);
     }
+    this.networkObserver.invalidate("workspace_opened");
     this.controlEpoch += 1;
     this.patchState({ mode: "USER_CONTROL" });
     return this.state;
@@ -619,6 +630,18 @@ export class WebGptWorkspace implements WebGptPublicService {
     return probe;
   }
 
+  async beginNetworkObservation(context: WebGptNetworkObservationContext): Promise<WebGptNetworkObserverDiagnostics> {
+    return this.networkObserver.begin(context);
+  }
+
+  markNetworkSubmitted(requestId: string, submittedAt: number): void {
+    this.networkObserver.markSubmitted(requestId, submittedAt);
+  }
+
+  getNetworkObserverDiagnostics(): WebGptNetworkObserverDiagnostics {
+    return this.networkObserver.getDiagnostics();
+  }
+
   getControlMode(): WebGptState["mode"] {
     return this.state.mode;
   }
@@ -631,6 +654,7 @@ export class WebGptWorkspace implements WebGptPublicService {
 
   async requestUserControl(): Promise<WebGptState> {
     this.setVisible(true);
+    this.networkObserver.invalidate("user_control");
     this.controlEpoch += 1;
     this.patchState({ mode: "USER_CONTROL" });
     return this.state;
@@ -643,6 +667,7 @@ export class WebGptWorkspace implements WebGptPublicService {
   }
 
   async pauseAutomation(): Promise<WebGptState> {
+    this.networkObserver.invalidate("automation_paused");
     this.controlEpoch += 1;
     this.patchState({ mode: "PAUSED" });
     return this.state;
@@ -687,6 +712,8 @@ export class WebGptWorkspace implements WebGptPublicService {
       sessionPath: this.sessionPath,
       automation: "prompt_response",
       error: this.state.error,
+      networkObserver: this.networkObserver.getDiagnostics(),
+      networkWait: this.lastNetworkWaitDiagnostics ? { ...this.lastNetworkWaitDiagnostics } : undefined,
     };
   }
 
@@ -757,35 +784,112 @@ export class WebGptWorkspace implements WebGptPublicService {
     return { chatUrl: await this.getCurrentUrl(), baseline, submitted: confirmed };
   }
 
-  async waitForResponse(baseline: WebGptPageProbe, timeoutMs = 120_000, expectedChatUrl?: string): Promise<{ response: string; samples: number; elapsedMs: number }> {
+  async waitForResponse(baseline: WebGptPageProbe, timeoutMs = 120_000, expectedChatUrl?: string, requestId?: string): Promise<{ response: string; samples: number; elapsedMs: number; network?: WebGptNetworkWaitDiagnostics }> {
     const startedAt = Date.now();
+    const epoch = this.controlEpoch;
+    if (requestId) this.lastNetworkWaitDiagnostics = null;
     let lastText = baseline.latestAssistantText;
     let stableSamples = 0;
     let sawResponse = false;
     let samples = 0;
-    while (Date.now() - startedAt < timeoutMs) {
-      const probe = await this.getPageProbe();
-      samples += 1;
-      if (expectedChatUrl) {
-        let actualUrl = "";
-        try { actualUrl = normalizeChatUrl(probe.page.url); } catch { /* handled as a target mismatch */ }
-        if (actualUrl !== expectedChatUrl) throw this.codedError("TARGET_CHAT_CHANGED", "等待回复期间当前页面已离开目标 Chat。");
+    const initialObserver = requestId ? this.networkObserver.getDiagnostics() : null;
+    const networkMode = initialObserver?.health === "AVAILABLE" && initialObserver.mode === "NETWORK";
+    const network = requestId ? {
+      observerMode: networkMode ? "NETWORK" as const : "FALLBACK" as const,
+      fallbackUsed: !networkMode,
+      candidateState: initialObserver?.candidateState ?? "NO_CANDIDATE" as const,
+      candidateUnique: false,
+      candidateEmitted: false,
+      candidateNetworkRequestId: null as string | null,
+      completionCandidateAt: null as string | null,
+      pageProbeCount: 0,
+      reconciliationProbeCount: 0,
+      confirmationProbeCount: 0,
+    } : undefined;
+    const scheduler = new WebGptCompletionProbeScheduler(networkMode);
+    let candidateWaitDone = !networkMode || !requestId;
+    const candidateWait = networkMode && requestId
+      ? this.networkObserver.waitForCompletionCandidate(requestId, timeoutMs)
+      : null;
+    try {
+      while (Date.now() - startedAt < timeoutMs) {
+        this.assertAutomationEpoch(epoch);
+        const probeDue = new Promise<"probe">((resolve) => setTimeout(() => resolve("probe"), Math.max(0, scheduler.nextProbeAtValue - Date.now())));
+        const event = candidateWait && !candidateWaitDone
+          ? await Promise.race([
+            probeDue,
+            candidateWait.then((candidate) => ({ kind: "candidate" as const, candidate })),
+          ])
+          : await probeDue;
+        if (event !== "probe") {
+          candidateWaitDone = true;
+          if (event.candidate) {
+            scheduler.acceptCandidate(event.candidate);
+            if (network) {
+              network.candidateState = "COMPLETION_CANDIDATE";
+              network.candidateUnique = true;
+              network.candidateEmitted = true;
+              network.candidateNetworkRequestId = event.candidate.networkRequestId;
+              network.completionCandidateAt = new Date(event.candidate.endedAt).toISOString();
+            }
+            scheduler.scheduleNext(Date.now());
+          } else {
+            scheduler.useFallback();
+            if (network) {
+              network.fallbackUsed = true;
+              network.candidateState = this.networkObserver.getDiagnostics().candidateState;
+            }
+            scheduler.scheduleNext(Date.now());
+          }
+          continue;
+        }
+        this.assertAutomationEpoch(epoch);
+        const probe = await this.getPageProbe();
+        samples += 1;
+        scheduler.noteProbe();
+        if (expectedChatUrl) {
+          let actualUrl = "";
+          try { actualUrl = normalizeChatUrl(probe.page.url); } catch { /* handled as a target mismatch */ }
+          if (actualUrl !== expectedChatUrl) throw this.codedError("TARGET_CHAT_CHANGED", "等待回复期间当前页面已离开目标 Chat。");
+        }
+        const changed = probe.page.assistantCount > baseline.page.assistantCount || probe.latestAssistantText !== baseline.latestAssistantText;
+        if (changed && probe.latestAssistantText.length > 0 && !isTransientWebGptResponse(probe.latestAssistantText)) sawResponse = true;
+        const settled = sawResponse
+          && probe.latestAssistantText.length > 0
+          && !isTransientWebGptResponse(probe.latestAssistantText)
+          && probe.page.composerFound
+          && !probe.page.generating
+          && probe.composerText.length === 0;
+        if (settled && probe.latestAssistantText === lastText) stableSamples += 1;
+        else stableSamples = 0;
+        lastText = probe.latestAssistantText;
+        if (settled && stableSamples >= 3) {
+          if (network) {
+            scheduler.markCompletionUsedFallback();
+            network.fallbackUsed = network.fallbackUsed || scheduler.fallbackUsedValue;
+            network.candidateState = scheduler.candidateSeenValue ? "COMPLETION_CANDIDATE" : this.networkObserver.getDiagnostics().candidateState;
+            network.candidateEmitted = network.candidateEmitted || this.networkObserver.getDiagnostics().candidateEmitted;
+            network.pageProbeCount = samples;
+            network.reconciliationProbeCount = scheduler.reconciliationProbeCountValue;
+            network.confirmationProbeCount = scheduler.confirmationProbeCountValue;
+            this.lastNetworkWaitDiagnostics = { ...network };
+          }
+          return { response: probe.latestAssistantText, samples, elapsedMs: Date.now() - startedAt, network };
+        }
+        const now = Date.now();
+        scheduler.scheduleNext(now);
       }
-      const changed = probe.page.assistantCount > baseline.page.assistantCount || probe.latestAssistantText !== baseline.latestAssistantText;
-      if (changed && probe.latestAssistantText.length > 0 && !isTransientWebGptResponse(probe.latestAssistantText)) sawResponse = true;
-      const settled = sawResponse
-        && probe.latestAssistantText.length > 0
-        && !isTransientWebGptResponse(probe.latestAssistantText)
-        && probe.page.composerFound
-        && !probe.page.generating
-        && probe.composerText.length === 0;
-      if (settled && probe.latestAssistantText === lastText) stableSamples += 1;
-      else stableSamples = 0;
-      lastText = probe.latestAssistantText;
-      if (settled && stableSamples >= 3) {
-        return { response: probe.latestAssistantText, samples, elapsedMs: Date.now() - startedAt };
-      }
-      await new Promise((resolve) => setTimeout(resolve, 800));
+    } finally {
+      if (requestId) this.networkObserver.end(requestId);
+    }
+    if (network) {
+      scheduler.markCompletionUsedFallback();
+      network.fallbackUsed = network.fallbackUsed || scheduler.fallbackUsedValue;
+      network.candidateEmitted = network.candidateEmitted || this.networkObserver.getDiagnostics().candidateEmitted;
+      network.pageProbeCount = samples;
+      network.reconciliationProbeCount = scheduler.reconciliationProbeCountValue;
+      network.confirmationProbeCount = scheduler.confirmationProbeCountValue;
+      this.lastNetworkWaitDiagnostics = { ...network };
     }
     throw this.codedError("WEBGPT_RESPONSE_TIMEOUT", `未能在 ${timeoutMs}ms 内确认 ChatGPT 回复已完成。`);
   }
@@ -821,6 +925,7 @@ export class WebGptWorkspace implements WebGptPublicService {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.networkObserver.dispose();
     this.detach();
     if (!this.view.webContents.isDestroyed()) this.view.webContents.close();
   }
