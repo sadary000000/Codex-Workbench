@@ -134,7 +134,7 @@ export interface WebGptPublicService {
   returnAutomationControl(): Promise<WebGptState>;
   getHealthStatus(): Promise<WebGptHealthStatus>;
   createChat(): Promise<WebGptState>;
-  submitPrompt(prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe }>;
+  submitPrompt(prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe; submitted: WebGptPageProbe }>;
   waitForResponse(baseline: WebGptPageProbe, timeoutMs?: number, expectedChatUrl?: string): Promise<{ response: string; samples: number; elapsedMs: number }>;
   getLatestResponse(): Promise<string | null>;
 }

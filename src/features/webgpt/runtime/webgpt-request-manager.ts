@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { WebGptPageProbe, WebGptPageState, WebGptRequestRecord, WebGptRequestResult, WebGptRequestState, WebGptRequestStateEvent, WebGptRole } from "../types.ts";
 import { isTransientWebGptResponse, normalizeChatUrl } from "../adapter/webgpt-page-adapter.ts";
 import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
+import { isWebGptInterruptionTestHookEnabled, waitForWebGptInterruptionTestHook, waitForWebGptSubmittedUserMessage } from "./webgpt-interruption-test-hook.ts";
 import type { WebGptWorkspace } from "./webgpt-workspace.ts";
 
 const REQUEST_FILE = "requests.json";
@@ -14,6 +15,7 @@ const TERMINAL_STATES = new Set<WebGptRequestState>(["COMPLETED", "FAILED", "CAN
 const RECOVERY_STATES = new Set<WebGptRequestState>(["SUBMITTING", "SUBMITTED", "GENERATING", "INDETERMINATE", "RECOVERY_REQUIRED", "TIMEOUT"]);
 const WAIT_SETTLED_STATES = new Set<WebGptRequestState>(["COMPLETED", "FAILED", "CANCELED", "INDETERMINATE", "RECOVERY_REQUIRED", "TIMEOUT"]);
 const NAVIGATION_BUSY_STATES = new Set<WebGptRequestState>(["QUEUED", "SUBMITTING", "SUBMITTED", "GENERATING"]);
+const TARGET_PAGE_HYDRATION_TIMEOUT_MS = 10_000;
 
 interface StoredDocument {
   version: 2;
@@ -157,7 +159,13 @@ export class WebGptRequestManager {
     const deadline = Date.now() + timeout;
     while (true) {
       const record = this.requireRecord(requestId);
-      if (WAIT_SETTLED_STATES.has(record.state)) return { record: this.clone(record), timedOut: false };
+      if (WAIT_SETTLED_STATES.has(record.state)) {
+        // A worker publishes its terminal/recovery state before awaiting the
+        // journal write. Waiters must not let their temporary storage be
+        // removed while that write is still in flight.
+        await this.persistQueue;
+        return { record: this.clone(record), timedOut: false };
+      }
       if (Date.now() >= deadline) return { record: this.clone(record), timedOut: true };
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
@@ -202,7 +210,7 @@ export class WebGptRequestManager {
       await this.validateTarget?.(this.clone(record));
       const target = this.recoveryTarget(record);
       await this.workspace.openChatForAutomation(target);
-      const probe = await this.workspace.getPageProbe();
+      const probe = await this.waitForTargetPageHydration(await this.workspace.getPageProbe());
       record.chatUrl = probe.page.url;
       record.lastKnownPageState = { ...probe.page };
       await this.persist();
@@ -308,6 +316,7 @@ export class WebGptRequestManager {
           await this.workspace.openChatForAutomation(record.targetChatUrl);
           probe = await this.workspace.getPageProbe();
         }
+        probe = await this.waitForTargetPageHydration(probe);
         let confirmedChatUrl = "";
         try { confirmedChatUrl = normalizeRoleChatUrl(probe.page.url); } catch { /* handled below */ }
         if (confirmedChatUrl !== record.targetChatUrl) throw this.codedError("ROLE_CHAT_MISMATCH", "当前页面不是请求指定的 Role Chat，已禁止发送。 ");
@@ -328,10 +337,29 @@ export class WebGptRequestManager {
       await this.validateTarget?.(this.clone(record));
       const submitted = await this.workspace.submitPrompt(prompt, record.targetChatUrl ?? undefined);
       record.chatUrl = safeChatUrl(submitted.chatUrl) || submitted.chatUrl;
-      record.submittedAt = new Date().toISOString();
+      const submittedAt = new Date().toISOString();
+      record.submittedAt = submittedAt;
       record.state = "SUBMITTED";
+      const confirmedPage = isWebGptInterruptionTestHookEnabled()
+        ? await waitForWebGptSubmittedUserMessage(submitted.submitted, submitted.baseline.page.userCount, record.promptSha256, () => this.workspace.getPageProbe())
+        : submitted.submitted;
+      record.chatUrl = safeChatUrl(confirmedPage.page.url) || record.chatUrl;
+      record.lastKnownPageState = { ...confirmedPage.page };
       await this.persist();
       this.emit(record);
+      await waitForWebGptInterruptionTestHook({
+        requestId: record.requestId,
+        idempotencyKey: record.idempotencyKey,
+        state: "SUBMITTED",
+        submittedAt,
+        chatUrl: record.chatUrl,
+        targetChatUrl: record.targetChatUrl,
+        baselineUserCount: submitted.baseline.page.userCount,
+        observedUserCount: confirmedPage.page.userCount,
+        baselineAssistantCount: submitted.baseline.page.assistantCount,
+        observedAssistantCount: confirmedPage.page.assistantCount,
+        observedGenerating: confirmedPage.page.generating,
+      });
       record.state = "GENERATING";
       await this.persist();
       this.emit(record);
@@ -364,6 +392,18 @@ export class WebGptRequestManager {
         await this.fail(record, code, message);
       }
     }
+  }
+
+  private async waitForTargetPageHydration(initial: WebGptPageProbe): Promise<WebGptPageProbe> {
+    if (initial.page.userCount > 0 || initial.page.assistantCount > 0 || initial.page.generating) return initial;
+    const deadline = Date.now() + TARGET_PAGE_HYDRATION_TIMEOUT_MS;
+    let probe = initial;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      probe = await this.workspace.getPageProbe();
+      if (probe.page.userCount > 0 || probe.page.assistantCount > 0 || probe.page.generating) return probe;
+    }
+    return probe;
   }
 
   private async pauseBeforeSubmit(record: WebGptRequestRecord): Promise<void> {

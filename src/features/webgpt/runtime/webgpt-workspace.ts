@@ -384,7 +384,7 @@ export class WebGptWorkspace implements WebGptPublicService {
     return this.state;
   }
 
-  async submitPrompt(prompt: string, expectedChatUrl?: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe }> {
+  async submitPrompt(prompt: string, expectedChatUrl?: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe; submitted: WebGptPageProbe }> {
     const epoch = this.requireAutomationEpoch();
     const expectedTarget = expectedChatUrl ? normalizeRoleChatUrl(expectedChatUrl) : null;
     const value = prompt.trim();
@@ -410,7 +410,7 @@ export class WebGptWorkspace implements WebGptPublicService {
       throw this.codedError(String((submitResult as { code?: unknown })?.code || "PROMPT_NOT_SUBMITTED"), "未能提交 ChatGPT Prompt。");
     }
     const submissionDeadline = Date.now() + 10_000;
-    let confirmed = false;
+    let confirmed: WebGptPageProbe | null = null;
     while (Date.now() < submissionDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 250));
       this.assertAutomationTarget(epoch, expectedTarget);
@@ -420,13 +420,13 @@ export class WebGptWorkspace implements WebGptPublicService {
       const generationStarted = afterSubmit.page.generating;
       const draftCleared = !afterSubmit.page.composerHasDraft && afterSubmit.composerText.length === 0;
       if (enteredChat || userAdded || generationStarted || draftCleared) {
-        confirmed = true;
+        confirmed = afterSubmit;
         break;
       }
     }
     if (!confirmed) throw this.codedError("PROMPT_NOT_SUBMITTED", "网页未确认 Prompt 已提交；已保留当前草稿以便恢复。 ");
     this.assertAutomationTarget(epoch, expectedTarget);
-    return { chatUrl: await this.getCurrentUrl(), baseline };
+    return { chatUrl: await this.getCurrentUrl(), baseline, submitted: confirmed };
   }
 
   async waitForResponse(baseline: WebGptPageProbe, timeoutMs = 120_000, expectedChatUrl?: string): Promise<{ response: string; samples: number; elapsedMs: number }> {

@@ -67,7 +67,16 @@ async function waitForReady(): Promise<void> {
 
 async function stopOwned(child: ChildProcess | null): Promise<void> {
   if (!child || child.exitCode !== null) return;
-  child.kill();
+  const pid = child.pid;
+  if (pid) {
+    try {
+      await execFile("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 15_000 });
+    } catch {
+      child.kill();
+    }
+  } else {
+    child.kill();
+  }
   await new Promise<void>((resolveExit) => {
     const timer = setTimeout(resolveExit, 10_000);
     child.once("exit", () => { clearTimeout(timer); resolveExit(); });

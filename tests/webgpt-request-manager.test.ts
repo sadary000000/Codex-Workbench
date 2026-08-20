@@ -38,17 +38,17 @@ class FakeWorkspace {
   getControlMode(): WebGptState["mode"] { return this.mode; }
   async returnAutomationControl(): Promise<WebGptState> { this.mode = "AUTO_CONTROL"; return this.state(); }
   async createChat(): Promise<WebGptState> { this.createChatCount += 1; this.probe = pageProbe(true); return this.state(); }
-  async openChatForAutomation(url: string): Promise<WebGptState> { this.openChatCount += 1; this.probe = pageProbe(true); this.probe.page.url = this.openChatUrlOverride ?? url; return this.state(); }
+  async openChatForAutomation(url: string): Promise<WebGptState> { this.openChatCount += 1; this.probe = pageProbe(true, 1, "WEBGPT_TEST_OK"); this.probe.page.userCount = 1; this.probe.page.url = this.openChatUrlOverride ?? url; return this.state(); }
   async getPageProbe(): Promise<WebGptPageProbe> { return this.probe; }
   async getCurrentUrl(): Promise<string> { return this.probe.page.url; }
-  async submitPrompt(_prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe }> {
+  async submitPrompt(_prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe; submitted: WebGptPageProbe }> {
     this.submitCount += 1;
     const baseline = this.probe;
     this.probe = pageProbe(true, baseline.page.assistantCount + 1, "WEBGPT_TEST_OK");
     this.probe.page.url = baseline.page.url;
     this.probe.page.userCount = baseline.page.userCount + 1;
     this.probe.latestUserText = _prompt;
-    return { chatUrl: this.probe.page.url, baseline };
+    return { chatUrl: this.probe.page.url, baseline, submitted: this.probe };
   }
   async waitForResponse(_baseline: WebGptPageProbe): Promise<{ response: string; samples: number; elapsedMs: number }> {
     if (this.waitErrorCode) {
@@ -106,7 +106,6 @@ test("WebGPT Request Manager persists role metadata and refuses a mismatched tar
     assert.equal(waited.record.state, "RECOVERY_REQUIRED");
     assert.equal(waited.record.error?.code, "ROLE_CHAT_MISMATCH");
     assert.equal((await manager.getResult(submitted.requestId)).projectId, "project-a");
-    await new Promise((resolve) => setTimeout(resolve, 25));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
