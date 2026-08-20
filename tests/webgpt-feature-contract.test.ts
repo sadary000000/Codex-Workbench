@@ -67,8 +67,36 @@ test("WebGPT CLI automation gives a zero-layout view a usable viewport", () => {
 test("Project CLI actions are scoped to the hovered Project row and preserve context evidence", () => {
   const adapter = readFileSync(join(root, "src", "features", "webgpt", "adapter", "webgpt-page-adapter.ts"), "utf8");
   const workspace = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-workspace.ts"), "utf8");
+  assert.match(adapter, /buildWebGptInspectProjectScript/);
+  assert.match(workspace, /buildWebGptInspectProjectScript\(name\)/);
   assert.match(adapter, /buildWebGptCreateProjectChatScript/);
   assert.match(adapter, /contextMatch/);
-  assert.match(workspace, /buildWebGptCreateProjectChatScript\(name\)/);
+  assert.match(adapter, /project-row-new-chat-pencil/);
+  assert.match(workspace, /buildWebGptOpenProjectScript\(name\)/);
   assert.match(workspace, /PROJECT_NEW_CHAT_ACTION_NOT_FOUND/);
+});
+
+test("Project CLI operations have a bounded server deadline and cancel stale navigation", () => {
+  const workspace = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-workspace.ts"), "utf8");
+  const budget = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-operation-budget.ts"), "utf8");
+  const control = readFileSync(join(root, "src", "main", "webgpt-control.ts"), "utf8");
+  assert.match(budget, /WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS = 60_000/);
+  assert.match(budget, /WEBGPT_PROJECT_NEW_CHAT_OPERATION_TIMEOUT_MS = 90_000/);
+  assert.match(budget, /WEBGPT_PROJECT_INSPECT_OPERATION_TIMEOUT_MS = 30_000/);
+  assert.match(budget, /WEBGPT_PROJECT_OPEN_CLI_TIMEOUT_MS/);
+  assert.match(workspace, /CONTROL_OPERATION_TIMEOUT/);
+  assert.match(workspace, /this\.controlEpoch \+= 1/);
+  assert.match(workspace, /webContents\.stop\(\)/);
+  assert.match(workspace, /operation\.remainingMs\(\)/);
+  assert.match(workspace, /projectLookupStartAt/);
+  assert.match(workspace, /navigationConfirmStartAt/);
+  assert.match(workspace, /waitForComposerStartAt/);
+  assert.match(workspace, /newChatActionStartAt/);
+  assert.match(workspace, /newChatContextConfirmStartAt/);
+  assert.match(control, /CONTROL_RESPONSE_TIMEOUT/);
+  assert.match(control, /process\.env\.ComSpec \|\| "cmd\.exe"/);
+  assert.match(control, /start "" \/b/);
+  assert.match(control, /cliStartAt/);
+  assert.match(control, /responseWriteAt/);
+  assert.match(control, /operationTimeline/);
 });

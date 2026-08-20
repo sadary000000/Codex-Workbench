@@ -28,7 +28,8 @@
     "test:real:reliability": "node --experimental-strip-types scripts/real-reliability-smoke.ts",
     "test:real:webgpt:roles": "node --experimental-strip-types scripts/real-webgpt-role-smoke.ts",
     "test:real:webgpt:recovery": "node --experimental-strip-types scripts/real-webgpt-recovery-smoke.ts",
-    "test:real:webgpt:gate-fix": "node --experimental-strip-types scripts/real-webgpt-gate-fix-smoke.ts"
+    "test:real:webgpt:gate-fix": "node --experimental-strip-types scripts/real-webgpt-gate-fix-smoke.ts",
+    "test:real:webgpt:project-cli": "node --experimental-strip-types scripts/real-webgpt-project-cli-smoke.ts"
   },
   "devDependencies": {
     "@types/node": "22.10.2",

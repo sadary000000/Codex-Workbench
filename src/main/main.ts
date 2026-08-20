@@ -22,6 +22,7 @@ import { WebGptWorkspace, type WebGptBounds } from "../features/webgpt/index.ts"
 import { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
 import { WebGptRoleSessionRegistry } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
 import { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
+import { isWebGptProjectOperationCommand, projectOperationBudgetMs } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
 import type { WebGptRole } from "../features/webgpt/types.ts";
 import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
 import { WEBGPT_CONTROL_PROTOCOL_VERSION, WebGptControlServer, controlDescriptorPath, createControlDescriptor, publishControlDescriptor, removeControlDescriptor, runWebGptCli, type WebGptControlDescriptor, type WebGptControlIdentity, type WebGptControlRequest, type WebGptControlResponse } from "./webgpt-control.ts";
@@ -243,6 +244,10 @@ async function webGptStatusResult(): Promise<Record<string, unknown>> {
 }
 
 async function handleWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {
+  const handlerStartMs = Date.now();
+  const handlerStartAt = new Date(handlerStartMs).toISOString();
+  const projectCommand = isWebGptProjectOperationCommand(request.command) ? request.command : null;
+  let operationStartMs: number | null = null;
   let response: WebGptControlResponse;
   try {
     if (request.command !== "webgpt.status" && !workbenchReady) {
@@ -270,10 +275,16 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "webgpt.open-chat") {
       if (!request.url) response = controlFail(request.command, "CHAT_URL_REQUIRED", "open-chat 必须提供 ChatGPT Chat URL。");
       else response = controlOk(request.command, await getWebGptRequestManager().openChat(request.url));
+    } else if (request.command === "webgpt.project.inspect") {
+      operationStartMs = Date.now();
+      if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project inspect 必须提供 Project 名称。");
+      else response = controlOk(request.command, await getWebGptRequestManager().inspectProject(request.projectName));
     } else if (request.command === "webgpt.project.open") {
+      operationStartMs = Date.now();
       if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project open 必须提供 Project 名称。");
       else response = controlOk(request.command, await getWebGptRequestManager().openProject(request.projectName));
     } else if (request.command === "webgpt.project.new-chat") {
+      operationStartMs = Date.now();
       if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project new-chat 必须提供 Project 名称。");
       else response = controlOk(request.command, await getWebGptRequestManager().createChatInProject(request.projectName));
     } else if (request.command === "webgpt.role.list") {
@@ -363,7 +374,26 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "WEBGPT_COMMAND_FAILED";
     response = controlFail(request.command, code, normalized.message);
   }
-  return attachControlIdentity(request, response);
+  const identified = attachControlIdentity(request, response);
+  if (!projectCommand) return identified;
+  const handlerFinishMs = Date.now();
+  const candidateTimeline = getWebGptRequestManager().getLastProjectOperationTimeline();
+  const operationTimeline = candidateTimeline && operationStartMs !== null
+    && Date.parse(candidateTimeline.operationStartAt) >= operationStartMs
+    ? candidateTimeline
+    : null;
+  return {
+    ...identified,
+    diagnostics: {
+      ...(identified.diagnostics ?? {}),
+      handlerStartAt,
+      operationStartAt: new Date(operationStartMs ?? handlerStartMs).toISOString(),
+      operationBudgetMs: projectOperationBudgetMs(projectCommand),
+      ...(operationTimeline ? { operationTimeline: { requestId: request.requestId, ...operationTimeline } } : {}),
+      handlerFinishAt: new Date(handlerFinishMs).toISOString(),
+      elapsedMs: handlerFinishMs - handlerStartMs,
+    },
+  };
 }
 
 function enqueueWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {
@@ -398,10 +428,17 @@ async function runCliInvocation(invocation: WebGptCliInvocation): Promise<never>
   if (invocation.kind !== "command") process.exit(2);
   await app.whenReady();
   const response = await runWebGptCli(invocation.command, process.execPath, controlDescriptorPath(app.getPath("userData")));
-  const output = cliOutput(invocation.command, response);
-  const stream = invocation.command.json || response.ok ? process.stdout : process.stderr;
+  const responseWithExit = {
+    ...response,
+    diagnostics: {
+      ...(response.diagnostics ?? {}),
+      cliExitAt: new Date().toISOString(),
+    },
+  };
+  const output = cliOutput(invocation.command, responseWithExit);
+  const stream = invocation.command.json || responseWithExit.ok ? process.stdout : process.stderr;
   await new Promise<void>((resolveOutput) => stream.write(output, () => resolveOutput()));
-  process.exit(response.ok ? 0 : 1);
+  process.exit(responseWithExit.ok ? 0 : 1);
 }
 
 function runtimeCwd(): string {

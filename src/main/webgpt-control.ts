@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import type { WebGptCliCommand, WebGptCliCommandName } from "./webgpt-command.ts";
+import { isWebGptProjectOperationCommand, projectCliTimeoutMs, type WebGptProjectOperationCommand } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
+import type { WebGptProjectOperationTimeline } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
 import type { WebGptRole } from "../features/webgpt/types.ts";
 import { normalizeRoleChatUrl } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
 
@@ -43,6 +45,20 @@ export interface WebGptControlError {
   message: string;
 }
 
+export interface WebGptControlDiagnostics {
+  cliStartAt?: string;
+  socketConnectAt?: string;
+  handlerStartAt?: string;
+  operationStartAt?: string;
+  operationBudgetMs?: number;
+  handlerFinishAt?: string;
+  responseWriteAt?: string;
+  cliReceiveAt?: string;
+  cliExitAt?: string;
+  elapsedMs?: number;
+  operationTimeline?: WebGptProjectOperationTimeline;
+}
+
 export interface WebGptControlIdentity {
   workbenchInstanceId: string;
   webgptRuntimeId: string | null;
@@ -58,6 +74,7 @@ export interface WebGptControlResponse {
   result?: unknown;
   error?: WebGptControlError;
   identity?: WebGptControlIdentity;
+  diagnostics?: WebGptControlDiagnostics;
 }
 
 export type WebGptControlHandler = (request: WebGptControlRequest) => Promise<WebGptControlResponse>;
@@ -71,6 +88,7 @@ const COMMANDS = new Set<WebGptCliCommandName>([
   "webgpt.control.auto",
   "webgpt.new-chat",
   "webgpt.open-chat",
+  "webgpt.project.inspect",
   "webgpt.project.open",
   "webgpt.project.new-chat",
   "webgpt.role.list",
@@ -173,7 +191,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (command === "webgpt.send" && ((record.projectId !== undefined) !== (role !== undefined))) return controlError("PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 projectId 和 role。", command, requestId);
   if (command === "webgpt.request.status" && typeof record.targetRequestId !== "string") return controlError("REQUEST_ID_REQUIRED", "request status 必须提供 requestId。", command, requestId);
   if (command === "webgpt.request.list" && record.active !== true) return controlError("REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。", command, requestId);
-  if (["webgpt.project.open", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
+  if (["webgpt.project.inspect", "webgpt.project.open", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
   if (record.idempotencyKey !== undefined && command !== "webgpt.send") return controlError("CONTROL_IDEMPOTENCY_UNSUPPORTED", "idempotencyKey 只支持 send。", command, requestId);
   if (record.replace !== undefined && command !== "webgpt.role.new" && command !== "webgpt.role.bind") return controlError("CONTROL_REPLACE_INVALID", "replace 只支持 role new/bind。", command, requestId);
   const allowedByCommand: Record<string, readonly string[]> = {
@@ -185,6 +203,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.control.auto": [],
     "webgpt.new-chat": [],
     "webgpt.open-chat": ["url"],
+    "webgpt.project.inspect": ["projectName"],
     "webgpt.project.open": ["projectName"],
     "webgpt.project.new-chat": ["projectName"],
     "webgpt.role.list": ["projectId"],
@@ -249,7 +268,11 @@ function isValidControlResponse(value: unknown): value is WebGptControlResponse 
 
 function writeResponse(socket: Socket, response: WebGptControlResponse): void {
   if (socket.destroyed) return;
-  socket.end(`${JSON.stringify(response)}\n`);
+  const responseWriteAt = new Date().toISOString();
+  const output = response.diagnostics
+    ? { ...response, diagnostics: { ...response.diagnostics, responseWriteAt } }
+    : response;
+  socket.end(`${JSON.stringify(output)}\n`);
 }
 
 export interface WebGptControlServerOptions {
@@ -357,7 +380,9 @@ function delay(milliseconds: number): Promise<void> {
 }
 
 function spawnWorkbench(executablePath: string): void {
-  const child = spawn(executablePath, [], { detached: true, stdio: "ignore", windowsHide: false });
+  const child = process.platform === "win32"
+    ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", `start "" /b "${executablePath.replaceAll('"', '""')}"`], { detached: true, stdio: "ignore", windowsHide: true })
+    : spawn(executablePath, [], { detached: true, stdio: "ignore", windowsHide: true });
   child.unref();
 }
 
@@ -365,8 +390,10 @@ async function sendWebGptControlRequestWithDescriptor(
   request: WebGptControlRequest,
   descriptorPath: string,
   timeoutMs: number,
-): Promise<{ response: WebGptControlResponse; descriptor: WebGptControlDescriptor }> {
+): Promise<{ response: WebGptControlResponse; descriptor: WebGptControlDescriptor; socketConnectAt: string | null; cliReceiveAt: string | null }> {
   const descriptor = await readControlDescriptor(descriptorPath);
+  let socketConnectAt: string | null = null;
+  let cliReceiveAt: string | null = null;
   const response = await new Promise<WebGptControlResponse>((resolve, reject) => {
     const socket = createConnection(descriptor.endpoint);
     socket.setEncoding("utf8");
@@ -394,6 +421,7 @@ async function sendWebGptControlRequestWithDescriptor(
         const parsed: unknown = JSON.parse(line);
         if (!isValidControlResponse(parsed)) throw new Error("invalid response schema");
         settled = true;
+        cliReceiveAt = new Date().toISOString();
         socket.destroy();
         resolve(parsed);
       } catch {
@@ -402,9 +430,12 @@ async function sendWebGptControlRequestWithDescriptor(
         reject(new Error("WebGPT Control Plane 返回了无效 JSON。"));
       }
     });
-    socket.on("connect", () => socket.write(`${JSON.stringify({ ...request, authToken: descriptor.authToken })}\n`));
+    socket.on("connect", () => {
+      socketConnectAt = new Date().toISOString();
+      socket.write(`${JSON.stringify({ ...request, authToken: descriptor.authToken })}\n`);
+    });
   });
-  return { response, descriptor };
+  return { response, descriptor, socketConnectAt, cliReceiveAt };
 }
 
 export async function sendWebGptControlRequest(request: WebGptControlRequest, descriptorPath: string, timeoutMs = 1_000): Promise<WebGptControlResponse> {
@@ -452,9 +483,14 @@ export async function runWebGptCli(
   descriptorPath: string,
   timeoutMs = WEBGPT_CONTROL_TIMEOUT_MS,
 ): Promise<WebGptControlResponse> {
-  const commandTimeout = command.name === "webgpt.wait"
+  const projectCommand = isWebGptProjectOperationCommand(command.name) ? command.name : null;
+  const commandTimeout = projectCommand
+    ? Math.max(timeoutMs, projectCliTimeoutMs(projectCommand))
+    : command.name === "webgpt.wait"
     ? Math.min(320_000, Math.max(timeoutMs, (command.timeoutMs ?? 120_000) + 5_000))
     : timeoutMs;
+  const cliStartAt = new Date().toISOString();
+  const cliStartMs = Date.now();
   const deadline = Date.now() + commandTimeout;
   let spawned = false;
   let lastError = "Workbench Control Plane 未就绪。";
@@ -470,13 +506,17 @@ export async function runWebGptCli(
       error: { code: "CLI_INPUT_INVALID", message: error instanceof Error ? error.message : String(error) },
     };
   }
+  let lastSocketConnectAt: string | null = null;
+  let lastCliReceiveAt: string | null = null;
   while (Date.now() < deadline) {
     try {
-      const { response, descriptor } = await sendWebGptControlRequestWithDescriptor(
+      const { response, descriptor, socketConnectAt, cliReceiveAt } = await sendWebGptControlRequestWithDescriptor(
         request,
         descriptorPath,
         Math.min(WEBGPT_CONTROL_SOCKET_TIMEOUT_MS, Math.max(500, deadline - Date.now())),
       );
+      lastSocketConnectAt = socketConnectAt;
+      lastCliReceiveAt = cliReceiveAt;
       if (response.identity && response.identity.workbenchInstanceId !== descriptor.workbenchInstanceId) {
         lastError = "Control Plane 实例身份不一致。";
       } else if (response.error?.code === "WORKBENCH_NOT_READY") {
@@ -484,7 +524,16 @@ export async function runWebGptCli(
       } else if (response.requestId !== request.requestId) {
         lastError = "Control Plane 返回的 requestId 与请求不一致。";
       } else {
-        return response;
+        return {
+          ...response,
+          diagnostics: {
+            ...(response.diagnostics ?? {}),
+            cliStartAt,
+            socketConnectAt: lastSocketConnectAt ?? undefined,
+            cliReceiveAt: lastCliReceiveAt ?? undefined,
+            elapsedMs: Date.now() - cliStartMs,
+          },
+        };
       }
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
@@ -505,6 +554,15 @@ export async function runWebGptCli(
     requestId: request.requestId,
     ok: false,
     command: command.name,
-    error: { code: "WORKBENCH_START_TIMEOUT", message: `${lastError} 等待时间超过 ${timeoutMs}ms。` },
+    error: {
+      code: projectCommand ? "CONTROL_RESPONSE_TIMEOUT" : "WORKBENCH_START_TIMEOUT",
+      message: `${lastError} 等待时间超过 ${commandTimeout}ms。`,
+    },
+    diagnostics: {
+      cliStartAt,
+      socketConnectAt: lastSocketConnectAt ?? undefined,
+      cliReceiveAt: lastCliReceiveAt ?? undefined,
+      elapsedMs: Date.now() - cliStartMs,
+    },
   };
 }

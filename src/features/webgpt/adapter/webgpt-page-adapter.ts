@@ -117,13 +117,43 @@ export function buildWebGptOpenProjectScript(projectName: string): string {
   if (matches.length === 0) return { clicked: false, projectName: expectedName, matchCount: 0, url: location.href };
   if (matches.length > 1) return { clicked: false, ambiguous: true, projectName: expectedName, matchCount: matches.length, url: location.href };
   const candidate = matches[0];
+  const row = (candidate.matches('[class*="project-unfurl-row"]')
+    ? candidate.parentElement?.closest('[class*="project-unfurl-row"]')
+    : candidate.closest('[class*="project-unfurl-row"]')) || candidate.parentElement || candidate;
   candidate.focus?.();
   const hover = { bubbles: true, cancelable: true, view: window, relatedTarget: null };
-  if (typeof PointerEvent === "function") candidate.dispatchEvent(new PointerEvent("pointerover", hover));
-  candidate.dispatchEvent(new MouseEvent("mouseover", hover));
-  candidate.dispatchEvent(new MouseEvent("mouseenter", { ...hover, bubbles: false }));
+  if (typeof PointerEvent === "function") row.dispatchEvent(new PointerEvent("pointerover", hover));
+  row.dispatchEvent(new MouseEvent("mouseover", hover));
+  row.dispatchEvent(new MouseEvent("mouseenter", { ...hover, bubbles: false }));
+  if (typeof PointerEvent === "function") row.dispatchEvent(new PointerEvent("pointermove", hover));
+  row.dispatchEvent(new MouseEvent("mousemove", hover));
   const interactive = "a, button, [role=\\"link\\"], [role=\\"button\\"]";
-  const target = (candidate.matches(interactive) ? candidate : candidate.querySelector(interactive)) || candidate;
+  const controls = [...row.querySelectorAll(interactive)].filter(visible);
+  const target = controls.find((element) => /open project home|project home|打开项目首页|打开.*项目首页/i.test(label(element))) || null;
+  if (!target) return {
+    clicked: false,
+    code: "PROJECT_NAVIGATION_ACTION_NOT_FOUND",
+    projectName: expectedName,
+    matchCount: matches.length,
+    candidateTag: candidate.tagName,
+    candidateRole: candidate.getAttribute("role"),
+    targetTag: null,
+    targetRole: null,
+    targetAttributes: null,
+    parentAttributes: null,
+    rowControls: [...row.querySelectorAll(interactive)].slice(0, 12).map((element) => ({
+      tag: element.tagName,
+      role: element.getAttribute("role"),
+      ariaLabel: element.getAttribute("aria-label"),
+      title: element.getAttribute("title"),
+      testId: element.getAttribute("data-testid"),
+      expanded: element.getAttribute("aria-expanded"),
+    })),
+    actionCount: controls.length,
+    actionLabels: controls.slice(0, 8).map((element) => label(element).slice(0, 160)),
+    href: null,
+    url: location.href,
+  };
   target.focus?.();
   const pointer = { bubbles: true, cancelable: true, view: window, button: 0, buttons: 1 };
   if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerdown", pointer));
@@ -131,6 +161,14 @@ export function buildWebGptOpenProjectScript(projectName: string): string {
   if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
   target.dispatchEvent(new MouseEvent("mouseup", { ...pointer, buttons: 0 }));
   target.click();
+  const boundedControl = (element) => ({
+    tag: element.tagName,
+    role: element.getAttribute("role"),
+    ariaLabel: element.getAttribute("aria-label"),
+    title: element.getAttribute("title"),
+    testId: element.getAttribute("data-testid"),
+    expanded: element.getAttribute("aria-expanded"),
+  });
   const boundedAttributes = (element) => Object.fromEntries(
     ["id", "class", "data-testid", "data-state", "data-active", "data-project-id", "data-href", "data-url", "aria-current", "aria-selected", "aria-expanded"]
       .map((key) => [key, element.getAttribute(key)]),
@@ -146,7 +184,62 @@ export function buildWebGptOpenProjectScript(projectName: string): string {
     targetRole: target.getAttribute("role"),
     targetAttributes: boundedAttributes(target),
     parentAttributes: boundedAttributes(target.parentElement || target),
+    rowControls: [...row.querySelectorAll("a, button, [role=\\\"link\\\"], [role=\\\"button\\\"]")].slice(0, 12).map(boundedControl),
     href: target instanceof HTMLAnchorElement ? target.href : null,
+    url: location.href,
+  };
+})(${JSON.stringify(projectName)})`;
+}
+
+export function buildWebGptInspectProjectScript(projectName: string): string {
+  return `((expectedName) => {
+  const visible = (element) => {
+    if (!(element instanceof Element)) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  };
+  const label = (element) => String(element.getAttribute("aria-label") || element.getAttribute("title") || element.innerText || element.textContent || "").replace(/\\s+/g, " ").trim();
+  const bounded = (element) => ({
+    tag: element?.tagName || null,
+    role: element?.getAttribute("role") || null,
+    ariaLabel: element?.getAttribute("aria-label") || null,
+    ariaExpanded: element?.getAttribute("aria-expanded") || null,
+    dataTestId: element?.getAttribute("data-testid") || null,
+    className: String(element?.className || "").slice(0, 240),
+  });
+  const candidates = [...document.querySelectorAll("a, button, [role=\\"link\\"], [role=\\"button\\"], [role=\\"treeitem\\"]")]
+    .filter((element) => visible(element) && label(element) === expectedName);
+  if (candidates.length === 0) {
+    return { project: expectedName, found: false, ambiguous: false, matchCount: 0, row: null, container: null, hoverActions: [], buttonCount: 0, linkCount: 0, url: location.href };
+  }
+  if (candidates.length > 1) {
+    return { project: expectedName, found: false, ambiguous: true, matchCount: candidates.length, row: null, container: null, hoverActions: [], buttonCount: 0, linkCount: 0, url: location.href };
+  }
+  const candidate = candidates[0];
+  const rowSelector = '[class*=\\"project-unfurl-row\\"], [data-testid*=\\"project\\"], [role=\\"treeitem\\"]';
+  const container = (candidate.matches(rowSelector)
+    ? candidate.parentElement?.closest(rowSelector)
+    : candidate.closest(rowSelector)) || candidate.parentElement || candidate;
+  candidate.focus?.();
+  const hover = { bubbles: true, cancelable: true, view: window, relatedTarget: null };
+  if (typeof PointerEvent === "function") container.dispatchEvent(new PointerEvent("pointerover", hover));
+  container.dispatchEvent(new MouseEvent("mouseover", hover));
+  container.dispatchEvent(new MouseEvent("mouseenter", { ...hover, bubbles: false }));
+  if (typeof PointerEvent === "function") container.dispatchEvent(new PointerEvent("pointermove", hover));
+  container.dispatchEvent(new MouseEvent("mousemove", hover));
+  const controls = [...container.querySelectorAll("button, a, [role=\\"link\\"], [role=\\"button\\"]")].filter(visible);
+  const actions = controls.filter((element) => element !== candidate).slice(0, 12);
+  return {
+    project: expectedName,
+    found: true,
+    ambiguous: false,
+    matchCount: candidates.length,
+    row: bounded(candidate),
+    container: bounded(container),
+    hoverActions: actions.map(bounded),
+    buttonCount: [...container.querySelectorAll("button, [role=\\"button\\"]")].filter(visible).length,
+    linkCount: [...container.querySelectorAll("a, [role=\\"link\\"]")].filter(visible).length,
     url: location.href,
   };
 })(${JSON.stringify(projectName)})`;
@@ -182,7 +275,7 @@ export function buildWebGptProjectProbeScript(projectName: string): string {
     contextMatch,
     href: target instanceof HTMLAnchorElement ? target.href : null,
     url: location.href,
-    projectRoute: /\\/project\\//i.test(location.pathname),
+    projectRoute: /\\/project(?:\\/|$)/i.test(location.pathname),
   };
 })(${JSON.stringify(projectName)})`;
 }
@@ -213,6 +306,39 @@ export function buildWebGptCreateProjectChatScript(projectName: string): string 
   const controls = [...new Set(rowContainers.flatMap((row) => [...row.querySelectorAll(interactive)]))]
     .filter((element) => visible(element) && element !== candidate);
   const actionPattern = /new chat|new conversation|new-chat|project.*chat|chat.*project|新建对话|新建聊天|新聊天|新对话|开始新对话|开始聊天/i;
+  const bounded = (element) => ({
+    tag: element.tagName,
+    role: element.getAttribute("role"),
+    ariaLabel: element.getAttribute("aria-label"),
+    ariaExpanded: element.getAttribute("aria-expanded"),
+    dataTestId: element.getAttribute("data-testid"),
+    label: label(element).slice(0, 160),
+  });
+  const dispatchClick = (target) => {
+    target.focus?.();
+    const pointer = { bubbles: true, cancelable: true, view: window, button: 0, buttons: 1 };
+    if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerdown", pointer));
+    target.dispatchEvent(new MouseEvent("mousedown", pointer));
+    if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
+    target.dispatchEvent(new MouseEvent("mouseup", { ...pointer, buttons: 0 }));
+    target.click();
+  };
+  const projectPencil = controls.find((element) => /open project home|project home|打开项目首页|打开.*项目首页/i.test(label(element))) || null;
+  if (projectPencil) {
+    dispatchClick(projectPencil);
+    return {
+      clicked: true,
+      projectName: expectedName,
+      matchCount: matches.length,
+      actionCount: 1,
+      actionLabel: label(projectPencil).slice(0, 160),
+      actionTag: projectPencil.tagName,
+      actionRole: projectPencil.getAttribute("role"),
+      actionSource: "project-row-new-chat-pencil",
+      href: projectPencil instanceof HTMLAnchorElement ? projectPencil.href : null,
+      url: location.href,
+    };
+  }
   const actions = controls.filter((element) => actionPattern.test(label(element)));
   const boundedLabels = actions.slice(0, 8).map((element) => label(element).slice(0, 160));
   if (actions.length === 0) {
@@ -223,19 +349,15 @@ export function buildWebGptCreateProjectChatScript(projectName: string): string 
       matchCount: matches.length,
       actionCount: controls.length,
       actionLabels: controls.slice(0, 8).map((element) => label(element).slice(0, 160)),
+      actionSource: "project-row-only",
+      rowControls: controls.slice(0, 8).map(bounded),
     };
   }
   if (actions.length > 1) {
     return { clicked: false, ambiguous: true, code: "PROJECT_NEW_CHAT_ACTION_AMBIGUOUS", projectName: expectedName, matchCount: matches.length, actionCount: actions.length, actionLabels: boundedLabels };
   }
   const target = actions[0];
-  target.focus?.();
-  const pointer = { bubbles: true, cancelable: true, view: window, button: 0, buttons: 1 };
-  if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerdown", pointer));
-  target.dispatchEvent(new MouseEvent("mousedown", pointer));
-  if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
-  target.dispatchEvent(new MouseEvent("mouseup", { ...pointer, buttons: 0 }));
-  target.click();
+  dispatchClick(target);
   return {
     clicked: true,
     projectName: expectedName,
@@ -244,6 +366,7 @@ export function buildWebGptCreateProjectChatScript(projectName: string): string 
     actionLabel: label(target).slice(0, 160),
     actionTag: target.tagName,
     actionRole: target.getAttribute("role"),
+    actionSource: "project-row-semantic-action",
     href: target instanceof HTMLAnchorElement ? target.href : null,
     url: location.href,
   };

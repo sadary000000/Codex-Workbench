@@ -13,6 +13,7 @@ export type WebGptCliCommandName =
   | "webgpt.control.auto"
   | "webgpt.new-chat"
   | "webgpt.open-chat"
+  | "webgpt.project.inspect"
   | "webgpt.project.open"
   | "webgpt.project.new-chat"
   | "webgpt.role.list"
@@ -108,7 +109,7 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
   const parsed = parseJsonFlag(argv.slice(markerIndex + 1));
   const args = parsed.args;
   const [verb, ...rest] = args;
-  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、new-chat、open-chat、project open、project new-chat、role、send、wait、result、request、screenshot、control user、control auto。");
+  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、new-chat、open-chat、project inspect、project open、project new-chat、role、send、wait、result、request、screenshot、control user、control auto。");
 
   if (verb === "status" && rest.length === 0) return { kind: "command", command: { name: "webgpt.status", json: parsed.json } };
   if (verb === "open" && rest.length === 0) return { kind: "command", command: { name: "webgpt.open", json: parsed.json } };
@@ -119,8 +120,9 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
     const [projectVerb, ...projectArgs] = rest;
     const projectName = optionValue(projectArgs, "--name");
     if (!projectVerb || !projectName || optionCount(projectArgs, "--name") !== 1 || !hasOnlyValueOptionsAndFlags(projectArgs, ["--name"])) {
-      return invalid(parsed.json, "project 命令必须使用 project open|new-chat --name <project-name>。");
+      return invalid(parsed.json, "project 命令必须使用 project inspect|open|new-chat --name <project-name>。");
     }
+    if (projectVerb === "inspect") return { kind: "command", command: { name: "webgpt.project.inspect", json: parsed.json, projectName } };
     if (projectVerb === "open") return { kind: "command", command: { name: "webgpt.project.open", json: parsed.json, projectName } };
     if (projectVerb === "new-chat") return { kind: "command", command: { name: "webgpt.project.new-chat", json: parsed.json, projectName } };
     return invalid(parsed.json, `不支持的 project 命令：${projectVerb}`);

@@ -6,6 +6,7 @@ import { isTransientWebGptResponse, normalizeChatUrl } from "../adapter/webgpt-p
 import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import { isWebGptInterruptionTestHookEnabled, waitForWebGptInterruptionTestHook, waitForWebGptSubmittedUserMessage } from "./webgpt-interruption-test-hook.ts";
 import type { WebGptWorkspace } from "./webgpt-workspace.ts";
+import type { WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
 
 const REQUEST_FILE = "requests.json";
 const RESULT_DIRECTORY = "results";
@@ -89,11 +90,22 @@ export class WebGptRequestManager {
     return this.workspace.openProjectForAutomation(projectName);
   }
 
+  async inspectProject(projectName: string): Promise<Record<string, unknown>> {
+    await this.ready();
+    this.assertNavigationIdle();
+    await this.ensureAutomationControl();
+    return this.workspace.inspectProjectForAutomation(projectName);
+  }
+
   async createChatInProject(projectName: string): Promise<Record<string, unknown>> {
     await this.ready();
     this.assertNavigationIdle();
     await this.ensureAutomationControl();
     return this.workspace.createChatInProjectForAutomation(projectName);
+  }
+
+  getLastProjectOperationTimeline(): WebGptProjectOperationTimeline | null {
+    return this.workspace.getLastProjectOperationTimeline();
   }
 
   async findIdempotent(prompt: string, metadata: WebGptRequestMetadata, idempotencyKey?: string): Promise<WebGptRequestRecord | null> {

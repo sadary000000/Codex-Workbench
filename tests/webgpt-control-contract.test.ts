@@ -11,10 +11,21 @@ import {
   publishControlDescriptor,
   readControlDescriptor,
   removeControlDescriptor,
+  runWebGptCli,
   sendWebGptControlRequest,
   WEBGPT_CONTROL_PROTOCOL_VERSION,
   WebGptControlServer,
 } from "../src/main/webgpt-control.ts";
+import {
+  projectCliTimeoutMs,
+  projectOperationBudgetMs,
+  WEBGPT_PROJECT_INSPECT_CLI_TIMEOUT_MS,
+  WEBGPT_PROJECT_INSPECT_OPERATION_TIMEOUT_MS,
+  WEBGPT_PROJECT_NEW_CHAT_CLI_TIMEOUT_MS,
+  WEBGPT_PROJECT_NEW_CHAT_OPERATION_TIMEOUT_MS,
+  WEBGPT_PROJECT_OPEN_CLI_TIMEOUT_MS,
+  WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS,
+} from "../src/features/webgpt/runtime/webgpt-operation-budget.ts";
 
 function sendRawControlRequest(endpoint: string, value: unknown): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -48,6 +59,18 @@ test("WebGPT Control Plane validates versioned, request-scoped allowlisted reque
     version: WEBGPT_CONTROL_PROTOCOL_VERSION,
     requestId: "req-1",
     command: "webgpt.status",
+  });
+  const inspect = parseWebGptControlRequest({
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "project-inspect-1",
+    command: "webgpt.project.inspect",
+    projectName: " workts ",
+  });
+  assert.deepEqual(inspect, {
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "project-inspect-1",
+    command: "webgpt.project.inspect",
+    projectName: "workts",
   });
   const badVersion = parseWebGptControlRequest({ version: 2, requestId: "req-2", command: "webgpt.status" });
   assert.equal("ok" in badVersion && badVersion.ok, false);
@@ -106,6 +129,17 @@ test("WebGPT Project navigation Control Plane requires a bounded project name", 
   assert.equal("error" in missingName && missingName.error?.code, "PROJECT_NAME_REQUIRED");
   const unexpectedName = parseWebGptControlRequest({ version: 1, requestId: "project-3", command: "webgpt.status", projectName: "workts" });
   assert.equal("error" in unexpectedName && unexpectedName.error?.code, "CONTROL_FIELD_UNSUPPORTED");
+});
+
+test("Project navigation budgets leave a transport margin over bounded server work", () => {
+  assert.equal(projectOperationBudgetMs("webgpt.project.inspect"), WEBGPT_PROJECT_INSPECT_OPERATION_TIMEOUT_MS);
+  assert.equal(projectOperationBudgetMs("webgpt.project.open"), WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS);
+  assert.equal(projectCliTimeoutMs("webgpt.project.inspect"), WEBGPT_PROJECT_INSPECT_CLI_TIMEOUT_MS);
+  assert.equal(projectOperationBudgetMs("webgpt.project.new-chat"), WEBGPT_PROJECT_NEW_CHAT_OPERATION_TIMEOUT_MS);
+  assert.equal(projectCliTimeoutMs("webgpt.project.open"), WEBGPT_PROJECT_OPEN_CLI_TIMEOUT_MS);
+  assert.equal(projectCliTimeoutMs("webgpt.project.new-chat"), WEBGPT_PROJECT_NEW_CHAT_CLI_TIMEOUT_MS);
+  assert.equal(WEBGPT_PROJECT_OPEN_CLI_TIMEOUT_MS > WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS, true);
+  assert.equal(WEBGPT_PROJECT_NEW_CHAT_CLI_TIMEOUT_MS > WEBGPT_PROJECT_NEW_CHAT_OPERATION_TIMEOUT_MS, true);
 });
 
 test("WebGPT Control Plane uses a published per-instance descriptor and authenticated socket", async () => {
@@ -177,6 +211,95 @@ test("WebGPT Control Plane deduplicates a retried requestId and rejects replay w
     assert.equal(handlerCalls, 1);
   } finally {
     await server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Project CLI response preserves bounded server/client timeline diagnostics", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-control-timeline-"));
+  const descriptorFile = controlDescriptorPath(directory);
+  const descriptor = createControlDescriptor("workbench-timeline-instance");
+  const server = new WebGptControlServer({
+    endpoint: descriptor.endpoint,
+    authToken: descriptor.authToken,
+    handler: async (request) => ({
+      version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+      requestId: request.requestId,
+      ok: true,
+      command: request.command,
+      result: { projectName: request.projectName, contextMatch: true },
+      diagnostics: {
+        handlerStartAt: "2026-08-20T00:00:00.000Z",
+        operationStartAt: "2026-08-20T00:00:00.001Z",
+        operationBudgetMs: WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS,
+        operationTimeline: {
+          command: "webgpt.project.open",
+          requestId: request.requestId,
+          operationBudgetMs: WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS,
+          operationStartAt: "2026-08-20T00:00:00.001Z",
+          projectLookupStartAt: "2026-08-20T00:00:00.002Z",
+          projectLookupEndAt: "2026-08-20T00:00:00.003Z",
+          clickResult: { clicked: true, matchCount: 1, targetTag: "DIV", targetRole: "button" },
+          navigationConfirmStartAt: "2026-08-20T00:00:00.004Z",
+          navigationConfirmEndAt: "2026-08-20T00:00:00.005Z",
+          waitForComposerStartAt: "2026-08-20T00:00:00.006Z",
+          waitForComposerEndAt: "2026-08-20T00:00:00.007Z",
+          operationFinishAt: "2026-08-20T00:00:00.008Z",
+          outcome: "PASS",
+        },
+        handlerFinishAt: "2026-08-20T00:00:00.010Z",
+      },
+    }),
+  });
+  try {
+    await server.start();
+    await publishControlDescriptor(descriptorFile, descriptor);
+    const response = await runWebGptCli({ name: "webgpt.project.open", json: true, projectName: "workts" }, process.execPath, descriptorFile, 1_000);
+    assert.equal(response.ok, true);
+    assert.equal((response.result as { projectName?: string }).projectName, "workts");
+    assert.equal(response.diagnostics?.operationBudgetMs, WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS);
+    assert.equal(typeof response.diagnostics?.handlerStartAt, "string");
+    assert.equal(typeof response.diagnostics?.responseWriteAt, "string");
+    assert.equal(typeof response.diagnostics?.cliStartAt, "string");
+    assert.equal(typeof response.diagnostics?.socketConnectAt, "string");
+    assert.equal(typeof response.diagnostics?.cliReceiveAt, "string");
+    assert.equal(response.diagnostics?.operationTimeline?.requestId, response.requestId);
+    assert.equal(response.diagnostics?.operationTimeline?.clickResult?.matchCount, 1);
+    assert.equal(response.diagnostics?.operationTimeline?.outcome, "PASS");
+  } finally {
+    await server.close();
+    await removeControlDescriptor(descriptorFile);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("A client timeout does not poison the next Control Plane request", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-control-timeout-"));
+  const descriptorFile = controlDescriptorPath(directory);
+  const descriptor = createControlDescriptor("workbench-timeout-instance");
+  let handlerCalls = 0;
+  const server = new WebGptControlServer({
+    endpoint: descriptor.endpoint,
+    authToken: descriptor.authToken,
+    handler: async (request) => {
+      handlerCalls += 1;
+      if (handlerCalls === 1) await new Promise((resolve) => setTimeout(resolve, 40));
+      return { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: request.requestId, ok: true, command: request.command, result: { handlerCalls } };
+    },
+  });
+  try {
+    await server.start();
+    await publishControlDescriptor(descriptorFile, descriptor);
+    await assert.rejects(
+      sendWebGptControlRequest({ version: 1, requestId: "timed-out-client", command: "webgpt.status" }, descriptorFile, 5),
+      /超时|closed|timeout/i,
+    );
+    const next = await sendWebGptControlRequest({ version: 1, requestId: "next-after-timeout", command: "webgpt.status" }, descriptorFile, 200);
+    assert.equal(next.ok, true);
+    assert.equal(handlerCalls, 2);
+  } finally {
+    await server.close();
+    await removeControlDescriptor(descriptorFile);
     await rm(directory, { recursive: true, force: true });
   }
 });
