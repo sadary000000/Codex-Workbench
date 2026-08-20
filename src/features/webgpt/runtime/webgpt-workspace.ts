@@ -1,10 +1,10 @@
 import { shell, WebContentsView, type BaseWindow, type Rectangle, type Session } from "electron";
-import { normalizeChatUrl, normalizePageState, normalizeWebGptUrl, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
+import { buildWebGptSetPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
 import { createWebGptSession, webGptSessionPath } from "../session/webgpt-session.ts";
 import type {
   WebGptBounds,
-  WebGptDeferredResult,
   WebGptHealthStatus,
+  WebGptPageProbe,
   WebGptPageState,
   WebGptPublicService,
   WebGptScreenshot,
@@ -12,7 +12,6 @@ import type {
 } from "../types.ts";
 
 const ZERO_BOUNDS: Rectangle = { x: 0, y: 0, width: 0, height: 0 };
-const DEFERRED_MESSAGE = "WEB-1 只提供 Browser Workspace 基础；自动 Prompt/Response 尚未开放。";
 
 function initialPage(url = ""): WebGptPageState {
   return {
@@ -25,10 +24,6 @@ function initialPage(url = ""): WebGptPageState {
     generating: false,
     assistantCount: 0,
   };
-}
-
-function deferredResult(): WebGptDeferredResult {
-  return { supported: false, code: "WEBGPT_AUTO_CONTROL_DEFERRED", message: DEFERRED_MESSAGE };
 }
 
 function validBounds(value: unknown): Rectangle {
@@ -95,7 +90,6 @@ export class WebGptWorkspace implements WebGptPublicService {
     this.session.setPermissionCheckHandler(() => false);
     this.session.setPermissionRequestHandler((_webContents, _permission, callback) => {
       callback(false);
-      this.setError("WebGPT 页面权限请求已被阻止。");
     });
     this.session.on("will-download", (_event, item) => {
       item.cancel();
@@ -171,18 +165,34 @@ export class WebGptWorkspace implements WebGptPublicService {
   private async refreshPageState(): Promise<WebGptPageState> {
     if (this.closed || this.view.webContents.isDestroyed()) return this.state.page;
     try {
-      const value = await this.view.webContents.executeJavaScript(WEBGPT_PAGE_PROBE_SCRIPT);
-      const page = normalizePageState(value, this.view.webContents.getURL() || this.state.url);
-      if (page.url.startsWith("chrome-error://")) {
-        this.patchState({ page, ready: false, error: this.state.error ?? "WebGPT 页面加载失败。" });
-      } else {
-        this.patchState({ page, url: page.url || this.view.webContents.getURL(), title: page.title || this.state.title, ready: true, error: null });
-      }
-      return page;
+      const probe = await this.readPageProbe();
+      this.applyPageProbe(probe);
+      return probe.page;
     } catch (error) {
       this.setError(`读取 WebGPT 页面状态失败：${String(error)}`);
       return this.state.page;
     }
+  }
+
+  private async readPageProbe(): Promise<WebGptPageProbe> {
+    if (this.closed || this.view.webContents.isDestroyed()) throw this.codedError("WEBGPT_CLOSED", "WebGPT Workspace 已关闭。");
+    const value = await this.view.webContents.executeJavaScript(WEBGPT_PAGE_PROBE_SCRIPT);
+    return normalizePageProbe(value, this.view.webContents.getURL() || this.state.url);
+  }
+
+  private applyPageProbe(probe: WebGptPageProbe): void {
+    const page = probe.page;
+    if (page.url.startsWith("chrome-error://")) {
+      this.patchState({ page, ready: false, url: page.url, error: this.state.error ?? "WebGPT 页面加载失败。" });
+    } else {
+      this.patchState({ page, url: page.url || this.view.webContents.getURL(), title: page.title || this.state.title, ready: true, error: null });
+    }
+  }
+
+  private codedError(code: string, message: string): Error & { code: string } {
+    const error = new Error(message) as Error & { code: string };
+    error.code = code;
+    return error;
   }
 
   setBounds(bounds: WebGptBounds): void {
@@ -231,12 +241,29 @@ export class WebGptWorkspace implements WebGptPublicService {
     return this.state;
   }
 
+  async openChatForAutomation(url: string): Promise<WebGptState> {
+    this.setVisible(true);
+    await this.load(normalizeChatUrl(url));
+    this.patchState({ mode: "AUTO_CONTROL" });
+    return this.state;
+  }
+
   async getCurrentUrl(): Promise<string> {
     return this.view.webContents.getURL() || this.state.url;
   }
 
   async getPageState(): Promise<WebGptPageState> {
     return this.refreshPageState();
+  }
+
+  async getPageProbe(): Promise<WebGptPageProbe> {
+    const probe = await this.readPageProbe();
+    this.applyPageProbe(probe);
+    return probe;
+  }
+
+  getControlMode(): WebGptState["mode"] {
+    return this.state.mode;
   }
 
   async takeScreenshot(): Promise<WebGptScreenshot> {
@@ -295,15 +322,93 @@ export class WebGptWorkspace implements WebGptPublicService {
       url: await this.getCurrentUrl(),
       title: this.state.title,
       sessionPath: this.sessionPath,
-      automation: "foundation_only",
+      automation: "prompt_response",
       error: this.state.error,
     };
   }
 
-  async createChat(): Promise<WebGptDeferredResult> { return deferredResult(); }
-  async submitPrompt(): Promise<WebGptDeferredResult> { return deferredResult(); }
-  async waitForResponse(): Promise<WebGptDeferredResult> { return deferredResult(); }
-  async getLatestResponse(): Promise<WebGptDeferredResult> { return deferredResult(); }
+  async createChat(): Promise<WebGptState> {
+    if (this.closed) throw this.codedError("WEBGPT_CLOSED", "WebGPT Workspace 已关闭。");
+    this.setVisible(true);
+    const currentUrl = this.view.webContents.getURL();
+    if (!currentUrl || currentUrl.startsWith("chrome-error://") || this.state.error) await this.load(WEBGPT_HOME_URL);
+    const probe = await this.getPageProbe();
+    if (probe.page.loginRequired) throw this.codedError("WEBGPT_LOGIN_REQUIRED", "ChatGPT 页面需要登录。");
+    if (probe.page.onChatPage && probe.page.composerFound) {
+      const result = await this.view.webContents.executeJavaScript(WEBGPT_CREATE_CHAT_SCRIPT);
+      if (!(result && typeof result === "object" && (result as { clicked?: unknown }).clicked === true)) {
+        await this.load(WEBGPT_HOME_URL);
+      }
+    } else {
+      await this.load(WEBGPT_HOME_URL);
+    }
+    await this.waitForComposer();
+    return this.state;
+  }
+
+  async submitPrompt(prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe }> {
+    if (this.state.mode !== "AUTO_CONTROL") throw this.codedError("WEBGPT_USER_CONTROL", "当前由用户控制，自动 Prompt 已暂停。");
+    const value = prompt.trim();
+    if (!value) throw this.codedError("PROMPT_EMPTY", "Prompt 不能为空。");
+    const baseline = await this.getPageProbe();
+    if (baseline.page.loginRequired) throw this.codedError("WEBGPT_LOGIN_REQUIRED", "ChatGPT 页面需要登录。");
+    if (!baseline.page.onChatPage || !baseline.page.composerFound) throw this.codedError("COMPOSER_NOT_READY", "ChatGPT Composer 尚未就绪。");
+    const setResult = await this.view.webContents.executeJavaScript(buildWebGptSetPromptScript(value));
+    if (!setResult || typeof setResult !== "object" || (setResult as { ok?: unknown }).ok !== true) {
+      throw this.codedError(String((setResult as { code?: unknown })?.code || "COMPOSER_DRAFT_MISMATCH"), "Prompt 未能可靠写入 ChatGPT Composer。");
+    }
+    const submitResult = await this.view.webContents.executeJavaScript(WEBGPT_SUBMIT_PROMPT_SCRIPT);
+    if (!submitResult || typeof submitResult !== "object" || (submitResult as { submitted?: unknown }).submitted !== true) {
+      throw this.codedError(String((submitResult as { code?: unknown })?.code || "PROMPT_NOT_SUBMITTED"), "未能提交 ChatGPT Prompt。");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return { chatUrl: await this.getCurrentUrl(), baseline };
+  }
+
+  async waitForResponse(baseline: WebGptPageProbe, timeoutMs = 120_000): Promise<{ response: string; samples: number; elapsedMs: number }> {
+    const startedAt = Date.now();
+    let lastText = baseline.latestAssistantText;
+    let stableSamples = 0;
+    let sawResponse = false;
+    let samples = 0;
+    while (Date.now() - startedAt < timeoutMs) {
+      const probe = await this.getPageProbe();
+      samples += 1;
+      const changed = probe.page.assistantCount > baseline.page.assistantCount || probe.latestAssistantText !== baseline.latestAssistantText;
+      if (changed && probe.latestAssistantText.length > 0 && !isTransientWebGptResponse(probe.latestAssistantText)) sawResponse = true;
+      const settled = sawResponse
+        && probe.latestAssistantText.length > 0
+        && !isTransientWebGptResponse(probe.latestAssistantText)
+        && probe.page.composerFound
+        && !probe.page.generating
+        && probe.composerText.length === 0;
+      if (settled && probe.latestAssistantText === lastText) stableSamples += 1;
+      else stableSamples = 0;
+      lastText = probe.latestAssistantText;
+      if (settled && stableSamples >= 3) {
+        return { response: probe.latestAssistantText, samples, elapsedMs: Date.now() - startedAt };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+    throw this.codedError("WEBGPT_RESPONSE_TIMEOUT", `未能在 ${timeoutMs}ms 内确认 ChatGPT 回复已完成。`);
+  }
+
+  async getLatestResponse(): Promise<string | null> {
+    const probe = await this.getPageProbe();
+    return probe.latestAssistantText || null;
+  }
+
+  private async waitForComposer(timeoutMs = 20_000): Promise<WebGptPageProbe> {
+    const deadline = Date.now() + timeoutMs;
+    let last: WebGptPageProbe | null = null;
+    while (Date.now() < deadline) {
+      last = await this.getPageProbe();
+      if (last.page.loginRequired) throw this.codedError("WEBGPT_LOGIN_REQUIRED", "ChatGPT 页面需要登录。");
+      if (last.page.composerFound) return last;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    throw this.codedError("COMPOSER_NOT_READY", last?.page.url ? `Composer 尚未就绪：${last.page.url}` : "ChatGPT Composer 尚未就绪。");
+  }
 
   close(): void {
     if (this.closed) return;

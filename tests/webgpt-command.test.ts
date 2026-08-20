@@ -27,3 +27,28 @@ test("WebGPT CLI parser exposes the WEB-2 allowlist and JSON flag", () => {
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "open", "--webgpt-account", "a"]).kind, "error");
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "--webgpt-open"]).kind, "not-cli");
 });
+
+test("WebGPT WEB-3 CLI parser keeps request and prompt inputs explicit", () => {
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "new-chat", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.new-chat", json: true },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "open-chat", "--url", "https://chatgpt.com/c/test"]), {
+    kind: "command",
+    command: { name: "webgpt.open-chat", json: false, url: "https://chatgpt.com/c/test" },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "send", "--file", "prompt.md", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.send", json: true, file: "prompt.md" },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "wait", "--request-id", "wgpt-1", "--timeout-ms", "5000"]), {
+    kind: "command",
+    command: { name: "webgpt.wait", json: false, targetRequestId: "wgpt-1", timeoutMs: 5000 },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "result", "--request-id", "wgpt-1", "--out", "result.txt", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.result", json: true, targetRequestId: "wgpt-1", out: "result.txt" },
+  });
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "send", "--text", "x", "--file", "p.md"]).kind, "error");
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "result", "--request-id", "wgpt-1", "--timeout-ms", "1"]).kind, "error");
+});

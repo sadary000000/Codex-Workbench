@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   isAllowedWebGptNavigation,
+  isTransientWebGptResponse,
   normalizeChatUrl,
   normalizePageState,
   normalizeWebGptUrl,
@@ -47,4 +48,10 @@ test("page adapter exposes bounded metadata, not arbitrary page content", () => 
     generating: false,
     assistantCount: 3,
   });
+});
+
+test("WebGPT completion ignores visible thinking placeholders", () => {
+  assert.equal(isTransientWebGptResponse("正在思考"), true);
+  assert.equal(isTransientWebGptResponse("Thinking..."), true);
+  assert.equal(isTransientWebGptResponse("WEBGPT_WEB3_OK"), false);
 });

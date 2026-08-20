@@ -19,6 +19,7 @@ import { isComposerTargetValid } from "../shared/thread-target.ts";
 import { buildNativeTurnOptions, parseComposerPreferences } from "../codex/composer-capabilities.ts";
 import { validateProjectDirectory } from "../shared/project-path.ts";
 import { WebGptWorkspace, type WebGptBounds } from "../features/webgpt/index.ts";
+import { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
 import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
 import { WEBGPT_CONTROL_PROTOCOL_VERSION, WebGptControlServer, controlDescriptorPath, createControlDescriptor, publishControlDescriptor, removeControlDescriptor, runWebGptCli, type WebGptControlDescriptor, type WebGptControlIdentity, type WebGptControlRequest, type WebGptControlResponse } from "./webgpt-control.ts";
 
@@ -66,6 +67,7 @@ const IPC = Object.freeze({
   projectMapMaintenanceRead: "project-map:maintenance-read",
   projectMapState: "project-map:state",
   webGptState: "webgpt:state",
+  webGptRequestState: "webgpt:request-state",
   webGptOpenRequest: "webgpt:open-request",
   webGptOpenWorkspace: "webgpt:open-workspace",
   webGptOpenHome: "webgpt:open-home",
@@ -99,6 +101,7 @@ let workbenchReady = false;
 let webGptControlServer: WebGptControlServer | null = null;
 let webGptControlDescriptorFile: string | null = null;
 let webGptRuntimeId: string | null = null;
+let webGptRequestManager: WebGptRequestManager | null = null;
 let webGptControlRevision = 0;
 let webGptControlQueue: Promise<void> = Promise.resolve();
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
@@ -134,8 +137,8 @@ function controlOk(command: string, result: unknown): WebGptControlResponse {
   return { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: "pending", ok: true, command, result };
 }
 
-function controlFail(command: string, code: string, message: string): WebGptControlResponse {
-  return { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: "pending", ok: false, command, error: { code, message } };
+function controlFail(command: string, code: string, message: string, result?: unknown): WebGptControlResponse {
+  return { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: "pending", ok: false, command, ...(result === undefined ? {} : { result }), error: { code, message } };
 }
 
 function controlIdentity(): WebGptControlIdentity {
@@ -172,6 +175,17 @@ function validateScreenshotPath(rawPath: string): string {
   }
   const sessionRoot = join(app.getPath("userData"), "webgpt", "session");
   if (pathWithin(sessionRoot, candidate)) throw codedError("SCREENSHOT_OUTPUT_SESSION_PATH", "不能把截图写入 WebGPT Session 目录。");
+  return candidate;
+}
+
+function validateResultPath(rawPath: string): string {
+  const value = rawPath.trim();
+  if (!value) throw codedError("WEBGPT_RESULT_OUTPUT_INVALID", "结果输出路径不能为空。");
+  const candidate = resolve(value);
+  const roots = [process.cwd(), app.getPath("userData"), app.getPath("temp")];
+  if (!roots.some((root) => pathWithin(root, candidate))) throw codedError("WEBGPT_RESULT_OUTPUT_OUTSIDE_ALLOWLIST", "结果输出路径必须位于当前工作目录、Workbench userData 或系统临时目录内。");
+  const protectedRoots = [join(app.getPath("userData"), "webgpt", "session"), join(app.getPath("userData"), "webgpt", "requests")];
+  if (protectedRoots.some((root) => pathWithin(root, candidate))) throw codedError("WEBGPT_RESULT_OUTPUT_PROTECTED", "不能把结果写入 WebGPT 内部存储目录。");
   return candidate;
 }
 
@@ -217,6 +231,7 @@ async function webGptStatusResult(): Promise<Record<string, unknown>> {
     pageTitle: health.title,
     pageHealthy,
     page,
+    activeRequests: webGptRequestManager ? await webGptRequestManager.activeSummary() : [],
   };
 }
 
@@ -237,10 +252,45 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
         : controlOk(request.command, result);
     } else if (request.command === "webgpt.control.user") {
       const state = await getWebGptWorkspace().requestUserControl();
+      await getWebGptRequestManager().userControl();
       response = controlOk(request.command, publicWebGptState(state));
     } else if (request.command === "webgpt.control.auto") {
       const state = await getWebGptWorkspace().returnAutomationControl();
+      await getWebGptRequestManager().automationControl();
       response = controlOk(request.command, publicWebGptState(state));
+    } else if (request.command === "webgpt.new-chat") {
+      response = controlOk(request.command, await getWebGptRequestManager().createChat());
+    } else if (request.command === "webgpt.open-chat") {
+      if (!request.url) response = controlFail(request.command, "CHAT_URL_REQUIRED", "open-chat 必须提供 ChatGPT Chat URL。");
+      else response = controlOk(request.command, await getWebGptRequestManager().openChat(request.url));
+    } else if (request.command === "webgpt.send") {
+      if (request.text === undefined) response = controlFail(request.command, "PROMPT_REQUIRED", "send 必须提供文本 Prompt。");
+      else response = controlOk(request.command, await getWebGptRequestManager().submit(request.text));
+    } else if (request.command === "webgpt.wait") {
+      if (!request.targetRequestId) response = controlFail(request.command, "REQUEST_ID_REQUIRED", "wait 必须提供目标 requestId。");
+      else {
+        const waited = await getWebGptRequestManager().waitForRequest(request.targetRequestId, request.timeoutMs ?? 120_000);
+        response = waited.timedOut
+          ? controlFail(request.command, "WEBGPT_WAIT_TIMEOUT", "等待超时；请求仍由 WebGPT Core 持有，可继续使用 result 查询。", { ...waited.record, waitTimedOut: true })
+          : controlOk(request.command, waited.record);
+      }
+    } else if (request.command === "webgpt.result") {
+      if (!request.targetRequestId) response = controlFail(request.command, "REQUEST_ID_REQUIRED", "result 必须提供目标 requestId。");
+      else {
+        const result = await getWebGptRequestManager().getResult(request.targetRequestId);
+        if (!result.response) response = controlOk(request.command, result);
+        else if (request.out) {
+          const outputPath = validateResultPath(request.out);
+          const bytes = Buffer.from(result.response, "utf8");
+          try {
+            await writeFile(outputPath, bytes, { flag: "wx" });
+          } catch (error) {
+            if ((error as { code?: string })?.code === "EEXIST") throw codedError("WEBGPT_RESULT_OUTPUT_EXISTS", "结果输出文件已存在，为避免覆盖已拒绝写入。");
+            throw error;
+          }
+          response = controlOk(request.command, { ...result, response: null, outputPath, outputBytes: bytes.byteLength });
+        } else response = controlOk(request.command, result);
+      }
     } else if (request.command === "webgpt.screenshot") {
       if (!request.out) {
         response = controlFail(request.command, "SCREENSHOT_OUTPUT_REQUIRED", "screenshot 必须提供 --out <png-path>。");
@@ -276,6 +326,9 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
 }
 
 function enqueueWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {
+  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current") {
+    return handleWebGptControlRequest(request);
+  }
   const result = webGptControlQueue.then(() => handleWebGptControlRequest(request));
   webGptControlQueue = result.then(() => undefined, () => undefined);
   return result;
@@ -348,6 +401,17 @@ function getWebGptWorkspace(): WebGptWorkspace {
     },
   });
   return webGptWorkspace;
+}
+
+function getWebGptRequestManager(): WebGptRequestManager {
+  if (webGptRequestManager) return webGptRequestManager;
+  const workspace = getWebGptWorkspace();
+  webGptRequestManager = new WebGptRequestManager({
+    workspace,
+    storageDirectory: join(app.getPath("userData"), "webgpt", "requests"),
+    onState: (state) => send(IPC.webGptRequestState, state),
+  });
+  return webGptRequestManager;
 }
 
 interface RuntimeTarget {

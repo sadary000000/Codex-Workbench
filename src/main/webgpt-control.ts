@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import type { WebGptCliCommand, WebGptCliCommandName } from "./webgpt-command.ts";
 
 export const WEBGPT_CONTROL_PROTOCOL_VERSION = 1 as const;
 export const WEBGPT_CONTROL_DESCRIPTOR_RELATIVE = join("webgpt", "control-plane.json");
 export const WEBGPT_CONTROL_TIMEOUT_MS = 15_000;
-const WEBGPT_CONTROL_SOCKET_TIMEOUT_MS = 12_000;
-const WEBGPT_CONTROL_MAX_REQUEST_BYTES = 64_000;
+const WEBGPT_CONTROL_SOCKET_TIMEOUT_MS = 320_000;
+const WEBGPT_CONTROL_MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 
 export interface WebGptControlDescriptor {
   version: typeof WEBGPT_CONTROL_PROTOCOL_VERSION;
@@ -24,6 +24,10 @@ export interface WebGptControlRequest {
   requestId: string;
   command: WebGptCliCommandName;
   out?: string;
+  url?: string;
+  text?: string;
+  targetRequestId?: string;
+  timeoutMs?: number;
 }
 
 export interface WebGptControlError {
@@ -57,6 +61,11 @@ const COMMANDS = new Set<WebGptCliCommandName>([
   "webgpt.screenshot",
   "webgpt.control.user",
   "webgpt.control.auto",
+  "webgpt.new-chat",
+  "webgpt.open-chat",
+  "webgpt.send",
+  "webgpt.wait",
+  "webgpt.result",
 ]);
 
 export function controlDescriptorPath(userDataDirectory: string): string {
@@ -126,11 +135,19 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (record.version !== WEBGPT_CONTROL_PROTOCOL_VERSION) return controlError("CONTROL_VERSION_UNSUPPORTED", "不支持的 WebGPT Control Plane 版本。", String(record.command ?? "webgpt"), requestId);
   if (typeof record.command !== "string" || !COMMANDS.has(record.command as WebGptCliCommandName)) return controlError("CONTROL_COMMAND_UNSUPPORTED", "不支持的 WebGPT Control Plane 命令。", String(record.command ?? "webgpt"), requestId);
   if (record.out !== undefined && (typeof record.out !== "string" || record.out.length > 4_096)) return controlError("CONTROL_OUTPUT_PATH_INVALID", "截图输出路径无效。", record.command, requestId);
+  if (record.url !== undefined && (typeof record.url !== "string" || record.url.length > 2_048)) return controlError("CONTROL_URL_INVALID", "WebGPT URL 无效。", record.command, requestId);
+  if (record.text !== undefined && (typeof record.text !== "string" || record.text.length > 2_000_000)) return controlError("CONTROL_PROMPT_TOO_LARGE", "Prompt 无效或过大。", record.command, requestId);
+  if (record.targetRequestId !== undefined && (typeof record.targetRequestId !== "string" || record.targetRequestId.length === 0 || record.targetRequestId.length > 128)) return controlError("CONTROL_REQUEST_ID_INVALID", "目标 requestId 无效。", record.command, requestId);
+  if (record.timeoutMs !== undefined && (typeof record.timeoutMs !== "number" || !Number.isSafeInteger(record.timeoutMs) || record.timeoutMs < 0 || record.timeoutMs > 300_000)) return controlError("CONTROL_TIMEOUT_INVALID", "timeoutMs 必须是 0 到 300000 之间的整数。", record.command, requestId);
   return {
     version: WEBGPT_CONTROL_PROTOCOL_VERSION,
     requestId,
     command: record.command as WebGptCliCommandName,
     ...(typeof record.out === "string" ? { out: record.out } : {}),
+    ...(typeof record.url === "string" ? { url: record.url } : {}),
+    ...(typeof record.text === "string" ? { text: record.text } : {}),
+    ...(typeof record.targetRequestId === "string" ? { targetRequestId: record.targetRequestId } : {}),
+    ...(typeof record.timeoutMs === "number" ? { timeoutMs: record.timeoutMs } : {}),
   };
 }
 
@@ -283,12 +300,31 @@ export async function sendWebGptControlRequest(request: WebGptControlRequest, de
   return response;
 }
 
-function requestFromCommand(command: WebGptCliCommand): WebGptControlRequest {
+async function requestFromCommand(command: WebGptCliCommand): Promise<WebGptControlRequest> {
+  let text = command.text;
+  if (command.file) {
+    const extension = extname(command.file).toLowerCase();
+    if (extension !== ".md" && extension !== ".txt") throw new Error("CLI_PROMPT_FILE_UNSUPPORTED: Prompt 文件只支持 .md 或 .txt。");
+    const filePath = resolve(command.file);
+    const information = await stat(filePath).catch(() => null);
+    if (!information?.isFile()) throw new Error("CLI_PROMPT_FILE_NOT_FOUND: Prompt 文件不存在。");
+    if (information.size > 2_000_000) throw new Error("CLI_PROMPT_FILE_TOO_LARGE: Prompt 文件超过 2 MB 限制。");
+    const bytes = await readFile(filePath);
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new Error("CLI_PROMPT_FILE_NOT_UTF8: Prompt 文件必须是 UTF-8 文本。");
+    }
+  }
   return {
     version: WEBGPT_CONTROL_PROTOCOL_VERSION,
     requestId: randomUUID(),
     command: command.name,
     ...(command.out ? { out: command.out } : {}),
+    ...(command.url ? { url: command.url } : {}),
+    ...(text !== undefined ? { text } : {}),
+    ...(command.targetRequestId ? { targetRequestId: command.targetRequestId } : {}),
+    ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
   };
 }
 
@@ -298,10 +334,24 @@ export async function runWebGptCli(
   descriptorPath: string,
   timeoutMs = WEBGPT_CONTROL_TIMEOUT_MS,
 ): Promise<WebGptControlResponse> {
-  const deadline = Date.now() + timeoutMs;
+  const commandTimeout = command.name === "webgpt.wait"
+    ? Math.min(320_000, Math.max(timeoutMs, (command.timeoutMs ?? 120_000) + 5_000))
+    : timeoutMs;
+  const deadline = Date.now() + commandTimeout;
   let spawned = false;
   let lastError = "Workbench Control Plane 未就绪。";
-  const request = requestFromCommand(command);
+  let request: WebGptControlRequest;
+  try {
+    request = await requestFromCommand(command);
+  } catch (error) {
+    return {
+      version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+      requestId: randomUUID(),
+      ok: false,
+      command: command.name,
+      error: { code: "CLI_INPUT_INVALID", message: error instanceof Error ? error.message : String(error) },
+    };
+  }
   while (Date.now() < deadline) {
     try {
       const { response, descriptor } = await sendWebGptControlRequestWithDescriptor(
@@ -313,6 +363,8 @@ export async function runWebGptCli(
         lastError = "Control Plane 实例身份不一致。";
       } else if (response.error?.code === "WORKBENCH_NOT_READY") {
         lastError = response.error.message;
+      } else if (response.requestId !== request.requestId) {
+        lastError = "Control Plane 返回的 requestId 与请求不一致。";
       } else {
         return response;
       }

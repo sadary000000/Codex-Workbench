@@ -11,6 +11,13 @@ export interface WebGptPageState {
   assistantCount: number;
 }
 
+export interface WebGptPageProbe {
+  page: WebGptPageState;
+  latestAssistantText: string;
+  composerText: string;
+  sendAvailable: boolean;
+}
+
 export interface WebGptState {
   visible: boolean;
   ready: boolean;
@@ -44,8 +51,42 @@ export interface WebGptHealthStatus {
   url: string;
   title: string;
   sessionPath: string;
-  automation: "foundation_only";
+  automation: "prompt_response";
   error: string | null;
+}
+
+export type WebGptRequestState =
+  | "QUEUED"
+  | "SUBMITTED"
+  | "GENERATING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELED"
+  | "PAUSED_FOR_USER"
+  | "TIMEOUT"
+  | "INDETERMINATE";
+
+export interface WebGptRequestRecord {
+  requestId: string;
+  state: WebGptRequestState;
+  chatUrl: string;
+  promptChars: number;
+  promptSha256: string;
+  createdAt: string;
+  submittedAt: string | null;
+  completedAt: string | null;
+  resultPath: string | null;
+  resultSha256: string | null;
+  resultBytes: number | null;
+  error: { code: string; message: string } | null;
+}
+
+export interface WebGptRequestResult extends WebGptRequestRecord {
+  response: string | null;
+}
+
+export interface WebGptRequestStateEvent extends WebGptRequestRecord {
+  responsePreview?: string;
 }
 
 export interface WebGptDeferredResult {
@@ -64,8 +105,8 @@ export interface WebGptPublicService {
   requestUserControl(): Promise<WebGptState>;
   returnAutomationControl(): Promise<WebGptState>;
   getHealthStatus(): Promise<WebGptHealthStatus>;
-  createChat(): Promise<WebGptDeferredResult>;
-  submitPrompt(): Promise<WebGptDeferredResult>;
-  waitForResponse(): Promise<WebGptDeferredResult>;
-  getLatestResponse(): Promise<WebGptDeferredResult>;
+  createChat(): Promise<WebGptState>;
+  submitPrompt(prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe }>;
+  waitForResponse(baseline: WebGptPageProbe, timeoutMs?: number): Promise<{ response: string; samples: number; elapsedMs: number }>;
+  getLatestResponse(): Promise<string | null>;
 }

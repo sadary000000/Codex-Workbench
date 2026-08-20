@@ -52,7 +52,7 @@ test("WebGPT Control Plane validates versioned, request-scoped allowlisted reque
   const badVersion = parseWebGptControlRequest({ version: 2, requestId: "req-2", command: "webgpt.status" });
   assert.equal("ok" in badVersion && badVersion.ok, false);
   assert.equal("error" in badVersion && badVersion.error?.code, "CONTROL_VERSION_UNSUPPORTED");
-  const badCommand = parseWebGptControlRequest({ version: 1, requestId: "req-3", command: "webgpt.send" });
+  const badCommand = parseWebGptControlRequest({ version: 1, requestId: "req-3", command: "webgpt.not-allowlisted" });
   assert.equal("ok" in badCommand && badCommand.ok, false);
   assert.equal("error" in badCommand && badCommand.error?.code, "CONTROL_COMMAND_UNSUPPORTED");
 });

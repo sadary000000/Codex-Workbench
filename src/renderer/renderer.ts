@@ -24,7 +24,7 @@ import { operationStatusLabel, runtimeStateLabel, shouldRenderDefaultEvent, user
 import { projectLiveEvent, projectReadItem, projectTurnState, type MessageProjection } from "./message-projection.ts";
 import { defaultComposerPreferences, validateComposerPreferencesAgainstCapabilities } from "../codex/composer-capabilities.ts";
 import { beginThreadSelection, isCurrentThreadSelection, type ThreadSelectionRequest } from "./thread-selection.ts";
-import type { WebGptPageState, WebGptState } from "../features/webgpt/types.ts";
+import type { WebGptPageState, WebGptRequestStateEvent, WebGptState } from "../features/webgpt/types.ts";
 
 interface IpcEnvelope<T = unknown> {
   ok: boolean;
@@ -101,6 +101,7 @@ interface WebGptApi {
   reloadWebGpt(): Promise<IpcEnvelope<WebGptState>>;
   openWebGptExternal(): Promise<IpcEnvelope<{ url: string }>>;
   onWebGptState(listener: (payload: WebGptState) => void): () => void;
+  onWebGptRequestState(listener: (payload: WebGptRequestStateEvent) => void): () => void;
   onWebGptOpenRequest(listener: () => void): () => void;
 }
 
@@ -203,6 +204,7 @@ const webGptPageTitleElement = document.querySelector<HTMLElement>("#webgpt-page
 const webGptPageUrlElement = document.querySelector<HTMLElement>("#webgpt-page-url")!;
 const webGptPageStateElement = document.querySelector<HTMLElement>("#webgpt-page-state")!;
 const webGptPageErrorElement = document.querySelector<HTMLElement>("#webgpt-page-error")!;
+const webGptRequestStateElement = document.querySelector<HTMLElement>("#webgpt-request-state")!;
 const webGptModeElement = document.querySelector<HTMLElement>("#webgpt-mode")!;
 const webGptUrlForm = document.querySelector<HTMLFormElement>("#webgpt-url-form")!;
 const webGptBackButton = document.querySelector<HTMLButtonElement>("#webgpt-back")!;
@@ -298,6 +300,13 @@ function renderWebGptState(state: WebGptState | null): void {
   webGptForwardButton.disabled = !state.url;
   webGptReloadButton.disabled = !state.url;
   openWebGptButton.setAttribute("aria-current", webGptOpen ? "page" : "false");
+}
+
+function renderWebGptRequestState(state: WebGptRequestStateEvent): void {
+  webGptRequestStateElement.textContent = state.requestId
+    ? `请求 ${state.requestId} · ${state.state}`
+    : "无自动请求";
+  webGptRequestStateElement.title = state.error ? `${state.error.code}: ${state.error.message}` : state.requestId;
 }
 
 function syncWebGptBounds(): void {
@@ -2367,6 +2376,7 @@ webGptApi.onWebGptState((state) => {
   renderWebGptState(state);
   if (state.visible) syncWebGptBounds();
 });
+webGptApi.onWebGptRequestState((state) => renderWebGptRequestState(state));
 webGptApi.onWebGptOpenRequest(() => { void showWebGptWorkspace(); });
 api.onState((state) => {
   // RuntimeRegistry may continue emitting state for a background Thread after
