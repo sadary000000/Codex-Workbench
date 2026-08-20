@@ -1,0 +1,69 @@
+{
+  "stage": "WEB-6.5 CLI Targeted Latest Read",
+  "result": "BLOCKED",
+  "implementationGate": "PASS",
+  "realPromptBudget": { "max": 1, "used": 0 },
+  "commands": [
+    {
+      "command": "webgpt.status",
+      "invocation": "node execFile",
+      "result": "PASS",
+      "ok": true,
+      "workbench": "READY",
+      "webgpt": "UNAVAILABLE",
+      "elapsedMsApprox": 159,
+      "promptSent": false
+    },
+    {
+      "command": "webgpt.latest",
+      "invocation": "node execFile",
+      "result": "FAIL_CLOSED",
+      "errorCode": "WEBGPT_RESPONSE_IN_PROGRESS",
+      "generating": true,
+      "assistantCount": 0,
+      "assistantTextIncluded": false,
+      "textLength": 0,
+      "textSha256": null,
+      "activeRequestCount": 19,
+      "promptSent": false
+    },
+    {
+      "command": "webgpt.chat.latest",
+      "invocation": "node execFile",
+      "result": "FAIL_CLOSED",
+      "errorCode": "WEBGPT_AUTOMATION_PAUSED",
+      "targetUrlIncluded": false,
+      "promptSent": false
+    },
+    {
+      "command": "webgpt.role.latest",
+      "invocation": "node execFile",
+      "result": "FAIL_CLOSED",
+      "errorCode": "PROJECT_NOT_FOUND",
+      "projectIdIncluded": false,
+      "promptSent": false
+    }
+  ],
+  "coldStart": {
+    "result": "BLOCKED",
+    "errorCode": "WORKBENCH_START_TIMEOUT",
+    "boundMs": 15000,
+    "promptSent": false,
+    "bodyIncluded": false,
+    "note": "CLI response/Control Plane startup was observed, but execFile close-handle lifetime needs a clean-environment follow-up."
+  },
+  "safety": {
+    "wrongChatRead": 0,
+    "silentRoleRebind": false,
+    "roleBindingChanged": false,
+    "globalNewChatClicked": false,
+    "requestJournalModified": false,
+    "cookiesRead": false,
+    "tokensRead": false,
+    "privatePageContentLogged": false,
+    "promptBodyLogged": false,
+    "responseBodyLogged": false,
+    "rateLimitObserved": false
+  },
+  "evidenceScope": "metadata-only; no user prompt or assistant response body"
+}

@@ -1,0 +1,13 @@
+{
+  "stage": "WEB-6.5 CLI Targeted Latest Read",
+  "npmRunCheck": "PASS",
+  "npmTest": { "result": "PASS", "passed": 184, "failed": 0, "skipped": 0 },
+  "npmRunBuild": "PASS",
+  "npmRunPackageWin": "PASS",
+  "npmAuditOmitDev": { "result": "PASS", "vulnerabilities": 0 },
+  "gitDiffCheck": "PASS",
+  "secretScan": { "result": "PASS", "credentialValuesFound": false, "scope": "WEB-6.5 changed files and review artifacts" },
+  "realPromptCount": 0,
+  "realPromptBudget": 1,
+  "notes": "Real completed-response Gates were not claimed because the existing local runtime was in active-request and USER_CONTROL states."
+}
