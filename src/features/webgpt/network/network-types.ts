@@ -10,6 +10,7 @@ export type WebGptNetworkCandidateState =
 export type WebGptNetworkObserverMode = "NETWORK" | "FALLBACK";
 
 export interface WebGptNetworkObservationContext {
+  operationId?: string | null;
   requestId: string;
   idempotencyKey: string | null;
   expectedChatUrl?: string | null;
@@ -68,6 +69,7 @@ export interface WebGptNetworkObserverDiagnostics {
   mode: WebGptNetworkObserverMode;
   attached: boolean;
   activeRequestId: string | null;
+  activeOperationId: string | null;
   candidateState: WebGptNetworkCandidateState;
   candidateUnique: boolean;
   candidateEmitted: boolean;

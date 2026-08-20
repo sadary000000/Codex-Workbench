@@ -46,7 +46,7 @@ export class WebGptRoleSessionService {
     const normalizedRole = normalizeWebGptRole(role);
     const existing = await this.registry.get(id, normalizedRole);
     if (existing.status !== "UNBOUND" && !replace) throw codedError("ROLE_ALREADY_BOUND", "该 Role 已有绑定；如需覆盖请显式使用 --replace。");
-    const state = await this.requestManager.createChat();
+    const state = await this.requestManager.createChat({ projectId: id, role: normalizedRole, operationType: "ROLE_NEW" });
     const pending = await this.registry.newPending(id, normalizedRole, titleOf(state), replace);
     const stableUrl = stableChatUrlFrom(state);
     const binding = stableUrl
@@ -65,7 +65,7 @@ export class WebGptRoleSessionService {
     const normalizedRole = normalizeWebGptRole(role);
     const binding = await this.registry.get(id, normalizedRole);
     this.assertBound(binding);
-    const state = await this.requestManager.openChat(binding.chatUrl);
+    const state = await this.requestManager.openChat(binding.chatUrl, { projectId: id, role: normalizedRole, operationType: "ROLE_OPEN" });
     const page = pageOf(state);
     if (page?.loginRequired) throw codedError("WEBGPT_LOGIN_REQUIRED", "ChatGPT 页面需要登录。");
     if (state.error || !page?.onChatPage || !page.composerFound) {
@@ -85,15 +85,7 @@ export class WebGptRoleSessionService {
     const existing = await this.requestManager.findIdempotent(prompt, { projectId: id, role: normalizedRole, targetChatUrl }, idempotencyKey);
     if (existing) return existing;
     if (this.workspace.getControlMode() === "USER_CONTROL") throw codedError("WEBGPT_USER_CONTROL", "当前由用户控制，Role 自动操作已暂停。");
-    if (binding.status === "BOUND") {
-      const state = await this.requestManager.openChat(binding.chatUrl);
-      const page = pageOf(state);
-      if (page?.loginRequired) throw codedError("WEBGPT_LOGIN_REQUIRED", "ChatGPT 页面需要登录。");
-      if (state.error || !page?.onChatPage || !page.composerFound) {
-        await this.registry.markInvalid(id, normalizedRole);
-        throw codedError("ROLE_INVALID", "Role Chat 页面不可用。");
-      }
-    } else if (!isHomeUrl(await this.workspace.getCurrentUrl())) {
+    if (binding.status !== "BOUND" && !isHomeUrl(await this.workspace.getCurrentUrl())) {
       throw codedError("ROLE_PENDING_CHAT_URL", "Role 尚未获得稳定 Chat URL；请保持新建 Role Chat 页面并重试。");
     }
     return this.requestManager.submit(prompt, { projectId: id, role: normalizedRole, targetChatUrl }, idempotencyKey);

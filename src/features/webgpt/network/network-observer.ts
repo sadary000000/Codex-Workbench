@@ -65,6 +65,7 @@ export class WebGptNetworkObserver {
   private readonly waiters = new Set<PendingCandidateWaiter>();
   private attached = false;
   private activeRequestId: string | null = null;
+  private activeOperationId: string | null = null;
   private health: WebGptNetworkObserverHealth = "UNAVAILABLE";
   private lastReason: string | null = "not_started";
   private eventCounts = { requestWillBeSent: 0, responseReceived: 0, dataReceived: 0, loadingFinished: 0, loadingFailed: 0 };
@@ -77,6 +78,7 @@ export class WebGptNetworkObserver {
 
   async begin(context: WebGptNetworkObservationContext): Promise<WebGptNetworkObserverDiagnostics> {
     this.invalidate("new_request", false);
+    this.activeOperationId = context.operationId ?? null;
     this.activeRequestId = context.requestId;
     this.lastCandidate = null;
     this.eventCounts = { requestWillBeSent: 0, responseReceived: 0, dataReceived: 0, loadingFinished: 0, loadingFailed: 0 };
@@ -85,13 +87,13 @@ export class WebGptNetworkObserver {
     return this.snapshot();
   }
 
-  markSubmitted(requestId: string, submittedAt: number): void {
-    if (this.activeRequestId !== requestId) return;
+  markSubmitted(requestId: string, submittedAt: number, operationId?: string | null): void {
+    if (this.activeRequestId !== requestId || (operationId !== undefined && this.activeOperationId !== operationId)) return;
     this.correlator.markSubmitted(submittedAt);
   }
 
-  waitForCompletionCandidate(requestId: string, timeoutMs: number): Promise<WebGptNetworkCompletionCandidate | null> {
-    if (this.activeRequestId !== requestId) return Promise.resolve(null);
+  waitForCompletionCandidate(requestId: string, timeoutMs: number, operationId?: string | null): Promise<WebGptNetworkCompletionCandidate | null> {
+    if (this.activeRequestId !== requestId || (operationId !== undefined && this.activeOperationId !== operationId)) return Promise.resolve(null);
     if (this.lastCandidate?.requestId === requestId) return Promise.resolve({ ...this.lastCandidate });
     return new Promise((resolve) => {
       const waiter: PendingCandidateWaiter = { requestId, resolve, timer: setTimeout(() => { this.waiters.delete(waiter); resolve(null); }, Math.max(0, timeoutMs)) };
@@ -99,12 +101,13 @@ export class WebGptNetworkObserver {
     });
   }
 
-  end(requestId: string): void {
-    if (this.activeRequestId !== requestId) return;
+  end(requestId: string, operationId?: string | null): void {
+    if (this.activeRequestId !== requestId || (operationId !== undefined && this.activeOperationId !== operationId)) return;
     this.resolveWaiters(null);
     const before = this.snapshot();
     this.lastSnapshot = before;
     this.activeRequestId = null;
+    this.activeOperationId = null;
     this.correlator.invalidate("request_finished");
     this.detachOwnedDebugger();
   }
@@ -115,6 +118,7 @@ export class WebGptNetworkObserver {
     this.correlator.invalidate(reason);
     this.lastReason = reason;
     this.activeRequestId = null;
+    this.activeOperationId = null;
     // Preserve the last completed candidate as historical diagnostics after
     // the page performs a follow-up navigation. Active-request invalidation
     // still replaces it with STALE, so stale candidates cannot be reused.
@@ -242,6 +246,7 @@ export class WebGptNetworkObserver {
       mode: this.health === "AVAILABLE" && this.activeRequestId ? "NETWORK" : "FALLBACK",
       attached: this.attached,
       activeRequestId: this.activeRequestId,
+      activeOperationId: this.activeOperationId,
       candidateState: correlation.state,
       candidateUnique: correlation.candidateUnique,
       candidateEmitted: correlation.candidateEmitted,

@@ -92,12 +92,13 @@ function metadata(networkRequestId: string, startedAt: number): WebGptNetworkReq
 test("network observer attaches once and emits a metadata-only completion candidate", async () => {
   const debuggerInstance = new FakeDebugger();
   const observer = new WebGptNetworkObserver({ debugger: debuggerInstance });
-  const context = { requestId: "wgpt-observer-1", idempotencyKey: "key-1", expectedChatUrl: "https://chatgpt.com/c/test", captureStartedAt: Date.now() };
+  const context = { operationId: "wgpt-op-observer-1", requestId: "wgpt-observer-1", idempotencyKey: "key-1", expectedChatUrl: "https://chatgpt.com/c/test", captureStartedAt: Date.now() };
   await observer.begin(context);
   await observer.begin(context);
   assert.equal(debuggerInstance.attachCount, 1);
   assert.equal(debuggerInstance.enableCount, 1);
   assert.equal(debuggerInstance.messages.size, 1);
+  assert.equal(observer.getDiagnostics().activeOperationId, context.operationId);
   const wait = observer.waitForCompletionCandidate(context.requestId, 1_000);
   strongRequest(debuggerInstance, "network-1");
   const candidate = await wait;

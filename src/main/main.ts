@@ -219,6 +219,7 @@ async function webGptStatusResult(): Promise<Record<string, unknown>> {
       pageTitle: "",
       pageHealthy: false,
       page: null,
+      browserResource: null,
     };
   }
   const health = await webGptWorkspace.getHealthStatus();
@@ -241,6 +242,7 @@ async function webGptStatusResult(): Promise<Record<string, unknown>> {
     page,
     networkObserver: health.networkObserver ?? webGptWorkspace.getNetworkObserverDiagnostics(),
     networkWait: health.networkWait ?? null,
+    browserResource: health.browserResource ?? webGptWorkspace.getOperationArbiter().getDiagnostics(),
     activeRequests: webGptRequestManager ? await webGptRequestManager.activeSummary() : [],
   };
 }
@@ -257,7 +259,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "webgpt.status") {
       response = controlOk(request.command, await webGptStatusResult());
     } else if (request.command === "webgpt.open") {
-      const state = await getWebGptWorkspace().openWorkspace();
+      const state = await getWebGptRequestManager().openWorkspace();
       response = controlOk(request.command, publicWebGptState(state));
     } else if (request.command === "webgpt.current") {
       const result = await webGptStatusResult();
@@ -350,7 +352,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
         response = controlFail(request.command, "SCREENSHOT_OUTPUT_REQUIRED", "screenshot 必须提供 --out <png-path>。");
       } else {
         const outputPath = validateScreenshotPath(request.out);
-        const screenshot = await getWebGptWorkspace().takeScreenshot();
+        const screenshot = await getWebGptWorkspace().getOperationArbiter().withRead({ source: "CLI", ownerKey: "control-plane", operationType: "SCREENSHOT" }, () => getWebGptWorkspace().takeScreenshot());
         const image = Buffer.from(screenshot.data, "base64");
         if (image.byteLength > 25 * 1024 * 1024) throw codedError("SCREENSHOT_OUTPUT_TOO_LARGE", "截图超过 25 MB 限制。");
         try {
@@ -399,7 +401,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
 }
 
 function enqueueWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {
-  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current" || request.command === "webgpt.role.list" || request.command === "webgpt.role.status" || request.command === "webgpt.request.status" || request.command === "webgpt.request.list") {
+  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current" || request.command === "webgpt.control.user" || request.command === "webgpt.role.list" || request.command === "webgpt.role.status" || request.command === "webgpt.request.status" || request.command === "webgpt.request.list") {
     return handleWebGptControlRequest(request);
   }
   const result = webGptControlQueue.then(() => handleWebGptControlRequest(request));

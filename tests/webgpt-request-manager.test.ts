@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebGptRequestManager } from "../src/features/webgpt/runtime/webgpt-request-manager.ts";
+import { WebGptOperationArbiter } from "../src/features/webgpt/runtime/webgpt-operation-arbiter.ts";
 import type { WebGptPageProbe, WebGptState } from "../src/features/webgpt/types.ts";
 
 function pageProbe(onChatPage = false, assistantCount = 0, latestAssistantText = ""): WebGptPageProbe {
@@ -34,6 +35,7 @@ class FakeWorkspace {
   submitCount = 0;
   waitErrorCode: string | null = null;
   openChatUrlOverride: string | null = null;
+  waitGate: Promise<void> | null = null;
 
   getControlMode(): WebGptState["mode"] { return this.mode; }
   async returnAutomationControl(): Promise<WebGptState> { this.mode = "AUTO_CONTROL"; return this.state(); }
@@ -51,6 +53,7 @@ class FakeWorkspace {
     return { chatUrl: this.probe.page.url, baseline, submitted: this.probe };
   }
   async waitForResponse(_baseline: WebGptPageProbe): Promise<{ response: string; samples: number; elapsedMs: number }> {
+    if (this.waitGate) await this.waitGate;
     if (this.waitErrorCode) {
       const error = new Error(this.waitErrorCode) as Error & { code: string };
       error.code = this.waitErrorCode;
@@ -263,6 +266,35 @@ test("WebGPT Request Manager turns a response timeout into recovery without a re
     assert.equal(retry.requestId, created.requestId);
     assert.equal(workspace.submitCount, 1);
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT wait timeout does not release the SEND browser lease", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-lease-wait-"));
+  const workspace = new FakeWorkspace();
+  workspace.mode = "AUTO_CONTROL";
+  let releaseWait!: () => void;
+  workspace.waitGate = new Promise<void>((resolve) => { releaseWait = resolve; });
+  const arbiter = new WebGptOperationArbiter();
+  arbiter.enterAutomationControl();
+  (workspace as unknown as { getOperationArbiter: () => WebGptOperationArbiter }).getOperationArbiter = () => arbiter;
+  try {
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const created = await manager.submit("lease wait prompt", {}, "lease-wait-key");
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && arbiter.getDiagnostics().activeRequestId !== created.requestId) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(arbiter.getDiagnostics().activeRequestId, created.requestId);
+    const timed = await manager.waitForRequest(created.requestId, 0);
+    assert.equal(timed.timedOut, true);
+    assert.equal(arbiter.getDiagnostics().activeRequestId, created.requestId);
+    releaseWait();
+    const completed = await manager.waitForRequest(created.requestId, 10_000);
+    assert.equal(completed.record.state, "COMPLETED");
+    assert.equal(arbiter.getDiagnostics().activeOperationId, null);
+    assert.equal(arbiter.getDiagnostics().lastOperation?.operationType, "SEND");
+  } finally {
+    releaseWait();
     await rm(directory, { recursive: true, force: true });
   }
 });

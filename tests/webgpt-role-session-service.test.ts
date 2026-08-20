@@ -107,7 +107,10 @@ test("Role service routes bound sends to the registered Chat and preserves metad
     const binding = await service.bind("project-a", "PLANNER", "https://chatgpt.com/c/planner");
     assert.equal(binding.status, "BOUND");
     const submitted = await service.submit("project-a", "PLANNER", "planner prompt");
-    assert.deepEqual(manager.opened, ["https://chatgpt.com/c/planner"]);
+    // Bound Chat preparation is now part of RequestManager.process(), inside
+    // the same browser lease as submission; Role service must not navigate
+    // under a separate lease before creating the Request.
+    assert.deepEqual(manager.opened, []);
     assert.equal(manager.submitted?.prompt, "planner prompt");
     assert.equal(manager.submitted?.metadata.projectId, "project-a");
     assert.equal(manager.submitted?.metadata.role, "PLANNER");
@@ -131,7 +134,7 @@ test("Role new creates PENDING_CHAT_URL and terminal completion binds the real /
     await service.bind("project-a", "REQUIREMENT", "https://chatgpt.com/c/requirement");
     const submitted = await service.submit("project-a", "REQUIREMENT", "first prompt");
     assert.equal(submitted.targetChatUrl, "https://chatgpt.com/c/requirement");
-    assert.deepEqual(manager.opened, ["https://chatgpt.com/c/requirement"]);
+    assert.deepEqual(manager.opened, []);
     await service.handleTerminal({ ...submitted, state: "COMPLETED", chatUrl: "https://chatgpt.com/c/requirement" });
     const status = await service.status("project-a", "REQUIREMENT");
     assert.equal(status.status, "BOUND");

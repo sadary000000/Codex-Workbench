@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { WebGptPageProbe, WebGptPageState, WebGptRequestRecord, WebGptRequestResult, WebGptRequestState, WebGptRequestStateEvent, WebGptRole } from "../types.ts";
+import type { WebGptPageProbe, WebGptPageState, WebGptRequestRecord, WebGptRequestResult, WebGptRequestState, WebGptRequestStateEvent, WebGptRole, WebGptState } from "../types.ts";
 import { isTransientWebGptResponse, normalizeChatUrl } from "../adapter/webgpt-page-adapter.ts";
 import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import { isWebGptInterruptionTestHookEnabled, waitForWebGptInterruptionTestHook, waitForWebGptSubmittedUserMessage } from "./webgpt-interruption-test-hook.ts";
 import type { WebGptWorkspace } from "./webgpt-workspace.ts";
 import type { WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
+import type { WebGptOperationArbiter, WebGptOperationLease, WebGptOperationRequest, WebGptOperationType } from "./webgpt-operation-arbiter.ts";
 
 const REQUEST_FILE = "requests.json";
 const RESULT_DIRECTORY = "results";
@@ -15,7 +16,6 @@ const MAX_IDEMPOTENCY_KEY_CHARS = 256;
 const TERMINAL_STATES = new Set<WebGptRequestState>(["COMPLETED", "FAILED", "CANCELED"]);
 const RECOVERY_STATES = new Set<WebGptRequestState>(["SUBMITTING", "SUBMITTED", "GENERATING", "INDETERMINATE", "RECOVERY_REQUIRED", "TIMEOUT"]);
 const WAIT_SETTLED_STATES = new Set<WebGptRequestState>(["COMPLETED", "FAILED", "CANCELED", "INDETERMINATE", "RECOVERY_REQUIRED", "TIMEOUT"]);
-const NAVIGATION_BUSY_STATES = new Set<WebGptRequestState>(["QUEUED", "SUBMITTING", "SUBMITTED", "GENERATING"]);
 const TARGET_PAGE_HYDRATION_TIMEOUT_MS = 10_000;
 
 interface StoredDocument {
@@ -67,41 +67,57 @@ export class WebGptRequestManager {
     this.loadPromise = this.load();
   }
 
-  async createChat(): Promise<Record<string, unknown>> {
+  async openWorkspace(): Promise<WebGptState> {
     await this.ready();
-    this.assertNavigationIdle();
-    await this.ensureAutomationControl();
-    const state = await this.workspace.createChat();
-    return { chatUrl: state.url, page: state.page, mode: state.mode };
+    const operation = async (): Promise<WebGptState> => {
+      const workspace = this.workspace as WebGptWorkspace & { openWorkspaceForAutomation?: () => Promise<unknown> };
+      const state = typeof workspace.openWorkspaceForAutomation === "function"
+        ? await workspace.openWorkspaceForAutomation() as WebGptState
+        : await this.workspace.openWorkspace();
+      return state;
+    };
+    return this.withBrowserLease({ source: "CLI", ownerKey: "control-plane", operationType: "OPEN" }, operation, { allowWhenPaused: true });
   }
 
-  async openChat(url: string): Promise<Record<string, unknown>> {
+  async createChat(operationMetadata: { projectId?: string | null; role?: WebGptRole | null; operationType?: WebGptOperationType } = {}): Promise<Record<string, unknown>> {
     await this.ready();
-    this.assertNavigationIdle();
     await this.ensureAutomationControl();
-    const state = await this.workspace.openChatForAutomation(url);
-    return { chatUrl: state.url, page: state.page, mode: state.mode };
+    const result = await this.withBrowserLease({ source: "CLI", ownerKey: operationMetadata.role ? `${operationMetadata.projectId ?? "project"}:${operationMetadata.role}` : "control-plane", projectId: operationMetadata.projectId, role: operationMetadata.role, operationType: operationMetadata.operationType ?? "OPEN_CHAT" }, async () => {
+      const state = await this.workspace.createChat();
+      return { chatUrl: state.url, page: state.page, mode: state.mode };
+    });
+    return { ...result, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
+  }
+
+  async openChat(url: string, operationMetadata: { projectId?: string | null; role?: WebGptRole | null; operationType?: WebGptOperationType } = {}): Promise<Record<string, unknown>> {
+    await this.ready();
+    await this.ensureAutomationControl();
+    const result = await this.withBrowserLease({ source: "CLI", ownerKey: operationMetadata.role ? `${operationMetadata.projectId ?? "project"}:${operationMetadata.role}` : "control-plane", projectId: operationMetadata.projectId, role: operationMetadata.role, targetChatUrl: url, operationType: operationMetadata.operationType ?? "OPEN_CHAT" }, async () => {
+      const state = await this.workspace.openChatForAutomation(url);
+      return { chatUrl: state.url, page: state.page, mode: state.mode };
+    });
+    return { ...result, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
   }
 
   async openProject(projectName: string): Promise<Record<string, unknown>> {
     await this.ready();
-    this.assertNavigationIdle();
     await this.ensureAutomationControl();
-    return this.workspace.openProjectForAutomation(projectName);
+    const result = await this.withBrowserLease({ source: "CLI", ownerKey: "control-plane", operationType: "PROJECT_OPEN" }, () => this.workspace.openProjectForAutomation(projectName));
+    return { ...result, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
   }
 
   async inspectProject(projectName: string): Promise<Record<string, unknown>> {
     await this.ready();
-    this.assertNavigationIdle();
     await this.ensureAutomationControl();
-    return this.workspace.inspectProjectForAutomation(projectName);
+    const result = await this.withBrowserLease({ source: "CLI", ownerKey: "control-plane", operationType: "PROJECT_INSPECT" }, () => this.workspace.inspectProjectForAutomation(projectName));
+    return { ...result, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
   }
 
   async createChatInProject(projectName: string): Promise<Record<string, unknown>> {
     await this.ready();
-    this.assertNavigationIdle();
     await this.ensureAutomationControl();
-    return this.workspace.createChatInProjectForAutomation(projectName);
+    const result = await this.withBrowserLease({ source: "CLI", ownerKey: "control-plane", operationType: "PROJECT_NEW_CHAT" }, () => this.workspace.createChatInProjectForAutomation(projectName));
+    return { ...result, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
   }
 
   getLastProjectOperationTimeline(): WebGptProjectOperationTimeline | null {
@@ -232,7 +248,17 @@ export class WebGptRequestManager {
       await this.markRecovery(record, "RECOVERY_CONTROL_REQUIRED", "恢复需要显式交还 AUTO_CONTROL；当前不会导航、输入或重发 Prompt。");
       return this.clone(record);
     }
+    let lease: WebGptOperationLease | undefined;
     try {
+      lease = await this.getOperationArbiter()?.acquire({
+        source: "INTERNAL",
+        ownerKey: "recovery",
+        projectId: record.projectId,
+        role: record.role,
+        targetChatUrl: record.targetChatUrl,
+        requestId: record.requestId,
+        operationType: "RECOVERY",
+      });
       await this.validateTarget?.(this.clone(record));
       const target = this.recoveryTarget(record);
       await this.workspace.openChatForAutomation(target);
@@ -259,6 +285,8 @@ export class WebGptRequestManager {
       const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "RECOVERY_REQUIRED";
       const message = error instanceof Error ? error.message : String(error);
       await this.markRecovery(record, code, message);
+    } finally {
+      lease?.release(record.state);
     }
     return this.clone(record);
   }
@@ -287,8 +315,9 @@ export class WebGptRequestManager {
       this.emit(record);
     }
     if (changed) await this.persist();
-    await this.drain();
     await this.reconcilePending();
+    this.getOperationArbiter()?.resumeQueue();
+    await this.drain();
   }
 
   async activeSummary(): Promise<Array<{ requestId: string; state: WebGptRequestState; chatUrl: string; idempotencyKey: string | null }>> {
@@ -332,7 +361,17 @@ export class WebGptRequestManager {
       if (this.workspace.getControlMode() === "USER_CONTROL") await this.pauseBeforeSubmit(record);
       return;
     }
+    let lease: WebGptOperationLease | undefined;
     try {
+      lease = await this.getOperationArbiter()?.acquire({
+        source: "INTERNAL",
+        ownerKey: record.projectId && record.role ? `${record.projectId}:${record.role}` : "request-manager",
+        projectId: record.projectId,
+        role: record.role,
+        targetChatUrl: record.targetChatUrl,
+        requestId: record.requestId,
+        operationType: "SEND",
+      });
       await this.validateTarget?.(this.clone(record));
       let probe = await this.workspace.getPageProbe();
       if (record.targetChatUrl) {
@@ -363,6 +402,7 @@ export class WebGptRequestManager {
       await this.validateTarget?.(this.clone(record));
       try {
         await this.workspace.beginNetworkObservation({
+          operationId: lease?.operation.operationId ?? null,
           requestId: record.requestId,
           idempotencyKey: record.idempotencyKey,
           expectedChatUrl: record.targetChatUrl,
@@ -376,7 +416,7 @@ export class WebGptRequestManager {
       const submitted = await this.workspace.submitPrompt(prompt, record.targetChatUrl ?? undefined);
       record.chatUrl = safeChatUrl(submitted.chatUrl) || submitted.chatUrl;
       const submittedAt = new Date().toISOString();
-      try { this.workspace.markNetworkSubmitted(record.requestId, Date.parse(submittedAt)); } catch { /* fallback remains authoritative */ }
+      try { this.workspace.markNetworkSubmitted(record.requestId, Date.parse(submittedAt), lease?.operation.operationId ?? null); } catch { /* fallback remains authoritative */ }
       record.submittedAt = submittedAt;
       record.state = "SUBMITTED";
       const confirmedPage = isWebGptInterruptionTestHookEnabled()
@@ -407,7 +447,7 @@ export class WebGptRequestManager {
       // the SPA location still reports the home route; treating that inferred
       // URL as a hard target would create a false TARGET_CHAT_CHANGED recovery.
       const expectedChatUrl = record.targetChatUrl ?? undefined;
-      const completed = await this.workspace.waitForResponse(submitted.baseline, 120_000, expectedChatUrl, record.requestId);
+      const completed = await this.workspace.waitForResponse(submitted.baseline, 120_000, expectedChatUrl, record.requestId, lease?.operation.operationId ?? null);
       // ChatGPT may navigate from the home page to the newly-created /c/<id>
       // route only after the first response has completed. Persist the final
       // observed URL so request records identify the actual native web chat.
@@ -425,11 +465,13 @@ export class WebGptRequestManager {
       const message = error instanceof Error ? error.message : String(error);
       if (code === "WEBGPT_USER_CONTROL" && record.state === "SUBMITTING" && record.submittedAt === null) {
         await this.pauseBeforeSubmit(record);
-      } else if (code === "WEBGPT_RESPONSE_TIMEOUT" || code === "PROMPT_NOT_SUBMITTED" || code === "TARGET_CHAT_CHANGED" || code === "ROLE_CHAT_MISMATCH" || code === "PAGE_ADAPTER_UNHEALTHY" || code === "COMPOSER_NOT_READY" || code === "WEBGPT_LOGIN_REQUIRED" || code === "WEBGPT_USER_CONTROL") {
+      } else if (code === "WEBGPT_RESPONSE_TIMEOUT" || code === "PROMPT_NOT_SUBMITTED" || code === "TARGET_CHAT_CHANGED" || code === "ROLE_CHAT_MISMATCH" || code === "PAGE_ADAPTER_UNHEALTHY" || code === "COMPOSER_NOT_READY" || code === "WEBGPT_LOGIN_REQUIRED" || code === "WEBGPT_USER_CONTROL" || code === "WEBGPT_OPERATION_NOT_ALLOWED" || code === "WEBGPT_OPERATION_DEGRADED") {
         await this.markRecovery(record, code, message);
       } else {
         await this.fail(record, code, message);
       }
+    } finally {
+      lease?.release(record.state);
     }
   }
 
@@ -524,9 +566,15 @@ export class WebGptRequestManager {
     if (mode === "PAUSED") throw this.codedError("WEBGPT_AUTOMATION_PAUSED", "自动化当前已暂停，请先显式交还 AUTO_CONTROL。");
   }
 
-  private assertNavigationIdle(): void {
-    const active = [...this.records.values()].find((record) => NAVIGATION_BUSY_STATES.has(record.state));
-    if (active) throw this.codedError("WEBGPT_BUSY", `WebGPT 当前请求 ${active.requestId} 正在执行，不能同时切换 Chat。`);
+  private getOperationArbiter(): WebGptOperationArbiter | undefined {
+    const candidate = this.workspace as WebGptWorkspace & { getOperationArbiter?: () => WebGptOperationArbiter };
+    return typeof candidate.getOperationArbiter === "function" ? candidate.getOperationArbiter() : undefined;
+  }
+
+  private async withBrowserLease<T>(request: WebGptOperationRequest, operation: () => Promise<T> | T, options: { allowWhenPaused?: boolean } = {}): Promise<T> {
+    const arbiter = this.getOperationArbiter();
+    if (!arbiter) return operation();
+    return arbiter.withLease(request, operation, options);
   }
 
   private emit(record: WebGptRequestRecord, response?: string): void {

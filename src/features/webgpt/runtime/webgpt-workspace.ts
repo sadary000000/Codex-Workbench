@@ -6,6 +6,7 @@ import { projectOperationBudgetMs, type WebGptProjectClickResult, type WebGptPro
 import { WebGptNetworkObserver } from "../network/network-observer.ts";
 import { WebGptCompletionProbeScheduler } from "../network/completion-scheduler.ts";
 import type { WebGptNetworkObservationContext, WebGptNetworkObserverDiagnostics, WebGptNetworkWaitDiagnostics } from "../network/network-types.ts";
+import { WebGptOperationArbiter } from "./webgpt-operation-arbiter.ts";
 import type {
   WebGptBounds,
   WebGptHealthStatus,
@@ -67,6 +68,7 @@ export class WebGptWorkspace implements WebGptPublicService {
   private readonly view: WebContentsView;
   private readonly onState: (state: WebGptState) => void;
   private readonly networkObserver: WebGptNetworkObserver;
+  private readonly operationArbiter = new WebGptOperationArbiter();
   private lastNetworkWaitDiagnostics: WebGptNetworkWaitDiagnostics | null = null;
   private state: WebGptState;
   private bounds: Rectangle = ZERO_BOUNDS;
@@ -329,6 +331,18 @@ export class WebGptWorkspace implements WebGptPublicService {
 
   async openWorkspace(): Promise<WebGptState> {
     if (this.closed) throw new Error("WebGPT Workspace 已关闭。");
+    await this.requestUserControl();
+    this.setVisible(true);
+    const currentUrl = this.view.webContents.getURL();
+    if (!currentUrl || currentUrl.startsWith("chrome-error://") || this.state.error) {
+      await this.load(WEBGPT_HOME_URL);
+    }
+    this.networkObserver.invalidate("workspace_opened");
+    return this.state;
+  }
+
+  async openWorkspaceForAutomation(): Promise<WebGptState> {
+    if (this.closed) throw this.codedError("WEBGPT_CLOSED", "WebGPT Workspace 已关闭。");
     this.setVisible(true);
     const currentUrl = this.view.webContents.getURL();
     if (!currentUrl || currentUrl.startsWith("chrome-error://") || this.state.error) {
@@ -337,10 +351,12 @@ export class WebGptWorkspace implements WebGptPublicService {
     this.networkObserver.invalidate("workspace_opened");
     this.controlEpoch += 1;
     this.patchState({ mode: "USER_CONTROL" });
+    this.operationArbiter.enterUserControl();
     return this.state;
   }
 
   async openHome(): Promise<WebGptState> {
+    await this.requestUserControl();
     this.prepareManualNavigation();
     this.setVisible(true);
     await this.load(WEBGPT_HOME_URL);
@@ -348,6 +364,7 @@ export class WebGptWorkspace implements WebGptPublicService {
   }
 
   async openChat(url: string): Promise<WebGptState> {
+    await this.requestUserControl();
     this.prepareManualNavigation();
     this.setVisible(true);
     await this.load(normalizeChatUrl(url));
@@ -634,8 +651,8 @@ export class WebGptWorkspace implements WebGptPublicService {
     return this.networkObserver.begin(context);
   }
 
-  markNetworkSubmitted(requestId: string, submittedAt: number): void {
-    this.networkObserver.markSubmitted(requestId, submittedAt);
+  markNetworkSubmitted(requestId: string, submittedAt: number, operationId?: string | null): void {
+    this.networkObserver.markSubmitted(requestId, submittedAt, operationId);
   }
 
   getNetworkObserverDiagnostics(): WebGptNetworkObserverDiagnostics {
@@ -644,6 +661,10 @@ export class WebGptWorkspace implements WebGptPublicService {
 
   getControlMode(): WebGptState["mode"] {
     return this.state.mode;
+  }
+
+  getOperationArbiter(): WebGptOperationArbiter {
+    return this.operationArbiter;
   }
 
   async takeScreenshot(): Promise<WebGptScreenshot> {
@@ -656,12 +677,15 @@ export class WebGptWorkspace implements WebGptPublicService {
     this.setVisible(true);
     this.networkObserver.invalidate("user_control");
     this.controlEpoch += 1;
+    this.operationArbiter.enterUserControl();
     this.patchState({ mode: "USER_CONTROL" });
+    await this.operationArbiter.waitForIdle();
     return this.state;
   }
 
   async returnAutomationControl(): Promise<WebGptState> {
     this.controlEpoch += 1;
+    this.operationArbiter.enterAutomationControl({ deferPump: true });
     this.patchState({ mode: "AUTO_CONTROL" });
     return this.state;
   }
@@ -669,11 +693,14 @@ export class WebGptWorkspace implements WebGptPublicService {
   async pauseAutomation(): Promise<WebGptState> {
     this.networkObserver.invalidate("automation_paused");
     this.controlEpoch += 1;
+    this.operationArbiter.enterPaused();
     this.patchState({ mode: "PAUSED" });
+    await this.operationArbiter.waitForIdle();
     return this.state;
   }
 
   async goBack(): Promise<WebGptState> {
+    await this.requestUserControl();
     this.prepareManualNavigation();
     if (this.view.webContents.canGoBack()) await this.view.webContents.goBack();
     await this.refreshPageState();
@@ -681,6 +708,7 @@ export class WebGptWorkspace implements WebGptPublicService {
   }
 
   async goForward(): Promise<WebGptState> {
+    await this.requestUserControl();
     this.prepareManualNavigation();
     if (this.view.webContents.canGoForward()) await this.view.webContents.goForward();
     await this.refreshPageState();
@@ -688,6 +716,7 @@ export class WebGptWorkspace implements WebGptPublicService {
   }
 
   async reload(): Promise<WebGptState> {
+    await this.requestUserControl();
     this.prepareManualNavigation();
     await this.view.webContents.reload();
     await this.refreshPageState();
@@ -714,6 +743,7 @@ export class WebGptWorkspace implements WebGptPublicService {
       error: this.state.error,
       networkObserver: this.networkObserver.getDiagnostics(),
       networkWait: this.lastNetworkWaitDiagnostics ? { ...this.lastNetworkWaitDiagnostics } : undefined,
+      browserResource: this.operationArbiter.getDiagnostics(),
     };
   }
 
@@ -784,7 +814,7 @@ export class WebGptWorkspace implements WebGptPublicService {
     return { chatUrl: await this.getCurrentUrl(), baseline, submitted: confirmed };
   }
 
-  async waitForResponse(baseline: WebGptPageProbe, timeoutMs = 120_000, expectedChatUrl?: string, requestId?: string): Promise<{ response: string; samples: number; elapsedMs: number; network?: WebGptNetworkWaitDiagnostics }> {
+  async waitForResponse(baseline: WebGptPageProbe, timeoutMs = 120_000, expectedChatUrl?: string, requestId?: string, operationId?: string | null): Promise<{ response: string; samples: number; elapsedMs: number; network?: WebGptNetworkWaitDiagnostics }> {
     const startedAt = Date.now();
     const epoch = this.controlEpoch;
     if (requestId) this.lastNetworkWaitDiagnostics = null;
@@ -809,7 +839,7 @@ export class WebGptWorkspace implements WebGptPublicService {
     const scheduler = new WebGptCompletionProbeScheduler(networkMode);
     let candidateWaitDone = !networkMode || !requestId;
     const candidateWait = networkMode && requestId
-      ? this.networkObserver.waitForCompletionCandidate(requestId, timeoutMs)
+      ? this.networkObserver.waitForCompletionCandidate(requestId, timeoutMs, operationId)
       : null;
     try {
       while (Date.now() - startedAt < timeoutMs) {
@@ -880,7 +910,7 @@ export class WebGptWorkspace implements WebGptPublicService {
         scheduler.scheduleNext(now);
       }
     } finally {
-      if (requestId) this.networkObserver.end(requestId);
+      if (requestId) this.networkObserver.end(requestId, operationId);
     }
     if (network) {
       scheduler.markCompletionUsedFallback();
@@ -925,6 +955,7 @@ export class WebGptWorkspace implements WebGptPublicService {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.operationArbiter.degrade("WebGPT Workspace 已关闭，排队操作已失效。 ");
     this.networkObserver.dispose();
     this.detach();
     if (!this.view.webContents.isDestroyed()) this.view.webContents.close();

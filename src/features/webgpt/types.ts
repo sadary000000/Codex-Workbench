@@ -1,4 +1,5 @@
 import type { WebGptNetworkObserverDiagnostics, WebGptNetworkWaitDiagnostics } from "./network/network-types.ts";
+import type { WebGptBrowserResourceDiagnostics } from "./runtime/webgpt-operation-arbiter.ts";
 
 export type WebGptControlMode = "USER_CONTROL" | "AUTO_CONTROL" | "PAUSED";
 
@@ -74,6 +75,7 @@ export interface WebGptHealthStatus {
   error: string | null;
   networkObserver?: WebGptNetworkObserverDiagnostics;
   networkWait?: WebGptNetworkWaitDiagnostics;
+  browserResource?: WebGptBrowserResourceDiagnostics;
 }
 
 export type WebGptRequestState =
@@ -141,6 +143,6 @@ export interface WebGptPublicService {
   getHealthStatus(): Promise<WebGptHealthStatus>;
   createChat(): Promise<WebGptState>;
   submitPrompt(prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe; submitted: WebGptPageProbe }>;
-  waitForResponse(baseline: WebGptPageProbe, timeoutMs?: number, expectedChatUrl?: string, requestId?: string): Promise<{ response: string; samples: number; elapsedMs: number; network?: WebGptNetworkWaitDiagnostics }>;
+  waitForResponse(baseline: WebGptPageProbe, timeoutMs?: number, expectedChatUrl?: string, requestId?: string, operationId?: string | null): Promise<{ response: string; samples: number; elapsedMs: number; network?: WebGptNetworkWaitDiagnostics }>;
   getLatestResponse(): Promise<string | null>;
 }
