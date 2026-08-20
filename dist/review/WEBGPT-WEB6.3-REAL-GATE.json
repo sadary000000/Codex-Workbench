@@ -1,0 +1,372 @@
+{
+  "stage": "WEB-6.3 Network Completion Candidate Integration",
+  "result": "PASS",
+  "runId": "web6.3-1787247730873-c0a6db65",
+  "executable": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+  "projectName": "workts",
+  "requestId": "wgpt-1fa17ea1-4cdd-4cf9-a4f3-4159df4a5915",
+  "observerMode": "NETWORK",
+  "observerHealth": "AVAILABLE",
+  "candidateUnique": true,
+  "candidateState": "COMPLETION_CANDIDATE",
+  "candidateEmitted": true,
+  "completionCandidateTimestamp": "2026-08-20T17:42:27.166Z",
+  "finalState": "COMPLETED",
+  "resultAvailable": true,
+  "fallbackUsed": false,
+  "pageProbeCount": 12,
+  "reconciliationProbeCount": 1,
+  "confirmationProbeCount": 11,
+  "requestIdAndNetworkIdSeparate": true,
+  "promptCount": 1,
+  "rateLimitObserved": false,
+  "failure": null,
+  "commands": {
+    "statusBefore": {
+      "args": [
+        "status"
+      ],
+      "startedAt": "2026-08-20T17:42:10.873Z",
+      "finishedAt": "2026-08-20T17:42:11.026Z",
+      "elapsedMs": 153,
+      "exitCode": 0,
+      "stdoutBytes": 569,
+      "stderrBytes": 0,
+      "json": {
+        "ok": true,
+        "command": "webgpt.status",
+        "requestId": "c4702a0b-b91b-428b-af4b-17e4cfd67b6d",
+        "identity": {
+          "workbenchInstanceId": "a2dd37a4-f4fb-4900-bc08-6945514ae1d5",
+          "webgptRuntimeId": null,
+          "revision": 0
+        },
+        "diagnostics": {
+          "cliStartAt": "2026-08-20T17:42:10.99Z",
+          "socketConnectAt": "2026-08-20T17:42:10.994Z",
+          "cliReceiveAt": "2026-08-20T17:42:10.995Z",
+          "elapsedMs": 6,
+          "cliExitAt": "2026-08-20T17:42:10.996Z"
+        }
+      },
+      "rateLimit": false
+    },
+    "open": {
+      "args": [
+        "open"
+      ],
+      "startedAt": "2026-08-20T17:42:11.026Z",
+      "finishedAt": "2026-08-20T17:42:12.889Z",
+      "elapsedMs": 1863,
+      "exitCode": 0,
+      "stdoutBytes": 853,
+      "stderrBytes": 0,
+      "json": {
+        "ok": true,
+        "command": "webgpt.open",
+        "requestId": "71c2f6c2-6ecc-42e3-b46e-342259958927",
+        "identity": {
+          "workbenchInstanceId": "a2dd37a4-f4fb-4900-bc08-6945514ae1d5",
+          "webgptRuntimeId": "e39397af-4d2d-4239-8ab7-255255e8eea0",
+          "revision": 11
+        },
+        "diagnostics": {
+          "cliStartAt": "2026-08-20T17:42:11.414Z",
+          "socketConnectAt": "2026-08-20T17:42:11.419Z",
+          "cliReceiveAt": "2026-08-20T17:42:12.847Z",
+          "elapsedMs": 1433,
+          "cliExitAt": "2026-08-20T17:42:12.848Z"
+        }
+      },
+      "rateLimit": false
+    },
+    "controlAuto": {
+      "args": [
+        "control",
+        "auto"
+      ],
+      "startedAt": "2026-08-20T17:42:12.889Z",
+      "finishedAt": "2026-08-20T17:42:25.545Z",
+      "elapsedMs": 12656,
+      "exitCode": 0,
+      "stdoutBytes": 862,
+      "stderrBytes": 0,
+      "json": {
+        "ok": true,
+        "command": "webgpt.control.auto",
+        "requestId": "bcfc83d7-f999-4987-99b7-2839fae316c8",
+        "identity": {
+          "workbenchInstanceId": "a2dd37a4-f4fb-4900-bc08-6945514ae1d5",
+          "webgptRuntimeId": "e39397af-4d2d-4239-8ab7-255255e8eea0",
+          "revision": 69
+        },
+        "diagnostics": {
+          "cliStartAt": "2026-08-20T17:42:13.003Z",
+          "socketConnectAt": "2026-08-20T17:42:13.008Z",
+          "cliReceiveAt": "2026-08-20T17:42:25.504Z",
+          "elapsedMs": 12501,
+          "cliExitAt": "2026-08-20T17:42:25.505Z"
+        }
+      },
+      "rateLimit": false
+    },
+    "projectOpen": {
+      "args": [
+        "project",
+        "open",
+        "--name",
+        "workts"
+      ],
+      "startedAt": "2026-08-20T17:42:25.545Z",
+      "finishedAt": "2026-08-20T17:42:26.076Z",
+      "elapsedMs": 531,
+      "exitCode": 0,
+      "stdoutBytes": 1936,
+      "stderrBytes": 0,
+      "json": {
+        "ok": true,
+        "command": "webgpt.project.open",
+        "requestId": "b6d37f8a-71b8-4893-8e95-ed360a652527",
+        "identity": {
+          "workbenchInstanceId": "a2dd37a4-f4fb-4900-bc08-6945514ae1d5",
+          "webgptRuntimeId": "e39397af-4d2d-4239-8ab7-255255e8eea0",
+          "revision": 74
+        },
+        "diagnostics": {
+          "handlerStartAt": "2026-08-20T17:42:25.659Z",
+          "operationStartAt": "2026-08-20T17:42:25.659Z",
+          "operationBudgetMs": 60000,
+          "operationTimeline": {
+            "requestId": "b6d37f8a-71b8-4893-8e95-ed360a652527",
+            "command": "webgpt.project.open",
+            "operationBudgetMs": 60000,
+            "operationStartAt": "2026-08-20T17:42:25.66Z",
+            "projectLookupStartAt": "2026-08-20T17:42:25.66Z",
+            "projectLookupEndAt": "2026-08-20T17:42:25.672Z",
+            "clickResult": {
+              "clicked": true,
+              "ambiguous": false,
+              "matchCount": 1,
+              "targetTag": "BUTTON",
+              "targetRole": null
+            },
+            "navigationConfirmStartAt": "2026-08-20T17:42:25.672Z",
+            "navigationConfirmEndAt": "2026-08-20T17:42:25.704Z",
+            "waitForComposerStartAt": "2026-08-20T17:42:25.704Z",
+            "waitForComposerEndAt": "2026-08-20T17:42:26.033Z",
+            "outcome": "PASS",
+            "operationFinishAt": "2026-08-20T17:42:26.033Z"
+          },
+          "handlerFinishAt": "2026-08-20T17:42:26.033Z",
+          "elapsedMs": 379,
+          "responseWriteAt": "2026-08-20T17:42:26.033Z",
+          "cliStartAt": "2026-08-20T17:42:25.654Z",
+          "socketConnectAt": "2026-08-20T17:42:25.659Z",
+          "cliReceiveAt": "2026-08-20T17:42:26.034Z",
+          "cliExitAt": "2026-08-20T17:42:26.034Z"
+        }
+      },
+      "rateLimit": false
+    },
+    "projectNewChat": {
+      "args": [
+        "project",
+        "new-chat",
+        "--name",
+        "workts"
+      ],
+      "startedAt": "2026-08-20T17:42:26.076Z",
+      "finishedAt": "2026-08-20T17:42:26.569Z",
+      "elapsedMs": 493,
+      "exitCode": 0,
+      "stdoutBytes": 2696,
+      "stderrBytes": 0,
+      "json": {
+        "ok": true,
+        "command": "webgpt.project.new-chat",
+        "requestId": "af899ba7-31b5-4bcb-b7b7-09bc10321a2f",
+        "identity": {
+          "workbenchInstanceId": "a2dd37a4-f4fb-4900-bc08-6945514ae1d5",
+          "webgptRuntimeId": "e39397af-4d2d-4239-8ab7-255255e8eea0",
+          "revision": 79
+        },
+        "diagnostics": {
+          "handlerStartAt": "2026-08-20T17:42:26.193Z",
+          "operationStartAt": "2026-08-20T17:42:26.193Z",
+          "operationBudgetMs": 90000,
+          "operationTimeline": {
+            "requestId": "af899ba7-31b5-4bcb-b7b7-09bc10321a2f",
+            "command": "webgpt.project.new-chat",
+            "operationBudgetMs": 90000,
+            "operationStartAt": "2026-08-20T17:42:26.193Z",
+            "newChatActionStartAt": "2026-08-20T17:42:26.194Z",
+            "projectLookupStartAt": "2026-08-20T17:42:26.194Z",
+            "projectLookupEndAt": "2026-08-20T17:42:26.199Z",
+            "clickResult": {
+              "clicked": true,
+              "ambiguous": false,
+              "matchCount": 1,
+              "targetTag": "BUTTON",
+              "targetRole": null
+            },
+            "navigationConfirmStartAt": "2026-08-20T17:42:26.199Z",
+            "navigationConfirmEndAt": "2026-08-20T17:42:26.203Z",
+            "waitForComposerStartAt": "2026-08-20T17:42:26.203Z",
+            "waitForComposerEndAt": "2026-08-20T17:42:26.526Z",
+            "newChatActionEndAt": "2026-08-20T17:42:26.526Z",
+            "newChatActionResult": {
+              "clicked": true,
+              "ambiguous": false,
+              "actionCount": 1,
+              "targetTag": "BUTTON",
+              "targetRole": null
+            },
+            "newChatContextConfirmStartAt": "2026-08-20T17:42:26.526Z",
+            "newChatContextConfirmEndAt": "2026-08-20T17:42:26.526Z",
+            "outcome": "PASS",
+            "operationFinishAt": "2026-08-20T17:42:26.526Z"
+          },
+          "handlerFinishAt": "2026-08-20T17:42:26.526Z",
+          "elapsedMs": 338,
+          "responseWriteAt": "2026-08-20T17:42:26.526Z",
+          "cliStartAt": "2026-08-20T17:42:26.188Z",
+          "socketConnectAt": "2026-08-20T17:42:26.192Z",
+          "cliReceiveAt": "2026-08-20T17:42:26.526Z",
+          "cliExitAt": "2026-08-20T17:42:26.526Z"
+        }
+      },
+      "rateLimit": false
+    },
+    "send": {
+      "args": [
+        "send",
+        "--text",
+        "[REDACTED_PROMPT]",
+        "--idempotency-key",
+        "[REDACTED_IDEMPOTENCY_KEY]"
+      ],
+      "startedAt": "2026-08-20T17:42:26.569Z",
+      "finishedAt": "2026-08-20T17:42:26.745Z",
+      "elapsedMs": 176,
+      "exitCode": 0,
+      "stdoutBytes": 1101,
+      "stderrBytes": 0,
+      "json": {
+        "ok": true,
+        "command": "webgpt.send",
+        "requestId": "018c1914-ce20-4829-a647-72d37a53cbaf",
+        "identity": {
+          "workbenchInstanceId": "a2dd37a4-f4fb-4900-bc08-6945514ae1d5",
+          "webgptRuntimeId": "e39397af-4d2d-4239-8ab7-255255e8eea0",
+          "revision": 79
+        },
+        "diagnostics": {
+          "cliStartAt": "2026-08-20T17:42:26.674Z",
+          "socketConnectAt": "2026-08-20T17:42:26.679Z",
+          "cliReceiveAt": "2026-08-20T17:42:26.683Z",
+          "elapsedMs": 10,
+          "cliExitAt": "2026-08-20T17:42:26.684Z"
+        }
+      },
+      "rateLimit": false
+    },
+    "wait": {
+      "args": [
+        "wait",
+        "--request-id",
+        "wgpt-1fa17ea1-4cdd-4cf9-a4f3-4159df4a5915",
+        "--timeout-ms",
+        "120000"
+      ],
+      "startedAt": "2026-08-20T17:42:26.745Z",
+      "finishedAt": "2026-08-20T17:42:31.195Z",
+      "elapsedMs": 4450,
+      "exitCode": 0,
+      "stdoutBytes": 1731,
+      "stderrBytes": 0,
+      "json": {
+        "ok": true,
+        "command": "webgpt.wait",
+        "requestId": "da2b91f7-0575-4ef1-81e1-78ecbffa613d",
+        "identity": {
+          "workbenchInstanceId": "a2dd37a4-f4fb-4900-bc08-6945514ae1d5",
+          "webgptRuntimeId": "e39397af-4d2d-4239-8ab7-255255e8eea0",
+          "revision": 97
+        },
+        "diagnostics": {
+          "cliStartAt": "2026-08-20T17:42:26.848Z",
+          "socketConnectAt": "2026-08-20T17:42:26.852Z",
+          "cliReceiveAt": "2026-08-20T17:42:31.153Z",
+          "elapsedMs": 4305,
+          "cliExitAt": "2026-08-20T17:42:31.153Z"
+        }
+      },
+      "rateLimit": false
+    },
+    "result": {
+      "args": [
+        "result",
+        "--request-id",
+        "wgpt-1fa17ea1-4cdd-4cf9-a4f3-4159df4a5915"
+      ],
+      "startedAt": "2026-08-20T17:42:31.195Z",
+      "finishedAt": "2026-08-20T17:42:31.362Z",
+      "elapsedMs": 167,
+      "exitCode": 0,
+      "stdoutBytes": 1768,
+      "stderrBytes": 0,
+      "json": {
+        "ok": true,
+        "command": "webgpt.result",
+        "requestId": "918e52c7-9a42-48a8-a785-f2d8c1e4a404",
+        "identity": {
+          "workbenchInstanceId": "a2dd37a4-f4fb-4900-bc08-6945514ae1d5",
+          "webgptRuntimeId": "e39397af-4d2d-4239-8ab7-255255e8eea0",
+          "revision": 97
+        },
+        "diagnostics": {
+          "cliStartAt": "2026-08-20T17:42:31.296Z",
+          "socketConnectAt": "2026-08-20T17:42:31.3Z",
+          "cliReceiveAt": "2026-08-20T17:42:31.301Z",
+          "elapsedMs": 5,
+          "cliExitAt": "2026-08-20T17:42:31.301Z"
+        }
+      },
+      "rateLimit": false
+    },
+    "statusAfter": {
+      "args": [
+        "status"
+      ],
+      "startedAt": "2026-08-20T17:42:31.362Z",
+      "finishedAt": "2026-08-20T17:42:31.532Z",
+      "elapsedMs": 170,
+      "exitCode": 0,
+      "stdoutBytes": 5293,
+      "stderrBytes": 0,
+      "json": {
+        "ok": true,
+        "command": "webgpt.status",
+        "requestId": "3ab660ef-e0f6-4d97-bade-6dfcbcf8889b",
+        "identity": {
+          "workbenchInstanceId": "a2dd37a4-f4fb-4900-bc08-6945514ae1d5",
+          "webgptRuntimeId": "e39397af-4d2d-4239-8ab7-255255e8eea0",
+          "revision": 98
+        },
+        "diagnostics": {
+          "cliStartAt": "2026-08-20T17:42:31.469Z",
+          "socketConnectAt": "2026-08-20T17:42:31.473Z",
+          "cliReceiveAt": "2026-08-20T17:42:31.477Z",
+          "elapsedMs": 8,
+          "cliExitAt": "2026-08-20T17:42:31.477Z"
+        }
+      },
+      "rateLimit": false
+    }
+  },
+  "promptBodyLogged": false,
+  "responseBodyLogged": false,
+  "cookiesRead": false,
+  "tokensRead": false,
+  "externalDebugPort": false
+}
