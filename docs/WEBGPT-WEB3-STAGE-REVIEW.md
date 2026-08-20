@@ -269,7 +269,8 @@ outer EXE SHA256:
 ```text
 base_commit: 5e700c2 (WEB-2 report commit)
 implementation_commit: a3af2f0
-report_commit: pending
+report_commit: 1c402ba (initial report commit)
+package_commit: 99fbaac
 ```
 
 以下用户本地资料保持原状态，未加入本阶段提交：
