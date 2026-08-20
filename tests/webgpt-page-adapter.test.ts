@@ -35,6 +35,7 @@ test("page adapter exposes bounded metadata, not arbitrary page content", () => 
     composerFound: true,
     composerHasDraft: true,
     generating: false,
+    userCount: 2,
     assistantCount: 3,
     bodyText: "this must not be returned",
   });
@@ -46,6 +47,7 @@ test("page adapter exposes bounded metadata, not arbitrary page content", () => 
     composerFound: true,
     composerHasDraft: true,
     generating: false,
+    userCount: 2,
     assistantCount: 3,
   });
 });

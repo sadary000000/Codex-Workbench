@@ -38,6 +38,7 @@ test("Role Registry strictly validates Chat URLs, collisions, and explicit repla
       "https://chatgpt.com:444/c/x",
       "https://user:pass@chatgpt.com/c/x",
       "https://chatgpt.com.evil.test/c/x",
+      "https://chatgpt.com/foo/c/x",
       "file:///c/x",
       "https://chatgpt.com/c/x/extra",
     ]) assert.throws(() => normalizeRoleChatUrl(value), { code: "ROLE_CHAT_URL_INVALID" });

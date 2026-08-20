@@ -76,13 +76,15 @@ export class WebGptRoleSessionService {
     return { binding: touched, chatUrl: String(state.chatUrl ?? touched.chatUrl), page, mode: modeOf(state) };
   }
 
-  async submit(projectId: string, role: WebGptRole, prompt: string): Promise<WebGptRequestRecord> {
+  async submit(projectId: string, role: WebGptRole, prompt: string, idempotencyKey?: string): Promise<WebGptRequestRecord> {
     const id = await this.requireProject(projectId);
     const normalizedRole = normalizeWebGptRole(role);
-    if (this.workspace.getControlMode() === "USER_CONTROL") throw codedError("WEBGPT_USER_CONTROL", "当前由用户控制，Role 自动操作已暂停。");
     const binding = await this.registry.get(id, normalizedRole);
     this.assertSendable(binding);
-    let targetChatUrl: string | null = null;
+    const targetChatUrl = binding.status === "BOUND" ? binding.chatUrl : null;
+    const existing = await this.requestManager.findIdempotent(prompt, { projectId: id, role: normalizedRole, targetChatUrl }, idempotencyKey);
+    if (existing) return existing;
+    if (this.workspace.getControlMode() === "USER_CONTROL") throw codedError("WEBGPT_USER_CONTROL", "当前由用户控制，Role 自动操作已暂停。");
     if (binding.status === "BOUND") {
       const state = await this.requestManager.openChat(binding.chatUrl);
       const page = pageOf(state);
@@ -91,11 +93,10 @@ export class WebGptRoleSessionService {
         await this.registry.markInvalid(id, normalizedRole);
         throw codedError("ROLE_INVALID", "Role Chat 页面不可用。");
       }
-      targetChatUrl = binding.chatUrl;
     } else if (!isHomeUrl(await this.workspace.getCurrentUrl())) {
       throw codedError("ROLE_PENDING_CHAT_URL", "Role 尚未获得稳定 Chat URL；请保持新建 Role Chat 页面并重试。");
     }
-    return this.requestManager.submit(prompt, { projectId: id, role: normalizedRole, targetChatUrl });
+    return this.requestManager.submit(prompt, { projectId: id, role: normalizedRole, targetChatUrl }, idempotencyKey);
   }
 
   async handleTerminal(record: WebGptRequestRecord): Promise<void> {
@@ -137,6 +138,7 @@ export class WebGptRoleSessionService {
 
   private assertSendable(binding: WebGptRoleBinding): void {
     if (binding.status === "UNBOUND") throw codedError("ROLE_UNBOUND", "该 Role 尚未绑定 Chat。");
+    if (binding.status === "PENDING_CHAT_URL") throw codedError("ROLE_PENDING_CHAT_URL", "该 Role 尚未获得稳定 Chat URL；请先显式绑定真实 Chat 后再发送。 ");
     if (binding.status === "INVALID") throw codedError("ROLE_INVALID", "该 Role 的 Chat 已标记为不可用。");
     if (binding.status === "BOUND") normalizeRoleChatUrl(binding.chatUrl);
   }

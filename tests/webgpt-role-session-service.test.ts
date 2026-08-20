@@ -8,12 +8,14 @@ import { WebGptRoleSessionService } from "../src/features/webgpt/runtime/webgpt-
 import type { WebGptPageState, WebGptRequestRecord, WebGptRole, WebGptState } from "../src/features/webgpt/types.ts";
 
 function page(url: string, ready = true): WebGptPageState {
-  return { url, title: "ChatGPT", loginRequired: false, onChatPage: ready, composerFound: ready, composerHasDraft: false, generating: false, assistantCount: 0 };
+  return { url, title: "ChatGPT", loginRequired: false, onChatPage: ready, composerFound: ready, composerHasDraft: false, generating: false, userCount: 0, assistantCount: 0 };
 }
 
 function responseRecord(projectId: string, role: WebGptRole, chatUrl: string): WebGptRequestRecord {
   return {
     requestId: "wgpt-test",
+    idempotencyKey: null,
+    semanticSha256: "semantic",
     state: "QUEUED",
     projectId,
     role,
@@ -21,12 +23,16 @@ function responseRecord(projectId: string, role: WebGptRole, chatUrl: string): W
     chatUrl,
     promptChars: 1,
     promptSha256: "hash",
+    baselineUserCount: 0,
+    baselineAssistantCount: 0,
+    sendStartedAt: null,
     createdAt: new Date().toISOString(),
     submittedAt: null,
     completedAt: null,
     resultPath: null,
     resultSha256: null,
     resultBytes: null,
+    lastKnownPageState: null,
     error: null,
   };
 }
@@ -54,6 +60,7 @@ class FakeManager {
     this.workspace.currentUrl = url;
     return { chatUrl: url, page: page(url, this.openReady), mode: "AUTO_CONTROL" };
   }
+  async findIdempotent(): Promise<WebGptRequestRecord | null> { return null; }
   async submit(prompt: string, metadata: Record<string, unknown>): Promise<WebGptRequestRecord> {
     this.submitted = { prompt, metadata };
     const projectId = String(metadata.projectId);
@@ -120,9 +127,11 @@ test("Role new creates PENDING_CHAT_URL and terminal completion binds the real /
   try {
     const created = await service.newRole("project-a", "REQUIREMENT");
     assert.equal(created.binding.status, "PENDING_CHAT_URL");
+    await assert.rejects(() => service.submit("project-a", "REQUIREMENT", "first prompt"), { code: "ROLE_PENDING_CHAT_URL" });
+    await service.bind("project-a", "REQUIREMENT", "https://chatgpt.com/c/requirement");
     const submitted = await service.submit("project-a", "REQUIREMENT", "first prompt");
-    assert.equal(submitted.targetChatUrl, null);
-    assert.equal(manager.opened.length, 0);
+    assert.equal(submitted.targetChatUrl, "https://chatgpt.com/c/requirement");
+    assert.deepEqual(manager.opened, ["https://chatgpt.com/c/requirement"]);
     await service.handleTerminal({ ...submitted, state: "COMPLETED", chatUrl: "https://chatgpt.com/c/requirement" });
     const status = await service.status("project-a", "REQUIREMENT");
     assert.equal(status.status, "BOUND");

@@ -57,7 +57,10 @@ export const WEBGPT_PAGE_PROBE_SCRIPT = `(() => {
     .find((element) => visible(element) && !/search|搜索/i.test(String(element.getAttribute("placeholder") || "")));
   const assistantNodes = [...document.querySelectorAll("[data-message-author-role=\\"assistant\\"], [data-testid*=\\"assistant\\"]")]
     .filter(visible);
+  const userNodes = [...document.querySelectorAll("[data-message-author-role=\\"user\\"], [data-testid*=\\"user\\"]")]
+    .filter(visible);
   const assistantTexts = assistantNodes.map(text).filter(Boolean);
+  const userTexts = userNodes.map(text).filter(Boolean);
   const controlLabel = (element) => String(text(element) + " " + (element.getAttribute("aria-label") || "") + " " + (element.getAttribute("title") || "") + " " + (element.getAttribute("data-testid") || ""));
   const stopButton = [...document.querySelectorAll("button")]
     .find((element) => visible(element) && /stop|停止|cancel|取消/i.test(controlLabel(element)));
@@ -77,8 +80,10 @@ export const WEBGPT_PAGE_PROBE_SCRIPT = `(() => {
     composerFound: Boolean(composer),
     composerHasDraft: Boolean(composer && text(composer)),
     generating: Boolean(stopButton) || transientAssistant,
+    userCount: userNodes.length,
     assistantCount: assistantNodes.length,
     latestAssistantText,
+    latestUserText: userTexts.at(-1) || "",
     composerText: composer ? text(composer) : "",
     sendAvailable: Boolean(sendButton),
   };
@@ -116,6 +121,7 @@ export function buildWebGptSetPromptScript(prompt: string): string {
   if (!composer) return { ok: false, code: "COMPOSER_NOT_FOUND", text: "" };
   composer.focus();
   if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
+    composer.select();
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(composer), "value")?.set;
     if (setter) setter.call(composer, value); else composer.value = value;
   } else {
@@ -125,7 +131,30 @@ export function buildWebGptSetPromptScript(prompt: string): string {
   }
   composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
   composer.dispatchEvent(new Event("change", { bubbles: true }));
-  return { ok: text(composer) === value, code: text(composer) === value ? null : "COMPOSER_DRAFT_MISMATCH", text: text(composer) };
+  const matches = text(composer) === value;
+  if (!matches) {
+    composer.focus();
+    if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) composer.select();
+    else document.getSelection()?.selectAllChildren(composer);
+  }
+  return { ok: matches, code: matches ? null : "COMPOSER_NATIVE_INPUT_REQUIRED", text: text(composer) };
+})(${pageScriptArgument(prompt)})`;
+}
+
+export function buildWebGptVerifyPromptScript(prompt: string): string {
+  return `((value) => {
+  const visible = (element) => {
+    if (!(element instanceof Element)) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  };
+  const text = (element) => String(("value" in element ? element.value : element.innerText || element.textContent || "") || "").trim();
+  const composer = [...document.querySelectorAll("textarea, [contenteditable=\\"true\\"], [role=\\"textbox\\"]")]
+    .find((element) => visible(element) && !/search|搜索/i.test(String(element.getAttribute("placeholder") || "")));
+  if (!composer) return { ok: false, code: "COMPOSER_NOT_FOUND", text: "" };
+  const actual = text(composer);
+  return { ok: actual === value, code: actual === value ? null : "COMPOSER_DRAFT_MISMATCH", text: actual };
 })(${pageScriptArgument(prompt)})`;
 }
 
@@ -137,13 +166,17 @@ export const WEBGPT_SUBMIT_PROMPT_SCRIPT = `(() => {
     return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
   };
   const label = (element) => String(element.getAttribute("aria-label") || element.getAttribute("title") || element.innerText || element.textContent || element.getAttribute("data-testid") || "").trim();
-  const button = [...document.querySelectorAll("button")]
-    .find((element) => visible(element) && !element.disabled && /send|发送|提交/i.test(label(element)));
-  if (button) { button.click(); return { submitted: true, method: "button" }; }
   const composer = [...document.querySelectorAll("textarea, [contenteditable=\\"true\\"], [role=\\"textbox\\"]")]
     .find((element) => visible(element) && !/search|搜索/i.test(String(element.getAttribute("placeholder") || "")));
+  const isSendButton = (element) => visible(element) && !element.disabled
+    && /send|发送|提交/i.test(label(element))
+    && !/stop|停止|cancel|取消/i.test(label(element));
+  const form = composer?.closest("form");
+  const button = (form ? [...form.querySelectorAll("button")] : []).find(isSendButton)
+    || [...document.querySelectorAll("button")].find(isSendButton);
+  if (button) { button.click(); return { submitted: true, method: "button" }; }
   if (!composer) return { submitted: false, code: "COMPOSER_NOT_FOUND" };
-  composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+  composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
   return { submitted: true, method: "enter" };
 })()`;
 
@@ -162,6 +195,9 @@ export function normalizePageState(value: unknown, fallbackUrl = ""): WebGptPage
     composerFound: record.composerFound === true,
     composerHasDraft: record.composerHasDraft === true,
     generating: record.generating === true,
+    userCount: typeof record.userCount === "number" && Number.isSafeInteger(record.userCount) && record.userCount >= 0
+      ? Math.min(record.userCount, 100_000)
+      : 0,
     assistantCount: typeof record.assistantCount === "number" && Number.isSafeInteger(record.assistantCount) && record.assistantCount >= 0
       ? Math.min(record.assistantCount, 100_000)
       : 0,
@@ -173,6 +209,7 @@ export function normalizePageProbe(value: unknown, fallbackUrl = ""): WebGptPage
   return {
     page: normalizePageState(record, fallbackUrl),
     latestAssistantText: boundedString(record.latestAssistantText, 2_000_000),
+    latestUserText: boundedString(record.latestUserText, 2_000_000),
     composerText: boundedString(record.composerText, 2_000_000),
     sendAvailable: record.sendAvailable === true,
   };

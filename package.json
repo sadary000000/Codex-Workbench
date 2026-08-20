@@ -26,7 +26,8 @@
     "test:real:composer-persistence": "node --experimental-strip-types scripts/real-composer-persistence-smoke.ts",
     "test:real:project-lifecycle": "node --experimental-strip-types scripts/real-project-lifecycle-smoke.ts",
     "test:real:reliability": "node --experimental-strip-types scripts/real-reliability-smoke.ts",
-    "test:real:webgpt:roles": "node --experimental-strip-types scripts/real-webgpt-role-smoke.ts"
+    "test:real:webgpt:roles": "node --experimental-strip-types scripts/real-webgpt-role-smoke.ts",
+    "test:real:webgpt:recovery": "node --experimental-strip-types scripts/real-webgpt-recovery-smoke.ts"
   },
   "devDependencies": {
     "@types/node": "22.10.2",

@@ -289,8 +289,14 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
       if (request.text === undefined) response = controlFail(request.command, "PROMPT_REQUIRED", "send 必须提供文本 Prompt。");
       else if ((request.projectId === undefined) !== (request.role === undefined)) response = controlFail(request.command, "PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 Project ID 和 Role。");
       else response = controlOk(request.command, request.projectId && request.role
-        ? await getWebGptRoleService().submit(request.projectId, request.role, request.text)
-        : await getWebGptRequestManager().submit(request.text));
+        ? await getWebGptRoleService().submit(request.projectId, request.role, request.text, request.idempotencyKey)
+        : await getWebGptRequestManager().submit(request.text, {}, request.idempotencyKey));
+    } else if (request.command === "webgpt.request.status") {
+      if (!request.targetRequestId) response = controlFail(request.command, "REQUEST_ID_REQUIRED", "request status 必须提供目标 requestId。");
+      else response = controlOk(request.command, await getWebGptRequestManager().requestStatus(request.targetRequestId, true));
+    } else if (request.command === "webgpt.request.list") {
+      if (request.active !== true) response = controlFail(request.command, "REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。");
+      else response = controlOk(request.command, await getWebGptRequestManager().activeSummary());
     } else if (request.command === "webgpt.wait") {
       if (!request.targetRequestId) response = controlFail(request.command, "REQUEST_ID_REQUIRED", "wait 必须提供目标 requestId。");
       else {
@@ -303,7 +309,11 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
       if (!request.targetRequestId) response = controlFail(request.command, "REQUEST_ID_REQUIRED", "result 必须提供目标 requestId。");
       else {
         const result = await getWebGptRequestManager().getResult(request.targetRequestId);
-        if (!result.response) response = controlOk(request.command, result);
+        if (result.state !== "COMPLETED" || !result.response) {
+          response = request.out
+            ? controlFail(request.command, "WEBGPT_RESULT_NOT_READY", "Request 尚未完成，未写入结果文件；请继续使用 wait 或 result 查询。", result)
+            : controlOk(request.command, result);
+        }
         else if (request.out) {
           const outputPath = validateResultPath(request.out);
           const bytes = Buffer.from(result.response, "utf8");
@@ -351,7 +361,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
 }
 
 function enqueueWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {
-  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current" || request.command === "webgpt.role.list" || request.command === "webgpt.role.status") {
+  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current" || request.command === "webgpt.role.list" || request.command === "webgpt.role.status" || request.command === "webgpt.request.status" || request.command === "webgpt.request.list") {
     return handleWebGptControlRequest(request);
   }
   const result = webGptControlQueue.then(() => handleWebGptControlRequest(request));
@@ -436,6 +446,13 @@ function getWebGptRequestManager(): WebGptRequestManager {
     storageDirectory: join(app.getPath("userData"), "webgpt", "requests"),
     onState: (state) => send(IPC.webGptRequestState, state),
     onTerminal: (record) => webGptRoleService?.handleTerminal(record),
+    validateTarget: async (record) => {
+      if (!record.projectId || !record.role || !record.targetChatUrl) return;
+      const binding = await getWebGptRoleService().status(record.projectId, record.role);
+      if (binding.status !== "BOUND" || binding.chatUrl !== record.targetChatUrl) {
+        throw codedError("ROLE_BINDING_CHANGED", "Role 绑定已变化，恢复时拒绝使用旧 Chat 目标。");
+      }
+    },
   });
   return webGptRequestManager;
 }
@@ -924,11 +941,21 @@ function registerIpc(): void {
       return fail(error);
     }
   });
-  ipcMain.handle(IPC.webGptOpenWorkspace, (event) => webGptCall(event.sender, () => getWebGptWorkspace().openWorkspace()));
-  ipcMain.handle(IPC.webGptOpenHome, (event) => webGptCall(event.sender, () => getWebGptWorkspace().openHome()));
-  ipcMain.handle(IPC.webGptOpenChat, (event, url: unknown) => webGptCall(event.sender, () => {
+  ipcMain.handle(IPC.webGptOpenWorkspace, (event) => webGptCall(event.sender, async () => {
+    const state = await getWebGptWorkspace().openWorkspace();
+    await getWebGptRequestManager().userControl();
+    return state;
+  }));
+  ipcMain.handle(IPC.webGptOpenHome, (event) => webGptCall(event.sender, async () => {
+    const state = await getWebGptWorkspace().openHome();
+    await getWebGptRequestManager().userControl();
+    return state;
+  }));
+  ipcMain.handle(IPC.webGptOpenChat, (event, url: unknown) => webGptCall(event.sender, async () => {
     if (typeof url !== "string") throw new Error("WebGPT Chat URL is required.");
-    return getWebGptWorkspace().openChat(url);
+    const state = await getWebGptWorkspace().openChat(url);
+    await getWebGptRequestManager().userControl();
+    return state;
   }));
   ipcMain.handle(IPC.webGptRoleList, (event, projectId: unknown) => webGptCall(event.sender, async () => {
     if (typeof projectId !== "string" || !projectId.trim()) throw codedError("PROJECT_REQUIRED", "Project ID is required.");
@@ -947,13 +974,37 @@ function registerIpc(): void {
   ipcMain.handle(IPC.webGptCurrentUrl, (event) => webGptCall(event.sender, () => getWebGptWorkspace().getCurrentUrl()));
   ipcMain.handle(IPC.webGptPageState, (event) => webGptCall(event.sender, () => getWebGptWorkspace().getPageState()));
   ipcMain.handle(IPC.webGptScreenshot, (event) => webGptCall(event.sender, () => getWebGptWorkspace().takeScreenshot()));
-  ipcMain.handle(IPC.webGptRequestUserControl, (event) => webGptCall(event.sender, () => getWebGptWorkspace().requestUserControl()));
-  ipcMain.handle(IPC.webGptReturnAutomationControl, (event) => webGptCall(event.sender, () => getWebGptWorkspace().returnAutomationControl()));
-  ipcMain.handle(IPC.webGptPause, (event) => webGptCall(event.sender, () => getWebGptWorkspace().pauseAutomation()));
+  ipcMain.handle(IPC.webGptRequestUserControl, (event) => webGptCall(event.sender, async () => {
+    const state = await getWebGptWorkspace().requestUserControl();
+    await getWebGptRequestManager().userControl();
+    return state;
+  }));
+  ipcMain.handle(IPC.webGptReturnAutomationControl, (event) => webGptCall(event.sender, async () => {
+    const state = await getWebGptWorkspace().returnAutomationControl();
+    await getWebGptRequestManager().automationControl();
+    return state;
+  }));
+  ipcMain.handle(IPC.webGptPause, (event) => webGptCall(event.sender, async () => {
+    const state = await getWebGptWorkspace().pauseAutomation();
+    await getWebGptRequestManager().userControl();
+    return state;
+  }));
   ipcMain.handle(IPC.webGptHealth, (event) => webGptCall(event.sender, () => getWebGptWorkspace().getHealthStatus()));
-  ipcMain.handle(IPC.webGptBack, (event) => webGptCall(event.sender, () => getWebGptWorkspace().goBack()));
-  ipcMain.handle(IPC.webGptForward, (event) => webGptCall(event.sender, () => getWebGptWorkspace().goForward()));
-  ipcMain.handle(IPC.webGptReload, (event) => webGptCall(event.sender, () => getWebGptWorkspace().reload()));
+  ipcMain.handle(IPC.webGptBack, (event) => webGptCall(event.sender, async () => {
+    const state = await getWebGptWorkspace().goBack();
+    await getWebGptRequestManager().userControl();
+    return state;
+  }));
+  ipcMain.handle(IPC.webGptForward, (event) => webGptCall(event.sender, async () => {
+    const state = await getWebGptWorkspace().goForward();
+    await getWebGptRequestManager().userControl();
+    return state;
+  }));
+  ipcMain.handle(IPC.webGptReload, (event) => webGptCall(event.sender, async () => {
+    const state = await getWebGptWorkspace().reload();
+    await getWebGptRequestManager().userControl();
+    return state;
+  }));
   ipcMain.handle(IPC.webGptOpenExternal, (event) => webGptCall(event.sender, () => getWebGptWorkspace().openExternalCurrentUrl()));
   ipcMain.handle(IPC.projectList, async () => {
     try {

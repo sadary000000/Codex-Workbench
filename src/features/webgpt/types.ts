@@ -23,12 +23,14 @@ export interface WebGptPageState {
   composerFound: boolean;
   composerHasDraft: boolean;
   generating: boolean;
+  userCount: number;
   assistantCount: number;
 }
 
 export interface WebGptPageProbe {
   page: WebGptPageState;
   latestAssistantText: string;
+  latestUserText: string;
   composerText: string;
   sendAvailable: boolean;
 }
@@ -72,6 +74,7 @@ export interface WebGptHealthStatus {
 
 export type WebGptRequestState =
   | "QUEUED"
+  | "SUBMITTING"
   | "SUBMITTED"
   | "GENERATING"
   | "COMPLETED"
@@ -79,10 +82,13 @@ export type WebGptRequestState =
   | "CANCELED"
   | "PAUSED_FOR_USER"
   | "TIMEOUT"
-  | "INDETERMINATE";
+  | "INDETERMINATE"
+  | "RECOVERY_REQUIRED";
 
 export interface WebGptRequestRecord {
   requestId: string;
+  idempotencyKey: string | null;
+  semanticSha256: string;
   state: WebGptRequestState;
   projectId: string | null;
   role: WebGptRole | null;
@@ -90,12 +96,16 @@ export interface WebGptRequestRecord {
   chatUrl: string;
   promptChars: number;
   promptSha256: string;
+  baselineUserCount: number | null;
+  baselineAssistantCount: number | null;
+  sendStartedAt: string | null;
   createdAt: string;
   submittedAt: string | null;
   completedAt: string | null;
   resultPath: string | null;
   resultSha256: string | null;
   resultBytes: number | null;
+  lastKnownPageState: WebGptPageState | null;
   error: { code: string; message: string } | null;
 }
 
@@ -125,6 +135,6 @@ export interface WebGptPublicService {
   getHealthStatus(): Promise<WebGptHealthStatus>;
   createChat(): Promise<WebGptState>;
   submitPrompt(prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe }>;
-  waitForResponse(baseline: WebGptPageProbe, timeoutMs?: number): Promise<{ response: string; samples: number; elapsedMs: number }>;
+  waitForResponse(baseline: WebGptPageProbe, timeoutMs?: number, expectedChatUrl?: string): Promise<{ response: string; samples: number; elapsedMs: number }>;
   getLatestResponse(): Promise<string | null>;
 }

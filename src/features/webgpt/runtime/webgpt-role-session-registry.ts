@@ -45,8 +45,7 @@ export function normalizeRoleChatUrl(value: string): string {
     throw codedError("ROLE_CHAT_URL_INVALID", "Role Chat URL 不允许端口、用户名或密码。");
   }
   const segments = url.pathname.split("/").filter(Boolean);
-  const chatSegment = segments.lastIndexOf("c");
-  if (chatSegment < 0 || chatSegment !== segments.length - 2 || !segments[chatSegment + 1]) {
+  if (segments.length !== 2 || segments[0] !== "c" || !segments[1]) {
     throw codedError("ROLE_CHAT_URL_INVALID", "Role 必须绑定真实的 /c/<chat-id> Chat URL。");
   }
   url.hostname = "chatgpt.com";
@@ -177,7 +176,7 @@ export class WebGptRoleSessionRegistry {
       const normalizedRole = normalizeWebGptRole(role);
       const key = this.key(id, normalizedRole);
       const previous = this.bindings.get(key);
-      if (previous && !replace) throw codedError("ROLE_ALREADY_BOUND", "该 Role 已有绑定；如需覆盖请显式使用 --replace。");
+      if (previous && !replace && previous.status !== "PENDING_CHAT_URL") throw codedError("ROLE_ALREADY_BOUND", "该 Role 已有绑定；如需覆盖请显式使用 --replace。");
       const collision = [...this.bindings.values()].find((candidate) => this.key(candidate.projectId, candidate.role) !== key && candidate.status === "BOUND" && candidate.chatUrl === chatUrl);
       if (collision) throw codedError("ROLE_BIND_CONFLICT", `Chat 已绑定到 ${collision.projectId}/${collision.role}，不能跨 Role 或 Project 复用。`);
       const now = this.now();

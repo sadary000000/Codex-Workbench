@@ -55,6 +55,9 @@ test("WebGPT Control Plane validates versioned, request-scoped allowlisted reque
   const badCommand = parseWebGptControlRequest({ version: 1, requestId: "req-3", command: "webgpt.not-allowlisted" });
   assert.equal("ok" in badCommand && badCommand.ok, false);
   assert.equal("error" in badCommand && badCommand.error?.code, "CONTROL_COMMAND_UNSUPPORTED");
+  const missingRequestId = parseWebGptControlRequest({ version: 1, command: "webgpt.status" });
+  assert.equal("ok" in missingRequestId && missingRequestId.ok, false);
+  assert.equal("error" in missingRequestId && missingRequestId.error?.code, "CONTROL_REQUEST_ID_REQUIRED");
 });
 
 test("WebGPT WEB-4 Control Plane validates Project Role routing at the boundary", () => {
@@ -125,6 +128,36 @@ test("WebGPT Control Plane uses a published per-instance descriptor and authenti
   } finally {
     await server.close();
     await removeControlDescriptor(descriptorFile);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT Control Plane deduplicates a retried requestId and rejects replay with different semantics", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-control-retry-"));
+  const descriptor = createControlDescriptor("workbench-retry-instance");
+  let handlerCalls = 0;
+  const server = new WebGptControlServer({
+    endpoint: descriptor.endpoint,
+    authToken: descriptor.authToken,
+    handler: async (request) => {
+      handlerCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: request.requestId, ok: true, command: request.command, result: { handlerCalls } };
+    },
+  });
+  try {
+    await server.start();
+    const first = { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: "retry-1", command: "webgpt.status", authToken: descriptor.authToken };
+    const [one, two] = await Promise.all([sendRawControlRequest(descriptor.endpoint, first), sendRawControlRequest(descriptor.endpoint, first)]);
+    assert.equal(one.ok, true);
+    assert.equal(two.ok, true);
+    assert.equal(handlerCalls, 1);
+    const conflict = await sendRawControlRequest(descriptor.endpoint, { ...first, command: "webgpt.current" });
+    assert.equal(conflict.ok, false);
+    assert.equal((conflict.error as { code?: unknown })?.code, "CONTROL_REQUEST_REPLAY_CONFLICT");
+    assert.equal(handlerCalls, 1);
+  } finally {
+    await server.close();
     await rm(directory, { recursive: true, force: true });
   }
 });
