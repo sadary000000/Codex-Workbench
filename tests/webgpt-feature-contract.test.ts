@@ -56,3 +56,19 @@ test("WebGPT automation waits for a stable Composer after navigation", () => {
   assert.match(source, /samePage = stable\?\.page\.url === last\.page\.url/);
   assert.match(source, /sameComposer = stable\?\.composerText === last\.composerText/);
 });
+
+test("WebGPT CLI automation gives a zero-layout view a usable viewport", () => {
+  const source = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-workspace.ts"), "utf8");
+  assert.match(source, /private ensureUsableBounds\(\): void/);
+  assert.match(source, /this\.mainWindow\.getContentBounds\(\)/);
+  assert.match(source, /this\.ensureUsableBounds\(\);/);
+});
+
+test("Project CLI actions are scoped to the hovered Project row and preserve context evidence", () => {
+  const adapter = readFileSync(join(root, "src", "features", "webgpt", "adapter", "webgpt-page-adapter.ts"), "utf8");
+  const workspace = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-workspace.ts"), "utf8");
+  assert.match(adapter, /buildWebGptCreateProjectChatScript/);
+  assert.match(adapter, /contextMatch/);
+  assert.match(workspace, /buildWebGptCreateProjectChatScript\(name\)/);
+  assert.match(workspace, /PROJECT_NEW_CHAT_ACTION_NOT_FOUND/);
+});

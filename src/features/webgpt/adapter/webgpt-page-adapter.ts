@@ -117,13 +117,35 @@ export function buildWebGptOpenProjectScript(projectName: string): string {
   if (matches.length === 0) return { clicked: false, projectName: expectedName, matchCount: 0, url: location.href };
   if (matches.length > 1) return { clicked: false, ambiguous: true, projectName: expectedName, matchCount: matches.length, url: location.href };
   const candidate = matches[0];
-  const target = candidate.closest("a, button, [role=\\"link\\"], [role=\\"button\\"], [role=\\"treeitem\\"]") || candidate;
+  candidate.focus?.();
+  const hover = { bubbles: true, cancelable: true, view: window, relatedTarget: null };
+  if (typeof PointerEvent === "function") candidate.dispatchEvent(new PointerEvent("pointerover", hover));
+  candidate.dispatchEvent(new MouseEvent("mouseover", hover));
+  candidate.dispatchEvent(new MouseEvent("mouseenter", { ...hover, bubbles: false }));
+  const interactive = "a, button, [role=\\"link\\"], [role=\\"button\\"]";
+  const target = (candidate.matches(interactive) ? candidate : candidate.querySelector(interactive)) || candidate;
+  target.focus?.();
+  const pointer = { bubbles: true, cancelable: true, view: window, button: 0, buttons: 1 };
+  if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerdown", pointer));
+  target.dispatchEvent(new MouseEvent("mousedown", pointer));
+  if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
+  target.dispatchEvent(new MouseEvent("mouseup", { ...pointer, buttons: 0 }));
   target.click();
+  const boundedAttributes = (element) => Object.fromEntries(
+    ["id", "class", "data-testid", "data-state", "data-active", "data-project-id", "data-href", "data-url", "aria-current", "aria-selected", "aria-expanded"]
+      .map((key) => [key, element.getAttribute(key)]),
+  );
   return {
     clicked: true,
     projectName: expectedName,
     matchCount: matches.length,
     matchedText: label(candidate),
+    candidateTag: candidate.tagName,
+    candidateRole: candidate.getAttribute("role"),
+    targetTag: target.tagName,
+    targetRole: target.getAttribute("role"),
+    targetAttributes: boundedAttributes(target),
+    parentAttributes: boundedAttributes(target.parentElement || target),
     href: target instanceof HTMLAnchorElement ? target.href : null,
     url: location.href,
   };
@@ -143,17 +165,87 @@ export function buildWebGptProjectProbeScript(projectName: string): string {
     .filter((element) => visible(element) && label(element) === expectedName);
   const candidate = candidates[0] || null;
   const target = candidate?.closest("a, button, [role=\\"link\\"], [role=\\"button\\"], [role=\\"treeitem\\"]") || candidate;
+  const activeClass = (element) => /(^|[-_\\s])(active|selected|current)([-_\\s]|$)/i.test(String(element?.className || ""));
   const active = Boolean(target && (target.getAttribute("aria-current") === "page"
+    || target.getAttribute("aria-selected") === "true"
     || target.getAttribute("data-state") === "active"
     || target.getAttribute("data-active") === "true"
-    || target.closest("[aria-current=\\"page\\"], [data-state=\\"active\\"], [data-active=\\"true\\"]")));
+    || activeClass(target)
+    || target.closest("[aria-current=\\"page\\"], [aria-selected=\\"true\\"], [data-state=\\"active\\"], [data-active=\\"true\\"]")
+    || activeClass(target.closest("[aria-current=\\"page\\"], [aria-selected=\\"true\\"], [data-state=\\"active\\"], [data-active=\\"true\\"]"))));
+  const contextMatch = [...document.querySelectorAll("h1, h2, h3, [role=\\"heading\\"]")]
+    .some((element) => visible(element) && label(element) === expectedName);
   return {
     projectName: expectedName,
     matchCount: candidates.length,
     active,
+    contextMatch,
     href: target instanceof HTMLAnchorElement ? target.href : null,
     url: location.href,
     projectRoute: /\\/project\\//i.test(location.pathname),
+  };
+})(${JSON.stringify(projectName)})`;
+}
+
+export function buildWebGptCreateProjectChatScript(projectName: string): string {
+  return `((expectedName) => {
+  const visible = (element) => {
+    if (!(element instanceof Element)) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  };
+  const label = (element) => String(element.getAttribute("aria-label") || element.getAttribute("title") || element.innerText || element.textContent || element.getAttribute("data-testid") || "").replace(/\\s+/g, " ").trim();
+  const candidates = [...document.querySelectorAll("a, button, [role=\\"link\\"], [role=\\"button\\"], [role=\\"treeitem\\"]")];
+  const matches = candidates.filter((element) => visible(element) && label(element) === expectedName);
+  if (matches.length === 0) return { clicked: false, code: "PROJECT_NOT_FOUND", projectName: expectedName, matchCount: 0, actionCount: 0, actionLabels: [] };
+  if (matches.length > 1) return { clicked: false, ambiguous: true, projectName: expectedName, matchCount: matches.length, actionCount: 0, actionLabels: [] };
+  const candidate = matches[0];
+  candidate.focus?.();
+  const hover = { bubbles: true, cancelable: true, view: window, relatedTarget: null };
+  if (typeof PointerEvent === "function") candidate.dispatchEvent(new PointerEvent("pointerover", hover));
+  candidate.dispatchEvent(new MouseEvent("mouseover", hover));
+  candidate.dispatchEvent(new MouseEvent("mouseenter", { ...hover, bubbles: false }));
+  if (typeof PointerEvent === "function") candidate.dispatchEvent(new PointerEvent("pointermove", { ...hover, bubbles: true }));
+  candidate.dispatchEvent(new MouseEvent("mousemove", hover));
+  const interactive = "button, a, [role=\\"link\\"], [role=\\"button\\"]";
+  const rowContainers = [candidate, candidate.parentElement, candidate.parentElement?.parentElement].filter(Boolean);
+  const controls = [...new Set(rowContainers.flatMap((row) => [...row.querySelectorAll(interactive)]))]
+    .filter((element) => visible(element) && element !== candidate);
+  const actionPattern = /new chat|new conversation|new-chat|project.*chat|chat.*project|新建对话|新建聊天|新聊天|新对话|开始新对话|开始聊天/i;
+  const actions = controls.filter((element) => actionPattern.test(label(element)));
+  const boundedLabels = actions.slice(0, 8).map((element) => label(element).slice(0, 160));
+  if (actions.length === 0) {
+    return {
+      clicked: false,
+      code: "PROJECT_NEW_CHAT_ACTION_NOT_FOUND",
+      projectName: expectedName,
+      matchCount: matches.length,
+      actionCount: controls.length,
+      actionLabels: controls.slice(0, 8).map((element) => label(element).slice(0, 160)),
+    };
+  }
+  if (actions.length > 1) {
+    return { clicked: false, ambiguous: true, code: "PROJECT_NEW_CHAT_ACTION_AMBIGUOUS", projectName: expectedName, matchCount: matches.length, actionCount: actions.length, actionLabels: boundedLabels };
+  }
+  const target = actions[0];
+  target.focus?.();
+  const pointer = { bubbles: true, cancelable: true, view: window, button: 0, buttons: 1 };
+  if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerdown", pointer));
+  target.dispatchEvent(new MouseEvent("mousedown", pointer));
+  if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
+  target.dispatchEvent(new MouseEvent("mouseup", { ...pointer, buttons: 0 }));
+  target.click();
+  return {
+    clicked: true,
+    projectName: expectedName,
+    matchCount: matches.length,
+    actionCount: actions.length,
+    actionLabel: label(target).slice(0, 160),
+    actionTag: target.tagName,
+    actionRole: target.getAttribute("role"),
+    href: target instanceof HTMLAnchorElement ? target.href : null,
+    url: location.href,
   };
 })(${JSON.stringify(projectName)})`;
 }

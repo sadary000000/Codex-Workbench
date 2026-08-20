@@ -1,5 +1,5 @@
 import { shell, WebContentsView, type BaseWindow, type Rectangle, type Session } from "electron";
-import { buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
+import { buildWebGptCreateProjectChatScript, buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
 import { createWebGptSession, webGptSessionPath } from "../session/webgpt-session.ts";
 import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import type {
@@ -152,6 +152,17 @@ export class WebGptWorkspace implements WebGptPublicService {
     this.view.setBounds(this.bounds);
   }
 
+  private ensureUsableBounds(): void {
+    if (this.bounds.width > 0 && this.bounds.height > 0) return;
+    const content = this.mainWindow.getContentBounds();
+    this.bounds = {
+      x: 0,
+      y: 0,
+      width: Math.max(1, Math.round(content.width)),
+      height: Math.max(1, Math.round(content.height)),
+    };
+  }
+
   private detach(): void {
     if (!this.attached) return;
     this.mainWindow.contentView.removeChildView(this.view);
@@ -236,7 +247,13 @@ export class WebGptWorkspace implements WebGptPublicService {
   }
 
   setVisible(visible: boolean): WebGptState {
-    if (visible) this.attach();
+    if (visible) {
+      // CLI automation does not pass through Renderer layout sync. Give the
+      // remote page a real viewport so Project/sidebar DOM can settle; the
+      // Renderer will replace this with the Browser Pane bounds when opened.
+      this.ensureUsableBounds();
+      this.attach();
+    }
     else this.detach();
     this.patchState({ visible });
     return this.state;
@@ -286,12 +303,24 @@ export class WebGptWorkspace implements WebGptPublicService {
     const currentUrl = this.view.webContents.getURL();
     if (!currentUrl || currentUrl.startsWith("chrome-error://") || this.state.error) await this.load(WEBGPT_HOME_URL);
     let beforeUrl = this.view.webContents.getURL() || this.state.url;
-    let result = await this.view.webContents.executeJavaScript(buildWebGptOpenProjectScript(name)) as Record<string, unknown>;
+    const clickProjectWhenReady = async (): Promise<Record<string, unknown>> => {
+      const deadline = Date.now() + 10_000;
+      let latest: Record<string, unknown> = { clicked: false, projectName: name, matchCount: 0, url: beforeUrl };
+      while (Date.now() < deadline) {
+        latest = await this.view.webContents.executeJavaScript(buildWebGptOpenProjectScript(name)) as Record<string, unknown>;
+        if (latest.ambiguous === true || latest.clicked === true) return latest;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        this.assertAutomationEpoch(epoch);
+      }
+      return latest;
+    };
+    let result = await clickProjectWhenReady();
     if (result.ambiguous === true) throw this.codedError("PROJECT_NAME_AMBIGUOUS", `当前页面存在多个同名 Project：${name}`);
     if (result.clicked !== true && beforeUrl !== WEBGPT_HOME_URL) {
       await this.load(WEBGPT_HOME_URL);
       beforeUrl = this.view.webContents.getURL() || this.state.url;
-      result = await this.view.webContents.executeJavaScript(buildWebGptOpenProjectScript(name)) as Record<string, unknown>;
+      result = await clickProjectWhenReady();
+      if (result.ambiguous === true) throw this.codedError("PROJECT_NAME_AMBIGUOUS", `当前页面存在多个同名 Project：${name}`);
     }
     this.assertAutomationEpoch(epoch);
     if (result.clicked !== true) {
@@ -304,41 +333,131 @@ export class WebGptWorkspace implements WebGptPublicService {
     }
     const deadline = Date.now() + 10_000;
     let actualUrl = this.view.webContents.getURL() || this.state.url;
+    let projectProbe = await this.view.webContents.executeJavaScript(buildWebGptProjectProbeScript(name)) as Record<string, unknown>;
+    let normalizedActual = (() => { try { return normalizeWebGptUrl(actualUrl); } catch { return actualUrl; } })();
+    const isProjectConfirmed = (): boolean => {
+      const projectIsActive = projectProbe.active === true;
+      return projectProbe.matchCount === 1 && (
+        (Boolean(expectedUrl) && normalizedActual === expectedUrl)
+        || projectIsActive
+        || projectProbe.contextMatch === true
+        || (projectProbe.projectRoute === true && normalizedActual !== beforeUrl)
+      );
+    };
     while (Date.now() < deadline) {
+      if (isProjectConfirmed()) break;
       await new Promise((resolve) => setTimeout(resolve, 250));
       this.assertAutomationEpoch(epoch);
       actualUrl = this.view.webContents.getURL() || this.state.url;
-      const normalizedActual = (() => { try { return normalizeWebGptUrl(actualUrl); } catch { return actualUrl; } })();
-      if ((expectedUrl && normalizedActual === expectedUrl) || (!expectedUrl && actualUrl !== beforeUrl)) break;
+      normalizedActual = (() => { try { return normalizeWebGptUrl(actualUrl); } catch { return actualUrl; } })();
+      projectProbe = await this.view.webContents.executeJavaScript(buildWebGptProjectProbeScript(name)) as Record<string, unknown>;
     }
-    const normalizedActual = (() => { try { return normalizeWebGptUrl(actualUrl); } catch { return actualUrl; } })();
-    const projectProbe = await this.view.webContents.executeJavaScript(buildWebGptProjectProbeScript(name)) as Record<string, unknown>;
-    const projectIsActive = projectProbe.active === true;
-    if ((expectedUrl && normalizedActual !== expectedUrl && !projectIsActive) || (!expectedUrl && actualUrl === beforeUrl) || projectProbe.matchCount !== 1 || (!projectIsActive && projectProbe.projectRoute !== true)) {
-      throw this.codedError("PROJECT_NAVIGATION_NOT_CONFIRMED", `Project 已点击但未确认进入目标 Project：${name}`);
+    if (!isProjectConfirmed() && expectedUrl && normalizedActual !== expectedUrl) {
+      await this.load(expectedUrl);
+      actualUrl = this.view.webContents.getURL() || this.state.url;
+      normalizedActual = (() => { try { return normalizeWebGptUrl(actualUrl); } catch { return actualUrl; } })();
+      projectProbe = await this.view.webContents.executeJavaScript(buildWebGptProjectProbeScript(name)) as Record<string, unknown>;
+    }
+    if (!isProjectConfirmed()) {
+      const evidence = JSON.stringify({
+        expectedUrl: expectedUrl || null,
+        actualUrl: normalizedActual,
+        matchCount: projectProbe.matchCount ?? null,
+        active: projectProbe.active === true,
+        contextMatch: projectProbe.contextMatch === true,
+        projectRoute: projectProbe.projectRoute === true,
+        href: typeof projectProbe.href === "string" ? projectProbe.href : null,
+        targetTag: result.targetTag ?? null,
+        targetRole: result.targetRole ?? null,
+        targetAttributes: result.targetAttributes ?? null,
+        parentAttributes: result.parentAttributes ?? null,
+      });
+      throw this.codedError("PROJECT_NAVIGATION_NOT_CONFIRMED", `Project 已点击但未确认进入目标 Project：${name}；受限诊断 ${evidence}`);
     }
     const page = await this.waitForComposer();
     this.assertAutomationEpoch(epoch);
-    return { projectName: name, projectUrl: normalizedActual, projectProbe, page: page.page, mode: this.state.mode };
+    return { projectName: name, projectUrl: expectedUrl || normalizedActual, projectProbe, page: page.page, mode: this.state.mode };
   }
 
   async createChatInProjectForAutomation(projectName: string): Promise<Record<string, unknown>> {
     const project = await this.openProjectForAutomation(projectName);
-    const state = await this.createChat();
-    const projectProbe = await this.view.webContents.executeJavaScript(buildWebGptProjectProbeScript(projectName.trim())) as Record<string, unknown>;
-    const chatUrl = await this.getCurrentUrl();
-    let normalizedChatUrl = "";
-    try { normalizedChatUrl = normalizeChatUrl(chatUrl); } catch { /* fail closed below */ }
-    if (!normalizedChatUrl || projectProbe.matchCount !== 1 || (projectProbe.active !== true && projectProbe.projectRoute !== true)) {
-      throw this.codedError("PROJECT_CHAT_CONTEXT_NOT_CONFIRMED", `未能确认新 Chat 仍位于目标 Project：${projectName}`);
+    const epoch = this.requireAutomationEpoch();
+    const name = projectName.trim();
+    const actionDeadline = Date.now() + 10_000;
+    let action: Record<string, unknown> = { clicked: false, projectName: name, actionCount: 0, actionLabels: [] };
+    while (Date.now() < actionDeadline) {
+      action = await this.view.webContents.executeJavaScript(buildWebGptCreateProjectChatScript(name)) as Record<string, unknown>;
+      if (action.ambiguous === true || action.clicked === true) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      this.assertAutomationEpoch(epoch);
     }
+    if (action.ambiguous === true) {
+      throw this.codedError("PROJECT_NEW_CHAT_ACTION_AMBIGUOUS", "Project “" + name + "” 的新建对话动作不唯一。");
+    }
+    if (action.clicked !== true) {
+      const evidence = JSON.stringify({
+        actionCount: action.actionCount ?? null,
+        actionLabels: action.actionLabels ?? [],
+        currentUrl: await this.getCurrentUrl(),
+      });
+      throw this.codedError("PROJECT_NEW_CHAT_ACTION_NOT_FOUND", "悬停 Project “" + name + "” 后未找到其行内新建对话动作；受限诊断 " + evidence);
+    }
+    const actionHref = typeof action.href === "string" ? action.href : "";
+    let expectedActionUrl = "";
+    if (actionHref) {
+      try { expectedActionUrl = normalizeWebGptUrl(actionHref); } catch { /* SPA action may not expose an href */ }
+    }
+    const deadline = Date.now() + 10_000;
+    let projectProbe = await this.view.webContents.executeJavaScript(buildWebGptProjectProbeScript(name)) as Record<string, unknown>;
+    let page = await this.getPageProbe();
+    let actualUrl = await this.getCurrentUrl();
+    let normalizedActual = (() => { try { return normalizeWebGptUrl(actualUrl); } catch { return actualUrl; } })();
+    let stablePage: WebGptPageProbe | null = null;
+    const isProjectConfirmed = (): boolean => projectProbe.matchCount === 1
+      && (projectProbe.active === true || projectProbe.contextMatch === true || projectProbe.projectRoute === true);
+    const isActionConfirmed = (): boolean => !expectedActionUrl || normalizedActual === expectedActionUrl;
+    while (Date.now() < deadline) {
+      if (page.page.composerFound && isProjectConfirmed() && isActionConfirmed()) {
+        const samePage = stablePage?.page.url === page.page.url;
+        const sameComposer = stablePage?.composerText === page.composerText;
+        const sameGeneration = stablePage?.page.generating === page.page.generating;
+        if (samePage && sameComposer && sameGeneration) break;
+        stablePage = page;
+      } else {
+        stablePage = null;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      this.assertAutomationEpoch(epoch);
+      page = await this.getPageProbe();
+      projectProbe = await this.view.webContents.executeJavaScript(buildWebGptProjectProbeScript(name)) as Record<string, unknown>;
+      actualUrl = await this.getCurrentUrl();
+      normalizedActual = (() => { try { return normalizeWebGptUrl(actualUrl); } catch { return actualUrl; } })();
+    }
+    if (!(page.page.composerFound && isProjectConfirmed() && isActionConfirmed() && stablePage)) {
+      const evidence = JSON.stringify({
+        actionHref: actionHref || null,
+        actualUrl: normalizedActual,
+        matchCount: projectProbe.matchCount ?? null,
+        active: projectProbe.active === true,
+        contextMatch: projectProbe.contextMatch === true,
+        projectRoute: projectProbe.projectRoute === true,
+        composerFound: page.page.composerFound,
+      });
+      throw this.codedError("PROJECT_CHAT_CONTEXT_NOT_CONFIRMED", "未能确认新 Chat 仍位于目标 Project：" + name + "；受限诊断 " + evidence);
+    }
+    const state = page.page;
+    let normalizedChatUrl = "";
+    try { normalizedChatUrl = normalizeChatUrl(normalizedActual); } catch { /* Project new-chat may not receive /c/ until the first Prompt */ }
     return {
-      projectName,
+      projectName: name,
       projectUrl: project.projectUrl,
-      chatUrl: normalizedChatUrl,
+      chatUrl: normalizedChatUrl || null,
+      url: normalizedActual,
+      chatCreated: true,
+      action,
       projectProbe,
-      page: state.page,
-      mode: state.mode,
+      page: state,
+      mode: this.state.mode,
     };
   }
 
