@@ -10,7 +10,23 @@ test("WebGPT is a top-level workspace entry and does not live under automation",
   assert.match(html, /id="open-webgpt"/);
   assert.match(html, /id="webgpt-workspace"/);
   assert.match(html, /id="webgpt-browser-host"/);
+  assert.match(html, /id="webgpt-role-strip"/);
+  assert.match(html, /id="webgpt-role-list"/);
   assert.doesNotMatch(html, /automation\/webgpt/i);
+});
+
+test("WebGPT WEB-4 role projection stays a lightweight Project-scoped bridge", () => {
+  const preload = readFileSync(join(root, "src", "preload", "preload.cts"), "utf8");
+  const renderer = readFileSync(join(root, "src", "renderer", "renderer.ts"), "utf8");
+  const registry = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-role-session-registry.ts"), "utf8");
+  assert.match(preload, /webGptRoleList/);
+  assert.match(preload, /webGptRoleOpen/);
+  assert.match(renderer, /listWebGptRoles/);
+  assert.match(renderer, /REQUIREMENT/);
+  assert.match(renderer, /PLANNER/);
+  assert.match(renderer, /REVIEWER/);
+  assert.match(registry, /role-sessions\.json/);
+  assert.doesNotMatch(registry, /prompt|response/i);
 });
 
 test("WebGPT build/package boundary includes the independent feature directory", () => {
@@ -31,4 +47,12 @@ test("remote WebGPT pages do not receive the V1 preload bridge", () => {
   assert.match(source, /setPermissionCheckHandler/);
   assert.match(source, /setPermissionRequestHandler/);
   assert.match(source, /will-download/);
+});
+
+test("WebGPT automation waits for a stable Composer after navigation", () => {
+  const source = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-workspace.ts"), "utf8");
+  assert.match(source, /await this\.waitForComposer\(\);/);
+  assert.match(source, /let stable: WebGptPageProbe \| null = null;/);
+  assert.match(source, /samePage = stable\?\.page\.url === last\.page\.url/);
+  assert.match(source, /sameComposer = stable\?\.composerText === last\.composerText/);
 });

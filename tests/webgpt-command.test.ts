@@ -52,3 +52,26 @@ test("WebGPT WEB-3 CLI parser keeps request and prompt inputs explicit", () => {
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "send", "--text", "x", "--file", "p.md"]).kind, "error");
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "result", "--request-id", "wgpt-1", "--timeout-ms", "1"]).kind, "error");
 });
+
+test("WebGPT WEB-4 CLI parser keeps Project Role routing explicit", () => {
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "list", "--project", "project-a", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.role.list", json: true, projectId: "project-a" },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "new", "--project", "project-a", "--role", "planner", "--replace"]), {
+    kind: "command",
+    command: { name: "webgpt.role.new", json: false, projectId: "project-a", role: "PLANNER", replace: true },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "bind", "--project", "project-a", "--role", "reviewer", "--url", "https://chatgpt.com/c/reviewer"]), {
+    kind: "command",
+    command: { name: "webgpt.role.bind", json: false, projectId: "project-a", role: "REVIEWER", url: "https://chatgpt.com/c/reviewer" },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "send", "--project", "project-a", "--role", "requirement", "--text", "hello", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.send", json: true, projectId: "project-a", role: "REQUIREMENT", text: "hello" },
+  });
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "open", "--project", "project-a", "--role", "planner"]).kind, "command");
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "status", "--project", "project-a"]).kind, "error");
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "send", "--project", "project-a", "--text", "hello"]).kind, "error");
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "bind", "--project", "project-a", "--role", "reviewer", "--url", "https://example.com/c/x"]).kind, "command");
+});

@@ -244,6 +244,7 @@ export class WebGptWorkspace implements WebGptPublicService {
   async openChatForAutomation(url: string): Promise<WebGptState> {
     this.setVisible(true);
     await this.load(normalizeChatUrl(url));
+    await this.waitForComposer();
     this.patchState({ mode: "AUTO_CONTROL" });
     return this.state;
   }
@@ -401,10 +402,19 @@ export class WebGptWorkspace implements WebGptPublicService {
   private async waitForComposer(timeoutMs = 20_000): Promise<WebGptPageProbe> {
     const deadline = Date.now() + timeoutMs;
     let last: WebGptPageProbe | null = null;
+    let stable: WebGptPageProbe | null = null;
     while (Date.now() < deadline) {
       last = await this.getPageProbe();
       if (last.page.loginRequired) throw this.codedError("WEBGPT_LOGIN_REQUIRED", "ChatGPT 页面需要登录。");
-      if (last.page.composerFound) return last;
+      if (last.page.composerFound) {
+        const samePage = stable?.page.url === last.page.url;
+        const sameComposer = stable?.composerText === last.composerText;
+        const sameGeneration = stable?.page.generating === last.page.generating;
+        if (samePage && sameComposer && sameGeneration) return last;
+        stable = last;
+      } else {
+        stable = null;
+      }
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
     throw this.codedError("COMPOSER_NOT_READY", last?.page.url ? `Composer 尚未就绪：${last.page.url}` : "ChatGPT Composer 尚未就绪。");

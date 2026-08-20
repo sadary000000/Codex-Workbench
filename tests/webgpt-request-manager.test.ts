@@ -70,6 +70,30 @@ test("WebGPT Request Manager owns async request state and persists the result", 
   }
 });
 
+test("WebGPT Request Manager persists role metadata and refuses a mismatched target Chat", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-role-target-"));
+  try {
+    const workspace = new FakeWorkspace();
+    workspace.mode = "AUTO_CONTROL";
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const submitted = await manager.submit("role prompt", {
+      projectId: "project-a",
+      role: "PLANNER",
+      targetChatUrl: "https://chatgpt.com/c/planner",
+    });
+    assert.equal(submitted.projectId, "project-a");
+    assert.equal(submitted.role, "PLANNER");
+    assert.equal(submitted.targetChatUrl, "https://chatgpt.com/c/planner");
+    const waited = await manager.waitForRequest(submitted.requestId, 10_000);
+    assert.equal(waited.record.state, "FAILED");
+    assert.equal(waited.record.error?.code, "ROLE_CHAT_MISMATCH");
+    assert.equal((await manager.getResult(submitted.requestId)).projectId, "project-a");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("WebGPT Request Manager pauses under USER_CONTROL and resumes only after AUTO_CONTROL", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-pause-"));
   const workspace = new FakeWorkspace();

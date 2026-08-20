@@ -13,4 +13,7 @@ export type {
   WebGptScreenshot,
   WebGptState,
   WebGptControlMode,
+  WebGptRole,
+  WebGptRoleBinding,
+  WebGptRoleBindingStatus,
 } from "./types.ts";

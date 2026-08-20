@@ -24,7 +24,7 @@ import { operationStatusLabel, runtimeStateLabel, shouldRenderDefaultEvent, user
 import { projectLiveEvent, projectReadItem, projectTurnState, type MessageProjection } from "./message-projection.ts";
 import { defaultComposerPreferences, validateComposerPreferencesAgainstCapabilities } from "../codex/composer-capabilities.ts";
 import { beginThreadSelection, isCurrentThreadSelection, type ThreadSelectionRequest } from "./thread-selection.ts";
-import type { WebGptPageState, WebGptRequestStateEvent, WebGptState } from "../features/webgpt/types.ts";
+import type { WebGptPageState, WebGptRequestStateEvent, WebGptRole, WebGptRoleBinding, WebGptState } from "../features/webgpt/types.ts";
 
 interface IpcEnvelope<T = unknown> {
   ok: boolean;
@@ -87,6 +87,8 @@ interface WebGptApi {
   openWebGptWorkspace(): Promise<IpcEnvelope<WebGptState>>;
   openWebGptHome(): Promise<IpcEnvelope<WebGptState>>;
   openWebGptChat(url: string): Promise<IpcEnvelope<WebGptState>>;
+  listWebGptRoles(projectId: string): Promise<IpcEnvelope<WebGptRoleBinding[]>>;
+  openWebGptRole(projectId: string, role: WebGptRole): Promise<IpcEnvelope<unknown>>;
   setWebGptBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<IpcEnvelope<{ updated: boolean }>>;
   setWebGptVisible(visible: boolean): Promise<IpcEnvelope<WebGptState>>;
   getWebGptCurrentUrl(): Promise<IpcEnvelope<string>>;
@@ -204,6 +206,9 @@ const webGptPageTitleElement = document.querySelector<HTMLElement>("#webgpt-page
 const webGptPageUrlElement = document.querySelector<HTMLElement>("#webgpt-page-url")!;
 const webGptPageStateElement = document.querySelector<HTMLElement>("#webgpt-page-state")!;
 const webGptPageErrorElement = document.querySelector<HTMLElement>("#webgpt-page-error")!;
+const webGptRoleStripElement = document.querySelector<HTMLElement>("#webgpt-role-strip")!;
+const webGptRoleProjectElement = document.querySelector<HTMLElement>("#webgpt-role-project")!;
+const webGptRoleListElement = document.querySelector<HTMLElement>("#webgpt-role-list")!;
 const webGptRequestStateElement = document.querySelector<HTMLElement>("#webgpt-request-state")!;
 const webGptModeElement = document.querySelector<HTMLElement>("#webgpt-mode")!;
 const webGptUrlForm = document.querySelector<HTMLFormElement>("#webgpt-url-form")!;
@@ -268,6 +273,60 @@ let interruptInFlight = false;
 let webGptState: WebGptState | null = null;
 let webGptOpen = false;
 let webGptBoundsFrame = 0;
+let webGptRolesGeneration = 0;
+
+const webGptRoleLabels: Record<WebGptRole, string> = {
+  REQUIREMENT: "Requirement",
+  PLANNER: "Planner",
+  REVIEWER: "Reviewer",
+};
+
+const webGptRoleStatusLabels: Record<WebGptRoleBinding["status"], string> = {
+  UNBOUND: "未绑定",
+  BOUND: "已绑定",
+  PENDING_CHAT_URL: "等待 Chat URL",
+  INVALID: "不可用",
+};
+
+function renderWebGptRoles(bindings: WebGptRoleBinding[], projectId: string | null): void {
+  webGptRoleStripElement.hidden = !projectId;
+  webGptRoleProjectElement.textContent = projectId ? `· ${projectId}` : "";
+  webGptRoleListElement.replaceChildren();
+  if (!projectId) return;
+  for (const binding of bindings) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `webgpt-role-chip role-${binding.status.toLowerCase()}`;
+    button.disabled = binding.status !== "BOUND";
+    button.textContent = `${webGptRoleLabels[binding.role]} · ${webGptRoleStatusLabels[binding.status]}`;
+    button.title = binding.chatUrl || "尚未绑定真实 Chat URL";
+    if (binding.status === "BOUND") button.addEventListener("click", () => { void openWebGptRole(binding.role); });
+    webGptRoleListElement.append(button);
+  }
+}
+
+async function refreshWebGptRoles(projectId = currentProjection?.projectId ?? null): Promise<void> {
+  const generation = ++webGptRolesGeneration;
+  if (!projectId) {
+    renderWebGptRoles([], null);
+    return;
+  }
+  const result = await consume("webgpt.role.list", webGptApi.listWebGptRoles(projectId));
+  if (generation !== webGptRolesGeneration || currentProjection?.projectId !== projectId) return;
+  if (result) renderWebGptRoles(result, projectId);
+}
+
+async function openWebGptRole(role: WebGptRole): Promise<void> {
+  const projectId = currentProjection?.projectId;
+  if (!projectId) return;
+  const result = await consume("webgpt.role.open", webGptApi.openWebGptRole(projectId, role));
+  if (result && webGptState) {
+    // Main owns the Browser Runtime; the role-open IPC state event updates the
+    // actual page. Refresh only the lightweight role projection here.
+    await refreshWebGptRoles(projectId);
+    syncWebGptBounds();
+  }
+}
 
 const webGptModeLabels: Record<WebGptState["mode"], string> = {
   USER_CONTROL: "用户控制",
@@ -300,6 +359,7 @@ function renderWebGptState(state: WebGptState | null): void {
   webGptForwardButton.disabled = !state.url;
   webGptReloadButton.disabled = !state.url;
   openWebGptButton.setAttribute("aria-current", webGptOpen ? "page" : "false");
+  if (webGptOpen) void refreshWebGptRoles();
 }
 
 function renderWebGptRequestState(state: WebGptRequestStateEvent): void {
@@ -339,6 +399,7 @@ async function showWebGptWorkspace(): Promise<void> {
   revealWebGptWorkspace();
   const result = await consume("webgpt.open-workspace", webGptApi.openWebGptWorkspace());
   if (result) renderWebGptState(result);
+  await refreshWebGptRoles();
   syncWebGptBounds();
 }
 
@@ -1421,6 +1482,7 @@ function renderState(state: RuntimeSnapshot): void {
   renderNavigation();
   renderMapPanel();
   renderComposerOptions(state.nativeThreadId);
+  if (webGptOpen) void refreshWebGptRoles(currentProjection?.projectId ?? null);
 }
 
 function renderNoSelectedThread(): void {
@@ -1458,6 +1520,7 @@ function renderNoSelectedThread(): void {
   renderThreadWorkspace();
   renderMapPanel();
   renderComposerOptions(null);
+  renderWebGptRoles([], null);
 }
 
 async function consume<T>(label: string, operation: Promise<IpcEnvelope<T>>, targetNativeThreadId = currentDiagnosticsThreadId()): Promise<T | null> {

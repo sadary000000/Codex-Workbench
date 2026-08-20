@@ -1,5 +1,20 @@
 export type WebGptControlMode = "USER_CONTROL" | "AUTO_CONTROL" | "PAUSED";
 
+export type WebGptRole = "REQUIREMENT" | "PLANNER" | "REVIEWER";
+
+export type WebGptRoleBindingStatus = "UNBOUND" | "BOUND" | "PENDING_CHAT_URL" | "INVALID";
+
+export interface WebGptRoleBinding {
+  projectId: string;
+  role: WebGptRole;
+  chatUrl: string;
+  title: string | null;
+  status: WebGptRoleBindingStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
+}
+
 export interface WebGptPageState {
   url: string;
   title: string;
@@ -69,6 +84,9 @@ export type WebGptRequestState =
 export interface WebGptRequestRecord {
   requestId: string;
   state: WebGptRequestState;
+  projectId: string | null;
+  role: WebGptRole | null;
+  targetChatUrl: string | null;
   chatUrl: string;
   promptChars: number;
   promptSha256: string;

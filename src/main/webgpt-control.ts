@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import type { WebGptCliCommand, WebGptCliCommandName } from "./webgpt-command.ts";
+import type { WebGptRole } from "../features/webgpt/types.ts";
+import { normalizeRoleChatUrl } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
 
 export const WEBGPT_CONTROL_PROTOCOL_VERSION = 1 as const;
 export const WEBGPT_CONTROL_DESCRIPTOR_RELATIVE = join("webgpt", "control-plane.json");
@@ -26,6 +28,9 @@ export interface WebGptControlRequest {
   out?: string;
   url?: string;
   text?: string;
+  projectId?: string;
+  role?: WebGptRole;
+  replace?: boolean;
   targetRequestId?: string;
   timeoutMs?: number;
 }
@@ -63,6 +68,11 @@ const COMMANDS = new Set<WebGptCliCommandName>([
   "webgpt.control.auto",
   "webgpt.new-chat",
   "webgpt.open-chat",
+  "webgpt.role.list",
+  "webgpt.role.status",
+  "webgpt.role.new",
+  "webgpt.role.bind",
+  "webgpt.role.open",
   "webgpt.send",
   "webgpt.wait",
   "webgpt.result",
@@ -129,7 +139,7 @@ export async function readControlDescriptor(path: string): Promise<WebGptControl
 export function parseWebGptControlRequest(value: unknown): WebGptControlRequest | WebGptControlResponse {
   if (!value || typeof value !== "object" || Array.isArray(value)) return controlError("CONTROL_INVALID_REQUEST", "控制请求必须是 JSON 对象。", "webgpt");
   const record = value as Record<string, unknown>;
-  const requestId = typeof record.requestId === "string" && record.requestId.length > 0 && record.requestId.length <= 128
+  const requestId = typeof record.requestId === "string" && record.requestId.trim().length > 0 && record.requestId.length <= 128
     ? record.requestId
     : randomUUID();
   if (record.version !== WEBGPT_CONTROL_PROTOCOL_VERSION) return controlError("CONTROL_VERSION_UNSUPPORTED", "不支持的 WebGPT Control Plane 版本。", String(record.command ?? "webgpt"), requestId);
@@ -137,15 +147,53 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (record.out !== undefined && (typeof record.out !== "string" || record.out.length > 4_096)) return controlError("CONTROL_OUTPUT_PATH_INVALID", "截图输出路径无效。", record.command, requestId);
   if (record.url !== undefined && (typeof record.url !== "string" || record.url.length > 2_048)) return controlError("CONTROL_URL_INVALID", "WebGPT URL 无效。", record.command, requestId);
   if (record.text !== undefined && (typeof record.text !== "string" || record.text.length > 2_000_000)) return controlError("CONTROL_PROMPT_TOO_LARGE", "Prompt 无效或过大。", record.command, requestId);
+  if (record.projectId !== undefined && (typeof record.projectId !== "string" || !record.projectId.trim() || record.projectId.length > 256)) return controlError("PROJECT_REQUIRED", "Project ID 无效。", record.command, requestId);
+  const role = record.role === undefined ? undefined : roleValue(record.role);
+  if (record.role !== undefined && !role) return controlError("ROLE_UNSUPPORTED", "Role 必须是 requirement、planner 或 reviewer。", record.command, requestId);
+  if (record.replace !== undefined && typeof record.replace !== "boolean") return controlError("CONTROL_REPLACE_INVALID", "replace 必须是布尔值。", record.command, requestId);
   if (record.targetRequestId !== undefined && (typeof record.targetRequestId !== "string" || record.targetRequestId.length === 0 || record.targetRequestId.length > 128)) return controlError("CONTROL_REQUEST_ID_INVALID", "目标 requestId 无效。", record.command, requestId);
   if (record.timeoutMs !== undefined && (typeof record.timeoutMs !== "number" || !Number.isSafeInteger(record.timeoutMs) || record.timeoutMs < 0 || record.timeoutMs > 300_000)) return controlError("CONTROL_TIMEOUT_INVALID", "timeoutMs 必须是 0 到 300000 之间的整数。", record.command, requestId);
+  const command = record.command as WebGptCliCommandName;
+  const roleCommand = command.startsWith("webgpt.role.");
+  if (roleCommand && typeof record.projectId !== "string") return controlError("PROJECT_REQUIRED", "Role 命令必须提供 projectId。", command, requestId);
+  if (["webgpt.role.status", "webgpt.role.new", "webgpt.role.bind", "webgpt.role.open"].includes(command) && !role) return controlError("ROLE_REQUIRED", "该 Role 命令必须提供 role。", command, requestId);
+  if (command === "webgpt.role.bind") {
+    if (typeof record.url !== "string") return controlError("ROLE_CHAT_URL_INVALID", "role.bind 必须提供 Chat URL。", command, requestId);
+    try { normalizeRoleChatUrl(record.url); } catch (error) { return controlError("ROLE_CHAT_URL_INVALID", error instanceof Error ? error.message : "Role Chat URL 无效。", command, requestId); }
+  }
+  if (command === "webgpt.send" && ((record.projectId !== undefined) !== (role !== undefined))) return controlError("PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 projectId 和 role。", command, requestId);
+  if (record.replace !== undefined && command !== "webgpt.role.new" && command !== "webgpt.role.bind") return controlError("CONTROL_REPLACE_INVALID", "replace 只支持 role new/bind。", command, requestId);
+  const allowedByCommand: Record<string, readonly string[]> = {
+    "webgpt.status": [],
+    "webgpt.open": [],
+    "webgpt.current": [],
+    "webgpt.screenshot": ["out"],
+    "webgpt.control.user": [],
+    "webgpt.control.auto": [],
+    "webgpt.new-chat": [],
+    "webgpt.open-chat": ["url"],
+    "webgpt.role.list": ["projectId"],
+    "webgpt.role.status": ["projectId", "role"],
+    "webgpt.role.new": ["projectId", "role", "replace"],
+    "webgpt.role.bind": ["projectId", "role", "url", "replace"],
+    "webgpt.role.open": ["projectId", "role"],
+    "webgpt.send": ["text", "projectId", "role"],
+    "webgpt.wait": ["targetRequestId", "timeoutMs"],
+    "webgpt.result": ["targetRequestId", "out"],
+  };
+  const allowedFields = new Set(["version", "requestId", "command", ...(allowedByCommand[command] ?? [])]);
+  const unexpectedField = Object.keys(record).find((field) => !allowedFields.has(field));
+  if (unexpectedField) return controlError("CONTROL_FIELD_UNSUPPORTED", `Control 请求字段不适用于 ${command}：${unexpectedField}`, command, requestId);
   return {
     version: WEBGPT_CONTROL_PROTOCOL_VERSION,
     requestId,
-    command: record.command as WebGptCliCommandName,
+    command,
     ...(typeof record.out === "string" ? { out: record.out } : {}),
     ...(typeof record.url === "string" ? { url: record.url } : {}),
     ...(typeof record.text === "string" ? { text: record.text } : {}),
+    ...(typeof record.projectId === "string" ? { projectId: record.projectId.trim() } : {}),
+    ...(role ? { role } : {}),
+    ...(typeof record.replace === "boolean" ? { replace: record.replace } : {}),
     ...(typeof record.targetRequestId === "string" ? { targetRequestId: record.targetRequestId } : {}),
     ...(typeof record.timeoutMs === "number" ? { timeoutMs: record.timeoutMs } : {}),
   };
@@ -155,6 +203,11 @@ function requestIdFromRaw(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return randomUUID();
   const requestId = (value as Record<string, unknown>).requestId;
   return typeof requestId === "string" && requestId.length > 0 && requestId.length <= 128 ? requestId : randomUUID();
+}
+
+function roleValue(value: unknown): WebGptRole | null {
+  const role = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return role === "REQUIREMENT" || role === "PLANNER" || role === "REVIEWER" ? role : null;
 }
 
 function controlError(code: string, message: string, command: string, requestId: string = randomUUID()): WebGptControlResponse {
@@ -323,6 +376,9 @@ async function requestFromCommand(command: WebGptCliCommand): Promise<WebGptCont
     ...(command.out ? { out: command.out } : {}),
     ...(command.url ? { url: command.url } : {}),
     ...(text !== undefined ? { text } : {}),
+    ...(command.projectId ? { projectId: command.projectId } : {}),
+    ...(command.role ? { role: command.role } : {}),
+    ...(command.replace ? { replace: true } : {}),
     ...(command.targetRequestId ? { targetRequestId: command.targetRequestId } : {}),
     ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
   };

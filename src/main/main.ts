@@ -20,6 +20,9 @@ import { buildNativeTurnOptions, parseComposerPreferences } from "../codex/compo
 import { validateProjectDirectory } from "../shared/project-path.ts";
 import { WebGptWorkspace, type WebGptBounds } from "../features/webgpt/index.ts";
 import { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
+import { WebGptRoleSessionRegistry } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
+import { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
+import type { WebGptRole } from "../features/webgpt/types.ts";
 import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
 import { WEBGPT_CONTROL_PROTOCOL_VERSION, WebGptControlServer, controlDescriptorPath, createControlDescriptor, publishControlDescriptor, removeControlDescriptor, runWebGptCli, type WebGptControlDescriptor, type WebGptControlIdentity, type WebGptControlRequest, type WebGptControlResponse } from "./webgpt-control.ts";
 
@@ -72,6 +75,8 @@ const IPC = Object.freeze({
   webGptOpenWorkspace: "webgpt:open-workspace",
   webGptOpenHome: "webgpt:open-home",
   webGptOpenChat: "webgpt:open-chat",
+  webGptRoleList: "webgpt:role-list",
+  webGptRoleOpen: "webgpt:role-open",
   webGptBounds: "webgpt:bounds",
   webGptVisible: "webgpt:visible",
   webGptCurrentUrl: "webgpt:current-url",
@@ -102,6 +107,8 @@ let webGptControlServer: WebGptControlServer | null = null;
 let webGptControlDescriptorFile: string | null = null;
 let webGptRuntimeId: string | null = null;
 let webGptRequestManager: WebGptRequestManager | null = null;
+let webGptRoleRegistry: WebGptRoleSessionRegistry | null = null;
+let webGptRoleService: WebGptRoleSessionService | null = null;
 let webGptControlRevision = 0;
 let webGptControlQueue: Promise<void> = Promise.resolve();
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
@@ -263,9 +270,27 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "webgpt.open-chat") {
       if (!request.url) response = controlFail(request.command, "CHAT_URL_REQUIRED", "open-chat 必须提供 ChatGPT Chat URL。");
       else response = controlOk(request.command, await getWebGptRequestManager().openChat(request.url));
+    } else if (request.command === "webgpt.role.list") {
+      if (!request.projectId) response = controlFail(request.command, "PROJECT_REQUIRED", "role list 必须提供 Project ID。");
+      else response = controlOk(request.command, await getWebGptRoleService().list(request.projectId));
+    } else if (request.command === "webgpt.role.status") {
+      if (!request.projectId || !request.role) response = controlFail(request.command, "ROLE_REQUIRED", "role status 必须提供 Project ID 和 Role。");
+      else response = controlOk(request.command, await getWebGptRoleService().status(request.projectId, request.role));
+    } else if (request.command === "webgpt.role.new") {
+      if (!request.projectId || !request.role) response = controlFail(request.command, "ROLE_REQUIRED", "role new 必须提供 Project ID 和 Role。");
+      else response = controlOk(request.command, await getWebGptRoleService().newRole(request.projectId, request.role, request.replace === true));
+    } else if (request.command === "webgpt.role.bind") {
+      if (!request.projectId || !request.role || !request.url) response = controlFail(request.command, "ROLE_REQUIRED", "role bind 必须提供 Project ID、Role 和 Chat URL。");
+      else response = controlOk(request.command, await getWebGptRoleService().bind(request.projectId, request.role, request.url, request.replace === true));
+    } else if (request.command === "webgpt.role.open") {
+      if (!request.projectId || !request.role) response = controlFail(request.command, "ROLE_REQUIRED", "role open 必须提供 Project ID 和 Role。");
+      else response = controlOk(request.command, await getWebGptRoleService().open(request.projectId, request.role));
     } else if (request.command === "webgpt.send") {
       if (request.text === undefined) response = controlFail(request.command, "PROMPT_REQUIRED", "send 必须提供文本 Prompt。");
-      else response = controlOk(request.command, await getWebGptRequestManager().submit(request.text));
+      else if ((request.projectId === undefined) !== (request.role === undefined)) response = controlFail(request.command, "PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 Project ID 和 Role。");
+      else response = controlOk(request.command, request.projectId && request.role
+        ? await getWebGptRoleService().submit(request.projectId, request.role, request.text)
+        : await getWebGptRequestManager().submit(request.text));
     } else if (request.command === "webgpt.wait") {
       if (!request.targetRequestId) response = controlFail(request.command, "REQUEST_ID_REQUIRED", "wait 必须提供目标 requestId。");
       else {
@@ -326,7 +351,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
 }
 
 function enqueueWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {
-  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current") {
+  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current" || request.command === "webgpt.role.list" || request.command === "webgpt.role.status") {
     return handleWebGptControlRequest(request);
   }
   const result = webGptControlQueue.then(() => handleWebGptControlRequest(request));
@@ -410,8 +435,28 @@ function getWebGptRequestManager(): WebGptRequestManager {
     workspace,
     storageDirectory: join(app.getPath("userData"), "webgpt", "requests"),
     onState: (state) => send(IPC.webGptRequestState, state),
+    onTerminal: (record) => webGptRoleService?.handleTerminal(record),
   });
   return webGptRequestManager;
+}
+
+function getWebGptRoleRegistry(): WebGptRoleSessionRegistry {
+  if (webGptRoleRegistry) return webGptRoleRegistry;
+  webGptRoleRegistry = new WebGptRoleSessionRegistry({
+    storageDirectory: join(app.getPath("userData"), "webgpt", "roles"),
+  });
+  return webGptRoleRegistry;
+}
+
+function getWebGptRoleService(): WebGptRoleSessionService {
+  if (webGptRoleService) return webGptRoleService;
+  webGptRoleService = new WebGptRoleSessionService({
+    registry: getWebGptRoleRegistry(),
+    requestManager: getWebGptRequestManager(),
+    workspace: getWebGptWorkspace(),
+    getProject: (projectId) => getPersistence().getProject(projectId),
+  });
+  return webGptRoleService;
 }
 
 interface RuntimeTarget {
@@ -885,6 +930,15 @@ function registerIpc(): void {
     if (typeof url !== "string") throw new Error("WebGPT Chat URL is required.");
     return getWebGptWorkspace().openChat(url);
   }));
+  ipcMain.handle(IPC.webGptRoleList, (event, projectId: unknown) => webGptCall(event.sender, async () => {
+    if (typeof projectId !== "string" || !projectId.trim()) throw codedError("PROJECT_REQUIRED", "Project ID is required.");
+    return getWebGptRoleService().list(projectId);
+  }));
+  ipcMain.handle(IPC.webGptRoleOpen, (event, projectId: unknown, role: unknown) => webGptCall(event.sender, async () => {
+    if (typeof projectId !== "string" || !projectId.trim()) throw codedError("PROJECT_REQUIRED", "Project ID is required.");
+    if (typeof role !== "string" || !role.trim()) throw codedError("ROLE_REQUIRED", "Role is required.");
+    return getWebGptRoleService().open(projectId, role as WebGptRole);
+  }));
   ipcMain.handle(IPC.webGptBounds, (event, bounds: unknown) => webGptCall(event.sender, () => {
     getWebGptWorkspace().setBounds(bounds as WebGptBounds);
     return { updated: true };
@@ -953,6 +1007,11 @@ function registerIpc(): void {
       } catch (error) {
         metadataCleanup = "failed";
         logger.warn("project_map_metadata_cleanup_failed", { projectId, error: errorInfo(error).message });
+      }
+      try {
+        await getWebGptRoleRegistry().removeProject(projectId);
+      } catch (error) {
+        logger.warn("webgpt_role_metadata_cleanup_failed", { projectId, error: errorInfo(error).message });
       }
       return ok({ ...result, metadataCleanup });
     } catch (error) {

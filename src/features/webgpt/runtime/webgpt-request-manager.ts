@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { WebGptPageProbe, WebGptRequestRecord, WebGptRequestResult, WebGptRequestState, WebGptRequestStateEvent } from "../types.ts";
+import type { WebGptPageProbe, WebGptRequestRecord, WebGptRequestResult, WebGptRequestState, WebGptRequestStateEvent, WebGptRole } from "../types.ts";
+import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import type { WebGptWorkspace } from "./webgpt-workspace.ts";
 
 const REQUEST_FILE = "requests.json";
@@ -19,6 +20,13 @@ export interface WebGptRequestManagerOptions {
   workspace: WebGptWorkspace;
   storageDirectory: string;
   onState?: (state: WebGptRequestStateEvent) => void;
+  onTerminal?: (record: WebGptRequestRecord) => Promise<void> | void;
+}
+
+export interface WebGptRequestMetadata {
+  projectId?: string;
+  role?: WebGptRole;
+  targetChatUrl?: string | null;
 }
 
 export interface WebGptWaitResult {
@@ -32,6 +40,7 @@ export class WebGptRequestManager {
   private readonly requestFile: string;
   private readonly resultDirectory: string;
   private readonly onState: (state: WebGptRequestStateEvent) => void;
+  private readonly onTerminal: (record: WebGptRequestRecord) => Promise<void> | void;
   private readonly records = new Map<string, WebGptRequestRecord>();
   private readonly prompts = new Map<string, string>();
   private loadPromise: Promise<void>;
@@ -43,6 +52,7 @@ export class WebGptRequestManager {
     this.requestFile = join(options.storageDirectory, REQUEST_FILE);
     this.resultDirectory = join(options.storageDirectory, RESULT_DIRECTORY);
     this.onState = options.onState ?? (() => undefined);
+    this.onTerminal = options.onTerminal ?? (() => undefined);
     this.loadPromise = this.load();
   }
 
@@ -62,7 +72,7 @@ export class WebGptRequestManager {
     return { chatUrl: state.url, page: state.page, mode: state.mode };
   }
 
-  async submit(prompt: string): Promise<WebGptRequestRecord> {
+  async submit(prompt: string, metadata: WebGptRequestMetadata = {}): Promise<WebGptRequestRecord> {
     await this.ready();
     const value = prompt.trim();
     if (!value) throw this.codedError("PROMPT_EMPTY", "Prompt 不能为空。");
@@ -72,6 +82,9 @@ export class WebGptRequestManager {
     const record: WebGptRequestRecord = {
       requestId,
       state: this.workspace.getControlMode() === "USER_CONTROL" ? "PAUSED_FOR_USER" : "QUEUED",
+      projectId: metadata.projectId ?? null,
+      role: metadata.role ?? null,
+      targetChatUrl: metadata.targetChatUrl ?? null,
       chatUrl: "",
       promptChars: value.length,
       promptSha256: createHash("sha256").update(value, "utf8").digest("hex"),
@@ -180,6 +193,14 @@ export class WebGptRequestManager {
     }
     try {
       const probe = await this.workspace.getPageProbe();
+      if (record.targetChatUrl) {
+        let currentChatUrl = "";
+        try { currentChatUrl = normalizeRoleChatUrl(probe.page.url); } catch { /* handled by mismatch below */ }
+        if (currentChatUrl !== record.targetChatUrl) {
+          await this.fail(record, "ROLE_CHAT_MISMATCH", "当前页面不是请求指定的 Role Chat，已禁止发送。");
+          return;
+        }
+      }
       if (!probe.page.onChatPage || !probe.page.composerFound) await this.workspace.createChat();
       const submitted = await this.workspace.submitPrompt(prompt);
       record.chatUrl = submitted.chatUrl;
@@ -195,6 +216,11 @@ export class WebGptRequestManager {
       // route only after the first response has completed. Persist the final
       // observed URL so request records identify the actual native web chat.
       record.chatUrl = await this.workspace.getCurrentUrl();
+      if (record.targetChatUrl) {
+        let actual: string;
+        try { actual = normalizeRoleChatUrl(record.chatUrl); } catch { throw this.codedError("ROLE_CHAT_MISMATCH", "发送后未能确认 Role Chat URL。"); }
+        if (actual !== record.targetChatUrl) throw this.codedError("ROLE_CHAT_MISMATCH", "发送后的 Chat URL 与 Role 目标不一致，已拒绝继续。");
+      }
       const resultPath = join(this.resultDirectory, `${record.requestId}.txt`);
       await mkdir(this.resultDirectory, { recursive: true });
       await writeFile(resultPath, completed.response, { encoding: "utf8", flag: "wx" });
@@ -207,6 +233,7 @@ export class WebGptRequestManager {
       record.error = null;
       await this.persist();
       this.emit(record, completed.response);
+      await this.notifyTerminal(record);
     } catch (error) {
       const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "WEBGPT_REQUEST_FAILED";
       const message = error instanceof Error ? error.message : String(error);
@@ -220,6 +247,7 @@ export class WebGptRequestManager {
     record.completedAt = new Date().toISOString();
     await this.persist();
     this.emit(record);
+    await this.notifyTerminal(record);
   }
 
   private requireRecord(requestId: string): WebGptRequestRecord {
@@ -282,6 +310,9 @@ export class WebGptRequestManager {
     return {
       requestId: value.requestId.slice(0, 128),
       state: value.state,
+      projectId: typeof value.projectId === "string" ? value.projectId.slice(0, 256) : null,
+      role: value.role === "REQUIREMENT" || value.role === "PLANNER" || value.role === "REVIEWER" ? value.role : null,
+      targetChatUrl: typeof value.targetChatUrl === "string" ? value.targetChatUrl.slice(0, 2_000) : null,
       chatUrl: typeof value.chatUrl === "string" ? value.chatUrl.slice(0, 2_000) : "",
       promptChars: Number.isSafeInteger(value.promptChars) ? Math.max(0, value.promptChars) : 0,
       promptSha256: typeof value.promptSha256 === "string" ? value.promptSha256.slice(0, 128) : "",
@@ -313,5 +344,13 @@ export class WebGptRequestManager {
     const error = new Error(message) as Error & { code: string };
     error.code = code;
     return error;
+  }
+
+  private async notifyTerminal(record: WebGptRequestRecord): Promise<void> {
+    try {
+      await this.onTerminal(this.clone(record));
+    } catch {
+      // Registry metadata is auxiliary; it must never rewrite the request result.
+    }
   }
 }

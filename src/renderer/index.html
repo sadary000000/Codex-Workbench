@@ -227,7 +227,7 @@
       .map-source:hover, .map-source:focus-visible { border-color: #6eaa8c; outline: none; }
       .map-node-children { display: grid; gap: 3px; margin-left: 16px; padding-left: 6px; border-left: 1px solid #333; }
       .map-empty { padding: 18px 8px; color: #777; font-size: 12px; line-height: 1.5; }
-      .webgpt-workspace { position: absolute; z-index: 8; inset: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; background: #212121; }
+      .webgpt-workspace { position: absolute; z-index: 8; inset: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; background: #212121; }
       .webgpt-workspace[hidden] { display: none; }
       .webgpt-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); background: #242424; }
       .webgpt-toolbar-group { display: flex; min-width: 0; align-items: center; gap: 6px; }
@@ -241,6 +241,14 @@
       .webgpt-page-meta-main { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .webgpt-page-meta-title { color: #ddd; }
       .webgpt-page-meta-error { color: var(--danger); }
+      .webgpt-role-strip { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 5px 16px; border-bottom: 1px solid #343434; background: #202020; color: #999; font-size: 11px; }
+      .webgpt-role-strip[hidden] { display: none; }
+      .webgpt-role-project { color: #ddd; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .webgpt-role-list { display: flex; min-width: 0; flex-wrap: wrap; gap: 5px; }
+      .webgpt-role-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 3px 7px; border: 1px solid #454545; border-radius: 6px; background: #292929; color: #ccc; font-size: 11px; }
+      .webgpt-role-chip[disabled] { cursor: default; opacity: .68; }
+      .webgpt-role-chip.role-bound { border-color: #3f806a; color: #bce6d0; }
+      .webgpt-role-chip.role-invalid { border-color: #865656; color: #f0b2b2; }
       .webgpt-browser-host { min-width: 0; min-height: 0; overflow: hidden; background: #fff; }
       .webgpt-browser-placeholder { display: grid; height: 100%; place-items: center; color: #666; background: #f5f5f5; font-size: 13px; }
       .webgpt-entry[aria-current="page"] { border: 1px solid #3f806a; background: #21483a; }
@@ -380,6 +388,11 @@
             <span id="webgpt-request-state" class="webgpt-request-state">无自动请求</span>
             <span id="webgpt-page-state">等待打开页面</span>
             <span id="webgpt-page-error" class="webgpt-page-meta-error" hidden></span>
+          </div>
+          <div id="webgpt-role-strip" class="webgpt-role-strip" hidden>
+            <span>Project Roles</span>
+            <span id="webgpt-role-project" class="webgpt-role-project"></span>
+            <div id="webgpt-role-list" class="webgpt-role-list" role="list"></div>
           </div>
           <div id="webgpt-browser-host" class="webgpt-browser-host" aria-label="真实 ChatGPT 网页"><div class="webgpt-browser-placeholder">正在准备 WebGPT 页面…</div></div>
         </section>

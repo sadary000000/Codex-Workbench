@@ -1,3 +1,5 @@
+import type { WebGptRole } from "../features/webgpt/types.ts";
+
 export type WebGptExternalCommand = {
   type: "open-workspace";
 };
@@ -11,6 +13,11 @@ export type WebGptCliCommandName =
   | "webgpt.control.auto"
   | "webgpt.new-chat"
   | "webgpt.open-chat"
+  | "webgpt.role.list"
+  | "webgpt.role.status"
+  | "webgpt.role.new"
+  | "webgpt.role.bind"
+  | "webgpt.role.open"
   | "webgpt.send"
   | "webgpt.wait"
   | "webgpt.result";
@@ -22,6 +29,9 @@ export interface WebGptCliCommand {
   url?: string;
   text?: string;
   file?: string;
+  projectId?: string;
+  role?: WebGptRole;
+  replace?: boolean;
   targetRequestId?: string;
   timeoutMs?: number;
 }
@@ -57,6 +67,29 @@ function hasOnlyOptions(args: readonly string[], allowed: readonly string[]): bo
   return true;
 }
 
+function hasOnlyValueOptionsAndFlags(args: readonly string[], valueOptions: readonly string[], flagOptions: readonly string[] = []): boolean {
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (valueOptions.includes(value)) {
+      if (index === args.length - 1 || !args[index + 1] || args[index + 1].startsWith("--")) return false;
+      index += 1;
+      continue;
+    }
+    if (flagOptions.includes(value)) continue;
+    return false;
+  }
+  return true;
+}
+
+function optionCount(args: readonly string[], flag: string): number {
+  return args.filter((value) => value === flag).length;
+}
+
+function roleValue(raw: string | null): WebGptRole | null {
+  const value = raw?.trim().toUpperCase();
+  return value === "REQUIREMENT" || value === "PLANNER" || value === "REVIEWER" ? value : null;
+}
+
 function invalid(json: boolean, message: string): WebGptCliInvocation {
   return { kind: "error", json, message };
 }
@@ -68,12 +101,41 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
   const parsed = parseJsonFlag(argv.slice(markerIndex + 1));
   const args = parsed.args;
   const [verb, ...rest] = args;
-  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、new-chat、open-chat、send、wait、result、screenshot、control user、control auto。");
+  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、new-chat、open-chat、role、send、wait、result、screenshot、control user、control auto。");
 
   if (verb === "status" && rest.length === 0) return { kind: "command", command: { name: "webgpt.status", json: parsed.json } };
   if (verb === "open" && rest.length === 0) return { kind: "command", command: { name: "webgpt.open", json: parsed.json } };
   if (verb === "current" && rest.length === 0) return { kind: "command", command: { name: "webgpt.current", json: parsed.json } };
   if (verb === "new-chat" && rest.length === 0) return { kind: "command", command: { name: "webgpt.new-chat", json: parsed.json } };
+
+  if (verb === "role") {
+    const [roleVerb, ...roleArgs] = rest;
+    const projectId = optionValue(roleArgs, "--project");
+    const role = roleValue(optionValue(roleArgs, "--role"));
+    const replace = roleArgs.includes("--replace");
+    if (!roleVerb || !projectId) return invalid(parsed.json, "role 命令必须提供 --project <project-id>。");
+    if (optionCount(roleArgs, "--project") !== 1) return invalid(parsed.json, "role 命令只能提供一次 --project。");
+    if (roleVerb === "list") {
+      if (!hasOnlyValueOptionsAndFlags(roleArgs, ["--project"]) || roleArgs.includes("--role") || roleArgs.includes("--replace")) return invalid(parsed.json, "role list 只支持 --project <project-id>。");
+      return { kind: "command", command: { name: "webgpt.role.list", json: parsed.json, projectId } };
+    }
+    if (!role) return invalid(parsed.json, "role 命令必须提供 --role <requirement|planner|reviewer>。");
+    if (optionCount(roleArgs, "--role") !== 1) return invalid(parsed.json, "role 命令只能提供一次 --role。");
+    if (roleVerb === "status" || roleVerb === "open") {
+      if (!hasOnlyValueOptionsAndFlags(roleArgs, ["--project", "--role"])) return invalid(parsed.json, `${roleVerb} 只支持 --project <project-id> --role <role>。`);
+      return { kind: "command", command: { name: roleVerb === "status" ? "webgpt.role.status" : "webgpt.role.open", json: parsed.json, projectId, role } };
+    }
+    if (roleVerb === "new") {
+      if (!hasOnlyValueOptionsAndFlags(roleArgs, ["--project", "--role"], ["--replace"])) return invalid(parsed.json, "role new 参数无效。");
+      return { kind: "command", command: { name: "webgpt.role.new", json: parsed.json, projectId, role, ...(replace ? { replace: true } : {}) } };
+    }
+    if (roleVerb === "bind") {
+      const url = optionValue(roleArgs, "--url");
+      if (!url || optionCount(roleArgs, "--url") !== 1 || !hasOnlyValueOptionsAndFlags(roleArgs, ["--project", "--role", "--url"], ["--replace"])) return invalid(parsed.json, "role bind 必须使用 --project <project-id> --role <role> --url <chat-url>，覆盖时加 --replace。");
+      return { kind: "command", command: { name: "webgpt.role.bind", json: parsed.json, projectId, role, url, ...(replace ? { replace: true } : {}) } };
+    }
+    return invalid(parsed.json, `不支持的 role 命令：${roleVerb ?? ""}`);
+  }
 
   if (verb === "control" && rest.length === 1 && rest[0] === "user") return { kind: "command", command: { name: "webgpt.control.user", json: parsed.json } };
   if (verb === "control" && rest.length === 1 && rest[0] === "auto") return { kind: "command", command: { name: "webgpt.control.auto", json: parsed.json } };
@@ -91,9 +153,14 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
   if (verb === "send") {
     const text = optionValue(rest, "--text");
     const file = optionValue(rest, "--file");
+    const projectId = optionValue(rest, "--project");
+    const roleRaw = optionValue(rest, "--role");
+    const role = roleValue(roleRaw);
     if ((text && file) || (!text && !file)) return invalid(parsed.json, "send 必须二选一使用 --text <prompt> 或 --file <prompt.md|prompt.txt>。");
-    if (!hasOnlyOptions(rest, text ? ["--text"] : ["--file"])) return invalid(parsed.json, "send 只支持 --text 或 --file，不支持其它参数。");
-    return { kind: "command", command: { name: "webgpt.send", json: parsed.json, ...(text ? { text } : { file: file! }) } };
+    if ((projectId && !role) || (!projectId && role) || (roleRaw && !role)) return invalid(parsed.json, "Role-aware send 必须同时提供有效的 --project 和 --role。");
+    const values = text ? ["--text", ...(projectId ? ["--project", "--role"] : [])] : ["--file", ...(projectId ? ["--project", "--role"] : [])];
+    if (!hasOnlyValueOptionsAndFlags(rest, values)) return invalid(parsed.json, "send 只支持 --text/--file 以及成对的 --project --role。");
+    return { kind: "command", command: { name: "webgpt.send", json: parsed.json, ...(text ? { text } : { file: file! }), ...(projectId && role ? { projectId, role } : {}) } };
   }
 
   if (verb === "wait" || verb === "result") {

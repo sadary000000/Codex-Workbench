@@ -57,6 +57,35 @@ test("WebGPT Control Plane validates versioned, request-scoped allowlisted reque
   assert.equal("error" in badCommand && badCommand.error?.code, "CONTROL_COMMAND_UNSUPPORTED");
 });
 
+test("WebGPT WEB-4 Control Plane validates Project Role routing at the boundary", () => {
+  const parsed = parseWebGptControlRequest({
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "role-1",
+    command: "webgpt.role.bind",
+    projectId: "project-a",
+    role: "reviewer",
+    url: "https://chatgpt.com/c/reviewer?source=test#top",
+    replace: true,
+  });
+  assert.deepEqual(parsed, {
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "role-1",
+    command: "webgpt.role.bind",
+    projectId: "project-a",
+    role: "REVIEWER",
+    url: "https://chatgpt.com/c/reviewer?source=test#top",
+    replace: true,
+  });
+  const missingProject = parseWebGptControlRequest({ version: 1, requestId: "role-2", command: "webgpt.role.list" });
+  assert.equal("error" in missingProject && missingProject.error?.code, "PROJECT_REQUIRED");
+  const missingRole = parseWebGptControlRequest({ version: 1, requestId: "role-3", command: "webgpt.role.open", projectId: "project-a" });
+  assert.equal("error" in missingRole && missingRole.error?.code, "ROLE_REQUIRED");
+  const invalidUrl = parseWebGptControlRequest({ version: 1, requestId: "role-4", command: "webgpt.role.bind", projectId: "project-a", role: "planner", url: "https://chatgpt.com/settings" });
+  assert.equal("error" in invalidUrl && invalidUrl.error?.code, "ROLE_CHAT_URL_INVALID");
+  const mismatchedSend = parseWebGptControlRequest({ version: 1, requestId: "role-5", command: "webgpt.send", projectId: "project-a", text: "hello" });
+  assert.equal("error" in mismatchedSend && mismatchedSend.error?.code, "PROJECT_ROLE_REQUIRED");
+});
+
 test("WebGPT Control Plane uses a published per-instance descriptor and authenticated socket", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-control-"));
   const descriptorFile = controlDescriptorPath(directory);
