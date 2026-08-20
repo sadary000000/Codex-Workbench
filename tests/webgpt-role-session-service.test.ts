@@ -50,6 +50,7 @@ class FakeManager {
   submitted: { prompt: string; metadata: Record<string, unknown> } | null = null;
   createUrl = "https://chatgpt.com/";
   openReady = true;
+  latestReads: string[] = [];
   constructor(workspace: FakeWorkspace) { this.workspace = workspace; }
   async createChat(): Promise<Record<string, unknown>> {
     this.workspace.currentUrl = this.createUrl;
@@ -59,6 +60,11 @@ class FakeManager {
     this.opened.push(url);
     this.workspace.currentUrl = url;
     return { chatUrl: url, page: page(url, this.openReady), mode: "AUTO_CONTROL" };
+  }
+  async readLatestChat(url: string): Promise<Record<string, unknown>> {
+    this.latestReads.push(url);
+    this.workspace.currentUrl = url;
+    return { chatUrl: url, assistantCount: 1, generating: false, assistantText: "ROLE_LATEST_OK", textLength: 14, textSha256: "role-hash" };
   }
   async findIdempotent(): Promise<WebGptRequestRecord | null> { return null; }
   async submit(prompt: string, metadata: Record<string, unknown>): Promise<WebGptRequestRecord> {
@@ -117,6 +123,26 @@ test("Role service routes bound sends to the registered Chat and preserves metad
     assert.equal(manager.submitted?.metadata.targetChatUrl, "https://chatgpt.com/c/planner");
     assert.equal(submitted.projectId, "project-a");
     assert.equal(submitted.role, "PLANNER");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Role latest reads the exact bound Chat without rebinding or touching the binding", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-role-latest-"));
+  const workspace = new FakeWorkspace();
+  const manager = new FakeManager(workspace);
+  const service = serviceFor(directory, workspace, manager);
+  try {
+    const binding = await service.bind("project-a", "PLANNER", "https://chatgpt.com/c/planner");
+    const before = await service.status("project-a", "PLANNER");
+    const latest = await service.latest("project-a", "PLANNER");
+    const after = await service.status("project-a", "PLANNER");
+    assert.equal(latest.assistantText, "ROLE_LATEST_OK");
+    assert.deepEqual(manager.latestReads, [binding.chatUrl]);
+    assert.equal(after.chatUrl, before.chatUrl);
+    assert.equal(after.updatedAt, before.updatedAt);
+    assert.equal(after.lastUsedAt, before.lastUsedAt);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

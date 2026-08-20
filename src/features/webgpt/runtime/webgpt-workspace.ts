@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { shell, WebContentsView, type BaseWindow, type Rectangle, type Session } from "electron";
 import { buildWebGptInspectProjectScript, buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
 import { createWebGptSession, webGptSessionPath } from "../session/webgpt-session.ts";
@@ -10,6 +11,7 @@ import { WebGptOperationArbiter } from "./webgpt-operation-arbiter.ts";
 import type {
   WebGptBounds,
   WebGptHealthStatus,
+  WebGptLatestResponse,
   WebGptPageProbe,
   WebGptPageState,
   WebGptPublicService,
@@ -224,9 +226,10 @@ export class WebGptWorkspace implements WebGptPublicService {
     }
   }
 
-  private codedError(code: string, message: string): Error & { code: string } {
+  private codedError(code: string, message: string, details?: unknown): Error & { code: string; details?: unknown } {
     const error = new Error(message) as Error & { code: string };
     error.code = code;
+    if (details !== undefined) (error as Error & { details?: unknown }).details = details;
     return error;
   }
 
@@ -924,9 +927,60 @@ export class WebGptWorkspace implements WebGptPublicService {
     throw this.codedError("WEBGPT_RESPONSE_TIMEOUT", `未能在 ${timeoutMs}ms 内确认 ChatGPT 回复已完成。`);
   }
 
+  async readLatestResponse(): Promise<WebGptLatestResponse> {
+    let probe = await this.getPageProbe();
+    const resolveChatUrl = (candidate: WebGptPageProbe): string => {
+      try { return normalizeRoleChatUrl(normalizeChatUrl(candidate.page.url || this.view.webContents.getURL() || this.state.url)); }
+      catch { throw this.codedError("WEBGPT_CHAT_REQUIRED", "当前页面不是可读取的 ChatGPT Chat。", { chatUrl: null, assistantCount: candidate.page.assistantCount, generating: false, assistantText: null, textLength: 0, textSha256: null }); }
+    };
+    let chatUrl = resolveChatUrl(probe);
+    let assistantText = probe.latestAssistantText.trim();
+    let assistantCount = probe.page.assistantCount;
+    const details = (generating: boolean, text: string | null = null) => ({
+      chatUrl,
+      assistantCount,
+      generating,
+      assistantText: null,
+      textLength: 0,
+      textSha256: null,
+      ...(text === null ? {} : { observedTextLength: text.length }),
+    });
+    if (!probe.page.onChatPage) throw this.codedError("WEBGPT_CHAT_REQUIRED", "当前页面不是可读取的 ChatGPT Chat。", details(false));
+    if (probe.page.generating || isTransientWebGptResponse(assistantText)) throw this.codedError("WEBGPT_RESPONSE_IN_PROGRESS", "当前 Chat 的 Assistant 回复仍在生成，已拒绝读取部分结果。", details(true));
+    if (!assistantText || assistantCount < 1) throw this.codedError("NO_ASSISTANT_RESPONSE", "当前 Chat 尚无可读取的 Assistant 回复。", details(false));
+
+    let stableSamples = 1;
+    const stabilityDeadline = Date.now() + 750;
+    while (stableSamples < 3 && Date.now() < stabilityDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const next = await this.getPageProbe();
+      const nextChatUrl = resolveChatUrl(next);
+      const nextText = next.latestAssistantText.trim();
+      const nextGenerating = next.page.generating || isTransientWebGptResponse(nextText);
+      if (nextChatUrl !== chatUrl) throw this.codedError("WEBGPT_CHAT_CHANGED", "读取期间当前页面已切换到另一个 Chat，已拒绝返回不确定结果。", { chatUrl, actualChatUrl: nextChatUrl, assistantCount: next.page.assistantCount, generating: nextGenerating, assistantText: null, textLength: 0, textSha256: null });
+      if (nextGenerating) throw this.codedError("WEBGPT_RESPONSE_IN_PROGRESS", "当前 Chat 的 Assistant 回复仍在生成，已拒绝读取部分结果。", details(true));
+      if (nextText === assistantText && next.page.assistantCount === assistantCount) stableSamples += 1;
+      else {
+        assistantText = nextText;
+        assistantCount = next.page.assistantCount;
+        stableSamples = 1;
+        if (!assistantText || assistantCount < 1) throw this.codedError("NO_ASSISTANT_RESPONSE", "当前 Chat 尚无可读取的 Assistant 回复。", details(false));
+      }
+    }
+    if (stableSamples < 3) throw this.codedError("WEBGPT_RESPONSE_UNSTABLE", "当前 Chat 的 Assistant 回复尚未稳定，已拒绝返回可能不完整的文本。", details(false, assistantText));
+    return {
+      chatUrl,
+      assistantCount,
+      generating: false,
+      assistantText,
+      textLength: assistantText.length,
+      textSha256: createHash("sha256").update(assistantText, "utf8").digest("hex"),
+    };
+  }
+
   async getLatestResponse(): Promise<string | null> {
-    const probe = await this.getPageProbe();
-    return probe.latestAssistantText || null;
+    const result = await this.readLatestResponse();
+    return result.assistantText;
   }
 
   private async waitForComposer(timeoutMs = 20_000, assertOperation?: () => void): Promise<WebGptPageProbe> {

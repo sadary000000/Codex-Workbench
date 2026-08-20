@@ -81,3 +81,29 @@ test("stale lease cannot release a later operation", async () => {
   assert.equal(arbiter.getDiagnostics().activeRequester, "current");
   currentLease.release("COMPLETED");
 });
+
+test("bounded reads do not overlap a Browser Lease and release queued writes", async () => {
+  const arbiter = new WebGptOperationArbiter();
+  arbiter.enterAutomationControl();
+  let releaseRead!: () => void;
+  const read = arbiter.withRead(request("latest", "OPEN_CHAT"), () => new Promise<void>((resolve) => { releaseRead = resolve; }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  let writeSettled = false;
+  const writePromise = arbiter.acquire(request("send", "SEND")).then((lease) => { writeSettled = true; return lease; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(writeSettled, false);
+  assert.equal(arbiter.getDiagnostics().queueDepth, 1);
+  releaseRead();
+  await read;
+  const write = await writePromise;
+  assert.equal(writeSettled, true);
+  write.release("COMPLETED");
+});
+
+test("bounded reads fail closed while a Browser Lease is active", async () => {
+  const arbiter = new WebGptOperationArbiter();
+  arbiter.enterAutomationControl();
+  const active = await arbiter.acquire(request("send", "SEND"));
+  await assert.rejects(() => arbiter.withRead(request("latest"), () => "unreachable"), { code: "WEBGPT_OPERATION_BUSY" });
+  active.release("COMPLETED");
+});

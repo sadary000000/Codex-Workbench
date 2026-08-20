@@ -8,11 +8,13 @@ export type WebGptCliCommandName =
   | "webgpt.status"
   | "webgpt.open"
   | "webgpt.current"
+  | "webgpt.latest"
   | "webgpt.screenshot"
   | "webgpt.control.user"
   | "webgpt.control.auto"
   | "webgpt.new-chat"
   | "webgpt.open-chat"
+  | "webgpt.chat.latest"
   | "webgpt.project.inspect"
   | "webgpt.project.open"
   | "webgpt.project.new-chat"
@@ -21,6 +23,7 @@ export type WebGptCliCommandName =
   | "webgpt.role.new"
   | "webgpt.role.bind"
   | "webgpt.role.open"
+  | "webgpt.role.latest"
   | "webgpt.send"
   | "webgpt.wait"
   | "webgpt.result"
@@ -109,12 +112,26 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
   const parsed = parseJsonFlag(argv.slice(markerIndex + 1));
   const args = parsed.args;
   const [verb, ...rest] = args;
-  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、new-chat、open-chat、project inspect、project open、project new-chat、role、send、wait、result、request、screenshot、control user、control auto。");
+  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、latest、chat latest、new-chat、open-chat、project inspect、project open、project new-chat、role、send、wait、result、request、screenshot、control user、control auto。");
 
   if (verb === "status" && rest.length === 0) return { kind: "command", command: { name: "webgpt.status", json: parsed.json } };
   if (verb === "open" && rest.length === 0) return { kind: "command", command: { name: "webgpt.open", json: parsed.json } };
   if (verb === "current" && rest.length === 0) return { kind: "command", command: { name: "webgpt.current", json: parsed.json } };
+  if (verb === "latest") {
+    const out = optionValue(rest, "--out");
+    if ((out !== null && optionCount(rest, "--out") !== 1) || !hasOnlyValueOptionsAndFlags(rest, ["--out"])) return invalid(parsed.json, "latest 只支持 [--out <file>]。");
+    return { kind: "command", command: { name: "webgpt.latest", json: parsed.json, ...(out ? { out } : {}) } };
+  }
   if (verb === "new-chat" && rest.length === 0) return { kind: "command", command: { name: "webgpt.new-chat", json: parsed.json } };
+
+  if (verb === "chat") {
+    const [chatVerb, ...chatArgs] = rest;
+    if (chatVerb !== "latest") return invalid(parsed.json, `不支持的 chat 命令：${chatVerb ?? ""}`);
+    const url = optionValue(chatArgs, "--url");
+    const out = optionValue(chatArgs, "--out");
+    if (!url || optionCount(chatArgs, "--url") !== 1 || (out !== null && optionCount(chatArgs, "--out") !== 1) || !hasOnlyValueOptionsAndFlags(chatArgs, ["--url", "--out"])) return invalid(parsed.json, "chat latest 必须使用 --url <chat-url> [--out <file>]。");
+    return { kind: "command", command: { name: "webgpt.chat.latest", json: parsed.json, url, ...(out ? { out } : {}) } };
+  }
 
   if (verb === "project") {
     const [projectVerb, ...projectArgs] = rest;
@@ -141,6 +158,11 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
     }
     if (!role) return invalid(parsed.json, "role 命令必须提供 --role <requirement|planner|reviewer>。");
     if (optionCount(roleArgs, "--role") !== 1) return invalid(parsed.json, "role 命令只能提供一次 --role。");
+    if (roleVerb === "latest") {
+      const out = optionValue(roleArgs, "--out");
+      if ((out !== null && optionCount(roleArgs, "--out") !== 1) || !hasOnlyValueOptionsAndFlags(roleArgs, ["--project", "--role", "--out"])) return invalid(parsed.json, "role latest 必须使用 --project <project-id> --role <role> [--out <file>]。");
+      return { kind: "command", command: { name: "webgpt.role.latest", json: parsed.json, projectId, role, ...(out ? { out } : {}) } };
+    }
     if (roleVerb === "status" || roleVerb === "open") {
       if (!hasOnlyValueOptionsAndFlags(roleArgs, ["--project", "--role"])) return invalid(parsed.json, `${roleVerb} 只支持 --project <project-id> --role <role>。`);
       return { kind: "command", command: { name: roleVerb === "status" ? "webgpt.role.status" : "webgpt.role.open", json: parsed.json, projectId, role } };

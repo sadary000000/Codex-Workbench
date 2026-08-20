@@ -23,7 +23,7 @@ import { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-
 import { WebGptRoleSessionRegistry } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
 import { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
 import { isWebGptProjectOperationCommand, projectOperationBudgetMs } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
-import type { WebGptRole } from "../features/webgpt/types.ts";
+import type { WebGptLatestResponse, WebGptRole } from "../features/webgpt/types.ts";
 import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
 import { WEBGPT_CONTROL_PROTOCOL_VERSION, WebGptControlServer, controlDescriptorPath, createControlDescriptor, publishControlDescriptor, removeControlDescriptor, runWebGptCli, type WebGptControlDescriptor, type WebGptControlIdentity, type WebGptControlRequest, type WebGptControlResponse } from "./webgpt-control.ts";
 
@@ -162,9 +162,10 @@ function attachControlIdentity(request: WebGptControlRequest, response: WebGptCo
   return { ...response, requestId: request.requestId, identity: controlIdentity() };
 }
 
-function codedError(code: string, message: string): Error & { code: string } {
+function codedError(code: string, message: string, details?: unknown): Error & { code: string; details?: unknown } {
   const error = new Error(message) as Error & { code: string };
   error.code = code;
+  if (details !== undefined) (error as Error & { details?: unknown }).details = details;
   return error;
 }
 
@@ -195,6 +196,29 @@ function validateResultPath(rawPath: string): string {
   const protectedRoots = [join(app.getPath("userData"), "webgpt", "session"), join(app.getPath("userData"), "webgpt", "requests")];
   if (protectedRoots.some((root) => pathWithin(root, candidate))) throw codedError("WEBGPT_RESULT_OUTPUT_PROTECTED", "不能把结果写入 WebGPT 内部存储目录。");
   return candidate;
+}
+
+async function latestControlResult(latest: WebGptLatestResponse, outputPathRaw?: string): Promise<Record<string, unknown>> {
+  const metadata: Record<string, unknown> = {
+    chatUrl: latest.chatUrl,
+    assistantCount: latest.assistantCount,
+    generating: latest.generating,
+    textLength: latest.textLength,
+    textSha256: latest.textSha256,
+    role: latest.role ?? null,
+    ...(latest.projectId ? { projectId: latest.projectId } : {}),
+  };
+  if (!outputPathRaw) return { ...metadata, assistantText: latest.assistantText };
+  if (latest.assistantText === null) throw codedError("NO_ASSISTANT_RESPONSE", "没有可写入的 Assistant 回复。", { ...metadata, assistantText: null });
+  const outputPath = validateResultPath(outputPathRaw);
+  const bytes = Buffer.from(latest.assistantText, "utf8");
+  try {
+    await writeFile(outputPath, bytes, { flag: "wx" });
+  } catch (error) {
+    if ((error as { code?: string })?.code === "EEXIST") throw codedError("WEBGPT_LATEST_OUTPUT_EXISTS", "latest 输出文件已存在，为避免覆盖已拒绝写入。");
+    throw error;
+  }
+  return { ...metadata, assistantText: null, outputPath, outputBytes: bytes.byteLength };
 }
 
 function publicWebGptState(state: import("../features/webgpt/types.ts").WebGptState): Record<string, unknown> {
@@ -266,6 +290,8 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
       response = result.webgpt !== "READY"
         ? controlFail(request.command, "WEBGPT_UNAVAILABLE", "WebGPT 页面当前不可用或尚未打开。")
         : controlOk(request.command, result);
+    } else if (request.command === "webgpt.latest") {
+      response = controlOk(request.command, await latestControlResult(await getWebGptRequestManager().readLatestCurrent(), request.out));
     } else if (request.command === "webgpt.control.user") {
       const state = await getWebGptWorkspace().requestUserControl();
       await getWebGptRequestManager().userControl();
@@ -279,6 +305,9 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "webgpt.open-chat") {
       if (!request.url) response = controlFail(request.command, "CHAT_URL_REQUIRED", "open-chat 必须提供 ChatGPT Chat URL。");
       else response = controlOk(request.command, await getWebGptRequestManager().openChat(request.url));
+    } else if (request.command === "webgpt.chat.latest") {
+      if (!request.url) response = controlFail(request.command, "CHAT_URL_REQUIRED", "chat latest 必须提供 Chat URL。");
+      else response = controlOk(request.command, await latestControlResult(await getWebGptRequestManager().readLatestChat(request.url), request.out));
     } else if (request.command === "webgpt.project.inspect") {
       operationStartMs = Date.now();
       if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project inspect 必须提供 Project 名称。");
@@ -306,6 +335,9 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "webgpt.role.open") {
       if (!request.projectId || !request.role) response = controlFail(request.command, "ROLE_REQUIRED", "role open 必须提供 Project ID 和 Role。");
       else response = controlOk(request.command, await getWebGptRoleService().open(request.projectId, request.role));
+    } else if (request.command === "webgpt.role.latest") {
+      if (!request.projectId || !request.role) response = controlFail(request.command, "ROLE_REQUIRED", "role latest 必须提供 Project ID 和 Role。");
+      else response = controlOk(request.command, await latestControlResult(await getWebGptRoleService().latest(request.projectId, request.role), request.out));
     } else if (request.command === "webgpt.send") {
       if (request.text === undefined) response = controlFail(request.command, "PROMPT_REQUIRED", "send 必须提供文本 Prompt。");
       else if ((request.projectId === undefined) !== (request.role === undefined)) response = controlFail(request.command, "PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 Project ID 和 Role。");
@@ -376,7 +408,8 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
   } catch (error) {
     const normalized = errorInfo(error);
     const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "WEBGPT_COMMAND_FAILED";
-    response = controlFail(request.command, code, normalized.message);
+    const details = (error as { details?: unknown })?.details;
+    response = controlFail(request.command, code, normalized.message, details);
   }
   const identified = attachControlIdentity(request, response);
   if (!projectCommand) return identified;
@@ -401,7 +434,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
 }
 
 function enqueueWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {
-  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current" || request.command === "webgpt.control.user" || request.command === "webgpt.role.list" || request.command === "webgpt.role.status" || request.command === "webgpt.request.status" || request.command === "webgpt.request.list") {
+  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current" || request.command === "webgpt.latest" || request.command === "webgpt.control.user" || request.command === "webgpt.role.list" || request.command === "webgpt.role.status" || request.command === "webgpt.request.status" || request.command === "webgpt.request.list") {
     return handleWebGptControlRequest(request);
   }
   const result = webGptControlQueue.then(() => handleWebGptControlRequest(request));

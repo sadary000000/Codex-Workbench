@@ -1,5 +1,5 @@
 import { normalizeWebGptUrl, WEBGPT_HOME_URL } from "../adapter/webgpt-page-adapter.ts";
-import type { WebGptPageState, WebGptRequestRecord, WebGptRole, WebGptRoleBinding, WebGptState } from "../types.ts";
+import type { WebGptLatestResponse, WebGptPageState, WebGptRequestRecord, WebGptRole, WebGptRoleBinding, WebGptState } from "../types.ts";
 import { normalizeRoleChatUrl, normalizeWebGptRole, WebGptRoleSessionRegistry } from "./webgpt-role-session-registry.ts";
 import type { WebGptRequestManager } from "./webgpt-request-manager.ts";
 import type { WebGptWorkspace } from "./webgpt-workspace.ts";
@@ -74,6 +74,19 @@ export class WebGptRoleSessionService {
     }
     const touched = await this.registry.touch(id, normalizedRole);
     return { binding: touched, chatUrl: String(state.chatUrl ?? touched.chatUrl), page, mode: modeOf(state) };
+  }
+
+  async latest(projectId: string, role: WebGptRole): Promise<WebGptLatestResponse> {
+    const id = await this.requireProject(projectId);
+    const normalizedRole = normalizeWebGptRole(role);
+    const binding = await this.registry.get(id, normalizedRole);
+    this.assertBound(binding);
+    const latest = await this.requestManager.readLatestChat(binding.chatUrl, {
+      projectId: id,
+      role: normalizedRole,
+      operationType: "ROLE_OPEN",
+    });
+    return { ...latest, projectId: id, role: normalizedRole };
   }
 
   async submit(projectId: string, role: WebGptRole, prompt: string, idempotencyKey?: string): Promise<WebGptRequestRecord> {

@@ -38,6 +38,17 @@ export interface WebGptPageProbe {
   sendAvailable: boolean;
 }
 
+export interface WebGptLatestResponse {
+  chatUrl: string;
+  assistantCount: number;
+  generating: boolean;
+  assistantText: string | null;
+  textLength: number;
+  textSha256: string | null;
+  projectId?: string;
+  role?: WebGptRole;
+}
+
 export interface WebGptState {
   visible: boolean;
   ready: boolean;

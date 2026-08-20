@@ -83,11 +83,13 @@ const COMMANDS = new Set<WebGptCliCommandName>([
   "webgpt.status",
   "webgpt.open",
   "webgpt.current",
+  "webgpt.latest",
   "webgpt.screenshot",
   "webgpt.control.user",
   "webgpt.control.auto",
   "webgpt.new-chat",
   "webgpt.open-chat",
+  "webgpt.chat.latest",
   "webgpt.project.inspect",
   "webgpt.project.open",
   "webgpt.project.new-chat",
@@ -96,6 +98,7 @@ const COMMANDS = new Set<WebGptCliCommandName>([
   "webgpt.role.new",
   "webgpt.role.bind",
   "webgpt.role.open",
+  "webgpt.role.latest",
   "webgpt.send",
   "webgpt.wait",
   "webgpt.result",
@@ -168,7 +171,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (!requestId || requestId.length > 128) return controlError("CONTROL_REQUEST_ID_REQUIRED", "Control 请求必须提供稳定且有效的 requestId。", String(record.command ?? "webgpt"), requestIdFromRaw(value));
   if (record.version !== WEBGPT_CONTROL_PROTOCOL_VERSION) return controlError("CONTROL_VERSION_UNSUPPORTED", "不支持的 WebGPT Control Plane 版本。", String(record.command ?? "webgpt"), requestId);
   if (typeof record.command !== "string" || !COMMANDS.has(record.command as WebGptCliCommandName)) return controlError("CONTROL_COMMAND_UNSUPPORTED", "不支持的 WebGPT Control Plane 命令。", String(record.command ?? "webgpt"), requestId);
-  if (record.out !== undefined && (typeof record.out !== "string" || record.out.length > 4_096)) return controlError("CONTROL_OUTPUT_PATH_INVALID", "截图输出路径无效。", record.command, requestId);
+  if (record.out !== undefined && (typeof record.out !== "string" || record.out.length > 4_096)) return controlError("CONTROL_OUTPUT_PATH_INVALID", "输出路径无效。", record.command, requestId);
   if (record.url !== undefined && (typeof record.url !== "string" || record.url.length > 2_048)) return controlError("CONTROL_URL_INVALID", "WebGPT URL 无效。", record.command, requestId);
   if (record.text !== undefined && (typeof record.text !== "string" || record.text.length > 2_000_000)) return controlError("CONTROL_PROMPT_TOO_LARGE", "Prompt 无效或过大。", record.command, requestId);
   if (record.projectName !== undefined && (typeof record.projectName !== "string" || !record.projectName.trim() || record.projectName.length > 256)) return controlError("PROJECT_NAME_INVALID", "Project 名称必须是 1 到 256 个字符。", record.command, requestId);
@@ -183,11 +186,12 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   const command = record.command as WebGptCliCommandName;
   const roleCommand = command.startsWith("webgpt.role.");
   if (roleCommand && typeof record.projectId !== "string") return controlError("PROJECT_REQUIRED", "Role 命令必须提供 projectId。", command, requestId);
-  if (["webgpt.role.status", "webgpt.role.new", "webgpt.role.bind", "webgpt.role.open"].includes(command) && !role) return controlError("ROLE_REQUIRED", "该 Role 命令必须提供 role。", command, requestId);
+  if (["webgpt.role.status", "webgpt.role.new", "webgpt.role.bind", "webgpt.role.open", "webgpt.role.latest"].includes(command) && !role) return controlError("ROLE_REQUIRED", "该 Role 命令必须提供 role。", command, requestId);
   if (command === "webgpt.role.bind") {
     if (typeof record.url !== "string") return controlError("ROLE_CHAT_URL_INVALID", "role.bind 必须提供 Chat URL。", command, requestId);
     try { normalizeRoleChatUrl(record.url); } catch (error) { return controlError("ROLE_CHAT_URL_INVALID", error instanceof Error ? error.message : "Role Chat URL 无效。", command, requestId); }
   }
+  if (command === "webgpt.chat.latest" && typeof record.url !== "string") return controlError("CHAT_URL_REQUIRED", "chat latest 必须提供 Chat URL。", command, requestId);
   if (command === "webgpt.send" && ((record.projectId !== undefined) !== (role !== undefined))) return controlError("PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 projectId 和 role。", command, requestId);
   if (command === "webgpt.request.status" && typeof record.targetRequestId !== "string") return controlError("REQUEST_ID_REQUIRED", "request status 必须提供 requestId。", command, requestId);
   if (command === "webgpt.request.list" && record.active !== true) return controlError("REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。", command, requestId);
@@ -198,11 +202,13 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.status": [],
     "webgpt.open": [],
     "webgpt.current": [],
+    "webgpt.latest": ["out"],
     "webgpt.screenshot": ["out"],
     "webgpt.control.user": [],
     "webgpt.control.auto": [],
     "webgpt.new-chat": [],
     "webgpt.open-chat": ["url"],
+    "webgpt.chat.latest": ["url", "out"],
     "webgpt.project.inspect": ["projectName"],
     "webgpt.project.open": ["projectName"],
     "webgpt.project.new-chat": ["projectName"],
@@ -211,6 +217,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.role.new": ["projectId", "role", "replace"],
     "webgpt.role.bind": ["projectId", "role", "url", "replace"],
     "webgpt.role.open": ["projectId", "role"],
+    "webgpt.role.latest": ["projectId", "role", "out"],
     "webgpt.send": ["text", "projectId", "role", "idempotencyKey"],
     "webgpt.wait": ["targetRequestId", "timeoutMs"],
     "webgpt.result": ["targetRequestId", "out"],
@@ -380,9 +387,10 @@ function delay(milliseconds: number): Promise<void> {
 }
 
 function spawnWorkbench(executablePath: string): void {
-  const child = process.platform === "win32"
-    ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", `start "" /b "${executablePath.replaceAll('"', '""')}"`], { detached: true, stdio: "ignore", windowsHide: true })
-    : spawn(executablePath, [], { detached: true, stdio: "ignore", windowsHide: true });
+  // Spawn the packaged executable directly. Going through `cmd /c start`
+  // leaves an orphan command shell behind and can delay the Control Plane past
+  // the bounded CLI startup window.
+  const child = spawn(executablePath, [], { detached: true, stdio: "ignore", windowsHide: true });
   child.unref();
 }
 

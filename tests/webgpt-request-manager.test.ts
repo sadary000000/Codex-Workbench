@@ -40,9 +40,23 @@ class FakeWorkspace {
   getControlMode(): WebGptState["mode"] { return this.mode; }
   async returnAutomationControl(): Promise<WebGptState> { this.mode = "AUTO_CONTROL"; return this.state(); }
   async createChat(): Promise<WebGptState> { this.createChatCount += 1; this.probe = pageProbe(true); return this.state(); }
-  async openChatForAutomation(url: string): Promise<WebGptState> { this.openChatCount += 1; this.probe = pageProbe(true, 1, "WEBGPT_TEST_OK"); this.probe.page.userCount = 1; this.probe.page.url = this.openChatUrlOverride ?? url; return this.state(); }
+  async openChatForAutomation(url: string): Promise<WebGptState> { this.openChatCount += 1; const text = this.probe.latestAssistantText || "WEBGPT_TEST_OK"; this.probe = pageProbe(true, 1, text); this.probe.page.userCount = 1; this.probe.page.url = this.openChatUrlOverride ?? url; return this.state(); }
   async getPageProbe(): Promise<WebGptPageProbe> { return this.probe; }
   async getCurrentUrl(): Promise<string> { return this.probe.page.url; }
+  async readLatestResponse(): Promise<Record<string, unknown>> {
+    const text = this.probe.latestAssistantText.trim();
+    if (this.probe.page.generating) {
+      const error = new Error("in progress") as Error & { code: string };
+      error.code = "WEBGPT_RESPONSE_IN_PROGRESS";
+      throw error;
+    }
+    if (!text) {
+      const error = new Error("no assistant") as Error & { code: string };
+      error.code = "NO_ASSISTANT_RESPONSE";
+      throw error;
+    }
+    return { chatUrl: this.probe.page.url, assistantCount: this.probe.page.assistantCount, generating: false, assistantText: text, textLength: text.length, textSha256: "test-hash" };
+  }
   async submitPrompt(_prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe; submitted: WebGptPageProbe }> {
     this.submitCount += 1;
     const baseline = this.probe;
@@ -85,6 +99,47 @@ test("WebGPT Request Manager owns async request state and persists the result", 
     assert.equal(states.at(-1), "COMPLETED");
     const stored = JSON.parse(await readFile(join(directory, "requests.json"), "utf8")) as { requests: Array<{ resultPath: string | null }> };
     assert.equal(stored.requests[0]?.resultPath !== null, true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT targeted latest reads are page-based, fail closed, and preserve Chat identity", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-latest-"));
+  try {
+    const workspace = new FakeWorkspace();
+    workspace.mode = "AUTO_CONTROL";
+    workspace.probe = pageProbe(true, 2, "LATEST_TEST_OK");
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const current = await manager.readLatestCurrent();
+    assert.equal(current.chatUrl, "https://chatgpt.com/c/test");
+    assert.equal(current.assistantText, "LATEST_TEST_OK");
+    const targeted = await manager.readLatestChat("https://chatgpt.com/c/test");
+    assert.equal(targeted.assistantText, "LATEST_TEST_OK");
+    assert.equal(workspace.openChatCount, 1);
+
+    workspace.probe = pageProbe(true, 2, "partial");
+    workspace.probe.page.generating = true;
+    await assert.rejects(() => manager.readLatestCurrent(), { code: "WEBGPT_RESPONSE_IN_PROGRESS" });
+    workspace.probe = pageProbe(true);
+    await assert.rejects(() => manager.readLatestCurrent(), { code: "NO_ASSISTANT_RESPONSE" });
+    workspace.openChatUrlOverride = "https://chatgpt.com/c/other";
+    await assert.rejects(() => manager.readLatestChat("https://chatgpt.com/c/test"), { code: "WEBGPT_TARGET_CHAT_MISMATCH" });
+    await assert.rejects(() => manager.readLatestChat("https://chatgpt.com/settings"), { code: "CHAT_URL_INVALID" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT current latest refuses to read while a Request is active", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-latest-active-"));
+  try {
+    const workspace = new FakeWorkspace();
+    workspace.mode = "PAUSED";
+    workspace.probe = pageProbe(true, 1, "old");
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    await manager.submit("active request");
+    await assert.rejects(() => manager.readLatestCurrent(), { code: "WEBGPT_RESPONSE_IN_PROGRESS" });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

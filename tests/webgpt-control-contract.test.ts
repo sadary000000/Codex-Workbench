@@ -112,6 +112,19 @@ test("WebGPT WEB-4 Control Plane validates Project Role routing at the boundary"
   assert.equal("error" in mismatchedSend && mismatchedSend.error?.code, "PROJECT_ROLE_REQUIRED");
 });
 
+test("WebGPT WEB-6.5 Control Plane allowlists targeted latest reads", () => {
+  const current = parseWebGptControlRequest({ version: 1, requestId: "latest-1", command: "webgpt.latest", out: "latest.txt" });
+  assert.deepEqual(current, { version: 1, requestId: "latest-1", command: "webgpt.latest", out: "latest.txt" });
+  const chat = parseWebGptControlRequest({ version: 1, requestId: "latest-2", command: "webgpt.chat.latest", url: "https://chatgpt.com/c/target", out: "chat.txt" });
+  assert.deepEqual(chat, { version: 1, requestId: "latest-2", command: "webgpt.chat.latest", url: "https://chatgpt.com/c/target", out: "chat.txt" });
+  const role = parseWebGptControlRequest({ version: 1, requestId: "latest-3", command: "webgpt.role.latest", projectId: "project-a", role: "planner" });
+  assert.deepEqual(role, { version: 1, requestId: "latest-3", command: "webgpt.role.latest", projectId: "project-a", role: "PLANNER" });
+  const missingUrl = parseWebGptControlRequest({ version: 1, requestId: "latest-4", command: "webgpt.chat.latest" });
+  assert.equal("error" in missingUrl && missingUrl.error?.code, "CHAT_URL_REQUIRED");
+  const wrongField = parseWebGptControlRequest({ version: 1, requestId: "latest-5", command: "webgpt.latest", url: "https://chatgpt.com/c/target" });
+  assert.equal("error" in wrongField && wrongField.error?.code, "CONTROL_FIELD_UNSUPPORTED");
+});
+
 test("WebGPT Project navigation Control Plane requires a bounded project name", () => {
   const parsed = parseWebGptControlRequest({
     version: WEBGPT_CONTROL_PROTOCOL_VERSION,

@@ -94,8 +94,9 @@ test("Project CLI operations have a bounded server deadline and cancel stale nav
   assert.match(workspace, /newChatActionStartAt/);
   assert.match(workspace, /newChatContextConfirmStartAt/);
   assert.match(control, /CONTROL_RESPONSE_TIMEOUT/);
-  assert.match(control, /process\.env\.ComSpec \|\| "cmd\.exe"/);
-  assert.match(control, /start "" \/b/);
+  assert.match(control, /spawn\(executablePath, \[\], \{ detached: true/);
+  assert.doesNotMatch(control, /process\.env\.ComSpec \|\| "cmd\.exe"/);
+  assert.doesNotMatch(control, /start "" \/b/);
   assert.match(control, /cliStartAt/);
   assert.match(control, /responseWriteAt/);
   assert.match(control, /operationTimeline/);

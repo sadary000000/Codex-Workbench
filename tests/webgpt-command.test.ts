@@ -89,3 +89,26 @@ test("WebGPT WEB-4 CLI parser keeps Project Role routing explicit", () => {
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "send", "--project", "project-a", "--text", "hello"]).kind, "error");
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "bind", "--project", "project-a", "--role", "reviewer", "--url", "https://example.com/c/x"]).kind, "command");
 });
+
+test("WebGPT WEB-6.5 CLI parser keeps targeted latest reads explicit", () => {
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "latest", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.latest", json: true },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "latest", "--out", "latest.txt"]), {
+    kind: "command",
+    command: { name: "webgpt.latest", json: false, out: "latest.txt" },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "chat", "latest", "--url", "https://chatgpt.com/c/target", "--out", "chat.txt", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.chat.latest", json: true, url: "https://chatgpt.com/c/target", out: "chat.txt" },
+  });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "latest", "--project", "project-a", "--role", "planner"]), {
+    kind: "command",
+    command: { name: "webgpt.role.latest", json: false, projectId: "project-a", role: "PLANNER" },
+  });
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "latest", "--out"]).kind, "error");
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "chat", "latest", "--url", "https://chatgpt.com/c/target"]).kind, "command");
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "latest", "--project", "project-a"]).kind, "error");
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "chat", "latest", "--url", "https://chatgpt.com/c/target", "--unknown"]).kind, "error");
+});

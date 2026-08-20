@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { WebGptPageProbe, WebGptPageState, WebGptRequestRecord, WebGptRequestResult, WebGptRequestState, WebGptRequestStateEvent, WebGptRole, WebGptState } from "../types.ts";
+import type { WebGptLatestResponse, WebGptPageProbe, WebGptPageState, WebGptRequestRecord, WebGptRequestResult, WebGptRequestState, WebGptRequestStateEvent, WebGptRole, WebGptState } from "../types.ts";
 import { isTransientWebGptResponse, normalizeChatUrl } from "../adapter/webgpt-page-adapter.ts";
 import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import { isWebGptInterruptionTestHookEnabled, waitForWebGptInterruptionTestHook, waitForWebGptSubmittedUserMessage } from "./webgpt-interruption-test-hook.ts";
@@ -97,6 +97,65 @@ export class WebGptRequestManager {
       return { chatUrl: state.url, page: state.page, mode: state.mode };
     });
     return { ...result, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
+  }
+
+  async readLatestCurrent(): Promise<WebGptLatestResponse> {
+    await this.ready();
+    const active = await this.activeSummary();
+    if (active.length > 0) {
+      let chatUrl: string | null = null;
+      try { chatUrl = normalizeChatUrl(await this.workspace.getCurrentUrl()); } catch { /* current page may be home/login */ }
+      throw this.codedError("WEBGPT_RESPONSE_IN_PROGRESS", "当前存在尚未结束的 WebGPT Request，已拒绝读取可能过时或部分的 Assistant 结果。", {
+        chatUrl,
+        assistantCount: 0,
+        generating: true,
+        assistantText: null,
+        textLength: 0,
+        textSha256: null,
+        activeRequestCount: active.length,
+      });
+    }
+    const operation = () => this.workspace.readLatestResponse();
+    const arbiter = this.getOperationArbiter();
+    if (arbiter?.getDiagnostics().activeOperationId) {
+      throw this.codedError("WEBGPT_OPERATION_BUSY", "浏览器当前正在执行导航或其它自动操作，已拒绝并发读取。", {
+        chatUrl: null,
+        assistantCount: 0,
+        generating: false,
+        assistantText: null,
+        textLength: 0,
+        textSha256: null,
+      });
+    }
+    return arbiter
+      ? arbiter.withRead({ source: "CLI", ownerKey: "control-plane", operationType: "CURRENT" }, operation)
+      : operation();
+  }
+
+  async readLatestChat(url: string, operationMetadata: { projectId?: string | null; role?: WebGptRole | null; operationType?: WebGptOperationType } = {}): Promise<WebGptLatestResponse> {
+    await this.ready();
+    await this.ensureAutomationControl();
+    let targetChatUrl: string;
+    try { targetChatUrl = normalizeRoleChatUrl(normalizeChatUrl(url)); }
+    catch { throw this.codedError("CHAT_URL_INVALID", "chat latest 只允许真实的 https://chatgpt.com/c/<chat-id> Chat URL。"); }
+    const result = await this.withBrowserLease({
+      source: "CLI",
+      ownerKey: operationMetadata.role ? `${operationMetadata.projectId ?? "project"}:${operationMetadata.role}` : "control-plane",
+      projectId: operationMetadata.projectId,
+      role: operationMetadata.role,
+      targetChatUrl,
+      operationType: operationMetadata.operationType ?? "OPEN_CHAT",
+    }, async () => {
+      await this.workspace.openChatForAutomation(targetChatUrl);
+      let actualChatUrl: string;
+      try { actualChatUrl = normalizeRoleChatUrl(normalizeChatUrl(await this.workspace.getCurrentUrl())); }
+      catch { throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "指定 Chat 未能在浏览器中确认。 "); }
+      if (actualChatUrl !== targetChatUrl) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "浏览器当前 Chat 与指定目标不一致，已拒绝读取。", { targetChatUrl, actualChatUrl });
+      const latest = await this.workspace.readLatestResponse();
+      if (latest.chatUrl !== targetChatUrl) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "读取结果的 Chat 身份与指定目标不一致，已拒绝返回。", { targetChatUrl, actualChatUrl: latest.chatUrl });
+      return latest;
+    });
+    return result;
   }
 
   async openProject(projectName: string): Promise<Record<string, unknown>> {
@@ -677,9 +736,10 @@ export class WebGptRequestManager {
     await operation;
   }
 
-  private codedError(code: string, message: string): Error & { code: string } {
+  private codedError(code: string, message: string, details?: unknown): Error & { code: string; details?: unknown } {
     const error = new Error(message) as Error & { code: string };
     error.code = code;
+    if (details !== undefined) (error as Error & { details?: unknown }).details = details;
     return error;
   }
 

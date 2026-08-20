@@ -91,7 +91,7 @@ export class WebGptOperationArbiter {
         reject,
         allowWhenPaused: options.allowWhenPaused === true,
       };
-      if (this.active === null) this.grant(pending);
+      if (this.active === null && this.activeReadCount === 0) this.grant(pending);
       else if (operation.operationType === "RECOVERY") {
         const firstNormal = this.queue.findIndex((queued) => queued.operation.operationType !== "RECOVERY");
         if (firstNormal < 0) this.queue.push(pending);
@@ -112,6 +112,7 @@ export class WebGptOperationArbiter {
 
   async withRead<T>(request: WebGptOperationRequest, operation: () => Promise<T> | T): Promise<T> {
     if (this.controlMode === "DEGRADED") throw this.operationError("WEBGPT_OPERATION_DEGRADED", "WebGPT 浏览器资源当前处于 degraded 状态。 ");
+    if (this.active) throw this.operationError("WEBGPT_OPERATION_BUSY", "WebGPT 浏览器当前正在执行不可并发的自动操作。 ");
     const identity = this.createOperation(request);
     identity.state = "ACTIVE";
     identity.startedAt = new Date().toISOString();
@@ -123,6 +124,8 @@ export class WebGptOperationArbiter {
       identity.state = "RELEASED";
       identity.endedAt = new Date().toISOString();
       this.lastOperation = identity;
+      this.resolveIdleWaiters();
+      this.pump();
     }
   }
 
@@ -152,7 +155,7 @@ export class WebGptOperationArbiter {
   }
 
   async waitForIdle(): Promise<void> {
-    if (!this.active) return;
+    if (!this.active && this.activeReadCount === 0) return;
     await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
   }
 
