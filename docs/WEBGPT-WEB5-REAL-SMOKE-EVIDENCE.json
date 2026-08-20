@@ -1,59 +1,113 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "runDate": "2026-08-20",
   "executable": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
   "projectName": "workts",
   "promptSent": false,
-  "newChatCommandInvoked": false,
-  "recoveryBudget": {
-    "normalOpenRecoveryAttempts": 1,
-    "additionalPageRefreshes": 0,
-    "newRealPrompts": 0
-  },
-  "observations": [
+  "newChatCommandInvoked": true,
+  "globalNewChatClicked": false,
+  "newPromptCount": 0,
+  "runs": [
     {
-      "step": "initial status",
-      "workbench": "READY",
-      "webgpt": "UNAVAILABLE",
-      "pageHealthy": false,
-      "currentUrl": ""
+      "label": "cold-start-immediate",
+      "result": "PARTIAL_STARTUP_NETWORK_READINESS",
+      "runWindow": "2026-08-20T10:07:16.366Z - 2026-08-20T10:07:39.110Z",
+      "status": "PASS",
+      "controlAuto": "PASS",
+      "inspect": {
+        "exitCode": 1,
+        "code": "ERR_CONNECTION_CLOSED",
+        "message": "ERR_CONNECTION_CLOSED (-100) loading https://chatgpt.com/"
+      },
+      "open": {
+        "exitCode": 1,
+        "code": "ERR_CONNECTION_CLOSED",
+        "message": "ERR_CONNECTION_CLOSED (-100) loading https://chatgpt.com/"
+      },
+      "newChat": {
+        "exitCode": 0,
+        "chatCreated": true,
+        "promptSent": false,
+        "actionSource": "project-row-new-chat-pencil"
+      },
+      "promptSent": false,
+      "interpretation": "Cold WebView first-load timing only; no selector retry, refresh, global click, or Prompt."
     },
     {
-      "step": "one normal open recovery",
-      "workbench": "READY",
-      "webgpt": "READY",
-      "controlOwnerBeforeAuto": "USER_CONTROL",
-      "pageHealthy": true,
-      "currentUrl": "https://chatgpt.com/",
-      "pageTitle": "ChatGPT",
-      "composerFound": true,
-      "loginRequired": false
-    },
-    {
-      "step": "control auto",
-      "controlOwner": "AUTO_CONTROL",
-      "pageHealthy": true,
-      "currentUrl": "https://chatgpt.com/"
-    },
-    {
-      "step": "project open --name workts --json",
-      "response": "NO_USABLE_JSON_RESPONSE",
-      "processExitCode": 0,
-      "pageChangedToProject": false
-    },
-    {
-      "step": "project open --name workts diagnostic retry without --json",
-      "response": "NO_USABLE_RESPONSE",
-      "processExitCode": 0,
-      "pageChangedToProject": false
-    },
-    {
-      "step": "post-attempt status",
-      "pageHealthy": true,
-      "currentUrl": "https://chatgpt.com/",
-      "projectContextConfirmed": false
+      "label": "settled",
+      "result": "PASS",
+      "runWindow": "2026-08-20T10:07:51.762Z - 2026-08-20T10:07:53.196Z",
+      "invocation": "Node execFile for every EXE CLI command",
+      "commands": [
+        "status",
+        "control auto",
+        "project inspect --name workts",
+        "project open --name workts",
+        "project new-chat --name workts"
+      ],
+      "exitCodes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "stderr": "empty",
+      "promptSent": false
     }
   ],
-  "result": "PROJECT_CLI_GATE_BLOCKED_BY_CONTROL_PLANE_RESPONSE",
-  "interpretation": "The page recovered to a healthy ChatGPT home, but the Project open command did not yield a verifiable Control Plane response or Project context. No selector change or repeated new-chat attempt was made."
+  "settledEvidence": {
+    "inspect": {
+      "found": true,
+      "ambiguous": false,
+      "matchCount": 1,
+      "row": {
+        "tag": "DIV",
+        "role": "button",
+        "ariaExpanded": "false"
+      },
+      "container": {
+        "tag": "DIV",
+        "className": "group/project-unfurl-row relative"
+      },
+      "hoverActions": [
+        {
+          "tag": "BUTTON",
+          "ariaLabel": "打开项目首页"
+        },
+        {
+          "tag": "BUTTON",
+          "ariaLabel": "打开 workts 的项目选项",
+          "ariaExpanded": "false"
+        }
+      ],
+      "buttonCount": 3,
+      "linkCount": 0,
+      "clicked": false
+    },
+    "open": {
+      "matchCount": 1,
+      "contextMatch": true,
+      "projectRoute": true,
+      "composerFound": true
+    },
+    "newChat": {
+      "chatCreated": true,
+      "chatUrl": null,
+      "promptSent": false,
+      "actionSource": "project-row-new-chat-pencil",
+      "actionLabel": "打开项目首页",
+      "contextMatch": true,
+      "projectRoute": true,
+      "composerFound": true,
+      "globalNewChatClicked": false
+    }
+  },
+  "recoveryBudget": {
+    "additionalPageRefreshes": 0,
+    "selectorRetries": 0,
+    "newRealPrompts": 0
+  },
+  "result": "PROJECT_CLI_DOM_GATE_PASS",
+  "interpretation": "The project row pencil is the verified Project-scoped new-chat entry; the three-dot control is project options and was never clicked. The final path does not query or click global New Chat."
 }

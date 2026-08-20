@@ -1,6 +1,6 @@
 # Codex Workbench WebGPT — WEB-5 阶段审查材料
 
-> 当前审查状态：`BLOCKED / PROJECT_CLI_REAL_GATE_NOT_COMPLETED`。自动化缺陷已修复；最终闭环先执行了一次无 Prompt 的 Project CLI smoke，但没有取得可复核的 Project open 响应，因此没有继续发送 WEB-5 真实 Prompt。
+> 当前审查状态：`FIX_REQUIRED / PROJECT_CLI_REAL_GATE_NOT_COMPLETED`。本轮 focused fix 已修复 Control Plane timeout/response 契约并取得结构化 Project 响应；但真实 Project `workts` 仍未取得 active/context/route PASS，因此没有继续发送 WEB-5 真实 Prompt。
 
 ## 1. Executive Summary
 
@@ -19,7 +19,7 @@
 - 测试期间 ChatGPT 网页出现“请求过于频繁”提示；本地日志记录了 54 条独立请求记录，其中 43 条到达网页提交动作。该事实已单独记录，后续没有继续触发真实网页请求。
 - V1 Frozen Core 的 Native Thread / Turn / Item、Runtime、Project、Composer、Map、Manual Mode 没有建立第二事实源，也没有改变其身份规则。
 
-本地阶段结论：`READY_FOR_GPT_REVIEW`，自动化部分 PASS；真实 Gate 结论为 `BLOCKED_BY_RATE_LIMIT`。本轮审核包由用户手动提交 GPT；本 Agent 不再自动发送网页请求或提交审查。
+本地阶段结论：`READY_FOR_GPT_REVIEW`，自动化部分 PASS；当前 Project CLI focused real Gate 结论为 `FIX_REQUIRED`。此前网页限流仍作为历史安全事实保留，本轮没有新增真实 Prompt。本轮审核包由用户手动提交 GPT；本 Agent 不自动发送网页请求或提交审查。
 
 ## 2. Scope Resolution
 
@@ -487,4 +487,97 @@ v1_regression: PASS
 review_report: docs/WEBGPT-WEB5-STAGE-REVIEW.md
 review_package: dist/review/WEBGPT-WEB5-STAGE-REVIEW-PACKAGE.zip
 next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
+```
+
+## 22. Current focused Gate Fix superseding addendum
+
+本节 supersede 第 21 节中“无可用 JSON 响应 / `BLOCKED_BY_PAGE_OR_NETWORK`”的历史描述。第 21 节保留为旧运行记录；当前 focused fix 已将失败分类改为结构化 Control Plane 错误，并没有把旧结论改写成 PASS。
+
+### 22.1 Fix scope
+
+- `project open` 服务端预算 60 秒，CLI 预算 65 秒；
+- `project new-chat` 服务端预算 90 秒，CLI 预算 95 秒；
+- 操作阶段记录 request/handler/lookup/click/navigation/composer/action/response-write/CLI receive/exit 时间线；
+- 超时推进 automation epoch、停止挂起导航，并返回 `CONTROL_OPERATION_TIMEOUT`；客户端超时返回 `CONTROL_RESPONSE_TIMEOUT`；
+- 不保存 Prompt、回答正文、Cookie、Token、页面全文或截图，不引入第二事实源。
+
+### 22.2 Current real evidence
+
+按以下无 Prompt 序列执行：
+
+```text
+webgpt status --json
+webgpt control auto --json
+webgpt project open --name "workts" --json
+webgpt project new-chat --name "workts" --json
+```
+
+结果：
+
+| Command | Structured result |
+|---|---|
+| `status` | 返回结构化状态；一次运行内层响应耗时 232 ms，但 CLI 外层受启动子进程句柄影响延迟返回 |
+| `control auto` | PASS，`AUTO_CONTROL` |
+| `project open workts` | `ok=false`、exit 1、约 12,401 ms，`PROJECT_NAVIGATION_NOT_CONFIRMED`；`matchCount=1`，但 `active=false`、`contextMatch=false`、`projectRoute=false`，URL 仍为 ChatGPT 首页 |
+| `project new-chat workts` | `ok=false`、exit 1、约 10,310 ms；同一 open 前置确认失败，未进入 Project 行内 action |
+
+当前页面后续不再含精确目标 `workts`，观察到的是 `works`，没有替换测试。独立冷启动检查还记录过结构化 `WORKBENCH_START_TIMEOUT` 与 `CONTROL_RESPONSE_TIMEOUT`；手动启动标准 EXE 能正常驻留。该冷启动生命周期问题与 Project route/context 失败分开记录。
+
+```text
+current_focused_gate: FIX_REQUIRED
+project_open_real_smoke: FAIL / PROJECT_NAVIGATION_NOT_CONFIRMED
+project_new_chat_real_smoke: FAIL_PREREQUISITE / NOT_ENTERED
+new_real_prompt_count: 0
+new_chat_created: false
+next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
+```
+
+## 23. Final Project CLI DOM Gate — current result supersedes section 22
+
+本节记录最终 focused DOM gate。第 22 节保留为历史运行记录；本节才是当前审查结论。
+
+### 23.1 Implementation decision from real DOM
+
+真实 Project 行悬停后有两个按钮：
+
+- `打开项目首页`：用户截图中的铅笔按钮，实际 Project 作用域新 Chat/项目首页入口；
+- `打开 workts 的项目选项`：用户截图中的三个点，仅项目菜单。
+
+最终 `open` 和 `new-chat` 都只追踪并点击第一个语义按钮；不点击三个点，不查询或点击全局 `create-new-chat-button` / `新聊天`，不发送 Prompt。
+
+### 23.2 Settled real EXE evidence
+```text
+package: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+run: 2026-08-20T10:07:51.762Z - 2026-08-20T10:07:53.196Z
+invocation: Node execFile for every EXE CLI command
+commands: status → control auto → project inspect → project open → project new-chat
+all_command_exit_codes: 0
+stderr: empty
+newPromptCount: 0
+```
+
+`inspect`：`found=true`、`ambiguous=false`、`matchCount=1`；row 为 `DIV[role=button]`，container class 为 `group/project-unfurl-row relative`；hover actions 正确返回铅笔和三个点两个受限控件。
+
+`open`：`matchCount=1`、`contextMatch=true`、`projectRoute=true`、Composer 可见，URL 为目标 `workts/project`。
+
+`new-chat`：`chatCreated=true`、`chatUrl=null`、`promptSent=false`、`actionSource=project-row-new-chat-pencil`、`actionLabel=打开项目首页`、`contextMatch=true`、`projectRoute=true`、`composerFound=true`、`globalNewChatClicked=false`。
+
+`chatUrl=null` 是正确结果：操作只建立 Project 作用域的空白 Chat 上下文，首条 Prompt 尚未发送，不伪造 `/c/...` URL。
+
+### 23.3 Cold-start limitation
+
+重新打包后立即启动并立刻执行时，首个 inspect/open 曾出现真实 `ERR_CONNECTION_CLOSED (-100)`；这属于 WebView 首次网络就绪时序，未循环重试、未刷新页面、未发送 Prompt。保持会话稳定后同一 EXE 复跑五步序列全部通过。该限制单独记录，不降低最终 DOM selector/context Gate 结论。
+
+### 23.4 Gate
+
+implementation_commit: 8e15807
+package_exe_sha256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+```text
+DOM_INSPECT: PASS
+PROJECT_OPEN: PASS
+PROJECT_NEW_CHAT: PASS
+PROMPT_SENT: NO
+GLOBAL_NEW_CHAT_CLICKED: NO
+AUTOMATED_TESTS: PASS (166/166)
+GATE_RESULT: PASS
 ```

@@ -1,12 +1,12 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "stage": "WEB-5 Request Recovery, Idempotency & Control Ownership Hardening",
-  "implementationCommit": "d54ac32",
+  "implementationCommit": "8e15807",
   "reviewReport": "docs/WEBGPT-WEB5-STAGE-REVIEW.md",
   "automatedGate": {
     "check": "PASS",
     "test": "PASS",
-    "testCount": "162/162",
+    "testCount": "166/166",
     "build": "PASS",
     "package": "PASS",
     "audit": "PASS",
@@ -15,31 +15,46 @@
   },
   "projectCliGate": {
     "projectName": "workts",
-    "open": "BLOCKED_BY_PAGE_OR_NETWORK",
-    "newChat": "NOT_TESTED",
+    "inspect": "PASS_SETTLED",
+    "open": "PASS_SETTLED",
+    "newChat": "PASS_SETTLED",
+    "matchCount": 1,
+    "contextMatch": true,
+    "projectRoute": true,
+    "composerFound": true,
+    "actionSource": "project-row-new-chat-pencil",
+    "actionLabel": "打开项目首页",
+    "chatUrlBeforeFirstPrompt": null,
     "promptSent": false,
-    "blocker": "Control Plane returned no usable response for project open after one normal page open recovery; page remained at ChatGPT home."
+    "globalNewChatClicked": false,
+    "coldStartObservation": "Immediate post-package inspect/open once returned ERR_CONNECTION_CLOSED (-100); same EXE settled rerun passed without retrying the DOM action.",
+    "blocker": null
   },
   "web5RealGates": {
-    "inflightInterruption": "NOT_RUN_PROJECT_GATE_BLOCKED",
-    "restartNoResend": "NOT_TESTED",
-    "roleWrongChatRecovery": "NOT_RUN_PROJECT_GATE_BLOCKED",
-    "sameKeyAfterRestart": "NOT_TESTED",
+    "inflightInterruption": "NOT_RUN_FOCUSED_PROJECT_CLI_SCOPE",
+    "restartNoResend": "NOT_RUN_FOCUSED_PROJECT_CLI_SCOPE",
+    "roleWrongChatRecovery": "NOT_RUN_FOCUSED_PROJECT_CLI_SCOPE",
+    "sameKeyAfterRestart": "NOT_RUN_FOCUSED_PROJECT_CLI_SCOPE",
     "duplicateCount": "NOT_PROVABLE"
   },
   "promptBudget": {
-    "maxNewRealPrompts": 2,
-    "usedDuringFinalClosure": 0
+    "maxNewRealPrompts": 0,
+    "usedDuringFocusedGate": 0
   },
   "rateLimit": {
     "previouslyObserved": true,
-    "reobservedDuringFinalClosure": false,
+    "reobservedDuringFocusedGate": false,
     "newPromptStopped": true
   },
   "v1CoreBehaviorChanged": false,
   "package": {
     "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
-    "sha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC"
+    "sha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "resources": {
+      "mainJsSha256": "245AA10BE927DE1AEE911E1A98AB09865B3ACBD528103A653AC7CCF2CB8EBA93",
+      "rendererJsSha256": "94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1",
+      "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F"
+    }
   },
-  "localResult": "BLOCKED"
+  "localResult": "PASS_PROJECT_CLI_DOM_GATE"
 }
