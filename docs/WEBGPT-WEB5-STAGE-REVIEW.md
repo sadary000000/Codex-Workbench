@@ -1,6 +1,6 @@
 # Codex Workbench WebGPT — WEB-5 阶段审查材料
 
-> 当前审查状态：`PASS_WITH_ISSUES_CANDIDATE / REAL_GATE_BLOCKED_BY_RATE_LIMIT`。自动化缺陷已修复；由于此前真实 ChatGPT 页面已出现限流，本轮没有再提交网页 Prompt，因此真实 Gate 不得写成 PASS。
+> 当前审查状态：`BLOCKED / PROJECT_CLI_REAL_GATE_NOT_COMPLETED`。自动化缺陷已修复；最终闭环先执行了一次无 Prompt 的 Project CLI smoke，但没有取得可复核的 Project open 响应，因此没有继续发送 WEB-5 真实 Prompt。
 
 ## 1. Executive Summary
 
@@ -14,7 +14,7 @@
 - `USER_CONTROL`、`AUTO_CONTROL`、暂停和交还控制有明确边界；用户接管后，未提交的自动请求不会修改网页。
 - Role 绑定要求稳定的 `/c/<chat-id>` Chat URL；未知、待绑定或失配目标 fail-closed，不 fallback 到当前 Chat，也不替换 Role。
 - WEBGPT Web5 基线 real smoke 的重复 Prompt、幂等冲突、CLI wait/result、控制权暂停/恢复、超时后继续和完成请求重启证据仍保留在历史报告中。
-- 本轮修复了两个 Request Manager 自动化失败：终态等待与 journal 持久化竞态、以及目标页 hydration 等待与测试夹具语义不一致；定向测试 12/12、全量测试 158/158 通过。
+- 本轮修复了两个 Request Manager 自动化失败：终态等待与 journal 持久化竞态、以及目标页 hydration 等待与测试夹具语义不一致；历史 WEB-5 修复测试已通过，当前 Project CLI 修复后的全量测试为 162/162。
 - v2 不再提交新的真实网页 Prompt。此前 Gate Fix real smoke 的最后一次尝试仍是 `RECOVERY_REQUIRED / REQUEST_NOT_VERIFIABLE`，所以 in-flight restart 和 Role wrong-chat real Gate 尚未取得 PASS 证据。
 - 测试期间 ChatGPT 网页出现“请求过于频繁”提示；本地日志记录了 54 条独立请求记录，其中 43 条到达网页提交动作。该事实已单独记录，后续没有继续触发真实网页请求。
 - V1 Frozen Core 的 Native Thread / Turn / Item、Runtime、Project、Composer、Map、Manual Mode 没有建立第二事实源，也没有改变其身份规则。
@@ -211,7 +211,7 @@ npm run test:real:webgpt:recovery
 | --- | --- |
 | `npm run check` | PASS |
 | 定向 Request Manager / interruption tests | PASS — 12/12 |
-| `npm test` | PASS — 158/158 |
+| `npm test` | PASS — 162/162 |
 | `npm run build` | PASS |
 | `npm run package:win` | PASS |
 | `npm audit --omit=dev` | PASS — 0 vulnerabilities |
@@ -247,7 +247,7 @@ npm run test:real:webgpt:recovery
 - In-flight interruption/restart：`BLOCKED_BY_RATE_LIMIT`；不能把之前 `REQUEST_NOT_VERIFIABLE` 的失败尝试改写为 PASS。
 - Role wrong-chat recovery：`BLOCKED_BY_RATE_LIMIT`；v2 没有提交 Role Prompt，因此没有新的真实 Role 证据。
 
-`v1_core_behavior_changed: NO`；`v1_regression: PASS（npm test 158/158）`。
+`v1_core_behavior_changed: NO`；`v1_regression: PASS（npm test 162/162）`。
 
 ## 13.2 Real In-flight Interruption / Restart Evidence
 
@@ -356,7 +356,7 @@ resources/app/package.json
 ## 17. Known Issues / Deferred
 
 - 最新 Gate Fix real smoke 的历史尝试在 in-flight 阶段因 `REQUEST_NOT_VERIFIABLE` 停止，Role wrong-chat recovery 没有实际执行到；本轮 v2 因限流保护没有重新发送 Prompt，因此这两项仍是 `BLOCKED_BY_RATE_LIMIT`，不是 PASS。
-- 本轮两个自动化失败已修复，`npm test` 已恢复为 158/158；修复不改变 Request lifecycle，也没有用 sleep 掩盖问题。
+- 本轮两个自动化失败已修复；当前 `npm test` 为 162/162。修复不改变 Request lifecycle，也没有用 sleep 掩盖问题。
 - 提交中/生成中恰好硬杀 Workbench 的真实窗口时序没有强制制造；自动化 recovery 测试覆盖“不确定状态不盲重发”，真实 smoke 覆盖完成后重启恢复。为避免向真实 ChatGPT 重复提交，未破坏性制造该时序。
 - `Attachment = deferred / unsupported`，不属于 WEB-5 范围。
 - Browser Pane、视觉 Polish、多账号和多浏览器继续 deferred。
@@ -388,7 +388,7 @@ role_aware_recovery: BLOCKED_BY_RATE_LIMIT (v2 Role phase not run)
 request_persistence: PASS
 single_webgpt_runtime: PASS
 v1_core_behavior_changed: NO
-npm_test: PASS (158/158)
+npm_test: PASS (162/162)
 rate_limit_observed: YES
 v1_regression: PASS (automated; real Gate additions blocked)
 multi_account: DEFERRED
@@ -431,4 +431,60 @@ GATE_RESULT: PASS | FIX_REQUIRED | BLOCKED
 gate: READY_FOR_GPT_REVIEW
 gate_result: BLOCKED_BY_RATE_LIMIT
 waiting_state: WAITING_FOR_GPT_REVIEW
+```
+
+## 21. Final closure addendum — Project CLI real smoke
+
+本次按最终闭环指令，对标准打包 EXE 和目标 Project `workts` 只做了一次无 Prompt 的最小真实验证。详细机器证据见：
+
+- `docs/WEBGPT-WEB5-REAL-SMOKE-EVIDENCE.json`
+- `docs/WEBGPT-WEB5-GATE-FIX-SUMMARY.json`
+
+执行顺序及结果：
+
+| 操作 | 结果 |
+|---|---|
+| `webgpt status --json` 初次启动 | Workbench READY，但 WebGPT UNAVAILABLE、页面不健康 |
+| 一次正常 `webgpt open --json` 恢复 | 页面恢复为 `https://chatgpt.com/`，`pageHealthy=true`，Composer 可见 |
+| `webgpt control auto --json` | 最终状态确认 `controlOwner=AUTO_CONTROL` |
+| `webgpt project open --name "workts" --json` | 无可用 JSON 响应，页面未进入 Project |
+| 同命令一次非 JSON 诊断调用 | 同样无可用响应，页面仍为 ChatGPT 首页 |
+| `webgpt project new-chat --name "workts" --json` | 未执行 |
+
+因此：
+
+```text
+projectName: workts
+open: BLOCKED_BY_PAGE_OR_NETWORK
+newChat: NOT_TESTED
+projectContextEvidence: NOT_OBTAINED
+chatUrlBeforeFirstPrompt: NOT_OBTAINED
+promptSentDuringProjectSmoke: NO
+```
+
+这不是新的 selector 失败证据：页面已经恢复到健康首页，但 Project CLI 调用没有返回可验证的 Control Plane 结果。按照预算和安全规则，本轮没有重复刷新、没有重复 new-chat、没有发送 Prompt，也没有继续 WEB-5 的两个真实 Gate。
+
+### 21.1 WEB-5 final gate decision
+
+Project CLI 是本次 WEB-5 剩余真实 Gate 的前置条件。由于 `project open` 未取得 PASS，本轮不执行 in-flight interruption 或 Role wrong-chat 真实 Prompt。此前已观察到的 ChatGPT 网页限流仍作为真实 Gate 的既有阻塞事实保留；本轮没有重新触发限流，也没有新增真实 Prompt。
+
+```text
+[CODEX_WORKBENCH_STAGE_REVIEW_READY]
+
+stage: WEB-5 Request Recovery, Idempotency & Control Ownership Hardening
+local_result: BLOCKED
+project_cli_open_real_smoke: BLOCKED_BY_PAGE_OR_NETWORK
+project_cli_new_chat_real_smoke: NOT_TESTED
+automated_tests: PASS
+inflight_real_interruption: BLOCKED_BY_RATE_LIMIT
+inflight_restart_no_resend: NOT_TESTED
+same_key_after_restart: NOT_TESTED
+real_page_duplicate_count: NOT_PROVABLE
+role_recovery_real_project: BLOCKED_BY_RATE_LIMIT
+wrong_chat_prompt_count: NOT_TESTED
+v1_core_behavior_changed: NO
+v1_regression: PASS
+review_report: docs/WEBGPT-WEB5-STAGE-REVIEW.md
+review_package: dist/review/WEBGPT-WEB5-STAGE-REVIEW-PACKAGE.zip
+next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
 ```

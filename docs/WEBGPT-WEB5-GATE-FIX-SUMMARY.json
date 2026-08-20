@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "stage": "WEB-5 Request Recovery, Idempotency & Control Ownership Hardening",
+  "implementationCommit": "d54ac32",
+  "reviewReport": "docs/WEBGPT-WEB5-STAGE-REVIEW.md",
+  "automatedGate": {
+    "check": "PASS",
+    "test": "PASS",
+    "testCount": "162/162",
+    "build": "PASS",
+    "package": "PASS",
+    "audit": "PASS",
+    "diffCheck": "PASS",
+    "secretScan": "PASS"
+  },
+  "projectCliGate": {
+    "projectName": "workts",
+    "open": "BLOCKED_BY_PAGE_OR_NETWORK",
+    "newChat": "NOT_TESTED",
+    "promptSent": false,
+    "blocker": "Control Plane returned no usable response for project open after one normal page open recovery; page remained at ChatGPT home."
+  },
+  "web5RealGates": {
+    "inflightInterruption": "NOT_RUN_PROJECT_GATE_BLOCKED",
+    "restartNoResend": "NOT_TESTED",
+    "roleWrongChatRecovery": "NOT_RUN_PROJECT_GATE_BLOCKED",
+    "sameKeyAfterRestart": "NOT_TESTED",
+    "duplicateCount": "NOT_PROVABLE"
+  },
+  "promptBudget": {
+    "maxNewRealPrompts": 2,
+    "usedDuringFinalClosure": 0
+  },
+  "rateLimit": {
+    "previouslyObserved": true,
+    "reobservedDuringFinalClosure": false,
+    "newPromptStopped": true
+  },
+  "v1CoreBehaviorChanged": false,
+  "package": {
+    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+    "sha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC"
+  },
+  "localResult": "BLOCKED"
+}

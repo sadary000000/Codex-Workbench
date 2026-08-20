@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "runDate": "2026-08-20",
+  "executable": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+  "projectName": "workts",
+  "promptSent": false,
+  "newChatCommandInvoked": false,
+  "recoveryBudget": {
+    "normalOpenRecoveryAttempts": 1,
+    "additionalPageRefreshes": 0,
+    "newRealPrompts": 0
+  },
+  "observations": [
+    {
+      "step": "initial status",
+      "workbench": "READY",
+      "webgpt": "UNAVAILABLE",
+      "pageHealthy": false,
+      "currentUrl": ""
+    },
+    {
+      "step": "one normal open recovery",
+      "workbench": "READY",
+      "webgpt": "READY",
+      "controlOwnerBeforeAuto": "USER_CONTROL",
+      "pageHealthy": true,
+      "currentUrl": "https://chatgpt.com/",
+      "pageTitle": "ChatGPT",
+      "composerFound": true,
+      "loginRequired": false
+    },
+    {
+      "step": "control auto",
+      "controlOwner": "AUTO_CONTROL",
+      "pageHealthy": true,
+      "currentUrl": "https://chatgpt.com/"
+    },
+    {
+      "step": "project open --name workts --json",
+      "response": "NO_USABLE_JSON_RESPONSE",
+      "processExitCode": 0,
+      "pageChangedToProject": false
+    },
+    {
+      "step": "project open --name workts diagnostic retry without --json",
+      "response": "NO_USABLE_RESPONSE",
+      "processExitCode": 0,
+      "pageChangedToProject": false
+    },
+    {
+      "step": "post-attempt status",
+      "pageHealthy": true,
+      "currentUrl": "https://chatgpt.com/",
+      "projectContextConfirmed": false
+    }
+  ],
+  "result": "PROJECT_CLI_GATE_BLOCKED_BY_CONTROL_PLANE_RESPONSE",
+  "interpretation": "The page recovered to a healthy ChatGPT home, but the Project open command did not yield a verifiable Control Plane response or Project context. No selector change or repeated new-chat attempt was made."
+}
