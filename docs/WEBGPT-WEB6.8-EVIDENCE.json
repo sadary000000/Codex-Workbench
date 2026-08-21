@@ -40,5 +40,10 @@
   "subagents": {
     "runningAtGate": 0,
     "completedAndClosed": 4
+  },
+  "legacyProject": {
+    "path": "D:\\办公\\AI\\Codex_Workbench",
+    "status": "PRE_EXISTING_DIRTY_BASELINE_PRESERVED",
+    "modifiedByStage": false
   }
 }

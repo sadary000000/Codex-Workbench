@@ -9,4 +9,4 @@ review_package=dist/review/WEBGPT-WEB6.8-STAGE-REVIEW-PACKAGE.zip
 real_project_create_smoke=NOT_RUN
 prompt_sent=NO
 v1_frozen_core_changed=NO
-old_donor=D:\办公\AI\Codex_Workbench (read-only)
+old_donor=D:\办公\AI\Codex_Workbench (read-only; pre-existing dirty baseline preserved)

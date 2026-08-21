@@ -189,7 +189,7 @@ running_subagents_at_gate: 0
 ```yaml
 v1_frozen_core_changed: NO
 legacy_project_changed: NO
-old_donor: D:\办公\AI\Codex_Workbench（只读，未修改）
+old_donor: D:\办公\AI\Codex_Workbench（只读；保留既有 dirty baseline，未操作）
 old_auto_agent: 未修改
 V1docs.zip: 保持用户原状态，未加入
 dist-stage-a: 保持用户原状态，未加入/修改/删除
