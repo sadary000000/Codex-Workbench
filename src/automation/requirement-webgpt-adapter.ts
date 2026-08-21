@@ -3,6 +3,7 @@ import {
   createRequirementRequest,
   diagnoseRequirementResponse,
   parseRequirementResponse,
+  REQUIREMENT_MODEL_RESPONSE_INSTRUCTIONS,
   requirementContextFromRequest,
   RequirementContractError,
   validateRequirementRequest,
@@ -70,6 +71,8 @@ export interface RequirementWebGptAdapterOptions {
   readonly runtime: RequirementWebGptRuntimePort;
   readonly timeoutMs?: number;
   readonly repairBudget?: RequirementRepairBudget;
+  /** Called immediately before a real WebGPT dispatch; exceptions fail closed. */
+  readonly onRequestDispatched?: (request: { kind: "original" | "repair"; idempotencyKey: string; targetChatUrl: string }) => void;
   readonly onRequestAccepted?: (request: { kind: "original" | "repair"; requestId: string; idempotencyKey: string; semanticSha256: string | null; targetChatUrl: string }) => void;
   readonly onResponseDiagnostics?: (event: RequirementResponseDiagnosticEvent) => void;
 }
@@ -86,6 +89,7 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
   private readonly runtime: RequirementWebGptRuntimePort;
   private readonly timeoutMs: number;
   private readonly repairBudget: RequirementRepairBudget;
+  private readonly onRequestDispatched?: RequirementWebGptAdapterOptions["onRequestDispatched"];
   private readonly onRequestAccepted?: RequirementWebGptAdapterOptions["onRequestAccepted"];
   private readonly onResponseDiagnostics?: (event: RequirementResponseDiagnosticEvent) => void;
 
@@ -97,6 +101,7 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
       throw new Error("REPAIR_BUDGET_INVALID: repair budget must be a bounded mutable counter.");
     }
     this.onResponseDiagnostics = options.onResponseDiagnostics;
+    this.onRequestDispatched = options.onRequestDispatched;
     this.onRequestAccepted = options.onRequestAccepted;
   }
 
@@ -104,6 +109,7 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
     const request = validateRequirementRequest(input);
     const binding = await this.runtime.getRequirementBinding(request.projectId);
     assertExactBinding(binding, request.binding.chatRef, request.projectId);
+    this.emitRequestDispatched({ kind: "original", idempotencyKey: request.idempotencyKey, targetChatUrl: request.binding.chatRef });
     const accepted = await this.runtime.submitRequirement({ projectId: request.projectId, prompt: request.prompt, idempotencyKey: request.idempotencyKey });
     assertAcceptedTarget(accepted, request.binding.chatRef);
     this.emitRequestAccepted({ kind: "original", requestId: accepted.requestId, idempotencyKey: request.idempotencyKey, semanticSha256: accepted.semanticSha256 ?? request.semanticSha256, targetChatUrl: request.binding.chatRef });
@@ -153,6 +159,16 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
       const repairIdempotencyKey = `aut2:repair:${accepted.requestId}:1`;
       let repairAccepted: RequirementWebGptAcceptedRequest;
       try {
+        this.repairBudget.used += 1;
+        try {
+          this.emitRequestDispatched({ kind: "repair", idempotencyKey: repairIdempotencyKey, targetChatUrl: request.binding.chatRef });
+        } catch (dispatchReservationError) {
+          // The dispatch hook is the last local reservation boundary before
+          // the runtime call. If it rejects the action, no repair request was
+          // sent and the mutable repair counter must not overstate usage.
+          this.repairBudget.used -= 1;
+          throw dispatchReservationError;
+        }
         repairAccepted = await this.runtime.submitRequirementRepair({ projectId: request.projectId, prompt: repairPrompt, idempotencyKey: repairIdempotencyKey });
         assertAcceptedTarget(repairAccepted, request.binding.chatRef);
         this.emitRequestAccepted({ kind: "repair", requestId: repairAccepted.requestId, idempotencyKey: repairIdempotencyKey, semanticSha256: repairAccepted.semanticSha256 ?? null, targetChatUrl: request.binding.chatRef });
@@ -160,7 +176,6 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
         this.emitDiagnostics(failedDiagnostics({ originalRequestId: accepted.requestId, originalIdempotencyKey: request.idempotencyKey, originalSemanticSha256: request.semanticSha256, originalResultSha256, original: originalDiagnostics, parseFailureCategory: originalDiagnostics.category }));
         throw repairSubmissionError;
       }
-      this.repairBudget.used += 1;
       const repairRequest = createRequirementRequest({
         projectId: request.projectId,
         binding: request.binding,
@@ -240,6 +255,10 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
     try { this.onResponseDiagnostics?.(event); } catch { /* Diagnostics are observational and never alter the request result. */ }
   }
 
+  private emitRequestDispatched(request: { kind: "original" | "repair"; idempotencyKey: string; targetChatUrl: string }): void {
+    this.onRequestDispatched?.(request);
+  }
+
   private emitRequestAccepted(request: { kind: "original" | "repair"; requestId: string; idempotencyKey: string; semanticSha256: string | null; targetChatUrl: string }): void {
     try { this.onRequestAccepted?.(request); } catch { /* Request accounting is observational and never alters dispatch. */ }
   }
@@ -251,6 +270,7 @@ export function createRequirementWebGptAdapter(dependencies: {
   requestManager: Pick<WebGptRequestManager, "waitForRequest" | "getResult">;
   timeoutMs?: number;
   repairBudget?: RequirementRepairBudget;
+  onRequestDispatched?: RequirementWebGptAdapterOptions["onRequestDispatched"];
   onRequestAccepted?: RequirementWebGptAdapterOptions["onRequestAccepted"];
   onResponseDiagnostics?: (event: RequirementResponseDiagnosticEvent) => void;
 }): RequirementWebGptAdapter {
@@ -261,6 +281,7 @@ export function createRequirementWebGptAdapter(dependencies: {
   return new RequirementWebGptAdapter({
     timeoutMs: dependencies.timeoutMs,
     repairBudget: dependencies.repairBudget,
+    onRequestDispatched: dependencies.onRequestDispatched,
     onRequestAccepted: dependencies.onRequestAccepted,
     onResponseDiagnostics: dependencies.onResponseDiagnostics,
     runtime: {
@@ -312,10 +333,8 @@ function buildRequirementRepairPrompt(error: RequirementContractError, request: 
     "Repair only the previous REQUIREMENT response's machine-readable format; do not re-ask the requirement or add a new alignment round.",
     `The previous response failed bounded validation at ${error.code}${error.path ? ` (${error.path})` : ""}.`,
     "Return exactly one JSON object, with no markdown fence and no explanation before or after it.",
-    `Preserve this exact original protocol identity: projectId=${request.projectId}; role=${REQUIREMENT_ROLE}; requestId=${request.requestId}; idempotencyKey=${request.idempotencyKey}; semanticSha256=${request.semanticSha256}.`,
     "Copy no invalid or mixed fields from the previous response. The repair transport request is not a new business action.",
-    "Conform exactly to requirementProtocolVersion=1. Allowed status values are NEEDS_INPUT, READY_FOR_DRAFT, and BLOCKED.",
-    "NEEDS_INPUT payload is {missingInputs: string[]}; READY_FOR_DRAFT payload is {requirement: object}; BLOCKED payload is {reason: string, code?: string, retryable?: boolean}.",
+    REQUIREMENT_MODEL_RESPONSE_INSTRUCTIONS,
     "Return the corrected envelope now using the same meaning already established in this Chat; do not explain the correction.",
   ].join("\n");
 }

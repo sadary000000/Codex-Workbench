@@ -9,6 +9,8 @@ import type { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt
 
 const SYNTHETIC_GOAL = "创建一个本地小型命令行示例程序，输入两个整数并输出它们的和。";
 const MAX_REAL_ALIGNMENT_REQUESTS = 3;
+const MAX_NEW_REAL_PROMPTS = 3;
+const MAX_REPAIR_PROMPTS_PER_GATE = 1;
 
 export interface Aut2RealWebGptGateOptions {
   readonly store: AutomationStore;
@@ -34,6 +36,9 @@ export interface Aut2RealWebGptSetupContext {
   readonly newChatCount: number;
   readonly stableChatMaterialized: true;
   readonly latestAssistantSha256: string | null;
+  /** Remaining cumulative budget supplied by the wrapper; never inferred from a retry. */
+  readonly remainingRealPrompts: number;
+  readonly remainingRepairPrompts: number;
 }
 
 export interface Aut2RealWebGptGateEvidence {
@@ -112,6 +117,9 @@ export interface Aut2RealWebGptGateEvidence {
   };
   readonly attemptedRealRequests: number;
   readonly realPromptCount: number;
+  readonly dispatchedRealPromptCount: number;
+  readonly realPromptBudget: { readonly used: number; readonly max: number };
+  readonly repairPromptBudget: { readonly used: number; readonly max: number };
   readonly roleSetupPromptCount: number;
   readonly newChatCount: number;
   readonly repairCount: number;
@@ -131,7 +139,11 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
   const idempotencyKeys: string[] = [];
   const semanticSha256: string[] = [];
   const responseDiagnostics: RequirementResponseDiagnosticEvent[] = [];
-  const repairBudget = { used: 0, max: 3 };
+  if (!Number.isSafeInteger(options.setupContext.remainingRealPrompts) || options.setupContext.remainingRealPrompts < 0 || !Number.isSafeInteger(options.setupContext.remainingRepairPrompts) || options.setupContext.remainingRepairPrompts < 0) {
+    throw gateError("SETUP_CONTEXT_INVALID", "The setup context must carry bounded remaining real and repair prompt budgets.");
+  }
+  const realPromptBudget = { used: 0, max: Math.min(MAX_NEW_REAL_PROMPTS, Math.max(0, options.setupContext.remainingRealPrompts)) };
+  const repairBudget = { used: 0, max: Math.min(MAX_REPAIR_PROMPTS_PER_GATE, Math.max(0, options.setupContext.remainingRepairPrompts)) };
   const runtimeRequestIds: string[] = [];
   const runtimeIdempotencyKeys: string[] = [];
   const runtimeSemanticSha256: string[] = [];
@@ -186,6 +198,10 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
         requestManager: options.requestManager,
         timeoutMs: options.timeoutMs ?? 240_000,
         repairBudget,
+        onRequestDispatched: () => {
+          if (realPromptBudget.used >= realPromptBudget.max) throw gateError("REAL_PROMPT_BUDGET_EXHAUSTED", `AUT-2 Gate Fix 4 allows at most ${realPromptBudget.max} new real prompts in this run.`);
+          realPromptBudget.used += 1;
+        },
         onRequestAccepted: (runtimeRequest) => {
           recordRuntimeRequest(runtimeRequest.requestId, runtimeRequest.idempotencyKey, runtimeRequest.semanticSha256, runtimeRequestIds, runtimeIdempotencyKeys, runtimeSemanticSha256);
         },
@@ -204,7 +220,6 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
     });
     sessionId = session.alignmentSessionId;
 
-    attemptedRealRequests += 1;
     draftResult = await service.requestDraft({ sessionId, binding });
     recordRequest(draftResult, requestIds, idempotencyKeys, semanticSha256);
     if (draftResult.status !== "WAITING_FOR_USER" || draftResult.envelope?.status !== "NEEDS_INPUT") {
@@ -226,7 +241,6 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
       const answers: Record<string, string> = {};
       for (const question of questions) answers[question.questionId] = syntheticAnswer(question.question);
       await service.answerQuestions({ sessionId, roundId: current.round.alignmentRoundId, answers });
-      attemptedRealRequests += 1;
       current = await service.requestDraft({ sessionId, binding });
       recordRequest(current, requestIds, idempotencyKeys, semanticSha256);
       if (current.status === "DRAFT_READY") break;
@@ -278,7 +292,7 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
 
   const bindingRestored = Boolean(originalBinding && finalBinding && originalBinding.status === finalBinding.status && originalBinding.chatUrl === finalBinding.chatUrl);
   if (!bindingRestored) errors.push({ code: "REQUIREMENT_BINDING_NOT_RESTORED", message: "The original REQUIREMENT binding did not remain unchanged." });
-  attemptedRealRequests = options.setupContext.setupPromptCount + runtimeRequestIds.length;
+  attemptedRealRequests = options.setupContext.setupPromptCount + realPromptBudget.used;
   const lastResponseDiagnostic = responseDiagnostics[responseDiagnostics.length - 1] ?? null;
   const firstFailureDiagnostic = responseDiagnostics.find((event) => event.parseFailureCategory !== null) ?? null;
   const repairCount = responseDiagnostics.reduce((total, event) => total + event.repairCount, 0);
@@ -357,7 +371,10 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
       events: responseDiagnostics,
     },
     attemptedRealRequests,
-    realPromptCount: options.setupContext.setupPromptCount + runtimeRequestIds.length,
+    realPromptCount: options.setupContext.setupPromptCount + realPromptBudget.used,
+    dispatchedRealPromptCount: realPromptBudget.used,
+    realPromptBudget: { used: realPromptBudget.used, max: realPromptBudget.max },
+    repairPromptBudget: { used: repairBudget.used, max: repairBudget.max },
     roleSetupPromptCount: options.setupContext.setupPromptCount,
     newChatCount: options.setupContext.newChatCount,
     repairCount,

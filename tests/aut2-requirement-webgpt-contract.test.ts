@@ -8,10 +8,12 @@ import {
   createBlockedEnvelope,
   createNeedsInputEnvelope,
   createReadyForDraftEnvelope,
+  semanticResponseFromEnvelope,
   diagnoseRequirementResponse,
   createRequirementRequest,
   extractBoundedJson,
   parseRequirementEnvelope,
+  parseRequirementSemanticResponse,
   parseRequirementResponse,
   requirementContextFromRequest,
   tryParseRequirementResponse,
@@ -54,10 +56,22 @@ function readyEnvelope(overrides: Record<string, unknown> = {}): RequirementEnve
     requestId: context.requestId,
     idempotencyKey: context.idempotencyKey,
     semanticSha256: context.semanticSha256,
-    payload: { requirement: { goal: "Deliver an automation-only requirement contract." } },
+    payload: { draft: { goal: "Deliver an automation-only requirement contract." } },
     ...overrides,
   } as RequirementEnvelope;
 }
+
+function semanticRaw(envelope: RequirementEnvelope = readyEnvelope()): string {
+  return JSON.stringify(semanticResponseFromEnvelope(envelope));
+}
+
+const semanticQuestion = {
+  category: "SCOPE",
+  question: "Which workspace is in scope?",
+  whyNeeded: "The implementation boundary must be explicit.",
+  blocking: true,
+  resolutionMode: "USER_REQUIRED",
+} as const;
 
 function errorCode(action: () => unknown): string {
   try {
@@ -74,8 +88,8 @@ test("defines protocol v1 and all three fail-closed envelope statuses", () => {
   assert.equal(MAX_REPAIR_ATTEMPTS, 1);
   assert.equal(REQUIREMENT_ROLE, "REQUIREMENT");
 
-  const needsInput = createNeedsInputEnvelope(context, { missingInputs: ["workspace scope"] });
-  const ready = createReadyForDraftEnvelope(context, { requirement: { goal: "A bounded goal" } });
+  const needsInput = createNeedsInputEnvelope(context, { questions: [semanticQuestion] });
+  const ready = createReadyForDraftEnvelope(context, { draft: { goal: "A bounded goal" } });
   const blocked = createBlockedEnvelope(context, { code: "POLICY_BLOCKED", reason: "The requested source is not in scope.", retryable: false });
 
   assert.equal(needsInput.status, "NEEDS_INPUT");
@@ -87,8 +101,8 @@ test("defines protocol v1 and all three fail-closed envelope statuses", () => {
   assert.equal(parsedNeedsInput.status, "NEEDS_INPUT");
   assert.equal(parsedReady.status, "READY_FOR_DRAFT");
   assert.equal(parsedBlocked.status, "BLOCKED");
-  if (parsedNeedsInput.status === "NEEDS_INPUT") assert.equal(parsedNeedsInput.payload.missingInputs[0], "workspace scope");
-  if (parsedReady.status === "READY_FOR_DRAFT") assert.equal(parsedReady.payload.requirement.goal, "A bounded goal");
+  if (parsedNeedsInput.status === "NEEDS_INPUT") assert.equal(parsedNeedsInput.payload.questions[0]?.question, semanticQuestion.question);
+  if (parsedReady.status === "READY_FOR_DRAFT") assert.equal(parsedReady.payload.draft.goal, "A bounded goal");
   if (parsedBlocked.status === "BLOCKED") assert.equal(parsedBlocked.payload.code, "POLICY_BLOCKED");
 });
 
@@ -152,18 +166,44 @@ test("validates schema and semantic identity fail closed", () => {
   assert.equal(errorCode(() => parseRequirementEnvelope(raw({
     ...readyEnvelope(),
     status: "NEEDS_INPUT",
-    payload: { missingInputs: [] },
+    payload: { questions: [] },
   } as RequirementEnvelope), context)), "SEMANTIC_INVALID");
   assert.equal(errorCode(() => parseRequirementEnvelope(raw({
     ...readyEnvelope(),
     status: "READY_FOR_DRAFT",
-    payload: { requirement: { goal: "   " } },
+    payload: { draft: { goal: "   " } },
   } as RequirementEnvelope), context)), "SCHEMA_INVALID");
   assert.equal(errorCode(() => parseRequirementEnvelope(raw({
     ...readyEnvelope(),
     status: "BLOCKED",
-    payload: { reason: "" },
+    payload: { reason: "", code: "BLOCKED", retryable: false },
   } as RequirementEnvelope), context)), "SCHEMA_INVALID");
+});
+
+test("keeps model semantics separate from trusted transport identity", () => {
+  const modelResponse = semanticRaw(readyEnvelope());
+  const attached = parseRequirementResponse(modelResponse, context, { repairBudget: 0 });
+  assert.equal(attached.projectId, context.projectId);
+  assert.equal(attached.requestId, context.requestId);
+  assert.equal(attached.idempotencyKey, context.idempotencyKey);
+  assert.equal(attached.semanticSha256, context.semanticSha256);
+  if (attached.status === "READY_FOR_DRAFT") assert.equal(attached.payload.draft.goal, "Deliver an automation-only requirement contract.");
+
+  const modelTryingToOverrideIdentity = JSON.stringify({
+    requirementProtocolVersion: 1,
+    projectId: "provider-controlled-project",
+    status: "READY_FOR_DRAFT",
+    payload: { draft: { goal: "not accepted" } },
+  });
+  assert.equal(errorCode(() => parseRequirementSemanticResponse(modelTryingToOverrideIdentity)), "SCHEMA_INVALID");
+  assert.equal(errorCode(() => parseRequirementResponse(modelTryingToOverrideIdentity, context, { repairBudget: 0 })), "SCHEMA_INVALID");
+
+  const mixedPayload = JSON.stringify({
+    requirementProtocolVersion: 1,
+    status: "NEEDS_INPUT",
+    payload: { questions: [semanticQuestion], draft: { goal: "must be rejected" } },
+  });
+  assert.equal(errorCode(() => parseRequirementSemanticResponse(mixedPayload)), "SCHEMA_INVALID");
 });
 
 test("requires exact REQUIREMENT project binding and has no current-chat fallback", () => {
@@ -188,7 +228,7 @@ test("requires exact REQUIREMENT project binding and has no current-chat fallbac
   const service: IWebGPTRequirementService = {
     async submit(input) {
       const validated = validateRequirementRequest(input);
-      return createReadyForDraftEnvelope(requirementContextFromRequest(validated), { requirement: { goal: "service boundary" } });
+      return createReadyForDraftEnvelope(requirementContextFromRequest(validated), { draft: { goal: "service boundary" } });
     },
   };
   assert.equal(typeof service.submit, "function");
@@ -224,18 +264,18 @@ test("semanticSha256 is stable for meaning and changes for target or prompt", ()
 });
 
 test("uses at most one pure repair candidate and never repairs a valid response", () => {
-  const repaired = tryParseRequirementResponse("not valid JSON", context, { repairResponse: raw(readyEnvelope()) });
+  const repaired = tryParseRequirementResponse("not valid JSON", context, { repairResponse: semanticRaw() });
   assert.equal(repaired.ok, true);
   if (repaired.ok) {
     assert.equal(repaired.source, "repair");
     assert.equal(repaired.repairAttempts, 1);
   }
 
-  const validWithRepair = tryParseRequirementResponse(raw(readyEnvelope()), context, { repairResponse: "must not be consulted" });
+  const validWithRepair = tryParseRequirementResponse(semanticRaw(), context, { repairResponse: "must not be consulted" });
   assert.equal(validWithRepair.ok, true);
   if (validWithRepair.ok) assert.deepEqual({ source: validWithRepair.source, repairAttempts: validWithRepair.repairAttempts }, { source: "original", repairAttempts: 0 });
 
-  const exhausted = tryParseRequirementResponse("not valid JSON", context, { repairResponses: [raw(readyEnvelope()), raw(readyEnvelope())] });
+  const exhausted = tryParseRequirementResponse("not valid JSON", context, { repairResponses: [semanticRaw(), semanticRaw()] });
   assert.equal(exhausted.ok, false);
   if (!exhausted.ok) {
     assert.equal(exhausted.error.code, "REPAIR_BUDGET_EXHAUSTED");
@@ -248,12 +288,12 @@ test("uses at most one pure repair candidate and never repairs a valid response"
     assert.equal(failedRepair.error.code, "REPAIR_FAILED");
     assert.equal(failedRepair.repairAttempts, 1);
   }
-  assert.throws(() => parseRequirementResponse("not valid JSON", context, { repairBudget: 0, repairResponse: raw(readyEnvelope()) }), (error: unknown) => error instanceof RequirementContractError && error.code === "REPAIR_BUDGET_EXHAUSTED");
+  assert.throws(() => parseRequirementResponse("not valid JSON", context, { repairBudget: 0, repairResponse: semanticRaw() }), (error: unknown) => error instanceof RequirementContractError && error.code === "REPAIR_BUDGET_EXHAUSTED");
 });
 
 test("rejects unbounded decoded JSON before semantic acceptance", () => {
   const tooManyInputs = readyEnvelope({
-    payload: { requirement: { goal: "bounded", constraints: Array.from({ length: 33 }, (_, index) => `constraint-${index}`) } },
+    payload: { draft: { goal: "bounded", constraints: Array.from({ length: 33 }, (_, index) => `constraint-${index}`) } },
   });
   assert.equal(errorCode(() => parseRequirementEnvelope(raw(tooManyInputs), context)), "JSON_BOUNDS_EXCEEDED");
 
@@ -267,7 +307,7 @@ test("rejects unbounded decoded JSON before semantic acceptance", () => {
     requestId: context.requestId,
     idempotencyKey: context.idempotencyKey,
     semanticSha256: context.semanticSha256,
-    payload: { requirement: { goal: "bounded", extra: tooDeep } },
+    payload: { draft: { goal: "bounded", extra: tooDeep } },
   });
   assert.equal(errorCode(() => parseRequirementEnvelope(deeplyNested, context)), "JSON_BOUNDS_EXCEEDED");
 });

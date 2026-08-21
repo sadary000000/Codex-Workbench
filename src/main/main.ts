@@ -199,10 +199,12 @@ async function waitForAut2SetupContext(path: string): Promise<Aut2RealWebGptSetu
         newChatCount: Number(value.newChatCount ?? 0),
         stableChatMaterialized: true,
         latestAssistantSha256: typeof value.latestAssistantSha256 === "string" ? value.latestAssistantSha256 : null,
+        remainingRealPrompts: Number(value.remainingRealPrompts),
+        remainingRepairPrompts: Number(value.remainingRepairPrompts),
       };
       const reusedStableChat = context.setupPromptCount === 0 && context.newChatCount === 0;
       const newlyMaterializedStableChat = context.setupPromptCount >= 1 && context.setupPromptCount <= 2 && context.newChatCount >= 1 && context.newChatCount <= 3;
-      if (context.originalBinding.status !== "BOUND" || !context.originalBinding.chatUrl || !context.setupChatRef || !context.setupRequestId || (!reusedStableChat && !newlyMaterializedStableChat) || !context.stableChatMaterialized) {
+      if (context.originalBinding.status !== "BOUND" || !context.originalBinding.chatUrl || !context.setupChatRef || !context.setupRequestId || (!reusedStableChat && !newlyMaterializedStableChat) || !context.stableChatMaterialized || !Number.isSafeInteger(context.remainingRealPrompts) || context.remainingRealPrompts < 0 || !Number.isSafeInteger(context.remainingRepairPrompts) || context.remainingRepairPrompts < 0) {
         throw new Error("setup context failed bounded validation");
       }
       return context;

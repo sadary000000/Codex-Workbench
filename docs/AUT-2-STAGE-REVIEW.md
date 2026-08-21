@@ -1,214 +1,162 @@
-# AUT-2 Gate Fix 3 Stage Review
+# AUT-2 Gate Fix 4 Stage Review
 
-## 1. Executive Summary
+## Executive Summary
 
-```yaml
-stage: AUT-2 Requirement Alignment + Baseline + Change Request
-gate_fix: Bounded JSON Repair + Complete Real Requirement Roundtrip
+stage: AUT-2 Gate Fix 4 — Transport / Semantic Contract Separation + Final Real Requirement Roundtrip
 result: FIX_REQUIRED
-base_commit: 8eda595
-gate_fix_commit: 917c060
+base_commit: 80d57f6
+prior_fix3_commit: 917c060
+implementation_commit: UNCOMMITTED_WORKTREE
 v1_core_changed: NO
 webgpt_v1_changed: NO
 planner_executor_reviewer_started: NO
-real_prompt_budget: 6/12 cumulative local attempts
-next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
-```
+aut3_started: NO
 
-本轮完成了 bounded response diagnostics、一次有界修复请求的真实接线、请求身份保护和证据计数修正。真实 Provider 仍未给出可接受的 Requirement roundtrip：原始响应是合法 JSON 但不符合严格协议 schema，修复响应又是截断/不平衡 JSON。因此不能宣称 `PASS_CANDIDATE`，Gate 为 `FIX_REQUIRED`；按指令停止真实 Prompt，不进入 AUT-3。
+Fix 4 已完成 semantic-only response contract、trusted local envelope、bounded repair/dispatch accounting、首轮批量提问约束和对应自动化回归。自动化 Gate 通过，但真实 Gate 尚未闭环：第一次 Fix4 真实业务调用得到合法 READY_FOR_DRAFT，没有满足首轮 NEEDS_INPUT Gate；提示已修正后第二次 Gate 在复用稳定 Chat 阶段被 USER_CONTROL / recovery lease 阻塞，且没有发送新的业务 Prompt。
 
-## 2. Scope Resolution
+因此当前只能判定 FIX_REQUIRED，不得进入 AUT-3。
 
-### In scope
+## Scope
 
-- 诊断真实 Requirement 响应：只保留长度、SHA256、候选数、JSON/schema 阶段、顶层类型/键和 bounded 错误分类。
-- 将最多 3 次修复预算接入 Requirement WebGPT Adapter；本次单次请求最多发送一次 repair。
-- repair 使用同一绑定 Chat，但使用新的 runtime requestId、idempotencyKey 和 semanticSha256。
-- 保留原始业务 Request/Alignment identity；repair 不能伪造新一轮业务对话。
-- 修正 packaged Official CLI Gate 的 setup/reuse、runtime 请求计数、恢复原 REQUIREMENT binding 和审查证据。
-- 在真实 Project `workts`、同一个测试 Chat 上完成最后一次受控 Gate 尝试。
+In scope:
+- 对齐 Prompt、Parser、Validator、Tests、Docs 和真实响应字段。
+- 模型只返回 semantic response；transport/domain identity 由本地可信层生成。
+- NEEDS_INPUT、READY_FOR_DRAFT、BLOCKED discriminated union。
+- 同 Chat 的 bounded repair，单次 Gate 最多一次 repair。
+- 真实业务 Prompt 累计硬上限、repair 上限、setup/new-chat 上限和 dispatch 前预留。
+- 首轮至少三条独立问题的 Requirement alignment Gate。
+- 使用打包 CLI/GUI host 做受控真实 Gate；不创建新 Chat、不发送多余 Prompt。
 
-### Out of scope
+Out of scope:
+- AUT-3 Planner/Structured Workflow、Executor、Reviewer、Scheduler。
+- V1 Native Thread/Turn/Item、Runtime Registry、WebGPT V1 页面/Completion/Request Manager 重构。
+- Cookie、Token、私有 API、原始 Prompt/Response、完整聊天正文归档。
 
-- Planner、Executor、Reviewer、Scheduler、Workflow UI、AUT-3。
-- V1 Frozen Core、Native Thread/Turn/Item、Runtime Registry 或 WebGPT V1 架构重构。
-- Cookie/Token、私有 API、历史 Chat 扫描、Prompt/Response 全文归档。
-- 盲目重试、替代 Chat、当前页面 fallback 或把 malformed 输出标成成功。
+## Architecture Boundary
 
-## 3. Architecture Boundary
-
-```text
 V1 Frozen Core
   └─ WebGPT V1 Runtime / Role Session / Request Manager
        └─ AUT-2 RequirementWebGptAdapter
-            ├─ bounded response diagnostics
+            ├─ semantic response contract
+            ├─ trusted local envelope
             ├─ bounded repair transport
             └─ RequirementAutomationService
-```
 
-本轮没有建立第二套 Conversation truth，也没有改变 Native identity、WebGPT 页面逻辑、Request Manager 的 no-resend 语义或 Role 路由规则。
+本轮未修改 src/features/webgpt/** 的产品语义；src/main/main.ts 仅承担 AUT-2 AutomationStore/Gate 组合接线和 bounded setup context 传递。未建立第二套 Conversation/Transcript truth，未替换 Native identity。
 
-## 4. Implementation
+## Implementation
 
-- `src/automation/requirement-webgpt-contract.ts`
-  - 增加 bounded diagnostics 和 A-I 失败分类。
-  - 记录 response 长度/SHA256、JSON 候选、括号平衡、解析阶段、schema 阶段、顶层键和截断推断；不保存 raw response。
-  - 保持严格 schema、精确身份和 semantic 校验，失败仍 fail-closed。
-- `src/automation/requirement-webgpt-adapter.ts`
-  - 接入共享最多 3 次 repair budget。
-  - 原始 response 失败且属于可修复 contract 错误时，在同一 Chat 发一次 bounded repair。
-  - repair 使用实际 accepted runtime requestId 派生新的 idempotencyKey，并要求新的 runtime identity；不重发原业务请求。
-  - 通过 diagnostics event 输出原始/修复请求的 bounded metadata，不输出正文。
-- `src/automation/requirement-service.ts`
-  - 在 Prompt 中明确 project/role/requestId/idempotencyKey/semanticSha256 回显约束。
-  - semantic hash 使用稳定 placeholder 归一化，避免把 hash 自身引入循环。
-- `src/automation/aut2-real-webgpt-gate.ts`、`scripts/aut2-real-webgpt-gate.ts`、`src/main/main.ts`
-  - 支持复用稳定 setup Chat，避免最终尝试再次新建 Chat 或发送 setup Prompt。
-  - 记录 runtime requestId/key/semantic、repair 事件和最终 parse source；修复 `chat latest` 正式 ABI 的计数判断。
-  - Gate 结束始终恢复原 REQUIREMENT binding，并把 setup、业务、repair 计数分开。
-- `tests/aut2-requirement-webgpt-contract.test.ts`、`tests/aut2-requirement-webgpt-adapter.test.ts`、`tests/aut2-requirement-service.test.ts`
-  - 覆盖 diagnostics、schema failure、same-Chat repair、new identity、repair budget、malformed repair 和 Prompt identity。
+- requirement-webgpt-contract.ts：共享模型指令、semantic response union、严格 validator、本地 trusted envelope；模型不得提供 transport/domain identity。
+- requirement-service.ts：semantic-only Prompt；初始无答案轮次强制 NEEDS_INPUT，至少三条独立问题覆盖 synthetic 缺口；ID 均由本地生成。
+- requirement-webgpt-adapter.ts：dispatch 前预算预留；同 Chat bounded repair；预留拒绝时回滚 repair 计数；不盲目重发业务请求。
+- aut2-real-webgpt-gate.ts：单次最多 3 个业务 Prompt/1 个 repair；只接受经过校验的剩余累计预算；记录 dispatched accounting。
+- main.ts：传递并校验 setup context 的剩余 Prompt/repair 预算，缺失或越界时 fail-closed。
+- scripts/aut2-real-webgpt-gate.ts：读取累计账本并记录 Fix4 bounded evidence。
+- Tests/docs：新增首轮 NEEDS_INPUT 提示回归、repair 预留回滚回归、contract drift audit 和 Fix4 report。
 
-## 5. Final Real Gate Evidence
+## Contract Drift Audit
 
-证据文件：`docs/AUT-2-GATE-FIX-3-RUNTIME.json`。该文件不含 raw Prompt/response。
+详见 D:\办公\AI\Codex_Workbench_V1\docs\AUT-2-REQUIREMENT-CONTRACT-DRIFT-AUDIT.md。Fix4 已将模型 semantic payload 与本地 trusted transport/domain identity 分离，Prompt/Validator/Tests 使用同一共享 schema instruction。剩余失败属于真实首轮语义 Gate 和运行控制恢复，不是继续用 repair 掩盖内部 contract drift。
 
-```yaml
-official_cli: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
-gui_host: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+## Real Gate Evidence
+
+当前正式证据：D:\办公\AI\Codex_Workbench_V1\docs\AUT-2-GATE-FIX-4-RUNTIME.json。
+
+latest_result: BLOCKED
 project: workts
-setup: PASS_REAL_SETUP
-final_setup_prompt_count: 0
-final_setup_new_chat_count: 0
-runtime: READY
-control_owner: AUTO_CONTROL
+setup_prompt_count: 0
+new_chat_count: 0
+new_business_prompts_dispatched: 0
+new_repair_prompts_dispatched: 0
 login_required: false
-original_requirement_binding_restored: true
-final_real_prompt_count: 2
-final_repair_count: 1
-```
 
-### Response contract result
+阻塞链路：稳定 Chat 的 chat latest 返回 USER_CONTROL；随后显式 control auto 因已有 recovery lease 返回 TIMEOUT/WORKBENCH_START_TIMEOUT。累计 setup/new-chat 预算已耗尽，所以脚本没有创建替代 Chat、没有发送 setup Prompt、没有发送业务 Prompt。直接 CLI status 随后显示 AUTO_CONTROL，但仍观测到 active RECOVERY lease，不能据此宣称稳定 Chat 已恢复。
 
-```yaml
-original_request_id: wgpt-20ccab78-11b4-4bda-826c-e03cfcb04c26
-original_result_sha256: 286641baecaeb49dfdf842dc7f3cdb54dd82ab6970956805a26fba738e694121
-original_json_parse: passed
-original_schema: failed
-original_category: F_SCHEMA_MISMATCH
-original_candidate_count: 1
-original_response_chars: 686
-original_brace_balance: 0
-repair_triggered: true
-repair_request_id: wgpt-89dafd5b-97b8-4325-951e-f3748ade04ae
-repair_idempotency_key: aut2:repair:wgpt-20ccab78-11b4-4bda-826c-e03cfcb04c26:1
-repair_semantic_sha256: 98973113da78a4352d384a4d293784c87c861ae23b999fed958d0ec89d6a92d6
-repair_result_sha256: e1ed83665932cb5c801204f998017d47fb6f7b1887e4fdd10a39ac735c2298a3
-repair_json_parse: failed
-repair_category: B_UNBALANCED_JSON
-repair_response_chars: 580
-repair_brace_balance: 3
-repair_truncated_suspected: true
-final_parse_result: FAIL
-```
+在本次阻塞之前的第一轮 Fix4 真实业务调用中，模型返回的顶层结构已经收敛到 semantic-only 三键，解析/schema/semantic 校验通过，但状态为 READY_FOR_DRAFT；由于首轮没有 NEEDS_INPUT 问题，触发 BATCH_ALIGNMENT_NOT_NEEDS_INPUT。该结果促成了当前首轮提示修复，但不构成完整真实 roundtrip 证据。
 
-原始响应的顶层键集合为 `requirementProtocolVersion/projectId/role/requestId/idempotencyKey/semanticSha256/status/payload`；JSON 本身已通过解析，但严格 payload/schema 校验失败。修复请求确实发送到同一绑定 Chat，且 runtime requestId、idempotencyKey、semanticSha256 均为新的值；修复响应没有形成可解析候选，故未继续发送 answers、draft 或 confirmation Prompt。
+## Gate Matrix
 
-## 6. Gate Matrix
+Gate | Result | Evidence
+Contract drift audit | PASS_AUTOMATED | audit + shared contract/tests
+Transport/semantic separation | PASS_AUTOMATED | semantic parser + trusted local envelope
+Local trusted identity | PASS_AUTOMATED | spoof/mixed payload rejection tests
+Single canonical response schema | PASS_AUTOMATED | contract tests and shared prompt instructions
+Prompt/validator alignment | PASS_AUTOMATED | check + 284 tests
+Packaged runtime | PASS_REAL_SETUP_PARTIAL | runtime reached READY; second reuse was blocked
+Exact REQUIREMENT binding | PASS_REAL_SETUP_PARTIAL | original binding restored on setup failure
+Real batch alignment | FAIL / NOT_COMPLETED | first attempt READY_FOR_DRAFT; no valid NEEDS_INPUT round
+Answers -> Draft | NOT_REACHED | no valid first round
+Canonical Requirement / payload hash | NOT_REACHED_REAL | automated path only
+Explicit USER confirmation | NOT_REACHED_REAL | no Draft in blocked run
+No blind resend / replacement Chat | PASS | latest blocked run dispatched 0 new Prompt
+V1/WebGPT frozen semantics | PASS | no src/features/webgpt/** product semantic changes
+AUT-3 | NOT_STARTED | blocked by AUT-2
 
-| Gate | Result | Evidence |
-|---|---|---|
-| Packaged Runtime / login / AUTO_CONTROL | PASS_REAL | final runtime status and setup evidence |
-| Stable setup Chat reuse | PASS_REAL_SETUP | 0 setup Prompt, 0 new Chat in final invocation |
-| Exact REQUIREMENT binding | PASS_REAL | same target was opened and restored |
-| Bounded diagnostics | PASS_AUTOMATED | diagnostics contract tests and runtime metadata |
-| Bounded repair wiring | PASS_AUTOMATED + PASS_REAL_CONTROL_FLOW | one repair was triggered and recorded |
-| New repair identity | PASS_REAL | runtime requestId/key/semantic differ from original |
-| Requirement alignment roundtrip | FAIL | original `F_SCHEMA_MISMATCH`, repair `B_UNBALANCED_JSON` |
-| Answers / Draft / canonical Requirement | NOT_REACHED | no valid envelope |
-| USER confirmation | NOT_REACHED | no Draft |
-| No blind resend / no replacement Chat | PASS | no extra business resend, original binding restored |
+## Budget Evidence
 
-## 7. Prompt Budget
+来源：D:\办公\AI\Codex_Workbench_V1\docs\AUT-2-REAL-PROMPT-BUDGET.json。
 
-最终一次 Gate invocation 使用 2 条业务 Prompt（original + repair），没有 setup Prompt、没有新 Chat。整个本地 Gate Fix 3 尝试累计如下；均在同一 Project `workts` 范围内，未继续发送：
-
-```yaml
 hard_max_real_prompts: 12
-target_max_real_prompts: 7
-cumulative_real_prompts: 6
-cumulative_breakdown:
-  requirement_setup: 2
-  alignment_original: 2
-  alignment_repair: 2
-  answers_to_draft: 0
-  draft_repair: 0
-  change_request: 0
-  change_repair: 0
+cumulative_local_real_prompts: 7
 cumulative_repair_prompts: 2/3
+cumulative_setup_prompts: 2/2
 cumulative_new_test_chats: 2/3
-final_invocation_real_prompts: 2
-final_invocation_setup_prompts: 0
-final_invocation_new_chats: 0
-```
+latest_gate_new_business_prompts: 0
+latest_gate_new_repair_prompts: 0
 
-## 8. Automated Verification
+没有因为稳定 Chat 复用失败而消耗第 8 条 Prompt；这符合本阶段的 fail-closed 预算规则。
 
-```yaml
+## Automated Verification
+
 npm_run_check: PASS
-npm_test: PASS (280/280)
+npm_test: PASS (284/284)
 npm_run_build: PASS
 npm_run_package_win: PASS
 npm_audit_omit_dev: PASS (0 vulnerabilities)
-git_diff_check: PASS (warnings only for Git LF/CRLF normalization)
-secret_scan: PASS (only synthetic-fixture-value in an existing egress-policy test)
-```
+git_diff_check: PASS (LF/CRLF normalization warnings only)
+secret_scan: PASS (only documented synthetic fixture match)
 
-`npm run build` 和 `npm run package:win` 在最终代码变更后已成功；标准产物在 `dist/package`。秘密扫描没有发现真实凭据；唯一命中是测试用的字符串 `Authorization: Bearer synthetic-fixture-value`，该夹具专门验证敏感内容被拒绝。
+打包产物：
+- D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+- D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
 
-## 9. Provenance and Safety
+## Provenance and Safety
 
-- Implementation commit: `917c0609f91589c3f9f0456714c4ab8198fef830`。
-- GUI outer EXE SHA256: `31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC`。
-- Official CLI EXE SHA256: `CAB4A529620720E820F2CE73E7C7EE9F03FAFFF739F5B4AEB07F1C1B0AD74D56`。
-- Packaged `main/main.js` SHA256: `9A9E8177E79BC9F7A57742D2EA33CA44B8D4F6EE441A73A833C4D60D86658A4F`。
-- Packaged `renderer/renderer.js` SHA256: `94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1`。
-- Packaged `automation/aut2-real-webgpt-gate.js` SHA256: `B87F6A8BA513A7673128A9C7F722B73683B9B73E86F4496B27008123B59E61E1`。
-- Packaged `package.json` SHA256: `1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F`。
-- Review package SHA256 is recorded in the adjacent `.sha256` sidecar to avoid self-reference.
-- No Cookie/Token/browser profile/private chat body was read or packaged. `promptBodyLogged=false`, `responseBodyLogged=false`, `cookiesRead=false`, `tokensRead=false`。
-- V1 Frozen Core and WebGPT V1 product semantics were not modified.
-- Existing controlled Request Manager result-file behavior was not expanded by this gate.
+- Base HEAD: 80d57f6；prior Fix3 implementation: 917c060。
+- Fix4 implementation is currently uncommitted in the intentionally dirty worktree；没有生成新的 implementation commit。
+- GUI outer EXE SHA256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC。
+- Official CLI EXE SHA256: 00F4063CA268F884AAB6B4C49BEDCEAA254388AE9410C39AFC25377CC8174EB2。
+- Packaged main.js SHA256: 5111A11C657BE336836A5ADCFA3ADBCB68FE3AF513F2B25CBE9A476971746EEF。
+- Packaged renderer.js SHA256: 94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1。
+- Packaged aut2-real-webgpt-gate.js SHA256: 001BA39FE9EC590F22C282D40879478330D3B7751B56EB76D5F312C8CB2EBEEA。
+- Packaged package.json SHA256: 1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F。
+- 未读取/打包 Cookie、Token、Browser profile 或聊天正文；evidence 仅包含 bounded metadata/hash/状态。
 
-## 10. Subagents
+## Subagents
 
-本轮四个独立审计子代理均自然完成并在审核整合后关闭：
+Agent | Task | Result | Final status
+Aristotle | Contract drift / identity audit | 指出 budget passthrough、repair dispatch accounting 和 real evidence 缺口 | completed, reviewed, closed/not_found after shutdown
+Pasteur | Real Gate / budget audit | 指出累计预算与 setup reuse 的安全边界 | completed, reviewed, closed
+Linnaeus | Regression / scope audit | 确认首轮 Gate 失败、AUT-3 未启动、V1/WebGPT 边界 | completed, reviewed, closed
 
-| Agent | Task | Result | Status |
-|---|---|---|---|
-| Kant | Root cause / parser audit | Identified prior `JSON_INVALID`; confirmed adapter repair wiring gap | completed, closed |
-| Beauvoir | Control-flow / no-resend audit | Confirmed same-Chat repair identity and Request Manager safety | completed, closed |
-| Lagrange | Real Gate harness / budget audit | Identified setup reuse/counting evidence issues | completed, closed |
-| McClintock | Security boundary audit | Confirmed bounded evidence and no new raw credential egress | completed, closed |
+running_subagents_at_gate: 0
 
-`running_subagents_at_gate: 0`
+## Known Limitations / Deferred
 
-## 11. Known Limitations / Deferred
+- 尚未取得真实 NEEDS_INPUT -> answers -> READY_FOR_DRAFT -> USER confirmation 完整证据。
+- 当前 RECOVERY lease / USER_CONTROL 恢复问题阻塞 stable Chat reattach；不得通过新 Chat 或额外 Prompt 绕过。
+- gpt_self_confirmation 仍 BLOCKED/未请求。
+- Change Request 仅保留 automated evidence；Planner/Executor/Reviewer/Workflow 未启动。
+- Attachment、多账号、多会话继续 deferred。
 
-- 真实 GPT 当前仍返回 schema mismatch，修复请求返回截断 JSON；因此完整 Requirement roundtrip 尚未完成。
-- `RequirementAutomationService` 对 Adapter 的最终失败仍以 `MALFORMED_REQUIREMENT_RESPONSE` fail-closed；这不是成功结果。
-- 没有获得有效 NEEDS_INPUT，所以 Draft、USER confirmation 和 Change Request 真实链路未执行。
-- Attachment、多账号、多会话、Planner/Executor/Reviewer/Workflow 继续 deferred 或 NOT_STARTED。
+## Workspace Protection and Gate
 
-## 12. Workspace Protection and Gate
+- D:\办公\AI\Codex_Workbench 旧 donor 只读，未修改。
+- D:\办公\AI\Auto_Agent 未修改。
+- dist-stage-a/、指导文档/*.docx、用户本地规划资料未被本轮 add/修改/删除/重命名。
+- 既有 dirty/deleted baseline 未 reset、clean、stash 或 checkout。
 
-- 用户本地 `dist-stage-a/`、`指导文档/*.docx`、其他未提交规划资料未被 add、修改、删除或重命名。
-- 旧 donor `D:\办公\AI\Codex_Workbench` 只读，原有 dirty baseline 保留；`D:\办公\AI\Auto_Agent` 未修改。
-- 既有无关 dirty/deleted 文件没有被 reset、clean、stash 或覆盖。
-
-```yaml
 gate: FIX_REQUIRED
 safe_stop: YES
-next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
 do_not_enter: AUT-3
-```
+next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT

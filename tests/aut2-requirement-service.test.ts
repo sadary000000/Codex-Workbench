@@ -37,7 +37,7 @@ class FakeRequirementWebGPT implements IWebGPTRequirementService {
     this.requests.push(request);
     if (this.mode === "THROW") throw new Error("bounded provider response was malformed");
     return createReadyForDraftEnvelope(requirementContextFromRequest(request), {
-      requirement: {
+      draft: {
         goal: "Deliver the confirmed AUT-2 requirement baseline.",
         context: "The requirement is derived from the alignment round.",
         constraints: ["No native execution is allowed in AUT-2."],
@@ -138,9 +138,10 @@ test("aligns a batch, resolves context, calls explicit REQUIREMENT WebGPT, and r
     assert.ok(first.draft && first.request);
     assert.equal(first.request?.role, REQUIREMENT_ROLE);
     assert.equal(first.request?.binding.chatRef, binding().chatRef);
-    assert.match(first.request?.prompt ?? "", /Protocol identity to echo exactly:/);
-    assert.match(first.request?.prompt ?? "", /Request semanticSha256 to echo: [a-f0-9]{64}/);
-    assert.equal(first.request?.prompt.includes(first.request?.semanticSha256 ?? ""), true);
+    assert.match(first.request?.prompt ?? "", /top-level keys must be exactly requirementProtocolVersion, status, and payload/);
+    assert.match(first.request?.prompt ?? "", /NEEDS_INPUT payload must be/);
+    assert.doesNotMatch(first.request?.prompt ?? "", /Protocol identity to echo|Request semanticSha256 to echo/);
+    assert.equal(first.request?.prompt.includes(first.request?.semanticSha256 ?? ""), false);
     assert.equal(webgpt.requests.length, 1);
 
     const second = await worker.requestDraft({
@@ -152,6 +153,27 @@ test("aligns a batch, resolves context, calls explicit REQUIREMENT WebGPT, and r
     assert.equal(second.draft?.requirementVersionId, first.draft?.requirementVersionId);
     assert.equal(second.request?.requestId, first.request?.requestId);
     assert.equal(webgpt.requests.length, 1);
+  } finally {
+    await dispose(value);
+  }
+});
+
+test("initial WebGPT alignment explicitly requires a batched NEEDS_INPUT response", async () => {
+  const value = await fixture();
+  const webgpt = new FakeRequirementWebGPT();
+  try {
+    const worker = service(value.store, webgpt);
+    const session = await worker.startAlignment({ projectId: value.projectId, goal: "Build a bounded command-line calculator.", questions: [] });
+    const result = await worker.requestDraft({ sessionId: session.alignmentSessionId, binding: binding() });
+    assert.equal(result.status, "DRAFT_READY");
+    assert.equal(webgpt.requests.length, 1);
+    const prompt = webgpt.requests[0]?.prompt ?? "";
+    assert.match(prompt, /initial alignment request and no answers are available yet/);
+    assert.match(prompt, /MUST return NEEDS_INPUT, not READY_FOR_DRAFT/);
+    assert.match(prompt, /programming language/);
+    assert.match(prompt, /invalid-input behavior/);
+    assert.match(prompt, /automated tests/);
+    assert.match(prompt, /Do not return a draft until those facts are answered/);
   } finally {
     await dispose(value);
   }

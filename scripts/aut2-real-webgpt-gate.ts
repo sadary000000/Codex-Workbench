@@ -11,10 +11,39 @@ const guiExecutable = process.env.WEBGPT_GUI_EXECUTABLE?.trim() || join(root, "d
 const cliExecutable = process.env.WEBGPT_CLI_EXECUTABLE?.trim() || join(root, "dist", "package", "Codex Workbench CLI.exe");
 const webgptProjectId = process.env.AUT2_WEBGPT_PROJECT_ID?.trim() || "";
 const webgptProjectName = process.env.AUT2_WEBGPT_PROJECT_NAME?.trim() || "workts";
-const permanentEvidencePath = process.env.AUT2_GATE3_EVIDENCE_PATH?.trim() || join(root, "docs", "AUT-2-GATE-FIX-3-RUNTIME.json");
-const reusableEvidencePath = process.env.AUT2_REUSE_SETUP_EVIDENCE?.trim() || join(root, "docs", "AUT-2-GATE-FIX-2-RUNTIME.json");
+const permanentEvidencePath = process.env.AUT2_GATE4_EVIDENCE_PATH?.trim() || join(root, "docs", "AUT-2-GATE-FIX-4-RUNTIME.json");
+const reusableEvidencePath = process.env.AUT2_REUSE_SETUP_EVIDENCE?.trim() || join(root, "docs", "AUT-2-GATE-FIX-3-RUNTIME.json");
+const budgetPath = process.env.AUT2_REAL_PROMPT_BUDGET_PATH?.trim() || join(root, "docs", "AUT-2-REAL-PROMPT-BUDGET.json");
+const MAX_CUMULATIVE_REAL_PROMPTS = 12;
+const MAX_CUMULATIVE_REPAIR_PROMPTS = 3;
+const MAX_CUMULATIVE_NEW_CHATS = 3;
+const MAX_CUMULATIVE_SETUP_PROMPTS = 2;
 const setupPrompt = "This chat is being initialized for a bounded automated requirement-alignment smoke test. Reply exactly: ROLE_READY. Do not infer or store any project requirements from this setup message.";
 const startedAt = new Date().toISOString();
+
+interface RealPromptBudgetSnapshot {
+  readonly cumulativeLocalRealPrompts: number;
+  readonly cumulativeRepairPrompts: number;
+  readonly cumulativeNewChats: number;
+  readonly cumulativeRoleSetupPrompts: number;
+}
+
+async function readRealPromptBudget(): Promise<RealPromptBudgetSnapshot> {
+  const parsed = JSON.parse(await readFile(budgetPath, "utf8")) as Record<string, unknown>;
+  const breakdown = parsed.cumulativeBreakdown && typeof parsed.cumulativeBreakdown === "object" && !Array.isArray(parsed.cumulativeBreakdown)
+    ? parsed.cumulativeBreakdown as Record<string, unknown>
+    : {};
+  const numberAt = (value: unknown, field: string): number => {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(`AUT2_BUDGET_INVALID: ${field}`);
+    return value;
+  };
+  return {
+    cumulativeLocalRealPrompts: numberAt(parsed.cumulativeLocalRealPrompts, "cumulativeLocalRealPrompts"),
+    cumulativeRepairPrompts: numberAt(parsed.cumulativeRepairPrompts, "cumulativeRepairPrompts"),
+    cumulativeNewChats: numberAt(parsed.cumulativeNewChats, "cumulativeNewChats"),
+    cumulativeRoleSetupPrompts: numberAt(parsed.cumulativeRoleSetupPrompts ?? breakdown.requirementSetup, "cumulativeRoleSetupPrompts"),
+  };
+}
 
 interface Invocation {
   readonly args: string[];
@@ -195,6 +224,19 @@ async function reusableSetupCandidate(): Promise<ReusableSetupCandidate | null> 
   return null;
 }
 
+const budgetBefore = await readRealPromptBudget();
+if (budgetBefore.cumulativeLocalRealPrompts > MAX_CUMULATIVE_REAL_PROMPTS
+  || budgetBefore.cumulativeRepairPrompts > MAX_CUMULATIVE_REPAIR_PROMPTS
+  || budgetBefore.cumulativeNewChats > MAX_CUMULATIVE_NEW_CHATS
+  || budgetBefore.cumulativeRoleSetupPrompts > MAX_CUMULATIVE_SETUP_PROMPTS) {
+  throw new Error("AUT2_BUDGET_EXCEEDED: the persisted cumulative budget is already over its hard limit; no WebGPT action was attempted.");
+}
+const remainingRealPrompts = MAX_CUMULATIVE_REAL_PROMPTS - budgetBefore.cumulativeLocalRealPrompts;
+const remainingRepairPrompts = MAX_CUMULATIVE_REPAIR_PROMPTS - budgetBefore.cumulativeRepairPrompts;
+if (remainingRealPrompts <= 0 || remainingRepairPrompts <= 0) {
+  throw new Error("AUT2_BUDGET_EXHAUSTED: no bounded real/repair prompt remains; no WebGPT action was attempted.");
+}
+
 const tempRoot = await mkdtemp(join(tmpdir(), "codex-workbench-aut2-real-"));
 const evidencePath = join(tempRoot, "evidence.json");
 const setupPath = join(tempRoot, "setup-context.json");
@@ -262,6 +304,8 @@ try {
         newChatCount: 0,
         stableChatMaterialized: true,
         latestAssistantSha256: reusable.latestAssistantSha256,
+        remainingRealPrompts,
+        remainingRepairPrompts,
       };
       reused = true;
     } catch (error) {
@@ -282,6 +326,9 @@ try {
     }
   }
   if (!reused) {
+    if (budgetBefore.cumulativeRoleSetupPrompts >= MAX_CUMULATIVE_SETUP_PROMPTS || budgetBefore.cumulativeNewChats >= MAX_CUMULATIVE_NEW_CHATS) {
+      throw new Error("AUT2_SETUP_BUDGET_EXHAUSTED: stable Chat reuse failed and creating another setup Chat/Prompt is forbidden by the cumulative budget.");
+    }
     setupInvocations.projectNewChat = await invoke(["project", "new-chat", "--name", webgptProjectName], 120_000);
     const newChat = requireOk(setupInvocations.projectNewChat, "PROJECT_NEW_CHAT");
     const newChatPage = newChat.page && typeof newChat.page === "object" && !Array.isArray(newChat.page) ? newChat.page as Record<string, unknown> : {};
@@ -324,6 +371,8 @@ try {
       newChatCount: 1,
       stableChatMaterialized: true,
       latestAssistantSha256: hash("ROLE_READY"),
+      remainingRealPrompts,
+      remainingRepairPrompts,
     };
   }
   await writeFile(setupPath, `${JSON.stringify(setupContext, null, 2)}\n`, "utf8");
@@ -351,10 +400,13 @@ await rm(tempRoot, { recursive: true, force: true });
 const result = gateEvidence?.result === "PASS_REAL" ? "PASS_REAL" : gateEvidence ? "FAIL" : "BLOCKED";
 const gateAttemptedRealRequests = typeof gateEvidence?.attemptedRealRequests === "number" ? gateEvidence.attemptedRealRequests : 0;
 const gateRealPromptCount = typeof gateEvidence?.realPromptCount === "number" ? gateEvidence.realPromptCount : 0;
+const gateDispatchedRealPromptCount = typeof gateEvidence?.dispatchedRealPromptCount === "number" ? gateEvidence.dispatchedRealPromptCount : Math.max(0, gateRealPromptCount - (setupContext ? Number(setupContext.setupPromptCount ?? 0) : 0));
 const setupPromptCount = setupContext ? Number(setupContext.setupPromptCount ?? 0) : 0;
-const accountedRealPromptCount = gateEvidence ? gateRealPromptCount : setupPromptCount;
+const accountedRealPromptCount = gateEvidence ? gateDispatchedRealPromptCount : 0;
+const gateRepairBudget = gateEvidence?.repairPromptBudget && typeof gateEvidence.repairPromptBudget === "object" && !Array.isArray(gateEvidence.repairPromptBudget) ? gateEvidence.repairPromptBudget as Record<string, unknown> : null;
+const gateDispatchedRepairPromptCount = typeof gateRepairBudget?.used === "number" ? gateRepairBudget.used : (typeof gateEvidence?.repairCount === "number" ? gateEvidence.repairCount : 0);
 const wrapperEvidence = {
-  stage: "AUT-2 Gate Fix 3",
+  stage: "AUT-2 Gate Fix 4",
   result,
   startedAt,
   officialCli: {
@@ -382,10 +434,18 @@ const wrapperEvidence = {
   },
   accounting: {
     realPromptCount: accountedRealPromptCount,
+    cumulativeRealPromptCount: budgetBefore.cumulativeLocalRealPrompts + accountedRealPromptCount,
     attemptedRealRequests: gateAttemptedRealRequests,
     roleSetupPromptCount: setupPromptCount,
+    cumulativeRoleSetupPrompts: budgetBefore.cumulativeRoleSetupPrompts + setupPromptCount,
     newChatCount: setupContext ? Number(setupContext.newChatCount ?? 0) : 0,
+    cumulativeNewChats: budgetBefore.cumulativeNewChats + (setupContext ? Number(setupContext.newChatCount ?? 0) : 0),
     repairCount: typeof gateEvidence?.repairCount === "number" ? gateEvidence.repairCount : 0,
+    dispatchedRepairPromptCount: gateDispatchedRepairPromptCount,
+    cumulativeRepairCount: budgetBefore.cumulativeRepairPrompts + gateDispatchedRepairPromptCount,
+    hardMaxRealPrompts: MAX_CUMULATIVE_REAL_PROMPTS,
+    hardMaxRepairPrompts: MAX_CUMULATIVE_REPAIR_PROMPTS,
+    hardMaxNewChats: MAX_CUMULATIVE_NEW_CHATS,
     source: "gate_evidence_request_diagnostics_and_setup_context",
   },
   gateEvidence,

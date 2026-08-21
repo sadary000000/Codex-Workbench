@@ -17,6 +17,22 @@ export const MAX_REPAIR_BUDGET = MAX_REQUIREMENT_REPAIR_ATTEMPTS;
 
 export const REQUIREMENT_ENVELOPE_STATUSES = ["NEEDS_INPUT", "READY_FOR_DRAFT", "BLOCKED"] as const;
 
+/**
+ * Canonical instructions shared by the Requirement prompt builder, bounded
+ * repair prompt and contract tests.  The model returns semantic data only;
+ * the trusted transport envelope is attached locally after validation.
+ */
+export const REQUIREMENT_MODEL_RESPONSE_INSTRUCTIONS = [
+  "Return exactly one JSON object and nothing else. Do not use markdown or prose.",
+  "The top-level keys must be exactly requirementProtocolVersion, status, and payload.",
+  "Use requirementProtocolVersion=1.",
+  "Allowed status values are NEEDS_INPUT, READY_FOR_DRAFT, and BLOCKED.",
+  "NEEDS_INPUT payload must be {questions: [{category, question, whyNeeded, blocking, resolutionMode, options?, defaultRecommendation?, dependsOn?}], assumptions?: [{statement, rationale?, impact?, confidence?, blocking?}]} and questions must contain at least one item.",
+  "READY_FOR_DRAFT payload must be {draft: {goal, context?, constraints?, acceptanceCriteria?, assumptions?, nonGoals?}}.",
+  "BLOCKED payload must be {code, reason, retryable}.",
+  "Do not output projectId, role, chatRef, requestId, idempotencyKey, semanticSha256, questionId, roundId, alignmentSessionId, requirementVersionId, auditEventId, or payloadSha256.",
+].join("\n");
+
 export const MAX_REQUIREMENT_RAW_RESPONSE_BYTES = 64 * 1024;
 export const MAX_REQUIREMENT_JSON_BYTES = 32 * 1024;
 export const MAX_REQUIREMENT_JSON_DEPTH = 8;
@@ -49,19 +65,68 @@ export interface RequirementDraft {
   readonly nonGoals?: readonly string[];
 }
 
+export const REQUIREMENT_QUESTION_RESOLUTION_MODES = [
+  "USER_REQUIRED",
+  "ASSUMPTION_ALLOWED",
+  "AVAILABLE_CONTEXT",
+  "AUTO_INVESTIGATION",
+] as const;
+export type RequirementQuestionResolutionMode = typeof REQUIREMENT_QUESTION_RESOLUTION_MODES[number];
+
+export interface RequirementQuestionResponse {
+  readonly category: string;
+  readonly question: string;
+  readonly whyNeeded: string;
+  readonly blocking: boolean;
+  readonly resolutionMode: RequirementQuestionResolutionMode;
+  readonly options?: readonly string[];
+  readonly defaultRecommendation?: string | null;
+  readonly dependsOn?: readonly string[];
+}
+
+export interface RequirementAssumptionResponse {
+  readonly statement: string;
+  readonly rationale?: string | null;
+  readonly impact?: string;
+  readonly confidence?: "LOW" | "MEDIUM" | "HIGH";
+  readonly blocking?: boolean;
+}
+
 export interface NeedsInputPayload {
-  readonly missingInputs: readonly string[];
+  readonly questions: readonly RequirementQuestionResponse[];
+  readonly assumptions?: readonly RequirementAssumptionResponse[];
 }
 
 export interface ReadyForDraftPayload {
-  readonly requirement: RequirementDraft;
+  readonly draft: RequirementDraft;
 }
 
 export interface BlockedPayload {
   readonly reason: string;
-  readonly code?: string;
-  readonly retryable?: boolean;
+  readonly code: string;
+  readonly retryable: boolean;
 }
+
+export interface RequirementSemanticResponseBase {
+  readonly requirementProtocolVersion: RequirementProtocolVersion;
+}
+
+export interface RequirementNeedsInputResponse extends RequirementSemanticResponseBase {
+  readonly status: "NEEDS_INPUT";
+  readonly payload: NeedsInputPayload;
+}
+
+export interface RequirementReadyForDraftResponse extends RequirementSemanticResponseBase {
+  readonly status: "READY_FOR_DRAFT";
+  readonly payload: ReadyForDraftPayload;
+}
+
+export interface RequirementBlockedResponse extends RequirementSemanticResponseBase {
+  readonly status: "BLOCKED";
+  readonly payload: BlockedPayload;
+}
+
+export type RequirementSemanticResponse = RequirementNeedsInputResponse | RequirementReadyForDraftResponse | RequirementBlockedResponse;
 
 interface RequirementEnvelopeBase {
   readonly requirementProtocolVersion: RequirementProtocolVersion;
@@ -226,8 +291,6 @@ export type RequirementParseResult = RequirementParseSuccess | RequirementParseF
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 const CURRENT_CHAT_SENTINEL = /^(?:current|current-chat|active-chat|latest-chat)$/i;
-const SEMANTIC_ECHO_LINE = /(^Request semanticSha256 to echo:\s*)(?:<SEMANTIC_SHA256>|[a-f0-9]{64})\s*$/m;
-const SEMANTIC_ECHO_PLACEHOLDER = "<SEMANTIC_SHA256>";
 
 /**
  * Computes the request semantic identity. Runtime ids and the idempotency key
@@ -248,12 +311,11 @@ export function computeRequirementSemanticSha256(value: RequirementSemanticDescr
 }
 
 /**
- * A Requirement prompt may explicitly tell the model which semantic hash to
- * echo. The hash is computed over the placeholder form of that line so the
- * prompt can carry the value without introducing a circular hash mismatch.
+ * The model never owns this hash. It is computed over the exact semantic
+ * request descriptor and attached to the trusted runtime request locally.
  */
 function canonicalPromptForSemantic(prompt: string): string {
-  return prompt.replace(SEMANTIC_ECHO_LINE, `$1${SEMANTIC_ECHO_PLACEHOLDER}`);
+  return prompt;
 }
 
 export function createRequirementRequest(input: CreateRequirementRequestInput): IWebGPTRequirementRequest {
@@ -453,6 +515,57 @@ export function parseRequirementEnvelope(rawResponse: string, context: Requireme
   return validateRequirementEnvelope(parsed, context);
 }
 
+/**
+ * Parses the model-facing semantic response. Transport identity is not
+ * accepted here by design; callers must attach the trusted local context via
+ * `attachTrustedRequirementEnvelope`.
+ */
+export function parseRequirementSemanticResponse(rawResponse: string): RequirementSemanticResponse {
+  const candidate = extractBoundedJson(rawResponse);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate) as unknown;
+  } catch {
+    throw new RequirementContractError("JSON_INVALID", "the extracted JSON object is invalid JSON.", "rawResponse");
+  }
+  return validateRequirementSemanticResponse(parsed);
+}
+
+export function validateRequirementSemanticResponse(value: unknown): RequirementSemanticResponse {
+  assertBoundedJsonValue(value, "semanticResponse", 0, { count: 0 });
+  const item = asRecord(value, "semanticResponse");
+  assertExactKeys(item, ["requirementProtocolVersion", "status", "payload"], "semanticResponse");
+  if (item.requirementProtocolVersion !== REQUIREMENT_PROTOCOL_VERSION) {
+    throw new RequirementContractError("SCHEMA_INVALID", `requirementProtocolVersion must equal ${REQUIREMENT_PROTOCOL_VERSION}.`, "semanticResponse.requirementProtocolVersion");
+  }
+  const status = item.status;
+  if (status !== "NEEDS_INPUT" && status !== "READY_FOR_DRAFT" && status !== "BLOCKED") {
+    throw new RequirementContractError("SCHEMA_INVALID", "status is not a supported requirement semantic response status.", "semanticResponse.status");
+  }
+  if (status === "NEEDS_INPUT") return { requirementProtocolVersion: REQUIREMENT_PROTOCOL_VERSION, status, payload: validateNeedsInputPayload(item.payload) };
+  if (status === "READY_FOR_DRAFT") return { requirementProtocolVersion: REQUIREMENT_PROTOCOL_VERSION, status, payload: validateReadyForDraftPayload(item.payload) };
+  return { requirementProtocolVersion: REQUIREMENT_PROTOCOL_VERSION, status, payload: validateBlockedPayload(item.payload) };
+}
+
+/** Adds only locally trusted request metadata to an already validated model response. */
+export function attachTrustedRequirementEnvelope(semantic: RequirementSemanticResponse, context: RequirementEnvelopeContext): RequirementEnvelope {
+  validateEnvelopeContext(context);
+  const validated = validateRequirementSemanticResponse(semantic);
+  return validateRequirementEnvelope({ ...contextFields(context), status: validated.status, payload: validated.payload }, context);
+}
+
+/** Test/adapter helper for serializing semantic data without copying transport identity. */
+export function semanticResponseFromEnvelope(envelope: RequirementEnvelope): RequirementSemanticResponse {
+  const validated = validateRequirementEnvelope(envelope, {
+    projectId: envelope.projectId,
+    role: envelope.role,
+    requestId: envelope.requestId,
+    idempotencyKey: envelope.idempotencyKey,
+    semanticSha256: envelope.semanticSha256,
+  });
+  return { requirementProtocolVersion: REQUIREMENT_PROTOCOL_VERSION, status: validated.status, payload: validated.payload } as RequirementSemanticResponse;
+}
+
 /** Validates a decoded envelope without parsing or performing any I/O. */
 export function validateRequirementEnvelope(value: unknown, context: RequirementEnvelopeContext): RequirementEnvelope {
   validateEnvelopeContext(context);
@@ -520,14 +633,14 @@ export function tryParseRequirementResponse(rawResponse: string, context: Requir
   }
 
   try {
-    const envelope = parseRequirementEnvelope(rawResponse, context);
+    const envelope = attachTrustedRequirementEnvelope(parseRequirementSemanticResponse(rawResponse), context);
     return { ok: true, envelope, source: "original", repairAttempts: 0 };
   } catch (originalError) {
     const original = asContractError(originalError, "original response could not satisfy the requirement contract.");
     if (candidates.length === 0 || budget === 0) return failure(original, "original", 0);
 
     try {
-      const envelope = parseRequirementEnvelope(candidates[0]!, context);
+      const envelope = attachTrustedRequirementEnvelope(parseRequirementSemanticResponse(candidates[0]!), context);
       return { ok: true, envelope, source: "repair", repairAttempts: 1 };
     } catch (repairError) {
       const repair = asContractError(repairError, "repair response could not satisfy the requirement contract.");
@@ -572,27 +685,30 @@ function validateEnvelopeContext(context: RequirementEnvelopeContext): void {
 
 function validateNeedsInputPayload(value: unknown): NeedsInputPayload {
   const item = asRecord(value, "envelope.payload");
-  assertExactKeys(item, ["missingInputs"], "envelope.payload");
-  const missingInputs = assertStringList(item.missingInputs, "envelope.payload.missingInputs", 32, 1_024);
-  if (missingInputs.length === 0) throw new RequirementContractError("SEMANTIC_INVALID", "NEEDS_INPUT requires at least one missing input.", "envelope.payload.missingInputs");
-  return { missingInputs };
+  assertExactKeys(item, ["questions", "assumptions"], "envelope.payload", ["assumptions"]);
+  if (!Array.isArray(item.questions)) throw new RequirementContractError("SCHEMA_INVALID", "questions must be an array.", "envelope.payload.questions");
+  if (item.questions.length === 0) throw new RequirementContractError("SEMANTIC_INVALID", "NEEDS_INPUT requires at least one question.", "envelope.payload.questions");
+  if (item.questions.length > 32) throw new RequirementContractError("JSON_BOUNDS_EXCEEDED", "questions exceeds 32 items.", "envelope.payload.questions");
+  const questions = item.questions.map((question, index) => validateRequirementQuestionResponse(question, `envelope.payload.questions[${index}]`));
+  const assumptions = item.assumptions === undefined ? undefined : validateRequirementAssumptionResponses(item.assumptions, "envelope.payload.assumptions");
+  return { questions, ...(assumptions === undefined ? {} : { assumptions }) };
 }
 
 function validateReadyForDraftPayload(value: unknown): ReadyForDraftPayload {
   const item = asRecord(value, "envelope.payload");
-  assertExactKeys(item, ["requirement"], "envelope.payload");
-  return { requirement: validateRequirementDraft(item.requirement) };
+  assertExactKeys(item, ["draft"], "envelope.payload");
+  return { draft: validateRequirementDraft(item.draft, "envelope.payload.draft") };
 }
 
-function validateRequirementDraft(value: unknown): RequirementDraft {
-  const item = asRecord(value, "envelope.payload.requirement");
-  assertExactKeys(item, ["goal", "context", "constraints", "acceptanceCriteria", "assumptions", "nonGoals"], "envelope.payload.requirement", ["context", "constraints", "acceptanceCriteria", "assumptions", "nonGoals"]);
-  const goal = assertText(item.goal, "envelope.payload.requirement.goal", MAX_REQUIREMENT_STRING_CHARS);
-  const context = item.context === undefined ? undefined : assertText(item.context, "envelope.payload.requirement.context", MAX_REQUIREMENT_STRING_CHARS);
-  const constraints = item.constraints === undefined ? undefined : assertStringList(item.constraints, "envelope.payload.requirement.constraints", 32, 1_024);
-  const acceptanceCriteria = item.acceptanceCriteria === undefined ? undefined : assertStringList(item.acceptanceCriteria, "envelope.payload.requirement.acceptanceCriteria", 32, 1_024);
-  const assumptions = item.assumptions === undefined ? undefined : assertStringList(item.assumptions, "envelope.payload.requirement.assumptions", 32, 1_024);
-  const nonGoals = item.nonGoals === undefined ? undefined : assertStringList(item.nonGoals, "envelope.payload.requirement.nonGoals", 32, 1_024);
+function validateRequirementDraft(value: unknown, path = "envelope.payload.draft"): RequirementDraft {
+  const item = asRecord(value, path);
+  assertExactKeys(item, ["goal", "context", "constraints", "acceptanceCriteria", "assumptions", "nonGoals"], path, ["context", "constraints", "acceptanceCriteria", "assumptions", "nonGoals"]);
+  const goal = assertText(item.goal, `${path}.goal`, MAX_REQUIREMENT_STRING_CHARS);
+  const context = item.context === undefined ? undefined : assertText(item.context, `${path}.context`, MAX_REQUIREMENT_STRING_CHARS);
+  const constraints = item.constraints === undefined ? undefined : assertStringList(item.constraints, `${path}.constraints`, 32, 1_024);
+  const acceptanceCriteria = item.acceptanceCriteria === undefined ? undefined : assertStringList(item.acceptanceCriteria, `${path}.acceptanceCriteria`, 32, 1_024);
+  const assumptions = item.assumptions === undefined ? undefined : assertStringList(item.assumptions, `${path}.assumptions`, 32, 1_024);
+  const nonGoals = item.nonGoals === undefined ? undefined : assertStringList(item.nonGoals, `${path}.nonGoals`, 32, 1_024);
   return { goal, ...(context === undefined ? {} : { context }), ...(constraints === undefined ? {} : { constraints }), ...(acceptanceCriteria === undefined ? {} : { acceptanceCriteria }), ...(assumptions === undefined ? {} : { assumptions }), ...(nonGoals === undefined ? {} : { nonGoals }) };
 }
 
@@ -600,9 +716,62 @@ function validateBlockedPayload(value: unknown): BlockedPayload {
   const item = asRecord(value, "envelope.payload");
   assertExactKeys(item, ["reason", "code", "retryable"], "envelope.payload");
   const reason = assertText(item.reason, "envelope.payload.reason", MAX_REQUIREMENT_STRING_CHARS);
-  const code = item.code === undefined ? undefined : assertToken(item.code, "envelope.payload.code", 128);
-  const retryable = item.retryable === undefined ? undefined : assertBoolean(item.retryable, "envelope.payload.retryable");
-  return { reason, ...(code === undefined ? {} : { code }), ...(retryable === undefined ? {} : { retryable }) };
+  const code = assertToken(item.code, "envelope.payload.code", 128);
+  const retryable = assertBoolean(item.retryable, "envelope.payload.retryable");
+  return { reason, code, retryable };
+}
+
+function validateRequirementQuestionResponse(value: unknown, path: string): RequirementQuestionResponse {
+  const item = asRecord(value, path);
+  assertExactKeys(item, ["category", "question", "whyNeeded", "blocking", "resolutionMode", "options", "defaultRecommendation", "dependsOn"], path, ["options", "defaultRecommendation", "dependsOn"]);
+  const category = assertText(item.category, `${path}.category`, 256);
+  const question = assertText(item.question, `${path}.question`, MAX_REQUIREMENT_STRING_CHARS);
+  const whyNeeded = assertText(item.whyNeeded, `${path}.whyNeeded`, MAX_REQUIREMENT_STRING_CHARS);
+  const blocking = assertBoolean(item.blocking, `${path}.blocking`);
+  const resolutionMode = item.resolutionMode;
+  if (!REQUIREMENT_QUESTION_RESOLUTION_MODES.includes(resolutionMode as RequirementQuestionResolutionMode)) {
+    throw new RequirementContractError("SCHEMA_INVALID", "resolutionMode is not supported by the Requirement response contract.", `${path}.resolutionMode`);
+  }
+  if (blocking && (resolutionMode === "AVAILABLE_CONTEXT" || resolutionMode === "AUTO_INVESTIGATION")) {
+    throw new RequirementContractError("SEMANTIC_INVALID", "blocking questions must use a user-resolvable resolutionMode.", `${path}.resolutionMode`);
+  }
+  const options = item.options === undefined ? undefined : assertStringList(item.options, `${path}.options`, 16, 1_024);
+  const defaultRecommendation = item.defaultRecommendation === undefined || item.defaultRecommendation === null
+    ? item.defaultRecommendation
+    : assertText(item.defaultRecommendation, `${path}.defaultRecommendation`, 1_024);
+  const dependsOn = item.dependsOn === undefined ? undefined : assertStringList(item.dependsOn, `${path}.dependsOn`, 32, 256);
+  return {
+    category,
+    question,
+    whyNeeded,
+    blocking,
+    resolutionMode: resolutionMode as RequirementQuestionResolutionMode,
+    ...(options === undefined ? {} : { options }),
+    ...(defaultRecommendation === undefined ? {} : { defaultRecommendation }),
+    ...(dependsOn === undefined ? {} : { dependsOn }),
+  };
+}
+
+function validateRequirementAssumptionResponses(value: unknown, path: string): readonly RequirementAssumptionResponse[] {
+  if (!Array.isArray(value)) throw new RequirementContractError("SCHEMA_INVALID", "assumptions must be an array.", path);
+  if (value.length > 32) throw new RequirementContractError("JSON_BOUNDS_EXCEEDED", "assumptions exceeds 32 items.", path);
+  return value.map((entry, index) => {
+    const item = asRecord(entry, `${path}[${index}]`);
+    assertExactKeys(item, ["statement", "rationale", "impact", "confidence", "blocking"], `${path}[${index}]`, ["rationale", "impact", "confidence", "blocking"]);
+    const statement = assertText(item.statement, `${path}[${index}].statement`, MAX_REQUIREMENT_STRING_CHARS);
+    const rationale = item.rationale === undefined || item.rationale === null ? item.rationale : assertText(item.rationale, `${path}[${index}].rationale`, MAX_REQUIREMENT_STRING_CHARS);
+    const impact = item.impact === undefined ? undefined : assertText(item.impact, `${path}[${index}].impact`, MAX_REQUIREMENT_STRING_CHARS);
+    const confidence = item.confidence === undefined ? undefined : item.confidence;
+    if (confidence !== undefined && confidence !== "LOW" && confidence !== "MEDIUM" && confidence !== "HIGH") throw new RequirementContractError("SCHEMA_INVALID", "confidence must be LOW, MEDIUM, or HIGH.", `${path}[${index}].confidence`);
+    const blocking = item.blocking === undefined ? undefined : assertBoolean(item.blocking, `${path}[${index}].blocking`);
+    return {
+      statement,
+      ...(rationale === undefined ? {} : { rationale }),
+      ...(impact === undefined ? {} : { impact }),
+      ...(confidence === undefined ? {} : { confidence }),
+      ...(blocking === undefined ? {} : { blocking }),
+    };
+  });
 }
 
 function assertBoundedJsonValue(value: unknown, path: string, depth: number, state: { count: number }): void {

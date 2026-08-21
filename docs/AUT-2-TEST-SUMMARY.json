@@ -1,14 +1,16 @@
 {
-  "stage": "AUT-2 Gate Fix 3",
+  "stage": "AUT-2 Gate Fix 4",
   "result": "FIX_REQUIRED",
-  "implementationCommit": "917c0609f91589c3f9f0456714c4ab8198fef830",
-  "executedAt": "2026-08-21T18:31:33.1172293Z",
+  "baseCommit": "80d57f6",
+  "priorFix3ImplementationCommit": "917c060",
+  "implementationCommit": "UNCOMMITTED_WORKTREE",
+  "executedAt": "2026-08-22",
   "checks": {
     "npm run check": "PASS",
     "npm test": {
       "status": "PASS",
-      "tests": 280,
-      "passed": 280,
+      "tests": 284,
+      "passed": 284,
       "failed": 0
     },
     "npm run build": "PASS",
@@ -20,20 +22,29 @@
     "git diff --check": "PASS",
     "secret scan": {
       "status": "PASS",
-      "note": "Only an existing synthetic-fixture-value string in a negative egress-policy test matched the scanner pattern; no credential was found."
+      "note": "Only documented synthetic-fixture-value matches; no credential was found."
     }
   },
   "realGate": {
-    "status": "FAIL",
-    "setup": "PASS_REAL_SETUP",
-    "alignment": "FAIL",
-    "originalResponseCategory": "F_SCHEMA_MISMATCH",
-    "repairResponseCategory": "B_UNBALANCED_JSON",
-    "repairCount": 1,
-    "answersDraftConfirmation": "NOT_REACHED",
-    "bindingRestored": true,
-    "evidence": "docs/AUT-2-GATE-FIX-3-RUNTIME.json"
+    "latestStatus": "BLOCKED",
+    "firstFix4Attempt": "FAIL",
+    "firstFix4Alignment": "READY_FOR_DRAFT_WITHOUT_INITIAL_NEEDS_INPUT",
+    "latestSetup": "STABLE_CHAT_REUSE_BLOCKED",
+    "latestBlocker": "USER_CONTROL_THEN_RECOVERY_LEASE_CONTROL_AUTO_TIMEOUT",
+    "newBusinessPromptsLatest": 0,
+    "newRepairPromptsLatest": 0,
+    "newChatsLatest": 0,
+    "setupPromptsLatest": 0,
+    "bindingRestoredOnSetupFailure": true,
+    "evidence": "docs/AUT-2-GATE-FIX-4-RUNTIME.json"
+  },
+  "cumulativeBudget": {
+    "realPrompts": "7/12",
+    "repairPrompts": "2/3",
+    "setupPrompts": "2/2",
+    "newTestChats": "2/3"
   },
   "rawPromptOrResponseBodiesIncluded": false,
-  "cookiesOrTokensIncluded": false
+  "cookiesOrTokensIncluded": false,
+  "aut3Started": false
 }

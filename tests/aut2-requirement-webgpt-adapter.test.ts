@@ -8,6 +8,7 @@ import {
   REQUIREMENT_ROLE,
   createRequirementRequest,
   createReadyForDraftEnvelope,
+  semanticResponseFromEnvelope,
   requirementContextFromRequest,
   type IWebGPTRequirementRequest,
 } from "../src/automation/requirement-webgpt-contract.ts";
@@ -21,7 +22,7 @@ const request = createRequirementRequest({
 });
 
 function runtime(overrides: Partial<RequirementWebGptRuntimePort> = {}): RequirementWebGptRuntimePort {
-  const response = JSON.stringify(createReadyForDraftEnvelope(requirementContextFromRequest(request), { requirement: { goal: "adapter contract" } }));
+  const response = JSON.stringify(semanticResponseFromEnvelope(createReadyForDraftEnvelope(requirementContextFromRequest(request), { draft: { goal: "adapter contract" } })));
   return {
     async getRequirementBinding() { return { projectId: request.projectId, role: REQUIREMENT_ROLE, chatUrl: request.binding.chatRef, status: "BOUND" }; },
     async submitRequirement(input) { return { requestId: `accepted:${input.idempotencyKey}`, targetChatUrl: request.binding.chatRef }; },
@@ -68,7 +69,7 @@ test("repairs one malformed completed response in the same Chat and preserves th
   const calls: Array<{ kind: string; idempotencyKey: string }> = [];
   let repairPrompt = "";
   const events: Array<Record<string, unknown>> = [];
-  const validRepair = JSON.stringify(createReadyForDraftEnvelope(requirementContextFromRequest(request), { requirement: { goal: "repaired adapter contract" } }));
+  const validRepair = JSON.stringify(semanticResponseFromEnvelope(createReadyForDraftEnvelope(requirementContextFromRequest(request), { draft: { goal: "repaired adapter contract" } })));
   const repairRuntime = runtime({
     async submitRequirement(input) {
       calls.push({ kind: "original", idempotencyKey: input.idempotencyKey });
@@ -102,9 +103,8 @@ test("repairs one malformed completed response in the same Chat and preserves th
   assert.equal(events[0]?.finalAlignmentStatus, "READY_FOR_DRAFT");
   assert.equal((events[0]?.original as { responseSha256: string }).responseSha256.length, 64);
   assert.equal("response" in events[0]!, false);
-  assert.match(repairPrompt, new RegExp(`projectId=${request.projectId}`));
-  assert.match(repairPrompt, new RegExp(`requestId=${request.requestId}`));
-  assert.match(repairPrompt, new RegExp(`semanticSha256=${request.semanticSha256}`));
+  assert.match(repairPrompt, /top-level keys must be exactly requirementProtocolVersion, status, and payload/);
+  assert.doesNotMatch(repairPrompt, /projectId=|requestId=|idempotencyKey=|semanticSha256=/);
 });
 
 test("stops after one repair when the repair response is malformed", async () => {
@@ -138,4 +138,39 @@ test("enforces the shared three-prompt repair budget before sending a fourth rep
   const adapter = new RequirementWebGptAdapter({ runtime: exhausted, repairBudget: budget });
   await assert.rejects(() => adapter.submit(request), /budget/i);
   assert.equal(repairCount, 0);
+});
+
+test("reserves the real dispatch budget before the runtime can send", async () => {
+  let submitCount = 0;
+  const guarded = runtime({
+    async submitRequirement(input) { submitCount += 1; return { requestId: input.idempotencyKey, targetChatUrl: request.binding.chatRef }; },
+  });
+  const adapter = new RequirementWebGptAdapter({
+    runtime: guarded,
+    onRequestDispatched: () => { throw new Error("REAL_PROMPT_BUDGET_EXHAUSTED"); },
+  });
+  await assert.rejects(() => adapter.submit(request), /REAL_PROMPT_BUDGET_EXHAUSTED/);
+  assert.equal(submitCount, 0);
+});
+
+test("does not count a repair when its pre-dispatch reservation rejects", async () => {
+  let repairSubmitCount = 0;
+  const budget = { used: 0, max: 1 };
+  const guarded = runtime({
+    async getResult() { return { state: "COMPLETED", response: "{\"status\":" }; },
+    async submitRequirementRepair() {
+      repairSubmitCount += 1;
+      return { requestId: "should-not-be-created", targetChatUrl: request.binding.chatRef };
+    },
+  });
+  const adapter = new RequirementWebGptAdapter({
+    runtime: guarded,
+    repairBudget: budget,
+    onRequestDispatched: ({ kind }) => {
+      if (kind === "repair") throw new Error("REAL_PROMPT_BUDGET_EXHAUSTED");
+    },
+  });
+  await assert.rejects(() => adapter.submit(request), /REAL_PROMPT_BUDGET_EXHAUSTED/);
+  assert.equal(repairSubmitCount, 0);
+  assert.equal(budget.used, 0);
 });
