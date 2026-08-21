@@ -141,6 +141,13 @@ function requestWebGptCommand(command: WebGptExternalCommand): void {
   forwardPendingWebGptCommand();
 }
 
+async function closeCliOutputStreams(): Promise<void> {
+  await Promise.all([
+    new Promise<void>((resolveOutput) => process.stdout.end(() => resolveOutput())),
+    new Promise<void>((resolveOutput) => process.stderr.end(() => resolveOutput())),
+  ]);
+}
+
 function controlOk(command: string, result: unknown): WebGptControlResponse {
   return { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: "pending", ok: true, command, result };
 }
@@ -448,7 +455,7 @@ function cliOutput(invocation: WebGptCliCommand, response: WebGptControlResponse
   return `${response.command}: ERROR [${response.error?.code ?? "UNKNOWN"}] ${response.error?.message ?? "未知错误"}\n`;
 }
 
-async function runCliInvocation(invocation: WebGptCliInvocation): Promise<never> {
+async function runCliInvocation(invocation: WebGptCliInvocation): Promise<void> {
   if (invocation.kind === "error") {
     const response: WebGptControlResponse = {
       version: WEBGPT_CONTROL_PROTOCOL_VERSION,
@@ -460,10 +467,15 @@ async function runCliInvocation(invocation: WebGptCliInvocation): Promise<never>
     const parseError = response.error ?? { code: "CLI_INVALID_ARGUMENT", message: invocation.message };
     const output = invocation.json ? `${JSON.stringify(response)}\n` : `${response.command}: ERROR [${parseError.code}] ${parseError.message}\n`;
     await new Promise<void>((resolveOutput) => (invocation.json ? process.stdout : process.stderr).write(output, () => resolveOutput()));
+    await closeCliOutputStreams();
     process.exit(2);
+    return;
   }
-  if (invocation.kind !== "command") process.exit(2);
-  await app.whenReady();
+  if (invocation.kind !== "command") {
+    await closeCliOutputStreams();
+    process.exit(2);
+    return;
+  }
   const response = await runWebGptCli(invocation.command, process.execPath, controlDescriptorPath(app.getPath("userData")));
   const responseWithExit = {
     ...response,
@@ -475,6 +487,7 @@ async function runCliInvocation(invocation: WebGptCliInvocation): Promise<never>
   const output = cliOutput(invocation.command, responseWithExit);
   const stream = invocation.command.json || responseWithExit.ok ? process.stdout : process.stderr;
   await new Promise<void>((resolveOutput) => stream.write(output, () => resolveOutput()));
+  await closeCliOutputStreams();
   process.exit(responseWithExit.ok ? 0 : 1);
 }
 
@@ -1420,6 +1433,7 @@ if (cliInvocation.kind !== "not-cli") {
   void runCliInvocation(cliInvocation).catch(async (error) => {
     const message = error instanceof Error ? error.message : String(error);
     await new Promise<void>((resolveOutput) => process.stderr.write(`webgpt: ERROR [CLI_UNHANDLED] ${message}\n`, () => resolveOutput()));
+    await closeCliOutputStreams();
     process.exit(1);
   });
 } else {

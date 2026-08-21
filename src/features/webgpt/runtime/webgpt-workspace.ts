@@ -978,6 +978,30 @@ export class WebGptWorkspace implements WebGptPublicService {
     };
   }
 
+  async waitForTargetChatHistory(expectedChatUrl: string, timeoutMs = 12_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let lastAssistantCount = 0;
+    while (Date.now() < deadline) {
+      const probe = await this.getPageProbe();
+      let actualChatUrl = "";
+      try { actualChatUrl = normalizeRoleChatUrl(normalizeChatUrl(probe.page.url || this.view.webContents.getURL() || this.state.url)); } catch { /* handled as target mismatch */ }
+      if (actualChatUrl !== expectedChatUrl) {
+        throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "等待目标 Chat 历史加载期间页面已切换，已拒绝读取。", { targetChatUrl: expectedChatUrl, actualChatUrl: actualChatUrl || null });
+      }
+      lastAssistantCount = probe.page.assistantCount;
+      if (probe.page.generating || probe.page.assistantCount > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw this.codedError("NO_ASSISTANT_RESPONSE", "目标 Chat 历史加载完成，但尚无可读取的 Assistant 回复。", {
+      chatUrl: expectedChatUrl,
+      assistantCount: lastAssistantCount,
+      generating: false,
+      assistantText: null,
+      textLength: 0,
+      textSha256: null,
+    });
+  }
+
   async getLatestResponse(): Promise<string | null> {
     const result = await this.readLatestResponse();
     return result.assistantText;

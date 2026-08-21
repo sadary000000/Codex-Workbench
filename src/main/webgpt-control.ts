@@ -387,10 +387,17 @@ function delay(milliseconds: number): Promise<void> {
 }
 
 function spawnWorkbench(executablePath: string): void {
-  // Spawn the packaged executable directly. Going through `cmd /c start`
-  // leaves an orphan command shell behind and can delay the Control Plane past
-  // the bounded CLI startup window.
-  const child = spawn(executablePath, [], { detached: true, stdio: "ignore", windowsHide: true });
+  // On Windows, Explorer launches the visible GUI through the native ShellExecute
+  // path without making Electron descendants inherit the CLI's stdout/stderr
+  // pipes. This avoids the `cmd /c start` orphan-shell behavior while keeping
+  // the GUI independent from the short-lived CLI host.
+  const launchPath = process.platform === "win32" ? "explorer.exe" : executablePath;
+  const launchArgs = process.platform === "win32" ? [executablePath] : [];
+  const child = spawn(launchPath, launchArgs, {
+    detached: false,
+    stdio: "ignore",
+    windowsHide: true,
+  });
   child.unref();
 }
 
@@ -501,6 +508,7 @@ export async function runWebGptCli(
   const cliStartMs = Date.now();
   const deadline = Date.now() + commandTimeout;
   let spawned = false;
+  let controlReachable = false;
   let lastError = "Workbench Control Plane 未就绪。";
   let request: WebGptControlRequest;
   try {
@@ -516,10 +524,11 @@ export async function runWebGptCli(
   }
   let lastSocketConnectAt: string | null = null;
   let lastCliReceiveAt: string | null = null;
+  let activeRequest = request;
   while (Date.now() < deadline) {
     try {
       const { response, descriptor, socketConnectAt, cliReceiveAt } = await sendWebGptControlRequestWithDescriptor(
-        request,
+        activeRequest,
         descriptorPath,
         Math.min(WEBGPT_CONTROL_SOCKET_TIMEOUT_MS, Math.max(500, deadline - Date.now())),
       );
@@ -528,9 +537,15 @@ export async function runWebGptCli(
       if (response.identity && response.identity.workbenchInstanceId !== descriptor.workbenchInstanceId) {
         lastError = "Control Plane 实例身份不一致。";
       } else if (response.error?.code === "WORKBENCH_NOT_READY") {
+        controlReachable = true;
         lastError = response.error.message;
-      } else if (response.requestId !== request.requestId) {
+        activeRequest = { ...request, requestId: randomUUID() };
+      } else if (response.requestId !== activeRequest.requestId) {
         lastError = "Control Plane 返回的 requestId 与请求不一致。";
+      } else if (isWorkbenchStartingStatus(response)) {
+        controlReachable = true;
+        lastError = "Workbench 窗口尚未完成加载。";
+        activeRequest = { ...request, requestId: randomUUID() };
       } else {
         return {
           ...response,
@@ -546,7 +561,7 @@ export async function runWebGptCli(
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
-    if (!spawned) {
+    if (!spawned && !controlReachable) {
       try {
         spawnWorkbench(executablePath);
         spawned = true;
@@ -573,4 +588,9 @@ export async function runWebGptCli(
       elapsedMs: Date.now() - cliStartMs,
     },
   };
+}
+
+function isWorkbenchStartingStatus(response: WebGptControlResponse): boolean {
+  if (response.command !== "webgpt.status" || !response.ok || !response.result || typeof response.result !== "object" || Array.isArray(response.result)) return false;
+  return (response.result as Record<string, unknown>).workbench === "STARTING";
 }

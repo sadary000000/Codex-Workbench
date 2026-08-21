@@ -45,8 +45,10 @@ export function normalizeRoleChatUrl(value: string): string {
     throw codedError("ROLE_CHAT_URL_INVALID", "Role Chat URL 不允许端口、用户名或密码。");
   }
   const segments = url.pathname.split("/").filter(Boolean);
-  if (segments.length !== 2 || segments[0] !== "c" || !segments[1]) {
-    throw codedError("ROLE_CHAT_URL_INVALID", "Role 必须绑定真实的 /c/<chat-id> Chat URL。");
+  const isStandardChat = segments.length === 2 && segments[0] === "c" && Boolean(segments[1]);
+  const isGptScopedChat = segments.length === 4 && segments[0] === "g" && Boolean(segments[1]) && segments[2] === "c" && Boolean(segments[3]);
+  if (!isStandardChat && !isGptScopedChat) {
+    throw codedError("ROLE_CHAT_URL_INVALID", "Role 必须绑定真实的 /c/<chat-id> 或 /g/<gpt-id>/c/<chat-id> Chat URL。");
   }
   url.hostname = "chatgpt.com";
   url.search = "";

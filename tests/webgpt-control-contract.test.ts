@@ -60,6 +60,22 @@ test("WebGPT Control Plane validates versioned, request-scoped allowlisted reque
     requestId: "req-1",
     command: "webgpt.status",
   });
+  const gptScoped = parseWebGptControlRequest({
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "role-1-gpt-scoped",
+    command: "webgpt.role.bind",
+    projectId: "project-a",
+    role: "planner",
+    url: "https://chatgpt.com/g/gpt-test/c/chat-123?source=test#top",
+  });
+  assert.deepEqual(gptScoped, {
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "role-1-gpt-scoped",
+    command: "webgpt.role.bind",
+    projectId: "project-a",
+    role: "PLANNER",
+    url: "https://chatgpt.com/g/gpt-test/c/chat-123?source=test#top",
+  });
   const inspect = parseWebGptControlRequest({
     version: WEBGPT_CONTROL_PROTOCOL_VERSION,
     requestId: "project-inspect-1",
@@ -279,6 +295,43 @@ test("Project CLI response preserves bounded server/client timeline diagnostics"
     assert.equal(response.diagnostics?.operationTimeline?.requestId, response.requestId);
     assert.equal(response.diagnostics?.operationTimeline?.clickResult?.matchCount, 1);
     assert.equal(response.diagnostics?.operationTimeline?.outcome, "PASS");
+  } finally {
+    await server.close();
+    await removeControlDescriptor(descriptorFile);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Cold-start status waits for Workbench readiness without replaying a cached STARTING response", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-control-ready-"));
+  const descriptorFile = controlDescriptorPath(directory);
+  const descriptor = createControlDescriptor("workbench-ready-instance");
+  const requestIds: string[] = [];
+  let handlerCalls = 0;
+  const server = new WebGptControlServer({
+    endpoint: descriptor.endpoint,
+    authToken: descriptor.authToken,
+    handler: async (request) => {
+      handlerCalls += 1;
+      requestIds.push(request.requestId);
+      return {
+        version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        ok: true,
+        command: request.command,
+        result: { workbench: handlerCalls === 1 ? "STARTING" : "READY" },
+      };
+    },
+  });
+  try {
+    await server.start();
+    await publishControlDescriptor(descriptorFile, descriptor);
+    const response = await runWebGptCli({ name: "webgpt.status", json: true }, process.execPath, descriptorFile, 1_000);
+    assert.equal(response.ok, true);
+    assert.equal((response.result as { workbench?: string }).workbench, "READY");
+    assert.equal(handlerCalls, 2);
+    assert.equal(requestIds.length, 2);
+    assert.notEqual(requestIds[0], requestIds[1]);
   } finally {
     await server.close();
     await removeControlDescriptor(descriptorFile);

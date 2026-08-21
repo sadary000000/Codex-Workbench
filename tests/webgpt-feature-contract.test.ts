@@ -94,10 +94,20 @@ test("Project CLI operations have a bounded server deadline and cancel stale nav
   assert.match(workspace, /newChatActionStartAt/);
   assert.match(workspace, /newChatContextConfirmStartAt/);
   assert.match(control, /CONTROL_RESPONSE_TIMEOUT/);
-  assert.match(control, /spawn\(executablePath, \[\], \{ detached: true/);
+  assert.match(control, /process\.platform === "win32" \? "explorer\.exe" : executablePath/);
+  assert.match(control, /detached: false/);
   assert.doesNotMatch(control, /process\.env\.ComSpec \|\| "cmd\.exe"/);
   assert.doesNotMatch(control, /start "" \/b/);
   assert.match(control, /cliStartAt/);
   assert.match(control, /responseWriteAt/);
   assert.match(control, /operationTimeline/);
+});
+
+test("WebGPT CLI avoids Electron Chromium initialization before returning to execFile", () => {
+  const main = readFileSync(join(root, "src", "main", "main.ts"), "utf8");
+  const cliBlock = main.slice(main.indexOf("async function runCliInvocation"), main.indexOf("function runtimeCwd"));
+  assert.doesNotMatch(cliBlock, /await app\.whenReady\(\)/);
+  assert.match(cliBlock, /controlDescriptorPath\(app\.getPath\("userData"\)\)/);
+  assert.match(cliBlock, /closeCliOutputStreams\(\)/);
+  assert.match(cliBlock, /process\.exit\(responseWithExit\.ok \? 0 : 1\)/);
 });

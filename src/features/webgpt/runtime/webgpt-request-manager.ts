@@ -101,12 +101,12 @@ export class WebGptRequestManager {
 
   async readLatestCurrent(): Promise<WebGptLatestResponse> {
     await this.ready();
-    const active = await this.activeSummary();
+    let currentChatUrl: string | null = null;
+    try { currentChatUrl = comparableChatUrl(await this.workspace.getCurrentUrl()); } catch { /* current page may be home/login */ }
+    const active = await this.activeForChat(currentChatUrl);
     if (active.length > 0) {
-      let chatUrl: string | null = null;
-      try { chatUrl = normalizeChatUrl(await this.workspace.getCurrentUrl()); } catch { /* current page may be home/login */ }
       throw this.codedError("WEBGPT_RESPONSE_IN_PROGRESS", "当前存在尚未结束的 WebGPT Request，已拒绝读取可能过时或部分的 Assistant 结果。", {
-        chatUrl,
+        chatUrl: currentChatUrl,
         assistantCount: 0,
         generating: true,
         assistantText: null,
@@ -137,7 +137,7 @@ export class WebGptRequestManager {
     await this.ensureAutomationControl();
     let targetChatUrl: string;
     try { targetChatUrl = normalizeRoleChatUrl(normalizeChatUrl(url)); }
-    catch { throw this.codedError("CHAT_URL_INVALID", "chat latest 只允许真实的 https://chatgpt.com/c/<chat-id> Chat URL。"); }
+    catch { throw this.codedError("CHAT_URL_INVALID", "chat latest 只允许真实的 ChatGPT /c/<chat-id> 或 /g/<gpt-id>/c/<chat-id> Chat URL。"); }
     const result = await this.withBrowserLease({
       source: "CLI",
       ownerKey: operationMetadata.role ? `${operationMetadata.projectId ?? "project"}:${operationMetadata.role}` : "control-plane",
@@ -151,6 +151,7 @@ export class WebGptRequestManager {
       try { actualChatUrl = normalizeRoleChatUrl(normalizeChatUrl(await this.workspace.getCurrentUrl())); }
       catch { throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "指定 Chat 未能在浏览器中确认。 "); }
       if (actualChatUrl !== targetChatUrl) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "浏览器当前 Chat 与指定目标不一致，已拒绝读取。", { targetChatUrl, actualChatUrl });
+      await this.workspace.waitForTargetChatHistory(targetChatUrl);
       const latest = await this.workspace.readLatestResponse();
       if (latest.chatUrl !== targetChatUrl) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "读取结果的 Chat 身份与指定目标不一致，已拒绝返回。", { targetChatUrl, actualChatUrl: latest.chatUrl });
       return latest;
@@ -383,6 +384,14 @@ export class WebGptRequestManager {
     await this.ready();
     return [...this.records.values()]
       .filter((record) => !TERMINAL_STATES.has(record.state))
+      .map((record) => ({ requestId: record.requestId, state: record.state, chatUrl: record.chatUrl, idempotencyKey: record.idempotencyKey }));
+  }
+
+  private async activeForChat(chatUrl: string | null): Promise<Array<{ requestId: string; state: WebGptRequestState; chatUrl: string; idempotencyKey: string | null }>> {
+    if (!chatUrl) return [];
+    await this.ready();
+    return [...this.records.values()]
+      .filter((record) => isLiveRequestState(record.state) && comparableChatUrl(record.targetChatUrl || record.chatUrl) === chatUrl)
       .map((record) => ({ requestId: record.requestId, state: record.state, chatUrl: record.chatUrl, idempotencyKey: record.idempotencyKey }));
   }
 
@@ -804,6 +813,15 @@ function safeChatUrl(value: string): string {
 
 function safeRoleChatUrl(value: string): string {
   try { return normalizeRoleChatUrl(value); } catch { return ""; }
+}
+
+function comparableChatUrl(value: string): string | null {
+  if (!value.trim()) return null;
+  try { return normalizeRoleChatUrl(normalizeChatUrl(value)); } catch { return null; }
+}
+
+function isLiveRequestState(state: WebGptRequestState): boolean {
+  return state === "SUBMITTING" || state === "SUBMITTED" || state === "GENERATING";
 }
 
 function isRequestState(value: unknown): value is WebGptRequestState {

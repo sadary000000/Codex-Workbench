@@ -43,6 +43,7 @@ class FakeWorkspace {
   async openChatForAutomation(url: string): Promise<WebGptState> { this.openChatCount += 1; const text = this.probe.latestAssistantText || "WEBGPT_TEST_OK"; this.probe = pageProbe(true, 1, text); this.probe.page.userCount = 1; this.probe.page.url = this.openChatUrlOverride ?? url; return this.state(); }
   async getPageProbe(): Promise<WebGptPageProbe> { return this.probe; }
   async getCurrentUrl(): Promise<string> { return this.probe.page.url; }
+  async waitForTargetChatHistory(_expectedChatUrl: string): Promise<WebGptPageProbe> { return this.probe; }
   async readLatestResponse(): Promise<Record<string, unknown>> {
     const text = this.probe.latestAssistantText.trim();
     if (this.probe.page.generating) {
@@ -131,16 +132,47 @@ test("WebGPT targeted latest reads are page-based, fail closed, and preserve Cha
   }
 });
 
-test("WebGPT current latest refuses to read while a Request is active", async () => {
+test("WebGPT current latest ignores a paused or stale Request for another Chat", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-latest-active-"));
   try {
     const workspace = new FakeWorkspace();
     workspace.mode = "PAUSED";
     workspace.probe = pageProbe(true, 1, "old");
     const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
-    await manager.submit("active request");
-    await assert.rejects(() => manager.readLatestCurrent(), { code: "WEBGPT_RESPONSE_IN_PROGRESS" });
+    const queued = await manager.submit("stale request", { targetChatUrl: "https://chatgpt.com/c/other" }, "stale-key");
+    assert.equal(queued.state, "PAUSED_FOR_USER");
+    const stored = JSON.parse(await readFile(join(directory, "requests.json"), "utf8")) as { requests: Array<Record<string, unknown>> };
+    stored.requests[0].state = "RECOVERY_REQUIRED";
+    stored.requests[0].chatUrl = "https://chatgpt.com/c/other";
+    await writeFile(join(directory, "requests.json"), JSON.stringify({ version: 2, requests: stored.requests }), "utf8");
+    const restarted = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const latest = await restarted.readLatestCurrent();
+    assert.equal(latest.assistantText, "old");
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT current latest blocks only a same-target live Request", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-latest-same-target-"));
+  const workspace = new FakeWorkspace();
+  workspace.mode = "AUTO_CONTROL";
+  let releaseWait!: () => void;
+  workspace.waitGate = new Promise<void>((resolve) => { releaseWait = resolve; });
+  try {
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const submitted = await manager.submit("same target live request", { targetChatUrl: "https://chatgpt.com/c/test" }, "same-target-key");
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline && !(await manager.activeSummary()).some((record) => record.requestId === submitted.requestId && record.state === "GENERATING")) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal((await manager.activeSummary()).some((record) => record.requestId === submitted.requestId && record.state === "GENERATING"), true);
+    await assert.rejects(() => manager.readLatestCurrent(), { code: "WEBGPT_RESPONSE_IN_PROGRESS" });
+    releaseWait();
+    const completed = await manager.waitForRequest(submitted.requestId, 10_000);
+    assert.equal(completed.record.state, "COMPLETED");
+  } finally {
+    releaseWait();
     await rm(directory, { recursive: true, force: true });
   }
 });
