@@ -6,6 +6,20 @@
   "fixCommit": "a569ba6",
   "v1CoreChanged": false,
   "promptSent": false,
+  "testProjectsCreated": [
+    {
+      "name": "WEB68_FINAL_1787306761906",
+      "projectUrl": "https://chatgpt.com/g/g-6a88231622548191a8905edd08892218/project",
+      "promptSent": false,
+      "cleanup": "NOT_PERFORMED_SCOPE_EXCLUDES_PROJECT_DELETE"
+    },
+    {
+      "name": "WEB68_PASS_1787307133490",
+      "projectUrl": "https://chatgpt.com/g/g-p-6a8824828c248191b748e0e92b76958c/project",
+      "promptSent": false,
+      "cleanup": "NOT_PERFORMED_SCOPE_EXCLUDES_PROJECT_DELETE"
+    }
+  ],
   "realSmoke": {
     "testName": "WEB68_PASS_1787307133490",
     "open": {

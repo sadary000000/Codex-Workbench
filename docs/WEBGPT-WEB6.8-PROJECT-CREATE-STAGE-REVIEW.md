@@ -109,6 +109,17 @@ project_name: WEB68_PASS_1787307133490
 project_id: g-p-6a8824828c248191b748e0e92b76958c
 created_project_url: https://chatgpt.com/g/g-p-6a8824828c248191b748e0e92b76958c/project
 prompt_sent: false
+
+本轮真实取证过程中实际创建了两个仅用于验证的远程测试 Project，均未发送 Prompt：
+
+```yaml
+test_projects_created:
+  - name: WEB68_FINAL_1787306761906
+    project_url: https://chatgpt.com/g/g-6a88231622548191a8905edd08892218/project
+  - name: WEB68_PASS_1787307133490
+    project_url: https://chatgpt.com/g/g-p-6a8824828c248191b748e0e92b76958c/project
+cleanup: NOT_PERFORMED (Project Delete 不在 WEB-6.8 scope)
+```
 ```
 
 | 操作 | 结果 | 关键证据 |
