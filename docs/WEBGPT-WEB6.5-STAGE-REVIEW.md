@@ -96,8 +96,8 @@ control_after_auto: AUTO_CONTROL
 | `npm run build` | PASS |
 | `npm run package:win` | PASS |
 | `npm audit --omit=dev` | PASS，0 vulnerabilities |
-| `git diff --check` | 待最终提交前复核 |
-| secret scan | 待最终提交前复核 |
+| `git diff --check` | PASS |
+| secret scan | PASS；限定审查文件无凭据形态值 |
 
 ## Package Provenance
 

@@ -12,8 +12,8 @@
     "npmRunBuild": "PASS",
     "npmRunPackageWin": "PASS",
     "npmAuditOmitDev": "PASS 0 vulnerabilities",
-    "gitDiffCheck": "PENDING_FINAL_WORKTREE",
-    "secretScan": "PENDING_FINAL_WORKTREE"
+    "gitDiffCheck": "PASS",
+    "secretScan": "PASS"
   },
   "officialCli": {
     "entry": "Codex Workbench CLI.exe",
