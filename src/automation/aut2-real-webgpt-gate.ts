@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
-import { createRequirementWebGptAdapter } from "./requirement-webgpt-adapter.ts";
+import { createRequirementWebGptAdapter, type RequirementResponseDiagnosticEvent } from "./requirement-webgpt-adapter.ts";
 import { RequirementAutomationService, type RequirementDraftResult } from "./requirement-service.ts";
 import { REQUIREMENT_ROLE, type RequirementChatBinding } from "./requirement-webgpt-contract.ts";
 import type { AutomationStore } from "./store.ts";
@@ -94,11 +94,27 @@ export interface Aut2RealWebGptGateEvidence {
     readonly sameSemanticSha256: boolean;
     readonly noAdditionalRealPrompt: true;
   };
+  readonly responseContract: {
+    readonly originalRequestId: string | null;
+    readonly originalResultSha256: string | null;
+    readonly parseFailureCategory: string | null;
+    readonly repairTriggered: boolean;
+    readonly repairRequestId: string | null;
+    readonly repairSemanticSha256: string | null;
+    readonly repairResultSha256: string | null;
+    readonly repairCount: number;
+    readonly finalParseResult: "PASS" | "FAIL" | "NOT_REACHED";
+    readonly finalAlignmentStatus: string | null;
+    readonly runtimeRequestIds: readonly string[];
+    readonly runtimeIdempotencyKeys: readonly string[];
+    readonly runtimeSemanticSha256: readonly string[];
+    readonly events: readonly RequirementResponseDiagnosticEvent[];
+  };
   readonly attemptedRealRequests: number;
   readonly realPromptCount: number;
   readonly roleSetupPromptCount: number;
   readonly newChatCount: number;
-  readonly repairCount: 0;
+  readonly repairCount: number;
   readonly errors: readonly { code: string; message: string }[];
   readonly createdAt: string;
 }
@@ -114,6 +130,11 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
   const requestIds: string[] = [];
   const idempotencyKeys: string[] = [];
   const semanticSha256: string[] = [];
+  const responseDiagnostics: RequirementResponseDiagnosticEvent[] = [];
+  const repairBudget = { used: 0, max: 3 };
+  const runtimeRequestIds: string[] = [];
+  const runtimeIdempotencyKeys: string[] = [];
+  const runtimeSemanticSha256: string[] = [];
   let firstRoundQuestionCount = 0;
   let firstRoundUniqueQuestionCount = 0;
   let recognizedQuestionTopics: string[] = [];
@@ -138,7 +159,9 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
   let setupStatus: "PASS_REAL_SETUP" | "FAIL" = "FAIL";
 
   try {
-    if (!options.setupContext.setupChatRef || !options.setupContext.setupRequestId || options.setupContext.setupPromptCount < 1) {
+    const reusedStableChat = options.setupContext.setupPromptCount === 0 && options.setupContext.newChatCount === 0;
+    const newlyMaterializedStableChat = options.setupContext.setupPromptCount >= 1 && options.setupContext.setupPromptCount <= 2 && options.setupContext.newChatCount >= 1 && options.setupContext.newChatCount <= 3;
+    if (!options.setupContext.setupChatRef || !options.setupContext.setupRequestId || (!reusedStableChat && !newlyMaterializedStableChat)) {
       throw gateError("SETUP_CONTEXT_INVALID", "A stable materialized setup Chat is required before the real Requirement Gate.");
     }
     await options.openWorkspace();
@@ -162,6 +185,13 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
         roleSession: options.roleSession,
         requestManager: options.requestManager,
         timeoutMs: options.timeoutMs ?? 240_000,
+        repairBudget,
+        onRequestAccepted: (runtimeRequest) => {
+          recordRuntimeRequest(runtimeRequest.requestId, runtimeRequest.idempotencyKey, runtimeRequest.semanticSha256, runtimeRequestIds, runtimeIdempotencyKeys, runtimeSemanticSha256);
+        },
+        onResponseDiagnostics: (event) => {
+          responseDiagnostics.push(event);
+        },
       }),
       now,
     });
@@ -248,6 +278,10 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
 
   const bindingRestored = Boolean(originalBinding && finalBinding && originalBinding.status === finalBinding.status && originalBinding.chatUrl === finalBinding.chatUrl);
   if (!bindingRestored) errors.push({ code: "REQUIREMENT_BINDING_NOT_RESTORED", message: "The original REQUIREMENT binding did not remain unchanged." });
+  attemptedRealRequests = options.setupContext.setupPromptCount + runtimeRequestIds.length;
+  const lastResponseDiagnostic = responseDiagnostics[responseDiagnostics.length - 1] ?? null;
+  const firstFailureDiagnostic = responseDiagnostics.find((event) => event.parseFailureCategory !== null) ?? null;
+  const repairCount = responseDiagnostics.reduce((total, event) => total + event.repairCount, 0);
   const evidence: Aut2RealWebGptGateEvidence = {
     stage: "AUT-2",
     result: errors.length === 0 && userConfirmation === "PASS_REAL_RUNTIME" ? "PASS_REAL" : "FAIL",
@@ -306,11 +340,27 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
       sameSemanticSha256: idempotentSameSemanticSha256,
       noAdditionalRealPrompt: true,
     },
+    responseContract: {
+      originalRequestId: firstFailureDiagnostic?.originalRequestId ?? lastResponseDiagnostic?.originalRequestId ?? null,
+      originalResultSha256: firstFailureDiagnostic?.originalResultSha256 ?? lastResponseDiagnostic?.originalResultSha256 ?? null,
+      parseFailureCategory: firstFailureDiagnostic?.parseFailureCategory ?? null,
+      repairTriggered: responseDiagnostics.some((event) => event.repairTriggered),
+      repairRequestId: firstFailureDiagnostic?.repairRequestId ?? null,
+      repairSemanticSha256: firstFailureDiagnostic?.repairSemanticSha256 ?? null,
+      repairResultSha256: firstFailureDiagnostic?.repairResultSha256 ?? null,
+      repairCount,
+      finalParseResult: lastResponseDiagnostic?.finalParseResult ?? "NOT_REACHED",
+      finalAlignmentStatus: lastResponseDiagnostic?.finalAlignmentStatus ?? null,
+      runtimeRequestIds,
+      runtimeIdempotencyKeys,
+      runtimeSemanticSha256,
+      events: responseDiagnostics,
+    },
     attemptedRealRequests,
-    realPromptCount: options.setupContext.setupPromptCount + requestIds.length,
+    realPromptCount: options.setupContext.setupPromptCount + runtimeRequestIds.length,
     roleSetupPromptCount: options.setupContext.setupPromptCount,
     newChatCount: options.setupContext.newChatCount,
-    repairCount: 0,
+    repairCount,
     errors,
     createdAt: now(),
   };
@@ -331,9 +381,14 @@ async function questionsForRound(store: AutomationStore, roundId: string): Promi
 
 function recordRequest(result: RequirementDraftResult, requestIds: string[], idempotencyKeys: string[], semanticSha256: string[]): void {
   if (!result.request) return;
-  requestIds.push(result.request.requestId);
-  idempotencyKeys.push(result.request.idempotencyKey);
-  semanticSha256.push(result.request.semanticSha256);
+  recordRuntimeRequest(result.request.requestId, result.request.idempotencyKey, result.request.semanticSha256, requestIds, idempotencyKeys, semanticSha256);
+}
+
+function recordRuntimeRequest(requestId: string | null, idempotencyKey: string | null, semantic: string | null, requestIds: string[], idempotencyKeys: string[], semanticSha256: string[]): void {
+  if (!requestId || requestIds.includes(requestId)) return;
+  requestIds.push(requestId);
+  idempotencyKeys.push(idempotencyKey ?? "");
+  semanticSha256.push(semantic ?? "");
 }
 
 function classifyQuestion(value: string): string[] {

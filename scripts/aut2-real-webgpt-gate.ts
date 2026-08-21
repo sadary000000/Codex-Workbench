@@ -11,7 +11,8 @@ const guiExecutable = process.env.WEBGPT_GUI_EXECUTABLE?.trim() || join(root, "d
 const cliExecutable = process.env.WEBGPT_CLI_EXECUTABLE?.trim() || join(root, "dist", "package", "Codex Workbench CLI.exe");
 const webgptProjectId = process.env.AUT2_WEBGPT_PROJECT_ID?.trim() || "";
 const webgptProjectName = process.env.AUT2_WEBGPT_PROJECT_NAME?.trim() || "workts";
-const permanentEvidencePath = process.env.AUT2_GATE2_EVIDENCE_PATH?.trim() || join(root, "docs", "AUT-2-GATE-FIX-2-RUNTIME.json");
+const permanentEvidencePath = process.env.AUT2_GATE3_EVIDENCE_PATH?.trim() || join(root, "docs", "AUT-2-GATE-FIX-3-RUNTIME.json");
+const reusableEvidencePath = process.env.AUT2_REUSE_SETUP_EVIDENCE?.trim() || join(root, "docs", "AUT-2-GATE-FIX-2-RUNTIME.json");
 const setupPrompt = "This chat is being initialized for a bounded automated requirement-alignment smoke test. Reply exactly: ROLE_READY. Do not infer or store any project requirements from this setup message.";
 const startedAt = new Date().toISOString();
 
@@ -94,11 +95,13 @@ function statusSummary(invocation: Invocation): Record<string, unknown> {
     webgpt: result.webgpt ?? null,
     controlOwner: result.controlOwner ?? null,
     currentUrl: result.currentUrl ?? result.url ?? null,
+    chatUrl: result.chatUrl ?? null,
     pageHealthy: result.pageHealthy ?? null,
     loginRequired: page?.loginRequired ?? null,
     onChatPage: page?.onChatPage ?? null,
     userCount: page?.userCount ?? null,
     assistantCount: page?.assistantCount ?? null,
+    assistantTextSha256: typeof result.assistantText === "string" ? hash(result.assistantText) : null,
     generating: page?.generating ?? null,
     identity: invocation.identity ?? null,
     error: invocation.error ?? null,
@@ -157,20 +160,47 @@ function bindingOf(invocation: Invocation): { status: string; chatUrl: string } 
   return { status: String(result.status ?? ""), chatUrl: String(result.chatUrl ?? "") };
 }
 
+interface ReusableSetupCandidate {
+  readonly setupChatRef: string;
+  readonly setupRequestId: string;
+  readonly setupIdempotencyKey: string;
+  readonly latestAssistantSha256: string | null;
+}
+
+async function reusableSetupCandidate(): Promise<ReusableSetupCandidate | null> {
+  const explicitChat = process.env.AUT2_REUSE_CHAT_URL?.trim();
+  if (explicitChat) {
+    const setupChatRef = chatUrl(explicitChat);
+    if (setupChatRef) return { setupChatRef, setupRequestId: "reused:external-evidence", setupIdempotencyKey: "reused:external-evidence", latestAssistantSha256: null };
+  }
+  try {
+    const parsed = JSON.parse(await readFile(reusableEvidencePath, "utf8")) as Record<string, unknown>;
+    const candidates = [parsed.setup, parsed.gateEvidence && typeof parsed.gateEvidence === "object" ? (parsed.gateEvidence as Record<string, unknown>).setup : null];
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+      const value = candidate as Record<string, unknown>;
+      const setupChatRef = chatUrl(value.setupChatRef);
+      const setupRequestId = typeof value.setupRequestId === "string" ? value.setupRequestId.trim() : "";
+      const setupIdempotencyKey = typeof value.setupIdempotencyKey === "string" ? value.setupIdempotencyKey.trim() : "";
+      if (setupChatRef && setupRequestId && setupIdempotencyKey) {
+        return {
+          setupChatRef,
+          setupRequestId,
+          setupIdempotencyKey,
+          latestAssistantSha256: typeof value.latestAssistantSha256 === "string" ? value.latestAssistantSha256 : null,
+        };
+      }
+    }
+  } catch { /* A missing/stale prior evidence file only disables reuse. */ }
+  return null;
+}
+
 const tempRoot = await mkdtemp(join(tmpdir(), "codex-workbench-aut2-real-"));
 const evidencePath = join(tempRoot, "evidence.json");
 const setupPath = join(tempRoot, "setup-context.json");
 const automationDb = join(tempRoot, "automation.db");
 const setupKey = `aut2:setup:${Date.now()}:${randomUUID()}`;
-const closeBefore: Invocation = {
-  args: ["close"],
-  exitCode: null,
-  elapsedMs: 0,
-  ok: true,
-  command: "precleaned_exact_host",
-  result: null,
-  identity: null,
-};
+const closeBefore = await invoke(["close"], 120_000);
 const environment = { ...process.env };
 delete environment.ELECTRON_RUN_AS_NODE;
 environment.AUT2_REAL_WEBGPT_GATE = "1";
@@ -187,6 +217,7 @@ let statusDuring: Invocation | null = null;
 let setupInvocations: Record<string, Invocation> = {};
 let setupContext: Record<string, unknown> | null = null;
 let setupFailure: string | null = null;
+let originalBindingForRestore: { status: string; chatUrl: string } | null = null;
 try {
   setupInvocations.open = await invoke(["open"], 120_000);
   requireOk(setupInvocations.open, "OPEN_WORKSPACE");
@@ -202,56 +233,109 @@ try {
   setupInvocations.statusBefore = statusDuring;
   setupInvocations.roleStatusBefore = await invoke(["role", "status", "--project", webgptProjectId, "--role", "requirement"]);
   const originalBinding = bindingOf(setupInvocations.roleStatusBefore);
+  originalBindingForRestore = originalBinding;
   if (originalBinding.status !== "BOUND" || !chatUrl(originalBinding.chatUrl)) throw new Error("ORIGINAL_REQUIREMENT_BINDING_NOT_BOUND");
 
   setupInvocations.projectOpen = await invoke(["project", "open", "--name", webgptProjectName], 120_000);
   requireOk(setupInvocations.projectOpen, "PROJECT_OPEN");
-  setupInvocations.projectNewChat = await invoke(["project", "new-chat", "--name", webgptProjectName], 120_000);
-  const newChat = requireOk(setupInvocations.projectNewChat, "PROJECT_NEW_CHAT");
-  const newChatPage = newChat.page && typeof newChat.page === "object" && !Array.isArray(newChat.page) ? newChat.page as Record<string, unknown> : {};
-  if (newChat.promptSent !== false || chatUrl(newChat.chatUrl) || newChatPage.composerFound !== true || newChat.chatMaterialized === true) throw new Error("FRESH_PROJECT_CHAT_CONTEXT_NOT_PENDING");
+  const reusable = await reusableSetupCandidate();
+  let reused = false;
+  if (reusable) {
+    try {
+      setupInvocations.reuseChatLatest = await invoke(["chat", "latest", "--url", reusable.setupChatRef], 120_000);
+      const latest = requireOk(setupInvocations.reuseChatLatest, "REUSE_CHAT_LATEST");
+      if (chatUrl(latest.chatUrl) !== reusable.setupChatRef || Number(latest.assistantCount ?? 0) < 1 || typeof latest.assistantText !== "string" || !latest.assistantText.trim()) throw new Error("REUSED_CHAT_NOT_STABLE");
+      setupInvocations.roleBind = await invoke(["role", "bind", "--project", webgptProjectId, "--role", "requirement", "--url", reusable.setupChatRef, "--replace"]);
+      requireOk(setupInvocations.roleBind, "ROLE_BIND_REUSED_CHAT");
+      setupInvocations.roleOpen = await invoke(["role", "open", "--project", webgptProjectId, "--role", "requirement"], 120_000);
+      const opened = requireOk(setupInvocations.roleOpen, "ROLE_OPEN_REUSED_CHAT");
+      if (chatUrl(opened.chatUrl) !== reusable.setupChatRef) throw new Error("REUSED_EXACT_REQUIREMENT_BINDING_NOT_CONFIRMED");
+      setupInvocations.reuseChatLatestAfterBind = await invoke(["chat", "latest", "--url", reusable.setupChatRef], 120_000);
+      const latestAfterBind = requireOk(setupInvocations.reuseChatLatestAfterBind, "REUSE_CHAT_LATEST_AFTER_BIND");
+      if (chatUrl(latestAfterBind.chatUrl) !== reusable.setupChatRef || Number(latestAfterBind.assistantCount ?? 0) < 1 || typeof latestAfterBind.assistantText !== "string" || !latestAfterBind.assistantText.trim()) throw new Error("REUSED_CHAT_NOT_STABLE_AFTER_BIND");
+      setupContext = {
+        originalBinding,
+        setupChatRef: reusable.setupChatRef,
+        setupRequestId: reusable.setupRequestId,
+        setupIdempotencyKey: reusable.setupIdempotencyKey,
+        setupPromptCount: 0,
+        newChatCount: 0,
+        stableChatMaterialized: true,
+        latestAssistantSha256: reusable.latestAssistantSha256,
+      };
+      reused = true;
+    } catch (error) {
+      setupInvocations.reuseFailure = {
+        args: ["reuse"],
+        exitCode: 1,
+        elapsedMs: 0,
+        ok: false,
+        command: "reuse_setup_chat",
+        result: null,
+        identity: null,
+        error: error instanceof Error ? error.message.slice(0, 512) : String(error).slice(0, 512),
+      };
+      if (originalBinding.status === "BOUND" && chatUrl(originalBinding.chatUrl)) {
+        setupInvocations.restoreBeforeFreshSetup = await invoke(["role", "bind", "--project", webgptProjectId, "--role", "requirement", "--url", originalBinding.chatUrl, "--replace"]);
+        requireOk(setupInvocations.restoreBeforeFreshSetup, "RESTORE_BEFORE_FRESH_SETUP");
+      }
+    }
+  }
+  if (!reused) {
+    setupInvocations.projectNewChat = await invoke(["project", "new-chat", "--name", webgptProjectName], 120_000);
+    const newChat = requireOk(setupInvocations.projectNewChat, "PROJECT_NEW_CHAT");
+    const newChatPage = newChat.page && typeof newChat.page === "object" && !Array.isArray(newChat.page) ? newChat.page as Record<string, unknown> : {};
+    if (newChat.promptSent !== false || chatUrl(newChat.chatUrl) || newChatPage.composerFound !== true || newChat.chatMaterialized === true) throw new Error("FRESH_PROJECT_CHAT_CONTEXT_NOT_PENDING");
 
-  setupInvocations.setupSend = await invoke(["send", "--text", setupPrompt, "--idempotency-key", setupKey], 120_000);
-  const setupSent = requireOk(setupInvocations.setupSend, "SETUP_SEND");
-  const setupRequestId = String(setupSent.requestId ?? "");
-  if (!/^wgpt-/.test(setupRequestId)) throw new Error("SETUP_REQUEST_ID_MISSING");
-  setupInvocations.setupWait = await invoke(["wait", "--request-id", setupRequestId, "--timeout-ms", "180000"], 210_000);
-  const waited = requireOk(setupInvocations.setupWait, "SETUP_WAIT");
-  if (waited.state !== "COMPLETED") throw new Error(`SETUP_NOT_COMPLETED: ${String(waited.state ?? "unknown")}`);
-  setupInvocations.setupResult = await invoke(["result", "--request-id", setupRequestId], 120_000);
-  const setupResult = requireOk(setupInvocations.setupResult, "SETUP_RESULT");
-  const response = typeof setupResult.response === "string" ? setupResult.response.trim() : "";
-  if (response !== "ROLE_READY") throw new Error("SETUP_RESPONSE_NOT_ROLE_READY");
-  const materialized = chatUrl(setupResult.chatUrl);
-  if (!materialized) throw new Error("SETUP_RESULT_CHAT_URL_NOT_MATERIALIZED");
-  setupInvocations.setupChatLatest = await invoke(["chat", "latest", "--url", materialized], 120_000);
-  const latest = requireOk(setupInvocations.setupChatLatest, "SETUP_CHAT_LATEST");
-  if (latest.chatUrl !== materialized || Number(latest.assistantCount ?? 0) < 1 || latest.assistantText !== "ROLE_READY") throw new Error("SETUP_LATEST_CHAT_NOT_STABLE");
-  setupInvocations.statusAfterSetup = await invoke(["status"]);
-  const statusAfterPage = setupInvocations.statusAfterSetup.result?.page && typeof setupInvocations.statusAfterSetup.result.page === "object" && !Array.isArray(setupInvocations.statusAfterSetup.result.page)
-    ? setupInvocations.statusAfterSetup.result.page as Record<string, unknown>
-    : {};
-  if (statusAfterPage.userCount !== undefined && Number(statusAfterPage.userCount) < 1) throw new Error("SETUP_USER_COUNT_NOT_MATERIALIZED");
+    setupInvocations.setupSend = await invoke(["send", "--text", setupPrompt, "--idempotency-key", setupKey], 120_000);
+    const setupSent = requireOk(setupInvocations.setupSend, "SETUP_SEND");
+    const setupRequestId = String(setupSent.requestId ?? "");
+    if (!/^wgpt-/.test(setupRequestId)) throw new Error("SETUP_REQUEST_ID_MISSING");
+    setupInvocations.setupWait = await invoke(["wait", "--request-id", setupRequestId, "--timeout-ms", "180000"], 210_000);
+    const waited = requireOk(setupInvocations.setupWait, "SETUP_WAIT");
+    if (waited.state !== "COMPLETED") throw new Error(`SETUP_NOT_COMPLETED: ${String(waited.state ?? "unknown")}`);
+    setupInvocations.setupResult = await invoke(["result", "--request-id", setupRequestId], 120_000);
+    const setupResult = requireOk(setupInvocations.setupResult, "SETUP_RESULT");
+    const response = typeof setupResult.response === "string" ? setupResult.response.trim() : "";
+    if (response !== "ROLE_READY") throw new Error("SETUP_RESPONSE_NOT_ROLE_READY");
+    const materialized = chatUrl(setupResult.chatUrl);
+    if (!materialized) throw new Error("SETUP_RESULT_CHAT_URL_NOT_MATERIALIZED");
+    setupInvocations.setupChatLatest = await invoke(["chat", "latest", "--url", materialized], 120_000);
+    const latest = requireOk(setupInvocations.setupChatLatest, "SETUP_CHAT_LATEST");
+    if (chatUrl(latest.chatUrl) !== materialized || Number(latest.assistantCount ?? 0) < 1 || typeof latest.assistantText !== "string" || latest.assistantText.trim() !== "ROLE_READY") throw new Error("SETUP_LATEST_CHAT_NOT_STABLE");
+    setupInvocations.statusAfterSetup = await invoke(["status"]);
+    const statusAfterPage = setupInvocations.statusAfterSetup.result?.page && typeof setupInvocations.statusAfterSetup.result.page === "object" && !Array.isArray(setupInvocations.statusAfterSetup.result.page)
+      ? setupInvocations.statusAfterSetup.result.page as Record<string, unknown>
+      : {};
+    if (statusAfterPage.userCount !== undefined && Number(statusAfterPage.userCount) < 1) throw new Error("SETUP_USER_COUNT_NOT_MATERIALIZED");
 
-  setupInvocations.roleBind = await invoke(["role", "bind", "--project", webgptProjectId, "--role", "requirement", "--url", materialized, "--replace"]);
-  requireOk(setupInvocations.roleBind, "ROLE_BIND");
-  setupInvocations.roleOpen = await invoke(["role", "open", "--project", webgptProjectId, "--role", "requirement"], 120_000);
-  const opened = requireOk(setupInvocations.roleOpen, "ROLE_OPEN");
-  if (chatUrl(opened.chatUrl) !== materialized) throw new Error("EXACT_REQUIREMENT_BINDING_NOT_CONFIRMED");
+    setupInvocations.roleBind = await invoke(["role", "bind", "--project", webgptProjectId, "--role", "requirement", "--url", materialized, "--replace"]);
+    requireOk(setupInvocations.roleBind, "ROLE_BIND");
+    setupInvocations.roleOpen = await invoke(["role", "open", "--project", webgptProjectId, "--role", "requirement"], 120_000);
+    const opened = requireOk(setupInvocations.roleOpen, "ROLE_OPEN");
+    if (chatUrl(opened.chatUrl) !== materialized) throw new Error("EXACT_REQUIREMENT_BINDING_NOT_CONFIRMED");
 
-  setupContext = {
-    originalBinding,
-    setupChatRef: materialized,
-    setupRequestId,
-    setupIdempotencyKey: setupKey,
-    setupPromptCount: 1,
-    newChatCount: 1,
-    stableChatMaterialized: true,
-    latestAssistantSha256: hash("ROLE_READY"),
-  };
+    setupContext = {
+      originalBinding,
+      setupChatRef: materialized,
+      setupRequestId,
+      setupIdempotencyKey: setupKey,
+      setupPromptCount: 1,
+      newChatCount: 1,
+      stableChatMaterialized: true,
+      latestAssistantSha256: hash("ROLE_READY"),
+    };
+  }
   await writeFile(setupPath, `${JSON.stringify(setupContext, null, 2)}\n`, "utf8");
 } catch (error) {
   setupFailure = error instanceof Error ? error.message : String(error);
+  if (originalBindingForRestore?.status === "BOUND" && chatUrl(originalBindingForRestore.chatUrl)) {
+    try {
+      setupInvocations.roleRestoreOnSetupFailure = await invoke(["role", "bind", "--project", webgptProjectId, "--role", "requirement", "--url", originalBindingForRestore.chatUrl, "--replace"]);
+    } catch (restoreError) {
+      setupFailure = `${setupFailure}; restore failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`;
+    }
+  }
   await writeFile(setupPath, `${JSON.stringify({ error: setupFailure })}\n`, "utf8");
 }
 
@@ -268,9 +352,9 @@ const result = gateEvidence?.result === "PASS_REAL" ? "PASS_REAL" : gateEvidence
 const gateAttemptedRealRequests = typeof gateEvidence?.attemptedRealRequests === "number" ? gateEvidence.attemptedRealRequests : 0;
 const gateRealPromptCount = typeof gateEvidence?.realPromptCount === "number" ? gateEvidence.realPromptCount : 0;
 const setupPromptCount = setupContext ? Number(setupContext.setupPromptCount ?? 0) : 0;
-const accountedRealPromptCount = Math.max(setupPromptCount, gateAttemptedRealRequests, gateRealPromptCount);
+const accountedRealPromptCount = gateEvidence ? gateRealPromptCount : setupPromptCount;
 const wrapperEvidence = {
-  stage: "AUT-2 Gate Fix 2",
+  stage: "AUT-2 Gate Fix 3",
   result,
   startedAt,
   officialCli: {
@@ -283,8 +367,8 @@ const wrapperEvidence = {
   },
   setup: {
     projectName: webgptProjectName,
-    promptCount: setupContext ? 1 : 0,
-    newChatCount: setupContext ? 1 : 0,
+    promptCount: setupContext ? Number(setupContext.setupPromptCount ?? 0) : 0,
+    newChatCount: setupContext ? Number(setupContext.newChatCount ?? 0) : 0,
     setupChatRef: setupContext?.setupChatRef ?? null,
     setupRequestId: setupContext?.setupRequestId ?? null,
     setupIdempotencyKey: setupContext?.setupIdempotencyKey ?? null,
@@ -301,8 +385,8 @@ const wrapperEvidence = {
     attemptedRealRequests: gateAttemptedRealRequests,
     roleSetupPromptCount: setupPromptCount,
     newChatCount: setupContext ? Number(setupContext.newChatCount ?? 0) : 0,
-    repairCount: 0,
-    source: "gate_evidence_attempted_requests_and_setup_context",
+    repairCount: typeof gateEvidence?.repairCount === "number" ? gateEvidence.repairCount : 0,
+    source: "gate_evidence_request_diagnostics_and_setup_context",
   },
   gateEvidence,
   temporaryEvidence: "cleaned-after-run",

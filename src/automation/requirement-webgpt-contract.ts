@@ -149,6 +149,43 @@ export type RequirementContractErrorCode =
   | "REPAIR_BUDGET_EXHAUSTED"
   | "REPAIR_FAILED";
 
+export type RequirementResponseFailureCategory =
+  | "A_NO_JSON_CANDIDATE"
+  | "B_UNBALANCED_JSON"
+  | "C_JSON_SYNTAX_INVALID"
+  | "D_MARKDOWN_FENCE"
+  | "E_MULTIPLE_JSON_CANDIDATES"
+  | "F_SCHEMA_MISMATCH"
+  | "G_SEMANTIC_MISMATCH"
+  | "H_TRUNCATED_RESPONSE"
+  | "I_OTHER";
+
+export type RequirementResponseParseStage = "not_attempted" | "passed" | "failed";
+
+/**
+ * Bounded, non-content diagnostics for a provider response. This type is
+ * intentionally limited to shape, counts, hashes, and validation stages; it
+ * must never become a transcript or a second Requirement truth source.
+ */
+export interface RequirementResponseDiagnostics {
+  readonly responseCharCount: number;
+  readonly responseSha256: string;
+  readonly candidateCount: number;
+  readonly candidateCharCount: number | null;
+  readonly startsWithFence: boolean;
+  readonly endsWithFence: boolean;
+  readonly braceBalance: number;
+  readonly jsonParseStage: RequirementResponseParseStage;
+  readonly schemaValidationStage: RequirementResponseParseStage;
+  readonly semanticValidationStage: RequirementResponseParseStage;
+  readonly topLevelType: "object" | "array" | "string" | "number" | "boolean" | "null" | null;
+  readonly topLevelKeys: readonly string[];
+  readonly errorOffset: number | null;
+  readonly category: RequirementResponseFailureCategory | null;
+  readonly truncatedSuspected: boolean;
+  readonly errorCode: RequirementContractErrorCode | null;
+}
+
 export class RequirementContractError extends Error {
   readonly code: RequirementContractErrorCode;
   readonly path: string | null;
@@ -189,6 +226,8 @@ export type RequirementParseResult = RequirementParseSuccess | RequirementParseF
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 const CURRENT_CHAT_SENTINEL = /^(?:current|current-chat|active-chat|latest-chat)$/i;
+const SEMANTIC_ECHO_LINE = /(^Request semanticSha256 to echo:\s*)(?:<SEMANTIC_SHA256>|[a-f0-9]{64})\s*$/m;
+const SEMANTIC_ECHO_PLACEHOLDER = "<SEMANTIC_SHA256>";
 
 /**
  * Computes the request semantic identity. Runtime ids and the idempotency key
@@ -203,9 +242,18 @@ export function computeRequirementSemanticSha256(value: RequirementSemanticDescr
     projectId: value.projectId,
     role: value.role,
     targetRef: value.targetRef,
-    prompt: value.prompt,
+    prompt: canonicalPromptForSemantic(value.prompt),
   });
   return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+/**
+ * A Requirement prompt may explicitly tell the model which semantic hash to
+ * echo. The hash is computed over the placeholder form of that line so the
+ * prompt can carry the value without introducing a circular hash mismatch.
+ */
+function canonicalPromptForSemantic(prompt: string): string {
+  return prompt.replace(SEMANTIC_ECHO_LINE, `$1${SEMANTIC_ECHO_PLACEHOLDER}`);
 }
 
 export function createRequirementRequest(input: CreateRequirementRequestInput): IWebGPTRequirementRequest {
@@ -342,6 +390,56 @@ export function extractBoundedJson(rawResponse: string): string {
     throw new RequirementContractError("JSON_AMBIGUOUS", "response contains more than one JSON object candidate.", "rawResponse");
   }
   return candidates[0]!;
+}
+
+/**
+ * Produces bounded diagnostics for a response without returning or storing its
+ * content. The scan intentionally mirrors the conservative extractor so a
+ * Gate can distinguish an unbalanced/truncated candidate from a balanced JSON
+ * candidate that failed syntax, schema, or semantic validation.
+ */
+export function diagnoseRequirementResponse(rawResponse: unknown, error: RequirementContractError | null = null): RequirementResponseDiagnostics {
+  const value = typeof rawResponse === "string" ? rawResponse : "";
+  const trimmed = value.trim();
+  const startsWithFence = trimmed.startsWith("```");
+  const endsWithFence = trimmed.endsWith("```");
+  const scan = scanJsonCandidates(value);
+  const firstCandidate = scan.candidates[0] ?? null;
+  const firstParsed = firstCandidate ? safeJsonParse(firstCandidate) : safeJsonParse(trimmed);
+  const topLevelType = jsonType(firstParsed);
+  const topLevelKeys = isRecord(firstParsed) ? Object.keys(firstParsed).slice(0, MAX_REQUIREMENT_OBJECT_KEYS).map((key) => key.slice(0, 128)) : [];
+  const code = error?.code ?? null;
+  const jsonFailed = code === "JSON_INVALID" || code === "JSON_NOT_FOUND" || code === "JSON_AMBIGUOUS" || code === "JSON_ROOT_NOT_OBJECT" || code === "JSON_TOO_LARGE";
+  const jsonPassed = firstCandidate !== null && !jsonFailed;
+  const schemaFailed = code === "SCHEMA_INVALID" || code === "JSON_BOUNDS_EXCEEDED";
+  const semanticFailed = code === "SEMANTIC_INVALID";
+  const category = responseFailureCategory({
+    code,
+    candidateCount: scan.candidates.length,
+    malformedObjectSeen: scan.malformedObjectSeen,
+    unbalancedObjectSeen: scan.unbalancedObjectSeen,
+    startsWithFence,
+    endsWithFence,
+    responseCharCount: value.length,
+  });
+  return {
+    responseCharCount: value.length,
+    responseSha256: createHash("sha256").update(value, "utf8").digest("hex"),
+    candidateCount: scan.candidates.length,
+    candidateCharCount: firstCandidate ? firstCandidate.length : null,
+    startsWithFence,
+    endsWithFence,
+    braceBalance: scan.braceBalance,
+    jsonParseStage: code === null ? (firstCandidate ? "passed" : "not_attempted") : jsonFailed ? "failed" : "passed",
+    schemaValidationStage: schemaFailed ? "failed" : jsonPassed ? "passed" : "not_attempted",
+    semanticValidationStage: semanticFailed ? "failed" : schemaFailed || !jsonPassed ? "not_attempted" : "passed",
+    topLevelType,
+    topLevelKeys,
+    errorOffset: scan.firstErrorOffset,
+    category,
+    truncatedSuspected: scan.unbalancedObjectSeen || (startsWithFence !== endsWithFence) || /(?:\.\.\.|…)$/.test(trimmed),
+    errorCode: code,
+  };
 }
 
 export function parseRequirementEnvelope(rawResponse: string, context: RequirementEnvelopeContext): RequirementEnvelope {
@@ -648,6 +746,108 @@ function assertStringList(value: unknown, path: string, maxItems: number, maxCha
   const result = value.map((item, index) => assertText(item, `${path}[${index}]`, maxChars));
   if (new Set(result).size !== result.length) throw new RequirementContractError("SEMANTIC_INVALID", "array entries must be unique.", path);
   return result;
+}
+
+interface JsonCandidateScan {
+  readonly candidates: string[];
+  readonly malformedObjectSeen: boolean;
+  readonly unbalancedObjectSeen: boolean;
+  readonly firstErrorOffset: number | null;
+  readonly braceBalance: number;
+}
+
+function scanJsonCandidates(raw: string): JsonCandidateScan {
+  const candidates: string[] = [];
+  let malformedObjectSeen = false;
+  let unbalancedObjectSeen = false;
+  let firstErrorOffset: number | null = null;
+  const braceBalance = calculateBraceBalance(raw);
+  for (let index = 0; index < raw.length; index += 1) {
+    const character = raw[index]!;
+    if (character !== "{") continue;
+    const end = findBalancedJsonObjectEnd(raw, index);
+    if (end === null) {
+      unbalancedObjectSeen = true;
+      firstErrorOffset ??= index;
+      continue;
+    }
+    const candidate = raw.slice(index, end + 1);
+    if (utf8Bytes(candidate) > MAX_REQUIREMENT_JSON_BYTES) {
+      malformedObjectSeen = true;
+      firstErrorOffset ??= index;
+      continue;
+    }
+    const parsed = safeJsonParse(candidate);
+    if (!isRecord(parsed) || Array.isArray(parsed)) {
+      malformedObjectSeen = true;
+      firstErrorOffset ??= index;
+      index = end;
+      continue;
+    }
+    candidates.push(candidate);
+    index = end;
+  }
+  return { candidates, malformedObjectSeen, unbalancedObjectSeen, firstErrorOffset, braceBalance };
+}
+
+function calculateBraceBalance(raw: string): number {
+  let balance = 0;
+  let inString = false;
+  let escaped = false;
+  for (const character of raw) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "{") balance += 1;
+    else if (character === "}") balance -= 1;
+  }
+  return balance;
+}
+
+function safeJsonParse(value: string): unknown {
+  if (!value) return null;
+  try { return JSON.parse(value) as unknown; } catch { return null; }
+}
+
+function jsonType(value: unknown): RequirementResponseDiagnostics["topLevelType"] {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  if (typeof value === "object") return "object";
+  if (typeof value === "string") return "string";
+  if (typeof value === "number") return "number";
+  if (typeof value === "boolean") return "boolean";
+  return null;
+}
+
+function responseFailureCategory(input: {
+  readonly code: RequirementContractErrorCode | null;
+  readonly candidateCount: number;
+  readonly malformedObjectSeen: boolean;
+  readonly unbalancedObjectSeen: boolean;
+  readonly startsWithFence: boolean;
+  readonly endsWithFence: boolean;
+  readonly responseCharCount: number;
+}): RequirementResponseFailureCategory | null {
+  if (input.code === null) return null;
+  if (input.code === "JSON_NOT_FOUND" || input.code === "RAW_RESPONSE_EMPTY") return "A_NO_JSON_CANDIDATE";
+  if (input.code === "JSON_AMBIGUOUS") return "E_MULTIPLE_JSON_CANDIDATES";
+  if (input.code === "SCHEMA_INVALID" || input.code === "JSON_BOUNDS_EXCEEDED") return "F_SCHEMA_MISMATCH";
+  if (input.code === "SEMANTIC_INVALID") return "G_SEMANTIC_MISMATCH";
+  if (input.code === "JSON_INVALID") {
+    if (input.unbalancedObjectSeen && !input.malformedObjectSeen) return "B_UNBALANCED_JSON";
+    if (input.malformedObjectSeen && !input.unbalancedObjectSeen) return "C_JSON_SYNTAX_INVALID";
+    if (input.unbalancedObjectSeen && input.responseCharCount > 0) return "H_TRUNCATED_RESPONSE";
+    return "C_JSON_SYNTAX_INVALID";
+  }
+  if (input.code === "JSON_ROOT_NOT_OBJECT" && input.startsWithFence !== input.endsWithFence) return "D_MARKDOWN_FENCE";
+  return "I_OTHER";
 }
 
 function utf8Bytes(value: string): number {

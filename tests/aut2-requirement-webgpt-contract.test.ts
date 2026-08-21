@@ -8,6 +8,7 @@ import {
   createBlockedEnvelope,
   createNeedsInputEnvelope,
   createReadyForDraftEnvelope,
+  diagnoseRequirementResponse,
   createRequirementRequest,
   extractBoundedJson,
   parseRequirementEnvelope,
@@ -100,6 +101,41 @@ test("extracts one bounded JSON object and rejects ambiguity, arrays, and oversi
   assert.equal(errorCode(() => extractBoundedJson(`[${encoded}]`)), "JSON_ROOT_NOT_OBJECT");
   assert.equal(errorCode(() => extractBoundedJson("not JSON at all")), "JSON_NOT_FOUND");
   assert.equal(errorCode(() => extractBoundedJson("x".repeat(64 * 1024 + 1))), "RAW_RESPONSE_TOO_LARGE");
+});
+
+test("diagnoses malformed responses without retaining response content", () => {
+  const unbalanced = diagnoseRequirementResponse('{"a":1', new RequirementContractError("JSON_INVALID", "invalid"));
+  assert.equal(unbalanced.category, "B_UNBALANCED_JSON");
+  assert.equal(unbalanced.candidateCount, 0);
+  assert.equal(unbalanced.braceBalance, 1);
+  assert.equal(unbalanced.truncatedSuspected, true);
+  assert.equal(unbalanced.topLevelKeys.length, 0);
+
+  const syntax = diagnoseRequirementResponse('{"a":}', new RequirementContractError("JSON_INVALID", "invalid"));
+  assert.equal(syntax.category, "C_JSON_SYNTAX_INVALID");
+  assert.equal(syntax.braceBalance, 0);
+  assert.equal(syntax.truncatedSuspected, false);
+
+  const fenced = diagnoseRequirementResponse("```json\n" + raw(readyEnvelope()) + "\n```");
+  assert.equal(fenced.category, null);
+  assert.equal(fenced.startsWithFence, true);
+  assert.equal(fenced.endsWithFence, true);
+  assert.equal(fenced.topLevelType, "object");
+  assert.deepEqual(fenced.topLevelKeys, [
+    "requirementProtocolVersion",
+    "status",
+    "projectId",
+    "role",
+    "requestId",
+    "idempotencyKey",
+    "semanticSha256",
+    "payload",
+  ]);
+
+  const schema = diagnoseRequirementResponse(raw(readyEnvelope({ requirementProtocolVersion: 2 })), new RequirementContractError("SCHEMA_INVALID", "invalid"));
+  assert.equal(schema.category, "F_SCHEMA_MISMATCH");
+  const semantic = diagnoseRequirementResponse(raw(readyEnvelope({ projectId: "other-project" })), new RequirementContractError("SEMANTIC_INVALID", "invalid"));
+  assert.equal(semantic.category, "G_SEMANTIC_MISMATCH");
 });
 
 test("validates schema and semantic identity fail closed", () => {

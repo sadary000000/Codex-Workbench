@@ -138,6 +138,9 @@ test("aligns a batch, resolves context, calls explicit REQUIREMENT WebGPT, and r
     assert.ok(first.draft && first.request);
     assert.equal(first.request?.role, REQUIREMENT_ROLE);
     assert.equal(first.request?.binding.chatRef, binding().chatRef);
+    assert.match(first.request?.prompt ?? "", /Protocol identity to echo exactly:/);
+    assert.match(first.request?.prompt ?? "", /Request semanticSha256 to echo: [a-f0-9]{64}/);
+    assert.equal(first.request?.prompt.includes(first.request?.semanticSha256 ?? ""), true);
     assert.equal(webgpt.requests.length, 1);
 
     const second = await worker.requestDraft({
