@@ -1,120 +1,132 @@
-# AUT-2 Real WebGPT Evidence
+# AUT-2 Gate Fix 2 — Real WebGPT Evidence
 
 ## 结论
 
 ```yaml
 stage: AUT-2 Requirement Alignment + Baseline + Change Request
+gate_fix: Materialize REQUIREMENT Chat + Real Roundtrip
 result: FIX_REQUIRED
-webgpt_contract: PASS_AUTOMATED
-real_webgpt_runtime: PASS_REAL_PRECHECK_ONLY
-real_requirement_roundtrip: FAIL
-official_cli_external_probe: PASS
-gui_exe_used_as_public_cli: NO
+runtime: PASS_REAL
+role_materialization: PASS_REAL_SETUP
+exact_requirement_role: PASS_REAL
+batch_alignment: FAIL
+answers_to_draft: NOT_REACHED
+canonical_requirement: NOT_REACHED
+explicit_user_confirmation: NOT_REACHED
+change_request: PASS_AUTOMATED
 v1_core_changed: NO
 webgpt_v1_changed: NO
 ```
 
-本轮已验证 packaged GUI Host 和 Official CLI 可以连接同一个 Control Plane；登录状态、AUTO_CONTROL、REQUIREMENT Role Open 以及精确 Chat URL 预检均可通过。但 Requirement Service 的真实网页请求在提交前被现有目标保护拒绝，未产生网页 User Prompt，因此不能把 AUT-2 Real Gate 写成 PASS。
+本轮已证明 Gate Fix 2 的前置问题已闭环：通过 `project new-chat` 创建待发送上下文，再发送一次受限初始化消息，得到稳定的真实 Chat URL；该 Chat 被精确绑定到 `REQUIREMENT` Role，并可通过 `role open` 重新确认。
 
-## 测试边界与预算
+随后正式 Requirement 请求确实发送到了这个新 Chat，但网页返回无法解析的 bounded JSON。Adapter 按既有 fail-closed 规则报告 `MALFORMED_REQUIREMENT_RESPONSE`，没有 repair Prompt、盲目重发、替代 Chat 或错误 Chat fallback。因此本轮是 `FIX_REQUIRED`，不能提升为 `PASS_CANDIDATE`。
 
-```yaml
-hardMaxRealPrompts: 12
-targetMaxRealPrompts: 6
-hardMaxNewChats: 3
-hardMaxRepairPrompts: 3
-maxRoleSetupPrompts: 0
-attemptedRealRequests: 2
-usedRealPrompts: 0
-usedNewChats: 1
-usedRepairPrompts: 0
-```
-
-两次 Gate 尝试使用同一个 synthetic 目标语义；均在网页提交前失败，没有重复发送。一次 `role new --replace` 只用于验证新 Role Chat 是否能得到稳定 URL，返回 `PENDING_CHAT_URL` 后立即用原 URL 恢复；没有发送 Role 初始化 Prompt。没有扫描历史 Chat、Cookie、Token、raw HTML 或私人聊天内容。
-
-## 使用的运行时与 CLI
+## 运行时与边界
 
 ```yaml
 gui_host: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
 official_cli: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
 official_cli_used: YES
 gui_exe_used_as_public_cli: NO
+project_name: workts
+project_id: 371c3fb8-30ac-4943-9584-1915045ea34d
 same_runtime: YES
 same_persistent_session: YES
-test_project_ref: 371c3fb8-30ac-4943-9584-1915045ea34d
-requirement_role: REQUIREMENT
-target_chat_ref: https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc
+login_required: NO
+page_healthy: YES
+control_owner: AUTO_CONTROL
 ```
 
-预检证据：在 AUTO_CONTROL 下，Official CLI `webgpt role open` 返回 `ok=true`、`onChatPage=true`、`composerFound=true`，`currentUrl` 与目标 Chat 一致，`loginRequired=false`。该页面当时没有可见 User/Assistant 条目（`userCount=0`、`assistantCount=0`），这是后续“新 Chat 是否已物化”的关键限制。
+`webgpt control auto` 公共命令本次因已有持久化 recovery sweep 超过 CLI 运输超时而返回失败；独立 `status` 随后确认 `READY/AUTO_CONTROL`，所以没有把超时当作成功，也没有盲目重试。`project open` 与 `project new-chat` 均通过。
 
-## 真实 Gate 尝试
+## 真实初始化与 Chat 物化
 
-### Attempt 1
+初始化只使用一条 Prompt，内容不进入本报告；仅记录可审计元数据：
 
 ```yaml
-requestId: wgpt-24b78c80-9222-4316-acd9-255fe6a582c7
-idempotencyKey: aut2:alignment:b7210c50-7484-4f66-b62b-82b9da6c6493:round:6362ec4a-ac53-4133-94c2-d032d9bc46dd:a521a89f093da9034fab1b8e14cb93bc
-semanticSha256: f31bd06499601e66240ba9af02bc773d0994c69f2e22f4e3633fb8f7101c5308
-targetChatUrl: https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc
-submitted: false
-submittedAt: null
-observedGateResult: FAIL
+role: REQUIREMENT_SETUP
+setup_request_id: wgpt-50c015b8-1544-48c3-9209-2b038524bac9
+setup_idempotency_key: aut2:setup:1787332385192:61821983-d0c1-4b40-b690-a48bf4a1c2d8
+setup_chat: https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workts/c/6a88873d-0af0-83e8-a2e7-202adf2560f8
+setup_prompt_count: 1/2
+new_chat_count: 1/3
+user_count_after_setup: 1
+assistant_count_after_setup: 1
+semantic_response_check: ROLE_READY
+stable_chat_materialized: YES
 ```
 
-### Attempt 2
+`chat latest` 返回同一 Chat URL、至少一个 User 和 Assistant 条目；随后 `role bind --replace` 与 `role open` 均确认目标为该物化 Chat。初始化结束后，原 `REQUIREMENT` binding 已在 Gate `finally` 路径恢复，最终仍为原 URL；PLANNER/REVIEWER 没有改动。
+
+## 正式 Requirement 请求
 
 ```yaml
-requestId: wgpt-13270834-c441-4ca3-8730-a7943f12a14a
-idempotencyKey: aut2:alignment:954a8f33-46fd-4126-9ebb-8543ae896966:round:7b1c7c89-94e8-4de8-b2a9-b205e3d14482:a521a89f093da9034fab1b8e14cb93bc
-semanticSha256: f31bd06499601e66240ba9af02bc773d0994c69f2e22f4e3633fb8f7101c5308
-targetChatUrl: https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc
-submitted: false
-submittedAt: null
-observedGateResult: FAIL
+request_id: wgpt-09790d1c-3ed2-49d7-9781-72294e0cc4ac
+idempotency_key: aut2:alignment:c84c6da2-13f8-4334-9f48-a2bcf5dc17dd:round:79c68acd-2799-4c28-bde4-b0c1a373c33a:9024228823f5ba143eb4bd06afd9e299
+target_chat: https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workts/c/6a88873d-0af0-83e8-a2e7-202adf2560f8
+prompt_chars: 468
+prompt_sha256: 1e6318b21024069b4afd6f45b5a914e5ca59884c71734d810365102649828efe
+semantic_sha256: 34339e8f99535c458af35ec16a9bcb4329cec4975615be08339266f723ed8995
+result_sha256: 263436cb464d4b2378663fc09f45c229ead181f4a93564901a7f03b0b396784a
+journal_state: COMPLETED
+created_at: 2026-08-21T17:13:59.372Z
+submitted_at: 2026-08-21T17:14:03.582Z
+completed_at: 2026-08-21T17:14:26.204Z
+result: MALFORMED_REQUIREMENT_RESPONSE
+repair_prompt_count: 0
 ```
 
-第一次 Gate 输出由 Requirement Service 包装为 `MALFORMED_REQUIREMENT_RESPONSE`；Request Journal 在后续恢复检查中保留为 `RECOVERY_REQUIRED`，没有 `submittedAt`。第二次同样在提交前被 `ROLE_CHAT_MISMATCH` 保护拒绝，后续恢复检查仍未发现可验证的目标 Chat 内容，当前 Journal 状态为 `RECOVERY_REQUIRED`。这不是向错误 Chat 发送，也不是 Prompt 重发。
+失败原因是 bounded JSON candidate 无效或不平衡。没有获得第一轮 `NEEDS_INPUT` 问题批次，因此 answers-to-draft、canonical requirement、USER confirmation 均为 `NOT_REACHED`。没有把失败误判为成功。
 
-## 为什么不能继续强行真实发送
+## 预算与计数
 
-原 REQUIREMENT binding 可以被导航确认，但目标 Chat 当前是空的；点击 `role new` 只返回 `PENDING_CHAT_URL` 并回到首页。按照 ChatGPT 页面行为，只有完成一次对话后才可能得到可稳定使用的 Chat 身份；而本轮明确要求 `MAX_ROLE_SETUP_PROMPTS=0`。在没有稳定、已物化的 REQUIREMENT Chat 前，绕过 Adapter 的精确 BOUND 检查、使用当前页面 fallback、或发送一个角色初始化 Prompt 都会违反本阶段安全边界。
+```yaml
+hard_max_real_prompts: 12
+target_max_real_prompts: 7
+real_prompt_count: 2
+hard_max_role_setup_prompts: 2
+role_setup_prompt_count: 1
+hard_max_new_test_chats: 3
+new_test_chat_count: 1
+hard_max_repair_prompts: 3
+repair_prompt_count: 0
+duplicate_prompt_count: 0
+wrong_chat_prompt_count: 0
+```
 
-因此本轮停止在真实 Gate 的安全边界：
+原始 Gate JSON 在 Adapter 异常发生前没有拿到正式请求 envelope，所以其中 `realPromptCount=1` 只计入初始化 Prompt。最终审查计数按本次 Request Journal 元数据更正为 2：初始化 1 条 + 正式 Requirement 1 条；没有第三条 Prompt。
+
+## 自动化 Gate 与安全边界
+
+- Requirement Domain、Batch Contract、Canonical Requirement、USER Confirmation Guard、Change Request、Data Egress 和 Prompt Injection Boundary：`PASS_AUTOMATED`。
+- Official CLI 使用 `execFile`，没有把 GUI EXE 当公共 CLI，也没有设置 `ELECTRON_RUN_AS_NODE`。
+- 没有扫描历史 Chat、读取 Cookie/Token、保存 Prompt/Response 全文或浏览器私有 Profile。
+- 没有启动 Planner、Native Executor、Reviewer、Scheduler、Workflow UI 或 AUT-3。
+- 没有修改 V1 Frozen Core 或 WebGPT V1 语义；未创建替代 Chat；原 REQUIREMENT binding 已恢复。
+
+## 自动化验证
+
+```yaml
+npm_run_check: PASS
+npm_test: PASS
+tests: 276/276
+npm_run_build: PASS
+npm_run_package_win: PASS
+npm_audit_omit_dev: PASS
+git_diff_check: PASS
+secret_scan: PASS
+```
+
+最新 packaged Host/CLI 已重新构建。计数修正只影响 Gate harness 的证据汇总，不重新发送真实 Prompt。
+
+## 阶段判断
 
 ```text
-Requirement Service → RequirementWebGptAdapter → Role Session
-→ target verification → fail-closed
+REQUIREMENT Chat materialization: PASS_REAL_SETUP
+Exact Role routing: PASS_REAL
+Real Requirement roundtrip: FAIL — MALFORMED_REQUIREMENT_RESPONSE
+AUT-2 Gate Fix 2: FIX_REQUIRED
 ```
 
-没有进入 `NEEDS_INPUT`，没有解析问题批次，没有生成 Draft，也没有执行网页侧 USER Confirmation。`PASS_AUTOMATED` 的 Domain/Contract/Confirmation/Data Egress 证据仍然有效，但不等于 `PASS_REAL`。
-
-## Gate 分级
-
-| Gate | 结果 | 证据 |
-|---|---|---|
-| Requirement Domain | PASS_AUTOMATED | 现有 AUT-2 单元/合同测试 |
-| Batch Alignment Contract | PASS_AUTOMATED | bounded contract 与服务测试 |
-| Canonical Requirement / payloadSha256 | PASS_AUTOMATED | 服务/持久化测试 |
-| Explicit USER Confirmation | PASS_AUTOMATED | actor guard 与状态机测试 |
-| Change Request / Impact / Diff | PASS_AUTOMATED | 现有测试 |
-| Data Egress / Trust Boundary | PASS_AUTOMATED | policy 与 injection 测试 |
-| Official CLI external probe | PASS | packaged CLI + same runtime |
-| Exact REQUIREMENT Role Open | PASS_REAL | URL/page/composer 预检 |
-| Real batch alignment | NOT_REACHED / FAIL | 发送前目标保护拒绝 |
-| Real answers-to-draft | NOT_REACHED | 没有第一轮问题 |
-| Real canonical draft | NOT_REACHED | 没有有效网页响应 |
-| Real USER confirmation | NOT_REACHED | 没有 Draft |
-| Request idempotency | PASS_AUTOMATED; REAL NO-RESEND OBSERVED | 两次尝试均未提交 |
-
-## 安全与范围
-
-- `official_cli_used=YES`；没有把 GUI EXE 当公共 CLI。
-- 没有修改 V1 Frozen Core、Native Thread/Turn/Item、Runtime Registry 或 WebGPT V1 语义。
-- 没有启动 Planner、Reviewer、Native Executor、Scheduler 或 AUT-3。
-- 没有复制 Transcript、Prompt/Response 全文、Cookie、Token、浏览器私有状态。
-- 原 REQUIREMENT binding 的 Project、Role、Chat URL 已恢复；PLANNER/REVIEWER 未修改。
-
-## 下一步最小阻塞解除条件
-
-需要用户提供或在已允许的真实 WebGPT 操作中先完成一个明确、稳定、可复用的 REQUIREMENT Chat 物化流程，并将其绑定到当前测试 Project；该流程若需要发送初始化 Prompt，必须单独获得允许并计入真实 Prompt 预算。本轮不自行发送该 Prompt。
+本次失败不是“找不到新 Chat”、不是 wrong-thread send、不是 timeout 误报，也不是 Prompt 重发；下一步只需由 GPT 审查当前真实响应协议失败，不能把本包当作 AUT-2 Real Gate PASS。

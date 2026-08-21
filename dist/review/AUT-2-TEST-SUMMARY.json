@@ -1,33 +1,47 @@
 {
-  "stage": "AUT-2 Requirement Alignment + Baseline + Change Request",
-  "verificationTimestamp": "2026-08-22T00:05:03+08:00",
-  "tests": {
-    "npm run check": "PASS",
-    "npm test": "PASS",
-    "count": 276,
+  "stage": "AUT-2 Gate Fix 2",
+  "implementationCommit": "91c39ae",
+  "automated": {
+    "npmRunCheck": "PASS",
+    "npmTest": "PASS",
+    "testCount": 276,
     "passed": 276,
     "failed": 0,
-    "npm run build": "PASS",
-    "npm run package:win": "PASS",
-    "npm audit --omit=dev": "PASS",
-    "git diff --check": "PASS",
-    "secretScan": "PASS_NO_CONCRETE_CREDENTIAL_PATTERN"
+    "npmRunBuild": "PASS",
+    "npmRunPackageWin": "PASS",
+    "npmAuditOmitDev": "PASS",
+    "gitDiffCheck": "PASS",
+    "secretScan": "PASS"
   },
-  "realWebGpt": {
-    "officialCliProbe": "PASS",
-    "runtimePrecheck": "PASS_REAL",
-    "requirementRoundtrip": "FAIL",
-    "realPromptCount": 0,
-    "attemptedRealRequests": 2,
+  "realGate": {
+    "runtime": "PASS_REAL",
+    "roleMaterialization": "PASS_REAL_SETUP",
+    "exactRequirementRole": "PASS_REAL",
+    "batchAlignment": "FAIL",
+    "result": "FIX_REQUIRED",
+    "failureCode": "MALFORMED_REQUIREMENT_RESPONSE",
+    "realPromptCount": 2,
     "newTestChatCount": 1,
+    "roleSetupPromptCount": 1,
     "repairPromptCount": 0,
-    "submittedAtNullForAttempts": true,
     "wrongChatPromptCount": 0,
     "duplicatePromptCount": 0
   },
-  "v1CoreChanged": false,
-  "webgptV1Changed": false,
-  "plannerStarted": false,
-  "nativeExecutionStarted": false,
-  "reviewerStarted": false
+  "scope": {
+    "v1CoreChanged": false,
+    "webgptV1Changed": false,
+    "plannerStarted": false,
+    "nativeExecutionStarted": false,
+    "reviewerStarted": false,
+    "originalRequirementBindingRestored": true
+  },
+  "evidenceFiles": [
+    "docs/AUT-2-STAGE-REVIEW.md",
+    "docs/AUT-2-REAL-WEBGPT-EVIDENCE.md",
+    "docs/AUT-2-REAL-WEBGPT-EVIDENCE.json",
+    "docs/AUT-2-GATE-FIX-2-RUNTIME.json",
+    "docs/AUT-2-REAL-PROMPT-BUDGET.json",
+    "docs/AUT-2-PROVENANCE.txt"
+  ],
+  "sensitiveContentExcluded": true
 }
