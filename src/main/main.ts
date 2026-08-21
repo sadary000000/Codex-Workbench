@@ -24,9 +24,11 @@ import { WebGptRoleSessionRegistry } from "../features/webgpt/runtime/webgpt-rol
 import { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
 import { isWebGptProjectOperationCommand, projectOperationBudgetMs } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
 import type { WebGptLatestResponse, WebGptRole } from "../features/webgpt/types.ts";
-import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
+import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
 import { WEBGPT_CONTROL_PROTOCOL_VERSION, WebGptControlServer, controlDescriptorPath, createControlDescriptor, publishControlDescriptor, removeControlDescriptor, runWebGptCli, type WebGptControlDescriptor, type WebGptControlIdentity, type WebGptControlRequest, type WebGptControlResponse } from "./webgpt-control.ts";
+import { createWebGptCliArgumentError, presentWebGptCliOutput } from "./webgpt-cli-presenter.ts";
 import { writeWebGptTextOutput } from "./webgpt-output.ts";
+import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -153,8 +155,29 @@ function controlOk(command: string, result: unknown): WebGptControlResponse {
   return { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: "pending", ok: true, command, result };
 }
 
-function controlFail(command: string, code: string, message: string, result?: unknown): WebGptControlResponse {
-  return { version: WEBGPT_CONTROL_PROTOCOL_VERSION, requestId: "pending", ok: false, command, ...(result === undefined ? {} : { result }), error: { code, message } };
+interface ControlFailureOptions {
+  retryable?: boolean;
+  retryAfterMs?: number | null;
+  userAction?: string;
+  details?: ControlPlaneErrorDetails;
+}
+
+function controlFail(command: string, code: string, message: string, result?: unknown, options: ControlFailureOptions = {}): WebGptControlResponse {
+  return {
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "pending",
+    ok: false,
+    command,
+    ...(result === undefined ? {} : { result }),
+    error: {
+      code,
+      message,
+      retryable: options.retryable ?? false,
+      ...(options.retryAfterMs === undefined ? {} : { retryAfterMs: options.retryAfterMs }),
+      ...(options.userAction ? { userAction: options.userAction } : {}),
+      ...(options.details ? { details: options.details } : {}),
+    },
+  };
 }
 
 function controlIdentity(): WebGptControlIdentity {
@@ -170,10 +193,13 @@ function attachControlIdentity(request: WebGptControlRequest, response: WebGptCo
   return { ...response, requestId: request.requestId, identity: controlIdentity() };
 }
 
-function codedError(code: string, message: string, details?: unknown): Error & { code: string; details?: unknown } {
-  const error = new Error(message) as Error & { code: string };
+function codedError(code: string, message: string, details?: unknown, options: ControlFailureOptions = {}): Error & { code: string; details?: unknown; retryable?: boolean; retryAfterMs?: number | null; userAction?: string } {
+  const error = new Error(message) as Error & { code: string; details?: unknown; retryable?: boolean; retryAfterMs?: number | null; userAction?: string };
   error.code = code;
   if (details !== undefined) (error as Error & { details?: unknown }).details = details;
+  if (options.retryable !== undefined) error.retryable = options.retryable;
+  if (options.retryAfterMs !== undefined) error.retryAfterMs = options.retryAfterMs;
+  if (options.userAction) error.userAction = options.userAction;
   return error;
 }
 
@@ -371,7 +397,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
       else {
         const waited = await getWebGptRequestManager().waitForRequest(request.targetRequestId, request.timeoutMs ?? 120_000);
         response = waited.timedOut
-          ? controlFail(request.command, "WEBGPT_WAIT_TIMEOUT", "等待超时；请求仍由 WebGPT Core 持有，可继续使用 result 查询。", { ...waited.record, waitTimedOut: true })
+          ? controlFail(request.command, "WEBGPT_WAIT_TIMEOUT", "等待超时；请求仍由 WebGPT Core 持有，可继续使用 result 查询。", { ...waited.record, waitTimedOut: true }, { retryable: true, retryAfterMs: 500, userAction: "poll_result" })
           : controlOk(request.command, waited.record);
       }
     } else if (request.command === "webgpt.result") {
@@ -380,7 +406,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
         const result = await getWebGptRequestManager().getResult(request.targetRequestId);
         if (result.state !== "COMPLETED" || !result.response) {
           response = request.out
-            ? controlFail(request.command, "WEBGPT_RESULT_NOT_READY", "Request 尚未完成，未写入结果文件；请继续使用 wait 或 result 查询。", result)
+            ? controlFail(request.command, "WEBGPT_RESULT_NOT_READY", "Request 尚未完成，未写入结果文件；请继续使用 wait 或 result 查询。", result, { retryable: true, retryAfterMs: 500, userAction: "poll_result" })
             : controlOk(request.command, result);
         }
         else if (request.out) {
@@ -421,8 +447,15 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
   } catch (error) {
     const normalized = errorInfo(error);
     const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "WEBGPT_COMMAND_FAILED";
-    const details = (error as { details?: unknown })?.details;
-    response = controlFail(request.command, code, normalized.message, details);
+    const details = sanitizeControlPlaneErrorDetails((error as { details?: unknown })?.details);
+    response = controlFail(request.command, code, normalized.message, undefined, {
+      retryable: typeof (error as { retryable?: unknown })?.retryable === "boolean" ? (error as { retryable: boolean }).retryable : undefined,
+      retryAfterMs: typeof (error as { retryAfterMs?: unknown })?.retryAfterMs === "number" || (error as { retryAfterMs?: unknown })?.retryAfterMs === null
+        ? (error as { retryAfterMs: number | null }).retryAfterMs
+        : undefined,
+      userAction: typeof (error as { userAction?: unknown })?.userAction === "string" ? (error as { userAction: string }).userAction : undefined,
+      ...(details ? { details } : {}),
+    });
   }
   const identified = attachControlIdentity(request, response);
   if (!projectCommand) return identified;
@@ -455,26 +488,13 @@ function enqueueWebGptControlRequest(request: WebGptControlRequest): Promise<Web
   return result;
 }
 
-function cliOutput(invocation: WebGptCliCommand, response: WebGptControlResponse): string {
-  if (invocation.json) return `${JSON.stringify(response)}\n`;
-  if (response.ok) return `${response.command}: OK\n${JSON.stringify(response.result ?? null, null, 2)}\n`;
-  return `${response.command}: ERROR [${response.error?.code ?? "UNKNOWN"}] ${response.error?.message ?? "未知错误"}\n`;
-}
-
 async function runCliInvocation(invocation: WebGptCliInvocation, workbenchExecutablePath = process.execPath): Promise<void> {
   if (invocation.kind === "error") {
-    const response: WebGptControlResponse = {
-      version: WEBGPT_CONTROL_PROTOCOL_VERSION,
-      requestId: randomUUID(),
-      ok: false,
-      command: "webgpt",
-      error: { code: "CLI_INVALID_ARGUMENT", message: invocation.message },
-    };
-    const parseError = response.error ?? { code: "CLI_INVALID_ARGUMENT", message: invocation.message };
-    const output = invocation.json ? `${JSON.stringify(response)}\n` : `${response.command}: ERROR [${parseError.code}] ${parseError.message}\n`;
-    await new Promise<void>((resolveOutput) => (invocation.json ? process.stdout : process.stderr).write(output, () => resolveOutput()));
+    const presented = presentWebGptCliOutput({ json: invocation.json }, createWebGptCliArgumentError(invocation.message));
+    if (presented.stdout) await new Promise<void>((resolveOutput) => process.stdout.write(presented.stdout, () => resolveOutput()));
+    if (presented.stderr) await new Promise<void>((resolveOutput) => process.stderr.write(presented.stderr, () => resolveOutput()));
     await closeCliOutputStreams();
-    process.exit(2);
+    process.exit(presented.exitCode);
     return;
   }
   if (invocation.kind !== "command") {
@@ -490,11 +510,11 @@ async function runCliInvocation(invocation: WebGptCliInvocation, workbenchExecut
       cliExitAt: new Date().toISOString(),
     },
   };
-  const output = cliOutput(invocation.command, responseWithExit);
-  const stream = invocation.command.json || responseWithExit.ok ? process.stdout : process.stderr;
-  await new Promise<void>((resolveOutput) => stream.write(output, () => resolveOutput()));
+  const presented = presentWebGptCliOutput(invocation.command, responseWithExit);
+  if (presented.stdout) await new Promise<void>((resolveOutput) => process.stdout.write(presented.stdout, () => resolveOutput()));
+  if (presented.stderr) await new Promise<void>((resolveOutput) => process.stderr.write(presented.stderr, () => resolveOutput()));
   await closeCliOutputStreams();
-  process.exit(responseWithExit.ok ? 0 : 1);
+  process.exit(presented.exitCode);
 }
 
 function runtimeCwd(): string {

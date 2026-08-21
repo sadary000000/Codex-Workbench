@@ -129,5 +129,6 @@ test("WebGPT CLI avoids Electron Chromium initialization before returning to exe
   assert.doesNotMatch(cliBlock, /await app\.whenReady\(\)/);
   assert.match(cliBlock, /controlDescriptorPath\(app\.getPath\("userData"\)\)/);
   assert.match(cliBlock, /closeCliOutputStreams\(\)/);
-  assert.match(cliBlock, /process\.exit\(responseWithExit\.ok \? 0 : 1\)/);
+  assert.match(cliBlock, /presentWebGptCliOutput/);
+  assert.match(cliBlock, /process\.exit\(presented\.exitCode\)/);
 });

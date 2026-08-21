@@ -48,6 +48,7 @@ export interface WebGptBrowserResourceDiagnostics {
   activeRequestId: string | null;
   activeOperationType: WebGptOperationType | null;
   queueDepth: number;
+  queueLimit: number;
   queue: Array<Pick<WebGptOperationIdentity, "operationId" | "source" | "ownerKey" | "requestId" | "operationType" | "createdAt" | "state">>;
   lastOperation: Pick<WebGptOperationIdentity, "operationId" | "source" | "ownerKey" | "requestId" | "operationType" | "createdAt" | "startedAt" | "endedAt" | "state"> | null;
 }
@@ -60,7 +61,7 @@ export interface WebGptOperationLease {
 interface PendingOperation {
   operation: WebGptOperationIdentity;
   resolve: (lease: WebGptOperationLease) => void;
-  reject: (error: Error & { code?: string }) => void;
+  reject: (error: Error & { code?: string; retryable?: boolean; retryAfterMs?: number; details?: Record<string, string | number | boolean | null> }) => void;
   allowWhenPaused: boolean;
 }
 
@@ -69,6 +70,11 @@ interface AcquireOptions {
 }
 
 const MAX_QUEUE_DIAGNOSTICS = 32;
+export const WEBGPT_OPERATION_QUEUE_LIMIT = 8;
+
+export interface WebGptOperationArbiterOptions {
+  maxQueueSize?: number;
+}
 
 export class WebGptOperationArbiter {
   private controlMode: "AUTO_CONTROL" | "USER_CONTROL" | "PAUSED" | "DEGRADED" = "PAUSED";
@@ -78,11 +84,25 @@ export class WebGptOperationArbiter {
   private lastOperation: WebGptOperationIdentity | null = null;
   private activeReadCount = 0;
   private readonly idleWaiters: Array<() => void> = [];
+  private readonly maxQueueSize: number;
+
+  constructor(options: WebGptOperationArbiterOptions = {}) {
+    this.maxQueueSize = Number.isSafeInteger(options.maxQueueSize) && (options.maxQueueSize as number) > 0
+      ? Math.min(options.maxQueueSize as number, 64)
+      : WEBGPT_OPERATION_QUEUE_LIMIT;
+  }
 
   async acquire(request: WebGptOperationRequest, options: AcquireOptions = {}): Promise<WebGptOperationLease> {
     const operation = this.createOperation(request);
     if (!this.canAcquire(options.allowWhenPaused === true)) {
-      throw this.operationError("WEBGPT_OPERATION_NOT_ALLOWED", this.notAllowedMessage());
+      throw this.notAllowedError();
+    }
+    if (this.queue.length >= this.maxQueueSize) {
+      throw this.operationError("WEBGPT_OPERATION_OVERLOADED", "WebGPT 浏览器操作队列已满，请稍后重试。", {
+        retryable: true,
+        retryAfterMs: 1_000,
+        details: { reason: "queue_capacity", queueDepth: this.queue.length, queueLimit: this.maxQueueSize },
+      });
     }
     return new Promise<WebGptOperationLease>((resolve, reject) => {
       const pending: PendingOperation = {
@@ -112,7 +132,11 @@ export class WebGptOperationArbiter {
 
   async withRead<T>(request: WebGptOperationRequest, operation: () => Promise<T> | T): Promise<T> {
     if (this.controlMode === "DEGRADED") throw this.operationError("WEBGPT_OPERATION_DEGRADED", "WebGPT 浏览器资源当前处于 degraded 状态。 ");
-    if (this.active) throw this.operationError("WEBGPT_OPERATION_BUSY", "WebGPT 浏览器当前正在执行不可并发的自动操作。 ");
+    if (this.active) throw this.operationError("WEBGPT_OPERATION_BUSY", "WebGPT 浏览器当前正在执行不可并发的自动操作。 ", {
+      retryable: true,
+      retryAfterMs: 250,
+      details: { reason: "active_write", operation: "read" },
+    });
     const identity = this.createOperation(request);
     identity.state = "ACTIVE";
     identity.startedAt = new Date().toISOString();
@@ -210,6 +234,7 @@ export class WebGptOperationArbiter {
       activeRequestId: this.active?.operation.requestId ?? null,
       activeOperationType: this.active?.operation.operationType ?? null,
       queueDepth: this.queue.length,
+      queueLimit: this.maxQueueSize,
       queue: this.queue.slice(0, MAX_QUEUE_DIAGNOSTICS).map(({ operation }) => ({
         operationId: operation.operationId,
         source: operation.source,
@@ -286,9 +311,19 @@ export class WebGptOperationArbiter {
     for (const resolve of this.idleWaiters.splice(0)) resolve();
   }
 
-  private operationError(code: string, message: string): Error & { code: string } {
-    const error = new Error(message) as Error & { code: string };
+  private notAllowedError(): Error & { code: string; retryable?: boolean; userAction?: string } {
+    if (this.controlMode === "USER_CONTROL") return this.operationError("WEBGPT_USER_CONTROL", this.notAllowedMessage(), { userAction: "return_auto_control" });
+    if (this.controlMode === "DEGRADED") return this.operationError("WEBGPT_OPERATION_DEGRADED", this.notAllowedMessage(), { userAction: "reconcile_request" });
+    return this.operationError("WEBGPT_OPERATION_NOT_ALLOWED", this.notAllowedMessage());
+  }
+
+  private operationError(code: string, message: string, options: { retryable?: boolean; retryAfterMs?: number; userAction?: string; details?: Record<string, string | number | boolean | null> } = {}): Error & { code: string; retryable?: boolean; retryAfterMs?: number; userAction?: string; details?: Record<string, string | number | boolean | null> } {
+    const error = new Error(message) as Error & { code: string; retryable?: boolean; retryAfterMs?: number; userAction?: string; details?: Record<string, string | number | boolean | null> };
     error.code = code;
+    if (options.retryable !== undefined) error.retryable = options.retryable;
+    if (options.retryAfterMs !== undefined) error.retryAfterMs = options.retryAfterMs;
+    if (options.userAction) error.userAction = options.userAction;
+    if (options.details) error.details = options.details;
     return error;
   }
 }

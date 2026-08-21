@@ -117,6 +117,8 @@ export function buildControlPlaneSchema(workbenchVersion = "runtime-supplied"): 
           code: { type: "string", minLength: 1, maxLength: 96 },
           message: { type: "string", minLength: 1, maxLength: 512 },
           retryable: { type: "boolean" },
+          retryAfterMs: { type: ["integer", "null"], minimum: 0, maximum: 300000 },
+          userAction: { type: "string", minLength: 1, maxLength: 64 },
           details: { type: "object", maxProperties: 16, additionalProperties: { type: ["string", "number", "boolean", "null"] } },
         },
       },

@@ -21,6 +21,7 @@ import {
   type ControlPlaneClientInfo,
   type ControlPlaneCompatibility,
 } from "../shared/webgpt-control-plane-contract.ts";
+import { normalizeControlPlaneError, sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 
 export const WEBGPT_CONTROL_PROTOCOL_VERSION = CONTROL_PLANE_WIRE_VERSION;
 export const WEBGPT_CONTROL_PROTOCOL_VERSION_TEXT = CONTROL_PLANE_PROTOCOL_VERSION;
@@ -65,7 +66,9 @@ export interface WebGptControlError {
   code: string;
   message: string;
   retryable?: boolean;
-  details?: Record<string, string | number | boolean | null>;
+  retryAfterMs?: number | null;
+  userAction?: string;
+  details?: ControlPlaneErrorDetails;
 }
 
 export interface WebGptControlDiagnostics {
@@ -320,7 +323,7 @@ function roleValue(value: unknown): WebGptRole | null {
   return role === "REQUIREMENT" || role === "PLANNER" || role === "REVIEWER" ? role : null;
 }
 
-function controlError(code: string, message: string, command: string, requestId: string = randomUUID(), retryable = false, details?: Record<string, string | number | boolean | null>): WebGptControlResponse {
+function controlError(code: string, message: string, command: string, requestId: string = randomUUID(), retryable = false, details?: ControlPlaneErrorDetails): WebGptControlResponse {
   return {
     version: WEBGPT_CONTROL_PROTOCOL_VERSION,
     protocolVersion: WEBGPT_CONTROL_PROTOCOL_VERSION_TEXT,
@@ -338,11 +341,15 @@ function isValidControlResponse(value: unknown): value is WebGptControlResponse 
   if (record.protocolVersion !== undefined && typeof record.protocolVersion !== "string") return false;
   if (!record.ok) {
     const error = record.error;
-    return !!error && typeof error === "object" && !Array.isArray(error)
-      && typeof (error as Record<string, unknown>).code === "string"
-      && typeof (error as Record<string, unknown>).message === "string"
-      && ((error as Record<string, unknown>).retryable === undefined || typeof (error as Record<string, unknown>).retryable === "boolean")
-      && isSafeErrorDetails((error as Record<string, unknown>).details);
+    if (!error || typeof error !== "object" || Array.isArray(error)) return false;
+    const errorRecord = error as Record<string, unknown>;
+    const retryAfterMs = errorRecord.retryAfterMs;
+    return typeof errorRecord.code === "string"
+      && typeof errorRecord.message === "string"
+      && (errorRecord.retryable === undefined || typeof errorRecord.retryable === "boolean")
+      && (retryAfterMs === undefined || retryAfterMs === null || (typeof retryAfterMs === "number" && Number.isSafeInteger(retryAfterMs) && retryAfterMs >= 0 && retryAfterMs <= 300_000))
+      && (errorRecord.userAction === undefined || (typeof errorRecord.userAction === "string" && errorRecord.userAction.length <= 64))
+      && isSafeErrorDetails(errorRecord.details);
   }
   return true;
 }
@@ -351,7 +358,7 @@ function isSafeErrorDetails(value: unknown): boolean {
   if (value === undefined) return true;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const entries = Object.entries(value as Record<string, unknown>);
-  const allowed = /^(?:supportedVersion|requestedVersion|capability|requiredCommand|compatibilityUntil|reason|retryAfterMs)$/;
+  const allowed = /^(?:legacyCode|layer|reason|field|operation|state|queueDepth|queueLimit|activeOperationType|supportedVersion|requestedVersion|capability|requiredCommand|compatibilityUntil|retryAfterMs)$/;
   return entries.length <= 16 && entries.every(([key, item]) => allowed.test(key)
     && (typeof item === "string" ? item.length <= 256 : typeof item === "number" || typeof item === "boolean" || item === null));
 }
@@ -565,12 +572,26 @@ export class WebGptControlServer {
 
   private decorateResponse(response: WebGptControlResponse, request: WebGptControlRequest, mode: "MODERN" | "LEGACY"): WebGptControlResponse {
     const error = response.error
-      ? {
-        code: response.error.code,
-        message: safeProtocolMessage(response.error.message),
-        retryable: response.error.retryable ?? false,
-        ...(response.error.details ? { details: boundedDetails(response.error.details) } : {}),
-      }
+      ? (() => {
+        const normalized = normalizeControlPlaneError({
+          ...response.error,
+          message: safeProtocolMessage(response.error.message),
+          details: boundedDetails(response.error.details),
+        });
+        // Legacy clients keep their historical error code. Modern clients get
+        // the stable taxonomy and can still inspect details.legacyCode.
+        if (mode === "LEGACY") {
+          return {
+            code: response.error.code,
+            message: normalized.message,
+            retryable: response.error.retryable ?? normalized.retryable,
+            ...(normalized.retryAfterMs === undefined ? {} : { retryAfterMs: normalized.retryAfterMs }),
+            ...(normalized.userAction ? { userAction: normalized.userAction } : {}),
+            ...(normalized.details ? { details: normalized.details } : {}),
+          };
+        }
+        return normalized;
+      })()
       : undefined;
     return {
       ...response,
@@ -589,12 +610,8 @@ export class WebGptControlServer {
   }
 }
 
-function boundedDetails(details: Record<string, string | number | boolean | null>): Record<string, string | number | boolean | null> {
-  const safeKey = /^(?:supportedVersion|requestedVersion|capability|requiredCommand|compatibilityUntil|reason|retryAfterMs)$/;
-  return Object.fromEntries(Object.entries(details)
-    .filter(([key]) => safeKey.test(key))
-    .slice(0, 16)
-    .map(([key, value]) => [key, typeof value === "string" ? value.slice(0, 256) : value]));
+function boundedDetails(details: Record<string, string | number | boolean | null> | undefined): Record<string, string | number | boolean | null> {
+  return sanitizeControlPlaneErrorDetails(details) ?? {};
 }
 
 function safeProtocolMessage(message: string): string {
@@ -744,7 +761,7 @@ export async function runWebGptCli(
       requestId: randomUUID(),
       ok: false,
       command: command.name,
-      error: { code: "CLI_INPUT_INVALID", message: error instanceof Error ? error.message : String(error), retryable: false },
+      error: { code: "CLI_INPUT_INVALID", message: error instanceof Error ? error.message : String(error), retryable: false, userAction: "fix_request" },
     };
   }
   let clientInfo: ControlPlaneClientInfo = {
@@ -805,7 +822,7 @@ export async function runWebGptCli(
           lastError = "";
           continue;
         }
-        if (["CONTROL_COMMAND_UNSUPPORTED", "CONTROL_VERSION_UNSUPPORTED", "CONTROL_FIELD_UNSUPPORTED"].includes(response.error?.code ?? "")) {
+        if (hasErrorCode(response, ["CONTROL_COMMAND_UNSUPPORTED", "CONTROL_VERSION_UNSUPPORTED", "CONTROL_FIELD_UNSUPPORTED"])) {
           legacyCompatibility = true;
           lastError = "Control Plane 进入兼容窗口。";
           continue;
@@ -828,9 +845,9 @@ export async function runWebGptCli(
       }
       if (response.identity && response.identity.workbenchInstanceId !== descriptor.workbenchInstanceId) {
         lastError = "Control Plane 实例身份不一致。";
-      } else if (response.error?.code === "WORKBENCH_NOT_READY") {
+      } else if (hasErrorCode(response, ["WORKBENCH_NOT_READY"])) {
         controlReachable = true;
-        lastError = response.error.message;
+        lastError = response.error?.message ?? "Workbench 尚未就绪。";
         request = { ...request, requestId: randomUUID() };
       } else if (response.requestId !== activeRequest.requestId) {
         lastError = "Control Plane 返回的 requestId 与请求不一致。";
@@ -865,7 +882,7 @@ export async function runWebGptCli(
           requestId: request.requestId,
           ok: false,
           command: command.name,
-          error: { code: "WORKBENCH_NOT_RUNNING", message: "Workbench 当前未运行或 Control Plane 不可用。", retryable: false },
+          error: { code: "WORKBENCH_NOT_RUNNING", message: "Workbench 当前未运行或 Control Plane 不可用。", retryable: false, userAction: "start_workbench" },
           diagnostics: {
             cliStartAt,
             socketConnectAt: lastSocketConnectAt ?? undefined,
@@ -896,6 +913,8 @@ export async function runWebGptCli(
       code: projectCommand ? "CONTROL_RESPONSE_TIMEOUT" : noAutostart ? "WORKBENCH_NOT_RUNNING" : "WORKBENCH_START_TIMEOUT",
       message: `${lastError} 等待时间超过 ${commandTimeout}ms。`,
       retryable: true,
+      retryAfterMs: 1_000,
+      userAction: "inspect_status",
     },
     diagnostics: {
       cliStartAt,
@@ -912,4 +931,10 @@ export async function runWebGptCli(
 function isWorkbenchStartingStatus(response: WebGptControlResponse): boolean {
   if (response.command !== "webgpt.status" || !response.ok || !response.result || typeof response.result !== "object" || Array.isArray(response.result)) return false;
   return (response.result as Record<string, unknown>).workbench === "STARTING";
+}
+
+function hasErrorCode(response: WebGptControlResponse, codes: readonly string[]): boolean {
+  const code = response.error?.code;
+  const legacyCode = response.error?.details?.legacyCode;
+  return (code !== undefined && codes.includes(code)) || (typeof legacyCode === "string" && codes.includes(legacyCode));
 }
