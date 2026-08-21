@@ -1,0 +1,39 @@
+{
+  "stage": "AUT-2 Gate Fix 3",
+  "result": "FIX_REQUIRED",
+  "implementationCommit": "917c0609f91589c3f9f0456714c4ab8198fef830",
+  "executedAt": "2026-08-21T18:31:33.1172293Z",
+  "checks": {
+    "npm run check": "PASS",
+    "npm test": {
+      "status": "PASS",
+      "tests": 280,
+      "passed": 280,
+      "failed": 0
+    },
+    "npm run build": "PASS",
+    "npm run package:win": "PASS",
+    "npm audit --omit=dev": {
+      "status": "PASS",
+      "vulnerabilities": 0
+    },
+    "git diff --check": "PASS",
+    "secret scan": {
+      "status": "PASS",
+      "note": "Only an existing synthetic-fixture-value string in a negative egress-policy test matched the scanner pattern; no credential was found."
+    }
+  },
+  "realGate": {
+    "status": "FAIL",
+    "setup": "PASS_REAL_SETUP",
+    "alignment": "FAIL",
+    "originalResponseCategory": "F_SCHEMA_MISMATCH",
+    "repairResponseCategory": "B_UNBALANCED_JSON",
+    "repairCount": 1,
+    "answersDraftConfirmation": "NOT_REACHED",
+    "bindingRestored": true,
+    "evidence": "docs/AUT-2-GATE-FIX-3-RUNTIME.json"
+  },
+  "rawPromptOrResponseBodiesIncluded": false,
+  "cookiesOrTokensIncluded": false
+}
