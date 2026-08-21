@@ -1,0 +1,34 @@
+{
+  "stage": "AUT-2 Requirement Alignment + Baseline + Change Request",
+  "implementationCommit": "fe2bf56",
+  "tests": {
+    "npmRunCheck": "PASS",
+    "npmTest": "PASS",
+    "testCount": 276,
+    "passed": 276,
+    "failed": 0,
+    "npmRunBuild": "PASS",
+    "npmRunPackageWin": "PASS",
+    "npmAuditOmitDev": "PASS",
+    "vulnerabilities": 0,
+    "gitDiffCheck": "PASS",
+    "secretScan": "PASS"
+  },
+  "normalGuiStoreSmoke": {
+    "status": "PASS",
+    "mode": "normal-gui-host",
+    "created": true,
+    "reopened": true,
+    "documentSchemaVersion": 3,
+    "nodeExecFile": true,
+    "electronRunAsNode": false
+  },
+  "realWebGptSmoke": {
+    "status": "NOT_TESTED",
+    "workbench": "READY",
+    "webgpt": "UNAVAILABLE",
+    "promptCount": 0,
+    "reason": "No explicit binding was supplied; no real prompt was sent."
+  },
+  "package": "D:/办公/AI/Codex_Workbench_V1/dist/package/Codex Workbench V1.exe"
+}
