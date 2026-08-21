@@ -39,6 +39,8 @@ test("WebGPT Project Registry persists bounded remote identities and rejects dup
 test("WebGPT Project URL normalization only accepts ChatGPT Project routes", () => {
   assert.equal(normalizeWebGptProjectUrl("https://www.chatgpt.com/project/project-2/?tab=chat#top"), "https://chatgpt.com/project/project-2");
   assert.equal(projectIdFromProjectUrl("https://chatgpt.com/projects/project-2"), "project-2");
+  assert.equal(projectIdFromProjectUrl("https://chatgpt.com/g/g-project-2/project"), "g-project-2");
+  assert.equal(normalizeWebGptProjectUrl("https://chatgpt.com/g/g-project-2/project?tab=chat#top"), "https://chatgpt.com/g/g-project-2/project");
   assert.throws(() => normalizeWebGptProjectUrl("https://chatgpt.com/"), /Project 路由/);
   assert.throws(() => normalizeWebGptProjectUrl("https://example.com/project/project-2"), /允许的/);
   assert.throws(() => normalizeWebGptProjectUrl("https://user:secret@chatgpt.com/project/project-2"), /Project/);

@@ -14,6 +14,8 @@ export interface WebGptProjectClickResult {
   ambiguous?: boolean;
   matchCount?: number;
   actionCount?: number;
+  actionLabels?: string[];
+  headingEvidence?: string[];
   targetTag?: string | null;
   targetRole?: string | null;
 }

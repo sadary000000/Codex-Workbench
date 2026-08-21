@@ -101,6 +101,11 @@ test("Project navigation scripts use exact bounded names and expose no page cont
   assert.match(createProjectScript, /PROJECT_CREATE_SECTION_NOT_FOUND/);
   assert.match(createProjectScript, /PROJECT_ALREADY_EXISTS/);
   assert.match(createProjectScript, /PROJECT_CREATE_NOT_CONFIRMED/);
+  assert.match(createProjectScript, /dispatchHover/);
+  assert.match(createProjectScript, /headingCandidates/);
+  assert.match(createProjectScript, /新项目/);
+  assert.match(createProjectScript, /inputs\.length === 1/);
+  assert.match(createProjectScript, /pointerover/);
   assert.match(createProjectScript, /pointerdown/);
   assert.match(createProjectScript, /dialog/);
   assert.match(createProjectScript, /promptSent: false/);

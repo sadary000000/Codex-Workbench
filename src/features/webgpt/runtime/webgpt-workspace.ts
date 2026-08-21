@@ -582,6 +582,12 @@ export class WebGptWorkspace implements WebGptPublicService {
         ambiguous: result?.ambiguous === true,
         matchCount: typeof result?.matchCount === "number" ? result.matchCount : undefined,
         actionCount: typeof result?.actionCount === "number" ? result.actionCount : undefined,
+        actionLabels: Array.isArray(result?.actionLabels)
+          ? result.actionLabels.filter((value): value is string => typeof value === "string").slice(0, 8).map((value) => value.slice(0, 160))
+          : undefined,
+        headingEvidence: Array.isArray(result?.headingEvidence)
+          ? result.headingEvidence.filter((value): value is string => typeof value === "string").slice(0, 32).map((value) => value.slice(0, 240))
+          : undefined,
         targetTag: typeof (result?.action as Record<string, unknown> | undefined)?.tag === "string" ? (result?.action as Record<string, unknown>).tag as string : null,
         targetRole: typeof (result?.action as Record<string, unknown> | undefined)?.role === "string" ? (result?.action as Record<string, unknown>).role as string : null,
       } satisfies WebGptProjectClickResult;

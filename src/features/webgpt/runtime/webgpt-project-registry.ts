@@ -52,7 +52,7 @@ function normalizeProjectId(value: string): string {
 export function projectIdFromProjectUrl(value: string): string | null {
   try {
     const url = new URL(value);
-    const match = url.pathname.match(/^\/(?:project|projects)\/([^/]+)\/?$/i);
+    const match = url.pathname.match(/^\/(?:project|projects)\/([^/]+)\/?$/i) || url.pathname.match(/^\/g\/([^/]+)\/project\/?$/i);
     return match ? decodeURIComponent(match[1]) : null;
   } catch {
     return null;
@@ -71,7 +71,9 @@ export function normalizeWebGptProjectUrl(value: string): string {
   const projectId = projectIdFromProjectUrl(url.toString());
   if (!projectId) throw registryError("PROJECT_CREATE_NOT_CONFIRMED", "远程 URL 不是可确认的 ChatGPT Project 路由。", { field: "projectUrl" });
   url.hostname = "chatgpt.com";
-  url.pathname = `/project/${encodeURIComponent(projectId)}`;
+  url.pathname = /^\/g\/[^/]+\/project\/?$/i.test(url.pathname)
+    ? `/g/${encodeURIComponent(projectId)}/project`
+    : `/project/${encodeURIComponent(projectId)}`;
   url.search = "";
   url.hash = "";
   return url.toString();
