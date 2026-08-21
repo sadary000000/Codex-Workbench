@@ -1,4 +1,4 @@
-import { cp, copyFile, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { cp, copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
@@ -11,6 +11,7 @@ const electronRoot = join(projectRoot, "node_modules", "electron", "dist");
 const packageRoot = join(compiledRoot, "package");
 const appRoot = join(packageRoot, "resources", "app");
 const officialCliSource = join(projectRoot, "tools", "official-cli", "Program.cs");
+const projectPackage = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
 
 await rm(packageRoot, { recursive: true, force: true });
 await cp(electronRoot, packageRoot, { recursive: true });
@@ -19,9 +20,12 @@ await mkdir(join(appRoot, "dist"), { recursive: true });
 for (const directory of ["codex", "features", "main", "preload", "renderer", "shared"]) {
   await cp(join(compiledRoot, directory), join(appRoot, "dist", directory), { recursive: true });
 }
+if (existsSync(join(compiledRoot, "contracts"))) {
+  await cp(join(compiledRoot, "contracts"), join(appRoot, "contracts"), { recursive: true });
+}
 await writeFile(join(appRoot, "package.json"), `${JSON.stringify({
-  name: "codex-workbench-v1",
-  version: "0.1.0",
+  name: projectPackage.name,
+  version: projectPackage.version,
   private: true,
   type: "module",
   main: "dist/main/main.js",

@@ -1407,8 +1407,8 @@ function createWindow(): void {
 }
 
 async function startWebGptControlPlane(): Promise<void> {
-  const descriptor: WebGptControlDescriptor = createControlDescriptor(workbenchInstanceId);
-  const server = new WebGptControlServer({ handler: enqueueWebGptControlRequest, endpoint: descriptor.endpoint, authToken: descriptor.authToken });
+  const descriptor: WebGptControlDescriptor = createControlDescriptor(workbenchInstanceId, undefined, app.getVersion());
+  const server = new WebGptControlServer({ handler: enqueueWebGptControlRequest, endpoint: descriptor.endpoint, authToken: descriptor.authToken, workbenchVersion: app.getVersion() });
   const descriptorFile = controlDescriptorPath(app.getPath("userData"));
   try {
     await server.start();

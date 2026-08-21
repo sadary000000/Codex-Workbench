@@ -17,4 +17,9 @@ await cp(
   join(projectRoot, "src", "renderer", "index.html"),
   join(distRoot, "renderer", "index.html"),
 );
+execFileSync(process.execPath, [join(projectRoot, "scripts", "generate-control-plane-schema.mjs")], {
+  cwd: projectRoot,
+  env: { ...process.env, CODEX_WORKBENCH_DIST: distRoot },
+  stdio: "inherit",
+});
 process.stdout.write("BUILD PASS\n");
