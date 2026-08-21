@@ -27,7 +27,7 @@ import { isWebGptProjectOperationCommand, projectOperationBudgetMs } from "../fe
 import type { WebGptLatestResponse, WebGptRole } from "../features/webgpt/types.ts";
 import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
 import { WEBGPT_CONTROL_PROTOCOL_VERSION, WebGptControlServer, controlDescriptorPath, createControlDescriptor, publishControlDescriptor, removeControlDescriptor, runWebGptCli, type WebGptControlDescriptor, type WebGptControlIdentity, type WebGptControlRequest, type WebGptControlResponse } from "./webgpt-control.ts";
-import { createWebGptCliArgumentError, presentWebGptCliOutput } from "./webgpt-cli-presenter.ts";
+import { createWebGptCliArgumentError, createWebGptCliFailure, presentWebGptCliOutput } from "./webgpt-cli-presenter.ts";
 import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 
@@ -1472,18 +1472,22 @@ const cliInvocation = parseWebGptCliInvocation(process.argv);
 const officialCliMode = process.argv.includes("--workbench-official-cli");
 
 if (officialCliMode) {
-  app.whenReady().then(() => runCliInvocation(cliInvocation, join(dirname(process.execPath), "Codex Workbench V1.exe"))).catch(async (error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    await new Promise<void>((resolveOutput) => process.stderr.write(`webgpt: ERROR [CLI_UNHANDLED] ${message}\n`, () => resolveOutput()));
+  app.whenReady().then(() => runCliInvocation(cliInvocation, join(dirname(process.execPath), "Codex Workbench V1.exe"))).catch(async () => {
+    const json = cliInvocation.kind === "error" ? cliInvocation.json : cliInvocation.kind === "command" ? cliInvocation.command.json : false;
+    const presented = presentWebGptCliOutput({ json }, createWebGptCliFailure("CLI_UNHANDLED", "WebGPT CLI 未处理错误。"));
+    if (presented.stdout) await new Promise<void>((resolveOutput) => process.stdout.write(presented.stdout, () => resolveOutput()));
+    if (presented.stderr) await new Promise<void>((resolveOutput) => process.stderr.write(presented.stderr, () => resolveOutput()));
     await closeCliOutputStreams();
-    process.exit(1);
+    process.exit(presented.exitCode);
   });
 } else if (cliInvocation.kind !== "not-cli") {
-  void runCliInvocation(cliInvocation).catch(async (error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    await new Promise<void>((resolveOutput) => process.stderr.write(`webgpt: ERROR [CLI_UNHANDLED] ${message}\n`, () => resolveOutput()));
+  void runCliInvocation(cliInvocation).catch(async () => {
+    const json = cliInvocation.kind === "error" ? cliInvocation.json : cliInvocation.kind === "command" ? cliInvocation.command.json : false;
+    const presented = presentWebGptCliOutput({ json }, createWebGptCliFailure("CLI_UNHANDLED", "WebGPT CLI 未处理错误。"));
+    if (presented.stdout) await new Promise<void>((resolveOutput) => process.stdout.write(presented.stdout, () => resolveOutput()));
+    if (presented.stderr) await new Promise<void>((resolveOutput) => process.stderr.write(presented.stderr, () => resolveOutput()));
     await closeCliOutputStreams();
-    process.exit(1);
+    process.exit(presented.exitCode);
   });
 } else {
   const initialWebGptCommand = parseWebGptExternalCommand(process.argv);

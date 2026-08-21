@@ -16,7 +16,7 @@ internal static class Program
             var runtimePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, RuntimeExecutableName);
             if (!File.Exists(runtimePath))
             {
-                Console.Error.WriteLine("webgpt: ERROR [CLI_RUNTIME_NOT_FOUND] 找不到官方 CLI 运行时。");
+                WriteFailure(args, "NOT_FOUND", "找不到官方 CLI 运行时。", "verify_target");
                 return 1;
             }
 
@@ -51,11 +51,41 @@ internal static class Program
             child.Dispose();
             return exitCode;
         }
-        catch (Exception error)
+        catch (Exception)
         {
-            Console.Error.WriteLine("webgpt: ERROR [CLI_LAUNCH_FAILED] " + error.Message);
+            WriteFailure(args, "INTERNAL_ERROR", "官方 CLI 运行时启动失败。", "inspect_diagnostics");
             return 1;
         }
+    }
+
+    private static void WriteFailure(string[] args, string code, string message, string userAction)
+    {
+        if (Array.IndexOf(args, "--json") >= 0)
+        {
+            var json = "{\"version\":1,\"requestId\":\"" + Guid.NewGuid().ToString() + "\",\"ok\":false,\"command\":\"webgpt\",\"error\":{\"code\":\"" + JsonEscape(code) + "\",\"message\":\"" + JsonEscape(message) + "\",\"retryable\":false,\"userAction\":\"" + JsonEscape(userAction) + "\"}}\n";
+            Console.Out.Write(json);
+            Console.Out.Flush();
+            return;
+        }
+        Console.Error.WriteLine("webgpt: ERROR [" + code + "] " + message);
+    }
+
+    private static string JsonEscape(string value)
+    {
+        var builder = new StringBuilder();
+        foreach (var character in value)
+        {
+            switch (character)
+            {
+                case '\\': builder.Append("\\\\"); break;
+                case '"': builder.Append("\\\""); break;
+                case '\n': builder.Append("\\n"); break;
+                case '\r': builder.Append("\\r"); break;
+                case '\t': builder.Append("\\t"); break;
+                default: builder.Append(character); break;
+            }
+        }
+        return builder.ToString();
     }
 
     private static string BuildArguments(string[] userArgs)

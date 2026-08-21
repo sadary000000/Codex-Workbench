@@ -1,0 +1,32 @@
+stage=WEB-6.9 WebGPT V1 Final Freeze Review
+result=PASS_CANDIDATE
+base_commit_before_freeze=1e356db
+product_code_changed=YES_MINIMAL_FREEZE_FIXES
+v1_core_changed=NO
+new_real_prompts=0
+automation=NOT_STARTED
+
+standard_package_dir=D:\办公\AI\Codex_Workbench_V1\dist\package
+gui_exe=Codex Workbench V1.exe
+gui_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+official_cli_exe=Codex Workbench CLI.exe
+official_cli_exe_sha256=FF22000156D1817183715624328C539CC6163160F415255B0C2A6725161D7A35
+cli_runtime_exe=Codex Workbench CLI Runtime.exe
+cli_runtime_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+main_js_sha256=0C91AD0F0D0FAFE758709C60E540B42346E9FE58B1765E50936A83655B9C3993
+renderer_js_sha256=94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1
+package_json_sha256=1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
+control_plane_schema_sha256=7803872B84EEFF714BFA683B51BB3D127BC51DAC95A93AE64B2342745A18EE79
+
+checks=npm run check PASS; npm test 213/213 PASS; npm run build PASS; npm run package:win PASS; npm audit --omit=dev PASS (0 vulnerabilities); git diff --check PASS; scoped high-confidence secret scan PASS (0 hits)
+freeze_fixes=Project Registry fail-closed; CLI exceptional --json envelope
+real_prompt_policy=MAX_NEW_REAL_PROMPTS=0; no new real prompt sent
+review_package_contents=WEBGPT-V1-FINAL-FREEZE.md; WEBGPT-V1-ARCHITECTURE.md; WEBGPT-V1-CAPABILITY-MATRIX.md; WEBGPT-V1-FAILURE-RECOVERY-MATRIX.md; WEBGPT-V1-CLI-CONTRACT.md; WEBGPT-WEB6.9-STAGE-REVIEW.md; WEBGPT-WEB6.9-PROVENANCE.txt
+review_package_excludes=Cookie; Browser Token; Browser profile; password; private chat content; raw upstream evidence with user URLs
+protected_inputs=old donor read-only; user dirty/untracked files preserved; no V1docs.zip/指导文档/dist-stage-a staged
+known_test_project_residue=YES; reason=Project Delete intentionally out of scope; two WEB-6.8 test Projects remain
+subagents=4 read-only audits naturally completed, reviewed, and closed
+running_subagents_at_gate=0
+legacy_project_status=unchanged; D:\办公\AI\Codex_Workbench read-only
+implementation_or_review_commit=reported in final handoff; not embedded to avoid commit self-reference
+review_package=dist/review/WEBGPT-WEB6.9-FINAL-FREEZE-REVIEW-PACKAGE.zip

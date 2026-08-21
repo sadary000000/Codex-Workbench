@@ -5,7 +5,7 @@ import {
   canonicalControlPlaneErrorCode,
   normalizeControlPlaneError,
 } from "../src/shared/control-plane-errors.ts";
-import { presentWebGptCliOutput } from "../src/main/webgpt-cli-presenter.ts";
+import { createWebGptCliFailure, presentWebGptCliOutput } from "../src/main/webgpt-cli-presenter.ts";
 import { WebGptOperationArbiter } from "../src/features/webgpt/runtime/webgpt-operation-arbiter.ts";
 
 test("WEB-6.7 exposes the complete stable Control Plane error taxonomy", () => {
@@ -84,6 +84,16 @@ test("WEB-6.7 CLI Presenter gives one JSON line and stable exit codes", () => {
   assert.equal(success.exitCode, 0);
   assert.match(success.stdout, /webgpt\.status: OK/);
   assert.equal(success.stderr, "");
+});
+
+test("CLI launch failures keep the public JSON envelope", () => {
+  const presented = presentWebGptCliOutput({ json: true }, createWebGptCliFailure("CLI_UNHANDLED", "WebGPT CLI 未处理错误。"));
+  const value = JSON.parse(presented.stdout) as { ok?: boolean; error?: { code?: string; userAction?: string } };
+  assert.equal(presented.stderr, "");
+  assert.equal(presented.exitCode, 1);
+  assert.equal(value.ok, false);
+  assert.equal(value.error?.code, "INTERNAL_ERROR");
+  assert.equal(value.error?.userAction, "inspect_diagnostics");
 });
 
 test("WEB-6.7 bounded Browser Arbiter distinguishes BUSY from OVERLOADED", async () => {

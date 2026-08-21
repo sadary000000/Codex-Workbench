@@ -56,3 +56,39 @@ test("WebGPT Project Registry reopens persisted records", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("WebGPT Project Registry fails closed instead of silently discarding malformed records", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-webgpt-project-registry-invalid-"));
+  try {
+    await writeFile(join(directory, "projects.json"), JSON.stringify({ version: 1, projects: [
+      { projectId: "project-10", name: "valid", projectUrl: "https://chatgpt.com/project/project-10", createdAt: "a", updatedAt: "b" },
+      { projectId: "project-11", name: "broken", projectUrl: "https://chatgpt.com/c/not-a-project", createdAt: "c", updatedAt: "d" },
+    ] }));
+    const registry = new WebGptProjectRegistry({ storageDirectory: directory });
+    await assert.rejects(() => registry.list(), (error: unknown) => {
+      assert.equal((error as { code?: string }).code, "PROJECT_REGISTRY_INVALID");
+      assert.deepEqual((error as { details?: Record<string, string> }).details, { field: "projects[1]" });
+      return true;
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT Project Registry rejects duplicate persisted identities", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-webgpt-project-registry-duplicate-"));
+  try {
+    await writeFile(join(directory, "projects.json"), JSON.stringify({ version: 1, projects: [
+      { projectId: "project-12", name: "same", projectUrl: "https://chatgpt.com/project/project-12", createdAt: "a", updatedAt: "b" },
+      { projectId: "project-13", name: "SAME", projectUrl: "https://chatgpt.com/project/project-13", createdAt: "c", updatedAt: "d" },
+    ] }));
+    const registry = new WebGptProjectRegistry({ storageDirectory: directory });
+    await assert.rejects(() => registry.list(), (error: unknown) => {
+      assert.equal((error as { code?: string }).code, "PROJECT_REGISTRY_INVALID");
+      assert.deepEqual((error as { details?: Record<string, string> }).details, { field: "projects[1]" });
+      return true;
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

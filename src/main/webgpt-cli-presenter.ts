@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { canonicalControlPlaneErrorCode, normalizeControlPlaneError, type ControlPlaneErrorCode } from "../shared/control-plane-errors.ts";
+import { canonicalControlPlaneErrorCode, normalizeControlPlaneError } from "../shared/control-plane-errors.ts";
 import type { WebGptCliCommand } from "./webgpt-command.ts";
 import { WEBGPT_CONTROL_PROTOCOL_VERSION, type WebGptControlResponse } from "./webgpt-control.ts";
 
@@ -49,16 +49,19 @@ export function presentWebGptCliOutput(invocation: Pick<WebGptCliCommand, "json"
 }
 
 export function createWebGptCliArgumentError(message: string): WebGptControlResponse {
+  return createWebGptCliFailure("INVALID_ARGUMENT", message);
+}
+
+export function createWebGptCliFailure(code: string, message: string): WebGptControlResponse {
   return {
     version: WEBGPT_CONTROL_PROTOCOL_VERSION,
     requestId: randomUUID(),
     ok: false,
     command: "webgpt",
     error: {
-      code: "INVALID_ARGUMENT" as ControlPlaneErrorCode,
+      code,
       message,
       retryable: false,
-      userAction: "fix_request",
     },
   };
 }

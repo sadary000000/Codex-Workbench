@@ -155,18 +155,27 @@ export class WebGptProjectRegistry {
     if (!parsed || typeof parsed !== "object" || (parsed as { version?: unknown }).version !== REGISTRY_VERSION || !Array.isArray((parsed as { projects?: unknown }).projects)) {
       throw registryError("PROJECT_REGISTRY_INVALID", "WebGPT Project Registry schema 无效。");
     }
-    for (const candidate of (parsed as { projects: unknown[] }).projects) {
-      if (!candidate || typeof candidate !== "object") continue;
+    for (const [index, candidate] of (parsed as { projects: unknown[] }).projects.entries()) {
+      const field = `projects[${index}]`;
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        throw registryError("PROJECT_REGISTRY_INVALID", "WebGPT Project Registry 包含无效记录，已拒绝加载。", { field });
+      }
       const value = candidate as Partial<WebGptProjectRecord>;
-      if (typeof value.projectId !== "string" || typeof value.name !== "string" || typeof value.projectUrl !== "string" || typeof value.createdAt !== "string" || typeof value.updatedAt !== "string") continue;
+      if (typeof value.projectId !== "string" || typeof value.name !== "string" || typeof value.projectUrl !== "string" || typeof value.createdAt !== "string" || typeof value.updatedAt !== "string") {
+        throw registryError("PROJECT_REGISTRY_INVALID", "WebGPT Project Registry 记录字段不完整，已拒绝加载。", { field });
+      }
       try {
         const projectId = normalizeProjectId(value.projectId);
         const name = normalizeName(value.name);
         const projectUrl = normalizeWebGptProjectUrl(value.projectUrl);
-        if (projectIdFromProjectUrl(projectUrl) !== projectId) continue;
-        if (this.projects.has(projectId) || [...this.projects.values()].some((record) => record.name.toLocaleLowerCase() === name.toLocaleLowerCase() || record.projectUrl === projectUrl)) continue;
+        if (projectIdFromProjectUrl(projectUrl) !== projectId) throw new Error("project identity mismatch");
+        if (this.projects.has(projectId) || [...this.projects.values()].some((record) => record.name.toLocaleLowerCase() === name.toLocaleLowerCase() || record.projectUrl === projectUrl)) {
+          throw new Error("duplicate project identity");
+        }
         this.projects.set(projectId, { projectId, name, projectUrl, createdAt: value.createdAt.slice(0, 64), updatedAt: value.updatedAt.slice(0, 64) });
-      } catch { /* discard malformed remote identity; never synthesize a replacement */ }
+      } catch {
+        throw registryError("PROJECT_REGISTRY_INVALID", "WebGPT Project Registry 包含无效或重复的远程身份，已拒绝加载。", { field });
+      }
     }
   }
 
