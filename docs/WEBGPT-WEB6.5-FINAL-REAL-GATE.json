@@ -2,7 +2,7 @@
   "stage": "WEB-6.5 CLI Targeted Latest Read",
   "result": "FIX_REQUIRED",
   "gateFixCommit": "0d8a39f",
-  "reviewCommit": "PENDING_REVIEW_COMMIT",
+  "reviewCommit": "0fe8437",
   "realPromptBudget": { "max": 0, "used": 0 },
   "v1FrozenCoreChanged": false,
   "latest": { "result": "PASS", "output": { "exitCode": 0, "signal": null, "bytes": 26, "sha256Matches": true } },

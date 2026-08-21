@@ -4,7 +4,7 @@ result=FIX_REQUIRED
 base_commit=3504c67
 previous_gate_fix_commit=48b0f70
 gate_fix_commit=0d8a39f
-review_freeze_commit=PENDING_REVIEW_COMMIT
+review_freeze_commit=0fe8437
 new_real_prompts=0
 v1_frozen_core_changed=NO
 
@@ -18,6 +18,7 @@ workspace_bundle_sha256=6191A82BDD4E56FA2028D416ECE9CA69D2446768E8D7C120E88589A5
 role_registry_bundle_sha256=1AFD28930255A83C5B6265EC989233A65B5CF524E7C9165A3736073ACEE8BD58
 control_bundle_sha256=5877B067B485F001EDE6769496E8F0B288DEA4F986161931280979DAA3668A91
 output_writer_bundle_sha256=998C38EB267F4A1C75373237330E74D4200C696515B1C6995977344DD8E0095C
+review_package_path=D:\办公\AI\Codex_Workbench_V1\dist\review\WEBGPT-WEB6.5-STAGE-REVIEW-PACKAGE.zip
 
 invocation_boundary=Node execFile; shell=false; cmd_shell=false
 safe_cli_form=Codex Workbench V1.exe -- webgpt chat latest --url <target> --out <absolute-temp> --json
