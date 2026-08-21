@@ -1,0 +1,46 @@
+{
+  "hardMaxRealPrompts": 12,
+  "targetMaxRealPrompts": 6,
+  "hardMaxNewChats": 3,
+  "hardMaxRepairPrompts": 3,
+  "maxRoleSetupPrompts": 0,
+  "usedRealPrompts": 0,
+  "attemptedRealRequests": 2,
+  "usedNewChats": 1,
+  "usedRepairPrompts": 0,
+  "entries": [
+    {
+      "sequence": 1,
+      "purpose": "AUT-2 Gate A synthetic Requirement alignment attempt",
+      "requestId": "wgpt-24b78c80-9222-4316-acd9-255fe6a582c7",
+      "idempotencyKey": "aut2:alignment:b7210c50-7484-4f66-b62b-82b9da6c6493:round:6362ec4a-ac53-4133-94c2-d032d9bc46dd:a521a89f093da9034fab1b8e14cb93bc",
+      "role": "REQUIREMENT",
+      "chatRef": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+      "semanticSha256": "f31bd06499601e66240ba9af02bc773d0994c69f2e22f4e3633fb8f7101c5308",
+      "submitted": false,
+      "result": "ROLE_CHAT_MISMATCH_BEFORE_SUBMIT",
+      "createdAt": "2026-08-21T15:42:38.401Z"
+    },
+    {
+      "sequence": 2,
+      "purpose": "AUT-2 Gate A bounded repeat after packaged Host pre-clean",
+      "requestId": "wgpt-13270834-c441-4ca3-8730-a7943f12a14a",
+      "idempotencyKey": "aut2:alignment:954a8f33-46fd-4126-9ebb-8543ae896966:round:7b1c7c89-94e8-4de8-b2a9-b205e3d14482:a521a89f093da9034fab1b8e14cb93bc",
+      "role": "REQUIREMENT",
+      "chatRef": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+      "semanticSha256": "f31bd06499601e66240ba9af02bc773d0994c69f2e22f4e3633fb8f7101c5308",
+      "submitted": false,
+      "result": "ROLE_CHAT_MISMATCH_BEFORE_SUBMIT",
+      "createdAt": "2026-08-21T15:48:12.670Z"
+    }
+  ],
+  "setupChatEntry": {
+    "sequence": "setup-only",
+    "purpose": "role new --replace materialization probe",
+    "createdChatCount": 1,
+    "stableChatUrl": false,
+    "status": "PENDING_CHAT_URL",
+    "promptSent": false,
+    "restoredOriginalBinding": true
+  }
+}

@@ -1,34 +1,33 @@
 {
   "stage": "AUT-2 Requirement Alignment + Baseline + Change Request",
-  "implementationCommit": "fe2bf56",
+  "verificationTimestamp": "2026-08-22T00:05:03+08:00",
   "tests": {
-    "npmRunCheck": "PASS",
-    "npmTest": "PASS",
-    "testCount": 276,
+    "npm run check": "PASS",
+    "npm test": "PASS",
+    "count": 276,
     "passed": 276,
     "failed": 0,
-    "npmRunBuild": "PASS",
-    "npmRunPackageWin": "PASS",
-    "npmAuditOmitDev": "PASS",
-    "vulnerabilities": 0,
-    "gitDiffCheck": "PASS",
-    "secretScan": "PASS"
+    "npm run build": "PASS",
+    "npm run package:win": "PASS",
+    "npm audit --omit=dev": "PASS",
+    "git diff --check": "PASS",
+    "secretScan": "PASS_NO_CONCRETE_CREDENTIAL_PATTERN"
   },
-  "normalGuiStoreSmoke": {
-    "status": "PASS",
-    "mode": "normal-gui-host",
-    "created": true,
-    "reopened": true,
-    "documentSchemaVersion": 3,
-    "nodeExecFile": true,
-    "electronRunAsNode": false
+  "realWebGpt": {
+    "officialCliProbe": "PASS",
+    "runtimePrecheck": "PASS_REAL",
+    "requirementRoundtrip": "FAIL",
+    "realPromptCount": 0,
+    "attemptedRealRequests": 2,
+    "newTestChatCount": 1,
+    "repairPromptCount": 0,
+    "submittedAtNullForAttempts": true,
+    "wrongChatPromptCount": 0,
+    "duplicatePromptCount": 0
   },
-  "realWebGptSmoke": {
-    "status": "NOT_TESTED",
-    "workbench": "READY",
-    "webgpt": "UNAVAILABLE",
-    "promptCount": 0,
-    "reason": "No explicit binding was supplied; no real prompt was sent."
-  },
-  "package": "D:/办公/AI/Codex_Workbench_V1/dist/package/Codex Workbench V1.exe"
+  "v1CoreChanged": false,
+  "webgptV1Changed": false,
+  "plannerStarted": false,
+  "nativeExecutionStarted": false,
+  "reviewerStarted": false
 }

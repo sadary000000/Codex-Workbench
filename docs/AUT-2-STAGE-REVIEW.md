@@ -1,44 +1,111 @@
-# AUT-2 Stage Review
+# AUT-2 Stage Review — Real WebGPT Gate Fix
 
 ## 1. Executive Summary
 
 ```yaml
 stage: AUT-2 Requirement Alignment + Baseline + Change Request
-result: PASS_CANDIDATE
-base_commit: 57390ff
+result: FIX_REQUIRED
+base_commit: c20c282
 implementation_commit: fe2bf56
 v1_core_changed: NO
 webgpt_v1_changed: NO
-native_execution_started: NO
-planner_started: NO
-reviewer_started: NO
+real_webgpt_runtime: PASS_REAL_PRECHECK_ONLY
+real_requirement_roundtrip: FAIL
+next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
 ```
 
-本阶段建立了需求对齐、Canonical Requirement、显式用户确认、Change Request / Impact Analysis、数据出站边界和 WebGPT REQUIREMENT 合同。没有进入 AUT-3，也没有执行 Planner/Reviewer/Native。
+AUT-2 的 Requirement Domain、批量问题合同、Canonical Requirement、显式 USER Confirmation、Change Request/Impact/Diff、Data Egress/Trust 和 Persistence 已有 `PASS_AUTOMATED` 证据，原有自动化基线为 276/276。此次 Gate Fix 修正了 packaged runtime 的 Official CLI 编排，并完成了真实运行时预检，但真实 Requirement 网页闭环仍未通过，不能宣称 `PASS_CANDIDATE`。
 
-## 2. Requirement Alignment
+## 2. Scope Resolution
 
-- 批量问题：PASS。
-- 阻塞问题要求用户回答：PASS。
-- 非阻塞假设显式记录并绑定影响/置信度：PASS。
-- 可用上下文与自动证据：PASS；无 provider 时 `WAITING_AUTOMATIC_EVIDENCE`，不伪造事实。
-- Canonical Requirement 字段、bounded validation、hash：PASS。
-- 用户确认和 stale hash fail-closed：PASS。
-- Change Request、deterministic diff、impact analysis、旧版 supersede/new active：PASS。
+本轮只做：
 
-## 3. WebGPT Boundary
+- `Codex Workbench CLI.exe` 作为唯一外部 CLI 探针；
+- 正常启动 packaged `Codex Workbench V1.exe` 作为 GUI/Browser Host；
+- Requirement Role 真实网页 Gate 的受预算取证；
+- Evidence grading、Prompt budget、Provenance 和审查 ZIP。
 
-`RequirementWebGptAdapter` 只通过已有 WebGPT Role Session / Request Manager 端口工作。它要求 Registry 中存在精确 BOUND REQUIREMENT binding，并检查 requestId、idempotencyKey、semanticSha256 和 target Chat。它不读取当前页面、不自动换 Chat、不创建替代 Thread/Chat、不改变 V1 Native Thread/Turn/Item 事实。
+本轮不做：
 
-## 4. Persistence / Host
+- V1 Frozen Core、Native Thread/Turn/Item、Runtime Registry、WebGPT V1 语义修改；
+- Automation、Planner、Reviewer、Native Executor、Scheduler、Workflow UI；
+- Cookie/Token/私有接口/历史 Chat 扫描；
+- 通过当前页面 fallback、替代 Chat 或盲目重发绕过目标保护。
 
-- Automation document schema 保持 v3，并增加 requirement alignment/change request collections。
-- v2 JSON migration：PASS，创建 rollback backup，保留旧 IDs、hash、audit chain。
-- v2 SQLite metadata migration：PASS，原地升级 document schema 到 3，创建 `.sqlite` backup，保留 durable identities/audit hash。
-- 正常打包 GUI host smoke：PASS；Automation SQLite store 创建后关闭、重新打开并读回同一 project。
-- 没有依赖 `ELECTRON_RUN_AS_NODE`。
+## 3. Architecture Boundary
 
-## 5. Tests / Gate Evidence
+```text
+Automation Requirement Service
+  → RequirementWebGptAdapter
+  → existing WebGPT Role Session / Request Manager
+  → exact REQUIREMENT Role Chat
+  → bounded response parser
+  → Requirement Domain
+```
+
+Automation 内部没有 spawn Official CLI；Official CLI 只用于外部 status/control/role/close 探针。GUI EXE 没有作为 public CLI 使用。
+
+## 4. Real Runtime Evidence
+
+使用：
+
+```yaml
+gui_host: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+official_cli: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
+project: 371c3fb8-30ac-4943-9584-1915045ea34d
+role: REQUIREMENT
+chat: https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc
+loginRequired: false
+autoControl: true
+roleOpen: PASS_REAL
+targetUrlConfirmed: true
+composerFound: true
+```
+
+预检页面没有可见对话条目（User=0、Assistant=0）。两次 Requirement Service 真实尝试均在网页提交前被目标保护拒绝，`submittedAt=null`，所以：
+
+```yaml
+realPromptCount: 0/12
+attemptedRealRequests: 2
+newTestChatCount: 1/3
+repairPromptCount: 0/3
+wrongChatPromptCount: 0
+duplicatePromptCount: 0
+```
+
+详细 request/idempotency/semantic hash 见 `AUT-2-REAL-WEBGPT-EVIDENCE.json` 和 `AUT-2-REAL-PROMPT-BUDGET.json`。证据中没有保存 Prompt/Response 全文。
+
+## 5. Gate Matrix
+
+| Gate | Result |
+|---|---|
+| Requirement Domain | PASS_AUTOMATED |
+| Batch Question Contract | PASS_AUTOMATED |
+| Canonical Requirement / payloadSha256 | PASS_AUTOMATED |
+| Explicit USER Confirmation | PASS_AUTOMATED |
+| Change Request / Impact / Diff | PASS_AUTOMATED |
+| Data Egress / Trust Boundary | PASS_AUTOMATED |
+| Prompt Injection Boundary | PASS_AUTOMATED |
+| Official CLI external probe | PASS |
+| GUI EXE used as public CLI | NO |
+| Runtime login / AUTO_CONTROL / Role Open precheck | PASS_REAL |
+| Real batch alignment / NEEDS_INPUT | FAIL / NOT_REACHED |
+| Real answers-to-draft | NOT_REACHED |
+| Real canonical draft | NOT_REACHED |
+| Real USER confirmation | NOT_REACHED |
+| Request idempotency | PASS_AUTOMATED; no resend observed in real attempts |
+| V1 Core changed | NO |
+| WebGPT V1 changed | NO |
+
+## 6. Root Cause / Blocker
+
+现有 binding 的 URL 可以导航确认，但页面是空 Chat；`role new --replace` 的无 Prompt 探针只返回 `PENDING_CHAT_URL` 并回到首页，无法得到稳定的 Chat URL。Adapter 要求 `BOUND + exact chatRef`，Request Manager 在提交前发现页面目标无法再次确认后 fail-closed。后续恢复检查也没有发现已物化对话身份。
+
+这不是 timeout、不是错误 Chat 发送、不是 Prompt 丢失，也不是自动替换 Chat。强行绕过该保护或发送角色初始化 Prompt 会违反本轮 `MAX_ROLE_SETUP_PROMPTS=0` 与 no-fallback 约束。
+
+## 7. Automated Verification
+
+本次 Gate Fix 最终验证：
 
 ```yaml
 npm run check: PASS
@@ -48,73 +115,52 @@ npm run build: PASS
 npm run package:win: PASS
 npm audit --omit=dev: 0 vulnerabilities
 git diff --check: PASS
-secret scan: PASS (no concrete credential/token/cookie/private-key pattern in AUT-2 evidence)
+secret scan: PASS
 ```
 
-正常 GUI store smoke 输出的关键值：`mode=normal-gui-host`、`created=true`、`reopened=true`、`documentSchemaVersion=3`、`writerAuthority=Workbench Automation Host`。
+验证结果已写入 `dist/review/AUT-2-TEST-SUMMARY.json`；真实 Requirement Gate 仍为 FAIL，不能由自动化测试替代。
 
-## 6. Real WebGPT
+## 8. Binding / Safety
 
-打包 EXE `webgpt status --json` 返回 `workbench=READY`、`webgpt=UNAVAILABLE`、`pageHealthy=false`。未提供可用的显式测试 Project/REQUIREMENT Chat，因此实际网页 Prompt 数量为 `0`，没有创建 Chat，也没有进行真实网页 response 验证。该限制已记录在 `docs/AUT-2-REAL-WEBGPT-EVIDENCE.md`，不伪造 Real PASS。
+- 原 REQUIREMENT Project/Role/Chat URL 已恢复，`originalChatRef == finalChatRef`。
+- PLANNER、REVIEWER 未修改。
+- 一次新 Role Chat 只用于无 Prompt 的物化能力探针，返回 PENDING 后已恢复，不作为成功 Chat。
+- 没有删除磁盘文件、没有修改旧 donor、没有修改 Auto_Agent。
+- `planner_started=NO`、`native_execution_started=NO`、`reviewer_started=NO`。
 
-## 7. Data / Prompt Injection Boundary
+## 9. Deferred / Required Follow-up
 
-只允许 bounded ContextItem；Project Content 是 `UNTRUSTED_PROJECT_CONTENT`。Cookie、Token、Secret、raw HTML、Transcript、private chat payload 不进入 outgoing request 或 Automation persistence。注入文本只作为不可信数据。
+真实 Gate 需要一个已物化、可稳定读取 URL 的 REQUIREMENT Chat。若必须先发送一次初始化消息，应由用户单独授权并计入预算；本轮不自行发送。取得该前置条件后，再从 Gate A 重新执行，不能把本轮 `PASS_REAL_PRECHECK_ONLY` 提升为 Real Roundtrip PASS。
 
-## 8. Scope Boundary / Limitations
+## 10. Review Package
 
-Accepted for this stage：真实网页 WebGPT 因 runtime unavailable 未执行；repair 的网页真实触发未执行，但 bounded contract/unit 证据通过。
-
-Not accepted as a success claim：真实 WebGPT round-trip、Planner continuation、Reviewer execution、Native execution、Automation workflow、multi-account/session、页面自动化 UI。
-
-## 9. Files
-
-实现：`src/automation/requirement-*.ts`、`src/automation/schema.ts`、`src/automation/sqlite-persistence.ts`、`src/automation/state-machine.ts`、`src/automation/store.ts`、`src/automation/types.ts`、`src/main/main.ts`。
-
-测试：`tests/aut2-*.test.ts` 以及持久化/基础 schema regression。
-
-探针：`scripts/aut2-normal-gui-store-smoke.mjs`、`scripts/aut2-real-webgpt-smoke.ts`。
-
-## 10. Subagents
-
-4 个独立审计/实现子代理已自然完成并返回：Requirement Domain/State Machine、WebGPT Contract、Data Egress、Change/Impact Audit。主 Agent 审核并整合了全部结果；Gate 前 `running_subagents=0`。不保留运行中的子代理。
-
-## 11. Provenance / Legacy
-
-- AUT-1.5 base: `57390ff`。
-- AUT-2 implementation: `fe2bf56`。
-- 本阶段未修改旧 donor `D:\办公\AI\Codex_Workbench`。
-- `D:\办公\AI\Auto_Agent` 保持 clean，未作为产品目录修改。
-- 用户未提交规划资料、`dist-stage-a/` 与 `指导文档/*.docx` 未加入本阶段 commit。
-
-## 12. Gate
-
-```yaml
-requirement_alignment: PASS
-batch_questions: PASS
-canonical_requirement: PASS
-explicit_user_confirmation: PASS
-change_request: PASS
-impact_analysis: PASS
-webgpt_requirement_integration: PASS
-data_egress: PASS
-prompt_injection_boundary: PASS
-normal_packaged_gui_store: PASS
-real_webgpt_prompts: 0
-native_execution_started: NO
-planner_started: NO
-reviewer_started: NO
-v1_core_changed: NO
-webgpt_v1_changed: NO
-gate: READY_FOR_GPT_REVIEW
+```text
+docs/AUT-2-REAL-WEBGPT-EVIDENCE.md
+docs/AUT-2-REAL-WEBGPT-EVIDENCE.json
+docs/AUT-2-REAL-PROMPT-BUDGET.json
+docs/AUT-2-PROVENANCE.txt
+docs/AUT-2-STAGE-REVIEW.md
 ```
 
-## 13. Package Provenance
+最终 ZIP 路径：`D:\办公\AI\Codex_Workbench_V1\dist\review\AUT-2-STAGE-REVIEW-PACKAGE.zip`。
+ZIP SHA256 通过同目录的 `AUT-2-STAGE-REVIEW-PACKAGE.sha256` sidecar 提供；避免把归档自身 hash 写入归档造成自引用。
+
+## 10.1 Package Provenance Inputs
 
 ```yaml
-package: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
-outerExeSha256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
-appMainSha256: 742FB46FC8F4C152D54133649C685D31F439C337D61B4F5F89C2D9C1BEB8E0E2
-appRendererSha256: 94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1
-appPackageJsonSha256: 1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
+gui_outer_sha256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+official_cli_sha256: DB558C0CE95E8539C62441EA4F1AF2575D42A4AEB194A07B9EECF9B38AEEE0A5
+app_main_sha256: 1848BBD792E5300E5ADC5BC0A04DF2D96DDF3B1FE177E5C2DAB2DA03B33A454C
+app_renderer_sha256: 94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1
+automation_gate_module_sha256: 5ECDDD373C5E7B00C6E93220D3EBCA0EB07C8B75F6189D856673D726DB0204F4
+package_json_sha256: 1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
+```
+
+## 11. Gate
+
+```yaml
+gate: FIX_REQUIRED
+real_webgpt_requirement_roundtrip: FAIL
+safe_stop: YES
+next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
 ```

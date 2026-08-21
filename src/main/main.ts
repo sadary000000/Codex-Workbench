@@ -31,6 +31,7 @@ import { createWebGptCliArgumentError, createWebGptCliFailure, presentWebGptCliO
 import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 import { AutomationStore } from "../automation/store.ts";
+import { runAut2RealWebGptGate } from "../automation/aut2-real-webgpt-gate.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -143,6 +144,29 @@ async function startAutomationPersistence(): Promise<void> {
   await reopened.close();
   console.log(JSON.stringify({ aut2NormalGuiStoreSmoke: result }));
   if (!result.reopened) process.exitCode = 1;
+  setTimeout(() => app.quit(), 50);
+}
+
+async function startAut2RealWebGptGate(): Promise<void> {
+  if (process.env.AUT2_REAL_WEBGPT_GATE !== "1") return;
+  if (!automationStore) throw new Error("AUT-2 real WebGPT Gate requires the Automation Store.");
+  const outputPath = process.env.AUT2_REAL_WEBGPT_GATE_OUTPUT?.trim() || join(app.getPath("userData"), "aut2-real-webgpt-evidence.json");
+  const webgptProjectId = process.env.AUT2_WEBGPT_PROJECT_ID?.trim() || "";
+  if (!webgptProjectId) throw new Error("AUT2_WEBGPT_PROJECT_ID is required for the real Gate.");
+  const evidence = await runAut2RealWebGptGate({
+    store: automationStore,
+    roleSession: getWebGptRoleService(),
+    requestManager: getWebGptRequestManager(),
+    openWorkspace: () => getWebGptRequestManager().openWorkspace(),
+    returnAutomationControl: () => getWebGptWorkspace().returnAutomationControl(),
+    automationControl: () => getWebGptRequestManager().automationControl(),
+    webgptProjectId,
+    automationProjectId: process.env.AUT2_AUTOMATION_PROJECT_ID?.trim() || undefined,
+    timeoutMs: Number(process.env.AUT2_REAL_WEBGPT_TIMEOUT_MS ?? 240_000),
+    outputPath,
+  });
+  logger.info("aut2_real_webgpt_gate_finished", { result: evidence.result, attemptedRealRequests: evidence.attemptedRealRequests, realPromptCount: evidence.realPromptCount, outputPath });
+  if (evidence.result !== "PASS_REAL") process.exitCode = 1;
   setTimeout(() => app.quit(), 50);
 }
 
@@ -1544,7 +1568,15 @@ if (officialCliMode) {
       });
       return startAutomationPersistence().then(() => {
         if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE === "1") return;
-        void startWebGptControlPlane();
+        return startWebGptControlPlane().then(() => {
+          if (process.env.AUT2_REAL_WEBGPT_GATE === "1") {
+            void startAut2RealWebGptGate().catch((error) => {
+              logError(logger, "aut2_real_webgpt_gate_failed", error);
+              process.exitCode = 1;
+              setTimeout(() => app.quit(), 50);
+            });
+          }
+        });
       });
     }).catch((error) => {
       logError(logger, "app_start_failed", error);
