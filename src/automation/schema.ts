@@ -342,7 +342,7 @@ function validateCommonTables(document: Record<string, unknown>): void {
   });
 
   const actionAttempts = array(document.actionAttempts, "actionAttempts");
-  const actionAttemptByIntent = new Map<string, number>();
+  const actionAttemptIdentity = new Set<string>();
   actionAttempts.forEach((value, index) => {
     const item = record(value);
     string(item.actionAttemptId, `actionAttempts[${index}].actionAttemptId`, 256);
@@ -353,16 +353,19 @@ function validateCommonTables(document: Record<string, unknown>): void {
     optionalString(item.completedAt, `actionAttempts[${index}].completedAt`, 64);
     optionalString(item.executorRef, `actionAttempts[${index}].executorRef`, 256);
     enumValue(item.recoveryState, `actionAttempts[${index}].recoveryState`, new Set(["KNOWN_NOT_STARTED", "IN_PROGRESS", "COMPLETED", "FAILED", "UNCERTAIN", "RECOVERY_REQUIRED"]));
-    const previous = actionAttemptByIntent.get(item.intentId as string) ?? 0;
-    if (previous > 0) throw new AutomationSchemaError(`actionAttempts[${index}].intentId must have at most one ActionAttempt.`);
-    actionAttemptByIntent.set(item.intentId as string, previous + 1);
+    const identity = `${item.intentId}\u0000${item.dispatchNumber}`;
+    if (actionAttemptIdentity.has(identity)) throw new AutomationSchemaError(`actionAttempts[${index}] duplicates an existing intentId/dispatchNumber identity.`);
+    actionAttemptIdentity.add(identity);
   });
 
   const receipts = array(document.actionReceipts, "actionReceipts");
+  const receiptAttempts = new Set<string>();
   receipts.forEach((value, index) => {
     const item = record(value);
     string(item.receiptId, `actionReceipts[${index}].receiptId`, 256);
     string(item.actionAttemptId, `actionReceipts[${index}].actionAttemptId`, 256);
+    if (receiptAttempts.has(item.actionAttemptId as string)) throw new AutomationSchemaError(`actionReceipts[${index}].actionAttemptId already has a receipt.`);
+    receiptAttempts.add(item.actionAttemptId as string);
     enumValue(item.status, `actionReceipts[${index}].status`, new Set(["SUCCEEDED", "FAILED", "UNKNOWN"]));
     optionalString(item.externalStatus, `actionReceipts[${index}].externalStatus`, 256);
     if (item.exitCode !== null && (!Number.isSafeInteger(item.exitCode))) throw new AutomationSchemaError(`actionReceipts[${index}].exitCode must be an integer or null.`);
@@ -371,6 +374,7 @@ function validateCommonTables(document: Record<string, unknown>): void {
     externalRefs.forEach((ref, refIndex) => string(ref, `actionReceipts[${index}].externalRefs[${refIndex}]`, 256));
     timestamp(item.createdAt, `actionReceipts[${index}].createdAt`);
     enumValue(item.reconcileState, `actionReceipts[${index}].reconcileState`, new Set(["NOT_REQUIRED", "PENDING", "RECONCILED", "RECOVERY_REQUIRED"]));
+    if (item.status === "UNKNOWN" && item.reconcileState !== "RECOVERY_REQUIRED") throw new AutomationSchemaError(`actionReceipts[${index}] UNKNOWN status requires RECOVERY_REQUIRED reconciliation.`);
   });
 
   const checkpoints = array(document.checkpoints, "checkpoints");

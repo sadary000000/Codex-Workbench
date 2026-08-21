@@ -17,7 +17,7 @@ await rm(packageRoot, { recursive: true, force: true });
 await cp(electronRoot, packageRoot, { recursive: true });
 await mkdir(appRoot, { recursive: true });
 await mkdir(join(appRoot, "dist"), { recursive: true });
-for (const directory of ["codex", "features", "main", "preload", "renderer", "shared"]) {
+for (const directory of ["automation", "codex", "features", "main", "preload", "renderer", "shared"]) {
   await cp(join(compiledRoot, directory), join(appRoot, "dist", directory), { recursive: true });
 }
 if (existsSync(join(compiledRoot, "contracts"))) {

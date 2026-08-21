@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import {
   AutomationSchemaError,
   createEmptyAutomationDocument,
@@ -16,6 +16,14 @@ import {
   stepRuntimeStateMachine,
 } from "./state-machine.ts";
 import { canonicalize, canonicalizeJson, computeActionSemanticSha256, sha256Hex } from "./canonical.ts";
+import {
+  AutomationPersistenceError,
+  type AutomationPersistenceDiagnostics,
+  cleanupJsonMigrationTemps,
+  inspectAutomationFile,
+  migrateJsonSnapshotToSqlite,
+  SqliteAutomationPersistence,
+} from "./sqlite-persistence.ts";
 import type {
   ActionAttempt,
   ActionIntent,
@@ -64,6 +72,9 @@ export type AutomationStoreErrorCode =
   | "AUTOMATION_DB_CORRUPT"
   | "AUTOMATION_DB_INVALID"
   | "AUTOMATION_DB_VERSION_UNSUPPORTED"
+  | "AUTOMATION_DB_LOCKED"
+  | "AUTOMATION_MIGRATION_FAILED"
+  | "AUTOMATION_PERSISTENCE_UNAVAILABLE"
   | "AUTOMATION_DB_WRITE_FAILED"
   | "AUTOMATION_NOT_FOUND"
   | "AUTOMATION_DUPLICATE_ID"
@@ -290,6 +301,107 @@ function entityId(table: AutomationTableName, value: unknown): string {
   return record[key] as string;
 }
 
+interface AutomationWriterLock {
+  state: AutomationWriterLockState;
+}
+
+interface AutomationWriterLockState {
+  databasePath: string;
+  filePath: string;
+  token: string;
+  references: number;
+}
+
+interface AutomationWriterLockRecord {
+  pid: number;
+  token: string;
+  acquiredAt: string;
+}
+
+const localWriterLocks = new Map<string, AutomationWriterLockState>();
+
+async function isProcessAlive(pid: number): Promise<boolean> {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function acquireAutomationWriterLock(databasePath: string): Promise<AutomationWriterLock> {
+  const filePath = `${databasePath}.writer-lock`;
+  const local = localWriterLocks.get(databasePath);
+  if (local) {
+    local.references += 1;
+    return { state: local };
+  }
+  const token = randomUUID();
+  await mkdir(dirname(databasePath), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      try {
+        const record: AutomationWriterLockRecord = { pid: process.pid, token, acquiredAt: now() };
+        await writeFile(filePath, JSON.stringify(record), { encoding: "utf8", flag: "wx" });
+        const state: AutomationWriterLockState = { databasePath, filePath, token, references: 1 };
+        localWriterLocks.set(databasePath, state);
+        return { state };
+      } catch (error) {
+        await rm(filePath, { force: true }).catch(() => undefined);
+        throw error;
+      }
+    } catch (error) {
+      if ((error as { code?: unknown })?.code !== "EEXIST") {
+        throw new AutomationStoreError("AUTOMATION_PERSISTENCE_UNAVAILABLE", "Automation writer authority could not be established.", error);
+      }
+      let record: AutomationWriterLockRecord | null = null;
+      try {
+        const raw = await readFile(filePath, "utf8");
+        const parsed = JSON.parse(raw) as Partial<AutomationWriterLockRecord>;
+        if (typeof parsed.pid === "number" && typeof parsed.token === "string" && typeof parsed.acquiredAt === "string") record = parsed as AutomationWriterLockRecord;
+      } catch {
+        // A malformed lock is treated as active. Removing it would make the
+        // single-writer contract fail open after a partial write.
+      }
+      if (record && !(await isProcessAlive(record.pid))) {
+        await rm(filePath, { force: true });
+        continue;
+      }
+      if (record?.pid === process.pid) {
+        for (let wait = 0; wait < 20; wait += 1) {
+          const shared = localWriterLocks.get(databasePath);
+          if (shared) {
+            shared.references += 1;
+            return { state: shared };
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      }
+      throw new AutomationStoreError("AUTOMATION_DB_LOCKED", "Automation Store is already owned by another Workbench Automation Host.", error);
+    }
+  }
+  throw new AutomationStoreError("AUTOMATION_DB_LOCKED", "Automation Store writer lock could not be acquired.");
+}
+
+async function releaseAutomationWriterLock(lock: AutomationWriterLock | null): Promise<void> {
+  if (!lock) return;
+  const state = lock.state;
+  state.references -= 1;
+  if (state.references > 0) return;
+  localWriterLocks.delete(state.databasePath);
+  let ownsFile = false;
+  try {
+    const raw = await readFile(state.filePath, "utf8");
+    const record = JSON.parse(raw) as Partial<AutomationWriterLockRecord>;
+    ownsFile = record.token === state.token;
+  } catch {
+    // The lock may have been removed during crash recovery; the handle still
+    // must be closed below.
+  }
+  if (ownsFile) await rm(state.filePath, { force: true });
+}
+
 export class AutomationTransaction {
   private readonly document: AutomationDocument;
 
@@ -394,6 +506,9 @@ export interface AuditEventInput {
 
 export class AutomationStore {
   private tail: Promise<void> = Promise.resolve();
+  private persistence: SqliteAutomationPersistence | null = null;
+  private persistenceInit: Promise<SqliteAutomationPersistence> | null = null;
+  private writerLock: AutomationWriterLock | null = null;
   readonly filePath: string;
 
   constructor(filePath: string) {
@@ -402,12 +517,16 @@ export class AutomationStore {
 
   async inspect(): Promise<AutomationInspection> {
     try {
-      const raw = await readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as unknown;
-      const migrated = migrateAutomationDocument(parsed);
-      return { status: "valid", document: clone(migrated.document), code: null, message: null, migratedFrom: migrated.migratedFrom };
+      const file = await inspectAutomationFile(this.filePath);
+      if (file.kind === "missing") return { status: "missing", document: null, code: null, message: null, migratedFrom: null };
+      if (file.kind === "json") {
+        const migrated = migrateAutomationDocument(JSON.parse(file.raw ?? "") as unknown);
+        return { status: "valid", document: clone(migrated.document), code: null, message: null, migratedFrom: migrated.migratedFrom };
+      }
+      if (file.kind !== "sqlite") throw new AutomationStoreError("AUTOMATION_DB_INVALID", "Automation persistence file format is not recognized.");
+      const persistence = await this.ensurePersistence();
+      return { status: "valid", document: clone(persistence.loadDocument()), code: null, message: null, migratedFrom: null };
     } catch (error) {
-      if ((error as { code?: unknown })?.code === "ENOENT") return { status: "missing", document: null, code: null, message: null, migratedFrom: null };
       const mapped = this.mapError(error);
       return { status: "invalid", document: null, code: mapped.code, message: mapped.message, migratedFrom: null };
     }
@@ -420,11 +539,12 @@ export class AutomationStore {
 
   async transaction<T>(work: (transaction: AutomationTransaction) => Promise<T> | T): Promise<T> {
     const operation = this.tail.then(async () => {
-      const draft = clone(await this.readDocument());
+      const previous = await this.readDocument();
+      const draft = clone(previous);
       const transaction = new AutomationTransaction(draft);
       const result = await work(transaction);
       validateAutomationDocument(draft);
-      await this.writeDocument(draft);
+      await this.writeDocument(previous, draft);
       return result;
     });
     this.tail = operation.then(() => undefined, () => undefined);
@@ -619,7 +739,14 @@ export class AutomationStore {
       const attempt = tx.require("actionAttempts", input.actionAttemptId);
       const intent = tx.require("actionIntents", attempt.intentId);
       const status = input.status;
-      const receipt: ActionReceipt = { receiptId: id(input.receiptId, "receiptId"), actionAttemptId: input.actionAttemptId, status, externalStatus: optionalText(input.externalStatus, "receipt.externalStatus", 256), exitCode: input.exitCode ?? null, resultHash: optionalText(input.resultHash, "receipt.resultHash", 128), externalRefs: list(input.externalRefs, "receipt.externalRefs"), createdAt: now(), reconcileState: input.reconcileState ?? (status === "UNKNOWN" ? "RECOVERY_REQUIRED" : "NOT_REQUIRED") };
+      if (tx.table("actionReceipts").some((receipt) => receipt.actionAttemptId === input.actionAttemptId)) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", "An ActionReceipt already exists for this ActionAttempt.");
+      }
+      if (status === "UNKNOWN" && input.reconcileState !== undefined && input.reconcileState !== "RECOVERY_REQUIRED") {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", "An UNKNOWN ActionReceipt must remain in RECOVERY_REQUIRED state.");
+      }
+      const reconcileState = status === "UNKNOWN" ? "RECOVERY_REQUIRED" : input.reconcileState ?? "NOT_REQUIRED";
+      const receipt: ActionReceipt = { receiptId: id(input.receiptId, "receiptId"), actionAttemptId: input.actionAttemptId, status, externalStatus: optionalText(input.externalStatus, "receipt.externalStatus", 256), exitCode: input.exitCode ?? null, resultHash: optionalText(input.resultHash, "receipt.resultHash", 128), externalRefs: list(input.externalRefs, "receipt.externalRefs"), createdAt: now(), reconcileState };
       tx.insert("actionReceipts", receipt);
       const nextAttemptState = status === "SUCCEEDED" ? "COMPLETED" : status === "FAILED" ? "FAILED" : "UNCERTAIN";
       const nextRecovery: RecoveryState = status === "UNKNOWN" ? "RECOVERY_REQUIRED" : status === "SUCCEEDED" ? "COMPLETED" : "FAILED";
@@ -837,38 +964,81 @@ export class AutomationStore {
     return intent?.state === "DISPATCH_ELIGIBLE";
   }
 
+  async persistenceDiagnostics(): Promise<AutomationPersistenceDiagnostics> {
+    return (await this.ensurePersistence()).diagnostics();
+  }
+
+  async close(): Promise<void> {
+    const pending = this.persistenceInit;
+    if (pending) await pending.catch(() => undefined);
+    await this.tail;
+    this.persistence?.close();
+    this.persistence = null;
+    this.persistenceInit = null;
+    await releaseAutomationWriterLock(this.writerLock);
+    this.writerLock = null;
+  }
+
+  private async ensurePersistence(): Promise<SqliteAutomationPersistence> {
+    if (this.persistence) return this.persistence;
+    if (!this.persistenceInit) {
+      const initialization = Promise.resolve().then(() => this.initializePersistence());
+      this.persistenceInit = initialization.then((persistence) => {
+        this.persistence = persistence;
+        return persistence;
+      }).catch((error) => {
+        this.persistenceInit = null;
+        throw error;
+      });
+    }
+    return this.persistenceInit;
+  }
+
+  private async initializePersistence(): Promise<SqliteAutomationPersistence> {
+    this.writerLock = await acquireAutomationWriterLock(this.filePath);
+    try {
+      const file = await inspectAutomationFile(this.filePath);
+      if (file.kind === "missing" || file.kind === "sqlite") {
+        await mkdir(dirname(this.filePath), { recursive: true });
+        return new SqliteAutomationPersistence(this.filePath);
+      }
+      if (file.kind === "json") {
+        await cleanupJsonMigrationTemps(this.filePath);
+        return migrateJsonSnapshotToSqlite(this.filePath, file.raw ?? "");
+      }
+      throw new AutomationStoreError("AUTOMATION_DB_INVALID", "Automation persistence file format is not recognized.");
+    } catch (error) {
+      await releaseAutomationWriterLock(this.writerLock);
+      this.writerLock = null;
+      throw error;
+    }
+  }
+
   private async readDocument(): Promise<AutomationDocument> {
     try {
-      const raw = await readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as unknown;
-      return migrateAutomationDocument(parsed).document;
+      const file = await inspectAutomationFile(this.filePath);
+      if (file.kind === "missing") return createEmptyAutomationDocument();
+      const persistence = await this.ensurePersistence();
+      return persistence.loadDocument();
     } catch (error) {
-      if ((error as { code?: unknown })?.code === "ENOENT") return createEmptyAutomationDocument();
       throw this.mapError(error);
     }
   }
 
-  private async writeDocument(document: AutomationDocument): Promise<void> {
-    const directory = dirname(this.filePath);
-    const temporary = join(directory, `.automation-${process.pid}-${randomUUID()}.tmp`);
-    await mkdir(directory, { recursive: true });
+  private async writeDocument(previous: AutomationDocument, document: AutomationDocument): Promise<void> {
     try {
-      const handle = await open(temporary, "w");
-      try {
-        await handle.writeFile(`${JSON.stringify(document, null, 2)}\n`, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await rename(temporary, this.filePath);
+      await (await this.ensurePersistence()).replaceDocument(previous, document);
     } catch (error) {
-      await rm(temporary, { force: true }).catch(() => undefined);
-      throw new AutomationStoreError("AUTOMATION_DB_WRITE_FAILED", "Automation database commit failed.", error);
+      const mapped = this.mapError(error);
+      if (mapped.code === "AUTOMATION_DB_LOCKED") throw mapped;
+      if (mapped.code === "AUTOMATION_MIGRATION_FAILED" || mapped.code === "AUTOMATION_PERSISTENCE_UNAVAILABLE") throw mapped;
+      throw new AutomationStoreError("AUTOMATION_DB_WRITE_FAILED", "Automation database commit failed.", mapped);
     }
   }
 
   private mapError(error: unknown): AutomationStoreError {
     if (error instanceof AutomationStoreError) return error;
+    if (error instanceof AutomationPersistenceError) return new AutomationStoreError(error.code, error.message, error);
     if (error instanceof SyntaxError) return new AutomationStoreError("AUTOMATION_DB_CORRUPT", "Automation database is not valid JSON.", error);
     if (error instanceof AutomationSchemaError) {
       return new AutomationStoreError(error.code === "AUTOMATION_SCHEMA_VERSION_UNSUPPORTED" ? "AUTOMATION_DB_VERSION_UNSUPPORTED" : "AUTOMATION_DB_INVALID", error.message, error);

@@ -107,6 +107,9 @@ export const actionIntentStateMachine = new StateMachine<ActionIntentState, stri
   { from: "DISPATCHED", event: "UNCERTAIN", to: "UNCERTAIN" },
   { from: "UNCERTAIN", event: "RECONCILE", to: "COMPLETED" },
   { from: "UNCERTAIN", event: "RECOVERY_REQUIRED", to: "RECOVERY_REQUIRED" },
+  { from: "UNCERTAIN", event: "REAUTHORIZE_RETRY", to: "DISPATCH_ELIGIBLE" },
+  { from: "RECOVERY_REQUIRED", event: "REAUTHORIZE_RETRY", to: "DISPATCH_ELIGIBLE" },
+  { from: "FAILED", event: "REAUTHORIZE_RETRY", to: "DISPATCH_ELIGIBLE" },
   { from: "DISPATCH_ELIGIBLE", event: "CANCEL", to: "CANCELLED" },
 ]);
 
