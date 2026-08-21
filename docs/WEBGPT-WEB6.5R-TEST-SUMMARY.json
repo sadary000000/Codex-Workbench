@@ -1,0 +1,22 @@
+{
+  "stage": "WEB-6.5R Role Targeted Latest Final Closeout",
+  "result": "BLOCKED",
+  "baseCommit": "ce7a50f99922525585fcba4d2c9fbd2d8a0bf06b",
+  "implementationCommit": "5e371b1",
+  "newRealPrompts": 0,
+  "automated": {
+    "npmRunCheck": "PASS",
+    "npmTest": "PASS 198/198",
+    "targetedRoleRequestTests": "PASS 16/16",
+    "npmAuditOmitDev": "PASS 0 vulnerabilities",
+    "gitDiffCheck": "PASS",
+    "secretScan": "PASS"
+  },
+  "package": {
+    "temporaryDistBuild": "PASS",
+    "standardDistPackageRefresh": "BLOCKED EPERM running Workbench EXE lock"
+  },
+  "v1FrozenCoreChanged": false,
+  "futureStagePlanningByCodex": false,
+  "automationStarted": false
+}

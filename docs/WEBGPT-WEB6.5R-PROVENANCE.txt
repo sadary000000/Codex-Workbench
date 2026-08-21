@@ -1,0 +1,14 @@
+stage=WEB-6.5R Role Targeted Latest Final Closeout
+base_commit=ce7a50f99922525585fcba4d2c9fbd2d8a0bf06b
+implementation_commit=5e371b1
+review_package_commit=pending
+new_real_prompts=0
+v1_frozen_core_changed=NO
+parallel_current_stage_subagents=4
+subagents_natural_completion=4
+subagents_closed_after_result=4
+standard_package_refresh=BLOCKED_EPERM_RUNNING_EXE_LOCK
+temporary_package_build=PASS
+automated_gate=npm_run_check_PASS;npm_test_198_of_198_PASS;npm_audit_zero;diff_check_PASS;secret_scan_PASS
+real_gate=BLOCKED_CHAT_LATEST_REFERENCE_UNAVAILABLE
+privacy=NO_COOKIE_NO_TOKEN_NO_PROMPT_BODY_NO_ASSISTANT_BODY

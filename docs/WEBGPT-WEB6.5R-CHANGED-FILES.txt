@@ -1,0 +1,10 @@
+src/features/webgpt/runtime/webgpt-role-session-registry.ts
+src/features/webgpt/runtime/webgpt-request-manager.ts
+src/features/webgpt/runtime/webgpt-workspace.ts
+tests/webgpt-role-session-registry.test.ts
+tests/webgpt-request-manager.test.ts
+docs/WEBGPT-WEB6.5R-ROLE-TARGETED-LATEST-FINAL.md
+docs/WEBGPT-WEB6.5R-STAGE-REVIEW.md
+docs/WEBGPT-WEB6.5R-TEST-SUMMARY.json
+docs/WEBGPT-WEB6.5R-CHANGED-FILES.txt
+docs/WEBGPT-WEB6.5R-PROVENANCE.txt
