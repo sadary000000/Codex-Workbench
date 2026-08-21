@@ -29,6 +29,7 @@ D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI Runtime.exe
 ```text
 Codex Workbench CLI.exe webgpt status --json
 Codex Workbench CLI.exe webgpt open --json
+Codex Workbench CLI.exe webgpt close --json
 Codex Workbench CLI.exe webgpt control auto --json
 Codex Workbench CLI.exe webgpt latest --out <absolute-file> --json
 Codex Workbench CLI.exe webgpt chat latest --url <chat-url> --out <absolute-file> --json
@@ -53,6 +54,17 @@ per-user authenticated Control Plane
 ```
 
 CLI front door 只负责 argv/stdio、子进程转发和退出码；真正的 WebGPT 操作仍由现有 Control Plane、Request Manager、Browser Lease、Page Adapter 和 Role Registry 完成。CLI 不创建 Conversation truth、Transcript truth、Task truth 或隐藏替代 Chat。
+
+## 正常关闭
+
+```text
+Codex Workbench CLI.exe webgpt close --json
+```
+
+该命令通过已认证的 Control Plane 请求 Workbench 走现有 Electron `before-quit` 清理路径，返回
+`closeMode: "GRACEFUL"` 后再退出。它不强杀进程、不操作窗口坐标，也不使用 Windows 应用控制。
+当没有正在运行的 Workbench 实例时，返回 `WORKBENCH_NOT_RUNNING`，不会为了执行 close
+而冷启动新的 GUI。
 
 ## 输出 ABI
 

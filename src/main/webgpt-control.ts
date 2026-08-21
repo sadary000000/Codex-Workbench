@@ -244,6 +244,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.status": [],
     "webgpt.open": [],
     "webgpt.current": [],
+    "webgpt.close": [],
     "webgpt.latest": ["out"],
     "webgpt.screenshot": ["out"],
     "webgpt.control.user": [],
@@ -726,6 +727,7 @@ export async function runWebGptCli(
     : command.name === "webgpt.wait"
     ? Math.min(320_000, Math.max(timeoutMs, (command.timeoutMs ?? 120_000) + 5_000))
     : timeoutMs;
+  const noAutostart = command.name === "webgpt.close";
   const cliStartAt = new Date().toISOString();
   const cliStartMs = Date.now();
   const deadline = Date.now() + commandTimeout;
@@ -856,6 +858,25 @@ export async function runWebGptCli(
     }
     if (!initialized && !legacyCompatibility) handshakeRequestId = randomUUID();
     if (!spawned && !controlReachable) {
+      if (noAutostart) {
+        return {
+          version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+          protocolVersion: WEBGPT_CONTROL_PROTOCOL_VERSION_TEXT,
+          requestId: request.requestId,
+          ok: false,
+          command: command.name,
+          error: { code: "WORKBENCH_NOT_RUNNING", message: "Workbench 当前未运行或 Control Plane 不可用。", retryable: false },
+          diagnostics: {
+            cliStartAt,
+            socketConnectAt: lastSocketConnectAt ?? undefined,
+            cliReceiveAt: lastCliReceiveAt ?? undefined,
+            protocolVersion: legacyCompatibility ? undefined : WEBGPT_CONTROL_PROTOCOL_VERSION_TEXT,
+            compatibilityMode: legacyCompatibility ? "LEGACY" : "MODERN",
+            clientType: clientInfo.clientType,
+            elapsedMs: Date.now() - cliStartMs,
+          },
+        };
+      }
       try {
         spawnWorkbench(workbenchExecutablePath);
         spawned = true;
@@ -872,7 +893,7 @@ export async function runWebGptCli(
     ok: false,
     command: command.name,
     error: {
-      code: projectCommand ? "CONTROL_RESPONSE_TIMEOUT" : "WORKBENCH_START_TIMEOUT",
+      code: projectCommand ? "CONTROL_RESPONSE_TIMEOUT" : noAutostart ? "WORKBENCH_NOT_RUNNING" : "WORKBENCH_START_TIMEOUT",
       message: `${lastError} 等待时间超过 ${commandTimeout}ms。`,
       retryable: true,
     },

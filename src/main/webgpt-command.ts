@@ -8,6 +8,7 @@ export type WebGptCliCommandName =
   | "webgpt.status"
   | "webgpt.open"
   | "webgpt.current"
+  | "webgpt.close"
   | "webgpt.latest"
   | "webgpt.screenshot"
   | "webgpt.control.user"
@@ -112,11 +113,12 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
   const parsed = parseJsonFlag(argv.slice(markerIndex + 1));
   const args = parsed.args;
   const [verb, ...rest] = args;
-  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、latest、chat latest、new-chat、open-chat、project inspect、project open、project new-chat、role、send、wait、result、request、screenshot、control user、control auto。");
+  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、close、latest、chat latest、new-chat、open-chat、project inspect、project open、project new-chat、role、send、wait、result、request、screenshot、control user、control auto。");
 
   if (verb === "status" && rest.length === 0) return { kind: "command", command: { name: "webgpt.status", json: parsed.json } };
   if (verb === "open" && rest.length === 0) return { kind: "command", command: { name: "webgpt.open", json: parsed.json } };
   if (verb === "current" && rest.length === 0) return { kind: "command", command: { name: "webgpt.current", json: parsed.json } };
+  if (verb === "close" && rest.length === 0) return { kind: "command", command: { name: "webgpt.close", json: parsed.json } };
   if (verb === "latest") {
     const out = optionValue(rest, "--out");
     if ((out !== null && optionCount(rest, "--out") !== 1) || !hasOnlyValueOptionsAndFlags(rest, ["--out"])) return invalid(parsed.json, "latest 只支持 [--out <file>]。");

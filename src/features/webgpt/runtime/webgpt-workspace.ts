@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { shell, WebContentsView, type BaseWindow, type Rectangle, type Session } from "electron";
-import { buildWebGptInspectProjectScript, buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
+import { buildWebGptCreateProjectChatScript, buildWebGptInspectProjectScript, buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
 import { createWebGptSession, webGptSessionPath } from "../session/webgpt-session.ts";
 import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import { projectOperationBudgetMs, type WebGptProjectClickResult, type WebGptProjectOperationCommand, type WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
@@ -568,13 +568,13 @@ export class WebGptWorkspace implements WebGptPublicService {
       const project = await this.openProjectForAutomationWithin(name, operation);
       operation.assert();
       operation.timeline.newChatActionEndAt = new Date().toISOString();
-      const clickResult = operation.timeline.clickResult;
+      const clickResult = await this.view.webContents.executeJavaScript(buildWebGptCreateProjectChatScript(name)) as Record<string, unknown>;
       operation.timeline.newChatActionResult = {
         clicked: clickResult?.clicked === true,
         ambiguous: clickResult?.ambiguous === true,
-        actionCount: clickResult?.clicked === true ? 1 : 0,
-        targetTag: clickResult?.targetTag ?? null,
-        targetRole: clickResult?.targetRole ?? null,
+        actionCount: clickResult?.clicked === true ? 1 : (typeof clickResult?.actionCount === "number" ? clickResult.actionCount : 0),
+        targetTag: typeof clickResult?.actionTag === "string" ? clickResult.actionTag : null,
+        targetRole: typeof clickResult?.actionRole === "string" ? clickResult.actionRole : null,
       } satisfies WebGptProjectClickResult;
       operation.assert();
       if (clickResult?.clicked !== true) {
@@ -588,16 +588,28 @@ export class WebGptWorkspace implements WebGptPublicService {
       }
       operation.timeline.newChatContextConfirmStartAt = new Date().toISOString();
       operation.assert();
-      const projectProbe = project.projectProbe && typeof project.projectProbe === "object"
+      const confirmationDeadline = Math.min(Date.now() + 15_000, operation.deadline);
+      let actualUrl = await this.getCurrentUrl();
+      let projectProbe = project.projectProbe && typeof project.projectProbe === "object"
         ? project.projectProbe as Record<string, unknown>
         : {};
-      const page = project.page && typeof project.page === "object"
+      let page: Record<string, unknown> = project.page && typeof project.page === "object"
         ? project.page as Record<string, unknown>
         : {};
-      const actualUrl = typeof project.projectUrl === "string" ? project.projectUrl : await this.getCurrentUrl();
-      if (!(projectProbe.matchCount === 1
-        && (projectProbe.active === true || projectProbe.contextMatch === true || projectProbe.projectRoute === true)
-        && page.composerFound === true)) {
+      let contextConfirmed = false;
+      while (Date.now() < confirmationDeadline) {
+        operation.assert();
+        actualUrl = await this.getCurrentUrl();
+        const refreshed = await this.waitForComposer(Math.min(2_000, operation.remainingMs()), operation.assert);
+        page = refreshed.page as unknown as Record<string, unknown>;
+        projectProbe = await this.view.webContents.executeJavaScript(buildWebGptProjectProbeScript(name)) as Record<string, unknown>;
+        contextConfirmed = projectProbe.matchCount === 1
+          && (projectProbe.active === true || projectProbe.contextMatch === true || projectProbe.projectRoute === true)
+          && page.composerFound === true;
+        if (contextConfirmed) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (!contextConfirmed) {
         const evidence = JSON.stringify({
           actualUrl,
           matchCount: projectProbe.matchCount ?? null,
@@ -605,8 +617,11 @@ export class WebGptWorkspace implements WebGptPublicService {
           contextMatch: projectProbe.contextMatch === true,
           projectRoute: projectProbe.projectRoute === true,
           composerFound: page.composerFound === true,
+          projectContextConfirmed: false,
+          actionSource: clickResult.actionSource ?? null,
+          actionLabel: clickResult.actionLabel ?? null,
         });
-        throw this.codedError("PROJECT_CHAT_CONTEXT_NOT_CONFIRMED", "未能确认新 Chat 仍位于目标 Project：" + name + "；受限诊断 " + evidence);
+        throw this.codedError("PROJECT_CHAT_CONTEXT_NOT_CONFIRMED", "未能确认铅笔动作已进入目标 Project 的新聊天编辑器：" + name + "；受限诊断 " + evidence);
       }
       operation.timeline.newChatContextConfirmEndAt = new Date().toISOString();
       const action = {
@@ -614,11 +629,11 @@ export class WebGptWorkspace implements WebGptPublicService {
         projectName: name,
         matchCount: clickResult.matchCount ?? 1,
         actionCount: 1,
-        actionLabel: "打开项目首页",
-        actionTag: clickResult.targetTag ?? null,
-        actionRole: clickResult.targetRole ?? null,
-        actionSource: "project-row-new-chat-pencil",
-        href: null,
+        actionLabel: typeof clickResult.actionLabel === "string" ? clickResult.actionLabel : null,
+        actionTag: typeof clickResult.actionTag === "string" ? clickResult.actionTag : null,
+        actionRole: typeof clickResult.actionRole === "string" ? clickResult.actionRole : null,
+        actionSource: typeof clickResult.actionSource === "string" ? clickResult.actionSource : "project-row-new-chat-pencil",
+        href: typeof clickResult.href === "string" ? clickResult.href : null,
         url: actualUrl,
       };
       return {
@@ -626,7 +641,10 @@ export class WebGptWorkspace implements WebGptPublicService {
         projectUrl: project.projectUrl,
         chatUrl: null,
         url: actualUrl,
-        chatCreated: true,
+        chatCreated: false,
+        chatMaterialized: false,
+        chatContextReady: true,
+        awaitingFirstPrompt: true,
         promptSent: false,
         action,
         projectProbe,

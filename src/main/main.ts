@@ -283,7 +283,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
   let operationStartMs: number | null = null;
   let response: WebGptControlResponse;
   try {
-    if (request.command !== "webgpt.status" && !workbenchReady) {
+    if (request.command !== "webgpt.status" && request.command !== "webgpt.close" && !workbenchReady) {
       response = controlFail(request.command, "WORKBENCH_NOT_READY", "Workbench 窗口尚未完成加载。");
     } else if (request.command === "webgpt.status") {
       response = controlOk(request.command, await webGptStatusResult());
@@ -295,6 +295,17 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
       response = result.webgpt !== "READY"
         ? controlFail(request.command, "WEBGPT_UNAVAILABLE", "WebGPT 页面当前不可用或尚未打开。")
         : controlOk(request.command, result);
+    } else if (request.command === "webgpt.close") {
+      response = controlOk(request.command, {
+        requested: true,
+        closeMode: "GRACEFUL",
+        message: "已请求 Workbench 正常退出。",
+      });
+      // Return the Control Plane response before invoking Electron's shutdown
+      // path; the existing before-quit handler performs runtime/persistence cleanup.
+      setTimeout(() => {
+        if (!quittingForExit) app.quit();
+      }, 100);
     } else if (request.command === "webgpt.latest") {
       response = controlOk(request.command, await latestControlResult(await getWebGptRequestManager().readLatestCurrent(), request.out));
     } else if (request.command === "webgpt.control.user") {
@@ -436,7 +447,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
 }
 
 function enqueueWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {
-  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current" || request.command === "webgpt.latest" || request.command === "webgpt.control.user" || request.command === "webgpt.role.list" || request.command === "webgpt.role.status" || request.command === "webgpt.request.status" || request.command === "webgpt.request.list") {
+  if (request.command === "webgpt.wait" || request.command === "webgpt.result" || request.command === "webgpt.status" || request.command === "webgpt.current" || request.command === "webgpt.close" || request.command === "webgpt.latest" || request.command === "webgpt.control.user" || request.command === "webgpt.role.list" || request.command === "webgpt.role.status" || request.command === "webgpt.request.status" || request.command === "webgpt.request.list") {
     return handleWebGptControlRequest(request);
   }
   const result = webGptControlQueue.then(() => handleWebGptControlRequest(request));

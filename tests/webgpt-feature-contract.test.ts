@@ -86,6 +86,16 @@ test("Project CLI actions are scoped to the hovered Project row and preserve con
   assert.match(workspace, /PROJECT_NEW_CHAT_ACTION_NOT_FOUND/);
 });
 
+test("Project new-chat requires a real canonical Chat identity before success", () => {
+  const workspace = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-workspace.ts"), "utf8");
+  assert.match(workspace, /buildWebGptCreateProjectChatScript\(name\)/);
+  assert.match(workspace, /PROJECT_CHAT_CONTEXT_NOT_CONFIRMED/);
+  assert.match(workspace, /chatUrl: null/);
+  assert.match(workspace, /chatCreated: false/);
+  assert.match(workspace, /chatMaterialized: false/);
+  assert.match(workspace, /awaitingFirstPrompt: true/);
+});
+
 test("Project CLI operations have a bounded server deadline and cancel stale navigation", () => {
   const workspace = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-workspace.ts"), "utf8");
   const budget = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-operation-budget.ts"), "utf8");

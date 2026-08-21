@@ -40,6 +40,7 @@ export const WEBGPT_CONTROL_COMMANDS = [
   "webgpt.status",
   "webgpt.open",
   "webgpt.current",
+  "webgpt.close",
   "webgpt.latest",
   "webgpt.screenshot",
   "webgpt.control.user",

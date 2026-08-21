@@ -15,6 +15,10 @@ test("WebGPT CLI parser exposes the WEB-2 allowlist and JSON flag", () => {
     kind: "command",
     command: { name: "webgpt.status", json: true },
   });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "close", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.close", json: true },
+  });
   assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "control", "user"]), {
     kind: "command",
     command: { name: "webgpt.control.user", json: false },
@@ -24,6 +28,7 @@ test("WebGPT CLI parser exposes the WEB-2 allowlist and JSON flag", () => {
     command: { name: "webgpt.screenshot", json: true, out: "capture.png" },
   });
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "status", "--unknown"]).kind, "error");
+  assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "close", "--unknown"]).kind, "error");
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "open", "--webgpt-account", "a"]).kind, "error");
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "--webgpt-open"]).kind, "not-cli");
 });

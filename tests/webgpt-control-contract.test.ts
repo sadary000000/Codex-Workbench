@@ -60,6 +60,16 @@ test("WebGPT Control Plane validates versioned, request-scoped allowlisted reque
     requestId: "req-1",
     command: "webgpt.status",
   });
+  const close = parseWebGptControlRequest({
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "close-1",
+    command: "webgpt.close",
+  });
+  assert.deepEqual(close, {
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "close-1",
+    command: "webgpt.close",
+  });
   const gptScoped = parseWebGptControlRequest({
     version: WEBGPT_CONTROL_PROTOCOL_VERSION,
     requestId: "role-1-gpt-scoped",
@@ -169,6 +179,24 @@ test("Project navigation budgets leave a transport margin over bounded server wo
   assert.equal(projectCliTimeoutMs("webgpt.project.new-chat"), WEBGPT_PROJECT_NEW_CHAT_CLI_TIMEOUT_MS);
   assert.equal(WEBGPT_PROJECT_OPEN_CLI_TIMEOUT_MS > WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS, true);
   assert.equal(WEBGPT_PROJECT_NEW_CHAT_CLI_TIMEOUT_MS > WEBGPT_PROJECT_NEW_CHAT_OPERATION_TIMEOUT_MS, true);
+});
+
+test("webgpt close does not cold-start a Workbench when no instance is running", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-close-"));
+  try {
+    const response = await runWebGptCli(
+      { name: "webgpt.close", json: true },
+      process.execPath,
+      join(directory, "missing-control-plane.json"),
+      500,
+      process.execPath,
+    );
+    assert.equal(response.ok, false);
+    assert.equal(response.command, "webgpt.close");
+    assert.equal(response.error?.code, "WORKBENCH_NOT_RUNNING");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("WebGPT Control Plane uses a published per-instance descriptor and authenticated socket", async () => {
