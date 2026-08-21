@@ -1,0 +1,29 @@
+AUT-1.5 Persistence Readiness & Productionization Gate
+Date: 2026-08-21 (Asia/Shanghai)
+
+Base commit: 9b30aa8 docs: package AUT-1 gate fix review
+Implementation commit: 954f32d feat: productionize AUT automation persistence
+Review commit: documentation/package commit (reported in final gate)
+
+Final packaged GUI:
+D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+GUI EXE SHA256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+
+Packaged CLI:
+D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
+CLI EXE SHA256: B29EF638D383BBFAA749FFCDF1AB7DE163872F708919818AA03E931AD0913E7F
+
+Runtime:
+Electron 43.3.0
+Node 24.18.1
+SQLite 3.53.1
+Persistence format sqlite-record-v1
+Persistence schema 1
+Automation document schema 2
+Writer authority Workbench Automation Host
+
+Real Native execution started: NO
+Real WebGPT execution started: NO
+New software/plugin installed: NO
+
+The packaged Windows smoke used Node execFile and an isolated temporary database. It did not send a prompt or perform an external action.

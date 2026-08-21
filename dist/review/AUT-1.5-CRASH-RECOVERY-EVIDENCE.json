@@ -1,0 +1,11 @@
+{
+  "stage": "AUT-1.5",
+  "rollbackBeforeCommit": "PASS",
+  "durableIntentAndReceiptAcrossProcessExit": "PASS",
+  "interruptedJsonMigrationRecovery": "PASS",
+  "corruptAndFuturePersistenceFailClosed": "PASS",
+  "secondProcessWriter": "AUTOMATION_DB_LOCKED",
+  "unknownReceiptRequiresRecovery": "PASS",
+  "duplicateReceiptRejected": "PASS",
+  "externalExecution": "NOT_STARTED"
+}

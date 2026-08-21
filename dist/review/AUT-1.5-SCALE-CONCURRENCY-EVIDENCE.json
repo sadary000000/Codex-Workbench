@@ -1,0 +1,19 @@
+{
+  "stage": "AUT-1.5",
+  "sameProcessConcurrentCallers": 25,
+  "sameProcessConcurrency": "PASS",
+  "competingProcess": "FAIL_CLOSED_AUTOMATION_DB_LOCKED",
+  "projects": 100,
+  "stages": 1000,
+  "steps": 10000,
+  "auditEvents": 50000,
+  "evidenceRecords": 10000,
+  "actionIntents": 10000,
+  "totalRecords": 91300,
+  "elapsedMs": 2240,
+  "limitMs": 60000,
+  "scaleGate": "PASS",
+  "journalMode": "delete",
+  "synchronous": "2",
+  "busyTimeoutMs": 2000
+}
