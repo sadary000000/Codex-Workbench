@@ -1,0 +1,79 @@
+{
+  "stage": "WEB-6.7 Control Plane Reliability",
+  "result": "PASS_CANDIDATE",
+  "baseCommit": "3c5e23a8c4c0f7321312bbcd3c4026fd2bfab069",
+  "implementationCommit": "0216cc4",
+  "v1CoreChanged": false,
+  "automationLayerChanged": false,
+  "errorCodes": [
+    "INVALID_ARGUMENT",
+    "NOT_FOUND",
+    "BUSY",
+    "OVERLOADED",
+    "TIMEOUT",
+    "RECOVERY_REQUIRED",
+    "USER_CONTROL",
+    "VERSION_MISMATCH",
+    "CAPABILITY_NOT_SUPPORTED",
+    "TARGET_CHAT_MISMATCH",
+    "INTERNAL_ERROR"
+  ],
+  "errorEnvelope": {
+    "requiredFields": ["ok", "error.code", "error.message", "error.retryable"],
+    "optionalFields": ["error.retryAfterMs", "error.userAction", "error.details"],
+    "safeDetails": true,
+    "sensitiveDataIncluded": false
+  },
+  "busyOverloaded": {
+    "busy": {
+      "code": "BUSY",
+      "meaning": "existing resource is temporarily occupied",
+      "retryable": true,
+      "example": "Browser Lease or active mutually exclusive operation"
+    },
+    "overloaded": {
+      "code": "OVERLOADED",
+      "meaning": "bounded operation queue has reached capacity",
+      "retryable": true,
+      "queueLimitDefault": 8
+    }
+  },
+  "cliPresenter": {
+    "humanSuccess": {"stdout": true, "stderr": false, "exitCode": 0},
+    "humanFailure": {"stdout": false, "stderr": true, "exitCode": 1},
+    "jsonSuccess": {"stdout": "single-line-json", "stderr": false, "exitCode": 0},
+    "jsonFailure": {"stdout": "single-line-json", "stderr": false, "exitCode": 1},
+    "invalidArgumentExitCode": 2
+  },
+  "tests": {
+    "check": "PASS",
+    "unitTests": "204/204 PASS",
+    "build": "PASS",
+    "packageWin": "PASS",
+    "auditOmitDev": "PASS: 0 vulnerabilities",
+    "diffCheck": "PASS",
+    "secretScan": "PASS"
+  },
+  "regression": {
+    "web65r": "PASS: contract/unit regression; no new real prompts",
+    "web66": "PASS: real protocol smoke; newRealPrompts=0",
+    "web66SchemaSha256": "CD03B094F402DE46F1DC39C345FDB7097CB356399D951CEE6CCAD5BAC1B67643"
+  },
+  "package": {
+    "workbenchExe": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+    "workbenchExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "cliExe": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench CLI.exe",
+    "cliExeSha256": "7FD7D691111C24ABB18FD516244639BE34C0866BF4E8D7BA5DDD4017DF1D33CE"
+  },
+  "realPromptPolicy": {
+    "newRealPrompts": 0,
+    "webpagePromptSmoke": "NOT_RUN",
+    "reason": "WEB-6.7 is a Control Plane reliability stage; no rate-limit-inducing live prompt was added"
+  },
+  "subagents": {
+    "completed": ["Arendt", "Newton", "Euler", "Ohm"],
+    "runningAtGate": 0,
+    "allClosedAfterReview": true
+  },
+  "blockers": []
+}

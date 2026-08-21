@@ -1,0 +1,63 @@
+WEBGPT WEB-6.7 PROVENANCE
+=========================
+
+Project: D:\办公\AI\Codex_Workbench_V1
+Stage: WEB-6.7 Control Plane Reliability
+Evidence date: 2026-08-21
+
+BASE COMMIT
+-----------
+3c5e23a8c4c0f7321312bbcd3c4026fd2bfab069
+
+IMPLEMENTATION COMMIT
+---------------------
+0216cc4
+feat: implement webgpt control plane reliability
+
+REVIEW DOCUMENTATION
+--------------------
+The review documentation commit is the commit that adds the four WEB-6.7
+documentation files listed below. Its exact hash is reported by the final
+git log/status check and final handoff; the report does not self-reference a
+hash that would change its own commit.
+
+REVIEW FILES
+------------
+docs/WEBGPT-WEB6.7-STAGE-REVIEW.md
+docs/WEBGPT-WEB6.7-EVIDENCE.json
+docs/WEBGPT-WEB6.7-TEST-SUMMARY.txt
+docs/WEBGPT-WEB6.7-PROVENANCE.txt
+
+PACKAGED APPLICATION
+--------------------
+dist/package/Codex Workbench V1.exe
+SHA256 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+
+dist/package/Codex Workbench CLI.exe
+SHA256 7FD7D691111C24ABB18FD516244639BE34C0866BF4E8D7BA5DDD4017DF1D33CE
+
+dist/package/Codex Workbench CLI Runtime.exe
+SHA256 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+
+PACKAGED APP RESOURCES
+----------------------
+main.js       AF895A2D6A0D453DF5920E128AEDC5A06F124ADFE96BB8431209BEFB8E4E1E74
+renderer.js   94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1
+package.json  1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
+schema        CD03B094F402DE46F1DC39C345FDB7097CB356399D951CEE6CCAD5BAC1B67643
+
+SCOPE / SAFETY
+--------------
+V1 Frozen Core changed: NO
+Automation started: NO
+New real webpage prompts: 0
+Cookie/token/browser profile included: NO
+Old donor modified: NO
+Auto_Agent modified: NO
+User planning documents staged: NO
+
+KNOWN DIRTY BASELINE
+--------------------
+Pre-existing review artifacts, WEB-6.5R documents, spike documents,
+dist-stage-a, user navigation DOCX files and donor-side changes were not
+staged or modified by this WEB-6.7 implementation commit.

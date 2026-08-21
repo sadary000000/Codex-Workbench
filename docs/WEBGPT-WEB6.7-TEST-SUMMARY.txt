@@ -1,0 +1,54 @@
+WEBGPT WEB-6.7 TEST SUMMARY
+Date: 2026-08-21
+Project: D:\办公\AI\Codex_Workbench_V1
+
+AUTOMATED
+---------
+npm run check                 PASS
+npm test                      PASS (204/204)
+npm run build                 PASS
+npm run package:win           PASS
+npm audit --omit=dev          PASS (0 vulnerabilities)
+git diff --check              PASS
+secret scan                  PASS (no credential-like literals)
+
+TARGETED WEB-6.7 CONTRACTS
+--------------------------
+Error taxonomy (11 canonical codes)             PASS
+Error Envelope/schema                            PASS
+Legacy-code normalization                        PASS
+Safe details sanitization                        PASS
+CLI human/json/exit-code matrix                  PASS
+BUSY Browser lease distinction                   PASS
+OVERLOADED bounded queue distinction             PASS
+retryAfterMs/userAction propagation              PASS
+
+REGRESSION
+----------
+WEB-6.5R contract/unit regression                PASS
+WEB-6.6 initialize/capability/schema smoke       PASS
+WEB-6.6 new real prompts                         0
+
+REAL-WEB POLICY
+---------------
+No new ChatGPT webpage Prompt was sent in WEB-6.7.
+No rate-limit or retry stress was performed.
+The WEB-6.6 smoke exercised the Control Plane protocol only.
+
+PACKAGE
+-------
+V1 EXE: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+V1 EXE SHA256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+CLI EXE: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
+CLI EXE SHA256: 7FD7D691111C24ABB18FD516244639BE34C0866BF4E8D7BA5DDD4017DF1D33CE
+
+GATE
+----
+error_taxonomy: PASS
+error_envelope: PASS
+busy_overloaded_split: PASS
+cli_presenter: PASS
+regression: PASS
+tests: PASS
+v1_core_changed: NO
+result: PASS_CANDIDATE
