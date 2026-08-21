@@ -1,0 +1,29 @@
+{
+  "stage": "AUT-1 Domain Store + State Machine Foundation",
+  "mode": "PROVISIONAL_FOUNDATION",
+  "aut0Status": "NOT_FROZEN",
+  "implementationCommit": "39fa88bf017d11d0644d8daffe479baf88e1f9f1",
+  "timestamp": "2026-08-21T19:57:34+08:00",
+  "automationTests": {
+    "file": "tests/automation-foundation.test.ts",
+    "passed": 11,
+    "failed": 0
+  },
+  "fullTests": {
+    "command": "npm test",
+    "passed": 224,
+    "failed": 0
+  },
+  "commands": {
+    "npm run check": "PASS",
+    "npm run build": "PASS",
+    "npm run package:win": "PASS",
+    "npm audit --omit=dev": "PASS (0 vulnerabilities)",
+    "git diff --check": "PASS",
+    "secretScan": "PASS"
+  },
+  "realExecution": {
+    "native": "NOT_STARTED",
+    "webgpt": "NOT_STARTED"
+  }
+}

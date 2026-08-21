@@ -1,0 +1,28 @@
+{
+  "stage": "AUT-1",
+  "evidenceKind": "domain-foundation-contract",
+  "automationDb": {
+    "schemaVersion": 1,
+    "migration": "v0-to-v1",
+    "atomicWrite": "temp-fsync-rename",
+    "independentFromV1": true
+  },
+  "stateMachine": {
+    "invalidTransitionsFailClosed": true,
+    "stateAndAuditSameTransaction": true,
+    "auditAppendOnlyHashChain": true
+  },
+  "intentReceiptRecovery": {
+    "intentBeforeAttempt": true,
+    "idempotencyConflictDetected": true,
+    "unknownReceiptRecoveryRequired": true,
+    "externalDispatchStarted": false
+  },
+  "identityBoundary": {
+    "nativeThreadTurnItemCopied": false,
+    "webgptTranscriptCopied": false,
+    "cookieOrTokenStored": false,
+    "v1CoreChanged": false,
+    "webgptV1Changed": false
+  }
+}
