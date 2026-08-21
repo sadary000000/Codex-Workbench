@@ -11,6 +11,7 @@ import {
   type SideEffectClass,
   type StepKind,
 } from "./types.ts";
+import { canonicalizeJson, computeActionSemanticSha256, sha256Hex } from "./canonical.ts";
 
 const PROJECT_LIFECYCLES = new Set<AutomationProjectLifecycle>([
   "DRAFT",
@@ -53,6 +54,8 @@ const SENSITIVE_KEY = /(?:prompt|response|transcript|cookie|token|authorization|
 const MAX_STRING = 4_096;
 const MAX_GOAL = 8_192;
 const MAX_METADATA = 32;
+const STEP_RUNTIME_LIFECYCLES = new Set(["NOT_STARTED", "READY", "RUNNING", "VERIFYING", "REVIEWING", "TERMINAL"]);
+const STEP_RUNTIME_WAIT_REASONS = new Set(["NONE", "RESOURCE", "HUMAN", "EXTERNAL", "USER_CONTROL", "RATE_LIMIT"]);
 
 export class AutomationSchemaError extends Error {
   readonly code: "AUTOMATION_SCHEMA_INVALID" | "AUTOMATION_SCHEMA_VERSION_UNSUPPORTED";
@@ -153,6 +156,14 @@ function validateVersions(document: Record<string, unknown>): void {
     enumValue(item.status, `requirementVersions[${index}].status`, new Set(["DRAFT", "CONFIRMED", "ACTIVE", "SUPERSEDED"]));
     optionalString(item.contentRef, `requirementVersions[${index}].contentRef`, 256);
     optionalString(item.structuredPayloadRef, `requirementVersions[${index}].structuredPayloadRef`, 256);
+    let canonicalPayload: string;
+    try {
+      canonicalPayload = canonicalizeJson(string(item.canonicalPayload, `requirementVersions[${index}].canonicalPayload`, 32 * 1024), `requirementVersions[${index}].canonicalPayload`);
+    } catch (error) {
+      throw new AutomationSchemaError(error instanceof Error ? error.message : "Requirement canonical payload is invalid.");
+    }
+    const payloadSha256 = string(item.payloadSha256, `requirementVersions[${index}].payloadSha256`, 128);
+    if (payloadSha256 !== sha256Hex(canonicalPayload)) throw new AutomationSchemaError(`requirementVersions[${index}].payloadSha256 does not match canonicalPayload.`);
     timestamp(item.createdAt, `requirementVersions[${index}].createdAt`);
     optionalString(item.confirmedAt, `requirementVersions[${index}].confirmedAt`, 64);
     optionalString(item.supersedes, `requirementVersions[${index}].supersedes`, 256);
@@ -198,16 +209,31 @@ function validateVersions(document: Record<string, unknown>): void {
     string(item.goal, `stepSpecs[${index}].goal`, MAX_GOAL);
     enumValue(item.riskClass, `stepSpecs[${index}].riskClass`, new Set(["LOW", "MEDIUM", "HIGH"]));
     enumValue(item.sideEffectClass, `stepSpecs[${index}].sideEffectClass`, new Set(["PURE", "IDEMPOTENT", "RECONCILABLE", "NON_REPEATABLE"]));
-    enumValue(item.status, `stepSpecs[${index}].status`, new Set(["NOT_STARTED", "READY", "RUNNING", "VERIFYING", "REVIEWING", "TERMINAL", "SUPERSEDED"]));
-    if (item.terminalResult !== null) enumValue(item.terminalResult, `stepSpecs[${index}].terminalResult`, new Set(["COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "SUPERSEDED", "SKIPPED"]));
+    enumValue(item.specStatus, `stepSpecs[${index}].specStatus`, new Set(["ACTIVE", "SUPERSEDED"]));
     timestamp(item.createdAt, `stepSpecs[${index}].createdAt`);
     optionalString(item.supersedes, `stepSpecs[${index}].supersedes`, 256);
+  });
+
+  const runtimes = array(document.stepRuntimes, "stepRuntimes");
+  validateUniqueIds(runtimes, "stepRuntimeId", "stepRuntimes");
+  runtimes.forEach((value, index) => {
+    const item = record(value);
+    string(item.stepRuntimeId, `stepRuntimes[${index}].stepRuntimeId`, 256);
+    string(item.stepSpecId, `stepRuntimes[${index}].stepSpecId`, 256);
+    enumValue(item.lifecycle, `stepRuntimes[${index}].lifecycle`, STEP_RUNTIME_LIFECYCLES);
+    if (item.terminalResult !== null) enumValue(item.terminalResult, `stepRuntimes[${index}].terminalResult`, new Set(["COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "SUPERSEDED", "SKIPPED"]));
+    enumValue(item.waitReason, `stepRuntimes[${index}].waitReason`, STEP_RUNTIME_WAIT_REASONS);
+    optionalString(item.currentAttemptId, `stepRuntimes[${index}].currentAttemptId`, 256);
+    integer(item.revision, `stepRuntimes[${index}].revision`);
+    timestamp(item.createdAt, `stepRuntimes[${index}].createdAt`);
+    timestamp(item.updatedAt, `stepRuntimes[${index}].updatedAt`);
   });
 }
 
 function validateCommonTables(document: Record<string, unknown>): void {
   const tables: Array<[string, string]> = [
     ["executionAttempts", "attemptId"],
+    ["stepRuntimes", "stepRuntimeId"],
     ["actionIntents", "intentId"],
     ["actionAttempts", "actionAttemptId"],
     ["actionReceipts", "receiptId"],
@@ -238,6 +264,7 @@ function validateCommonTables(document: Record<string, unknown>): void {
   });
 
   const intents = array(document.actionIntents, "actionIntents");
+  const idempotencyKeys = new Set<string>();
   intents.forEach((value, index) => {
     const item = record(value);
     string(item.intentId, `actionIntents[${index}].intentId`, 256);
@@ -248,7 +275,18 @@ function validateCommonTables(document: Record<string, unknown>): void {
     string(item.actionType, `actionIntents[${index}].actionType`, 256);
     optionalString(item.targetRef, `actionIntents[${index}].targetRef`, 256);
     enumValue(item.sideEffectClass, `actionIntents[${index}].sideEffectClass`, new Set(["PURE", "IDEMPOTENT", "RECONCILABLE", "NON_REPEATABLE"]));
+    optionalString(item.payloadRef, `actionIntents[${index}].payloadRef`, 256);
+    optionalString(item.payloadHash, `actionIntents[${index}].payloadHash`, 128);
+    const executionOptions = metadata(item.executionOptions, `actionIntents[${index}].executionOptions`);
+    const semanticSha256 = string(item.semanticSha256, `actionIntents[${index}].semanticSha256`, 128);
+    const expectedSemanticSha256 = computeActionSemanticSha256({ actionType: item.actionType as string, targetRef: (item.targetRef ?? null) as string | null, sideEffectClass: item.sideEffectClass as string, payloadRef: (item.payloadRef ?? null) as string | null, payloadHash: (item.payloadHash ?? null) as string | null, executionOptions, expectedOutcomeRef: (item.expectedOutcomeRef ?? null) as string | null });
+    if (semanticSha256 !== expectedSemanticSha256) throw new AutomationSchemaError(`actionIntents[${index}].semanticSha256 does not match the canonical action descriptor.`);
     optionalString(item.idempotencyRef, `actionIntents[${index}].idempotencyRef`, 256);
+    if (item.idempotencyRef !== null) {
+      const key = `${item.projectId}\u0000${item.idempotencyRef}`;
+      if (idempotencyKeys.has(key)) throw new AutomationSchemaError(`actionIntents[${index}].idempotencyRef is duplicated within a project.`);
+      idempotencyKeys.add(key);
+    }
     optionalString(item.expectedOutcomeRef, `actionIntents[${index}].expectedOutcomeRef`, 256);
     enumValue(item.state, `actionIntents[${index}].state`, new Set(["PLANNED", "DISPATCH_ELIGIBLE", "DISPATCHING", "DISPATCHED", "COMPLETED", "FAILED", "UNCERTAIN", "RECOVERY_REQUIRED", "CANCELLED"]));
     timestamp(item.createdAt, `actionIntents[${index}].createdAt`);
@@ -304,6 +342,7 @@ function validateCommonTables(document: Record<string, unknown>): void {
   });
 
   const actionAttempts = array(document.actionAttempts, "actionAttempts");
+  const actionAttemptByIntent = new Map<string, number>();
   actionAttempts.forEach((value, index) => {
     const item = record(value);
     string(item.actionAttemptId, `actionAttempts[${index}].actionAttemptId`, 256);
@@ -314,6 +353,9 @@ function validateCommonTables(document: Record<string, unknown>): void {
     optionalString(item.completedAt, `actionAttempts[${index}].completedAt`, 64);
     optionalString(item.executorRef, `actionAttempts[${index}].executorRef`, 256);
     enumValue(item.recoveryState, `actionAttempts[${index}].recoveryState`, new Set(["KNOWN_NOT_STARTED", "IN_PROGRESS", "COMPLETED", "FAILED", "UNCERTAIN", "RECOVERY_REQUIRED"]));
+    const previous = actionAttemptByIntent.get(item.intentId as string) ?? 0;
+    if (previous > 0) throw new AutomationSchemaError(`actionAttempts[${index}].intentId must have at most one ActionAttempt.`);
+    actionAttemptByIntent.set(item.intentId as string, previous + 1);
   });
 
   const receipts = array(document.actionReceipts, "actionReceipts");
@@ -337,7 +379,7 @@ function validateCommonTables(document: Record<string, unknown>): void {
     string(item.checkpointId, `checkpoints[${index}].checkpointId`, 256);
     string(item.projectId, `checkpoints[${index}].projectId`, 256);
     integer(item.projectRevision, `checkpoints[${index}].projectRevision`);
-    for (const key of ["requirementVersionId", "planVersionId", "currentStageSpecId", "currentStepSpecId", "currentAttemptId", "lastActionIntentId", "lastActionReceiptId", "workspaceSnapshotRef"]) optionalString(item[key], `checkpoints[${index}].${key}`, 256);
+    for (const key of ["requirementVersionId", "planVersionId", "currentStageSpecId", "currentStepSpecId", "currentStepRuntimeId", "currentAttemptId", "lastActionIntentId", "lastActionReceiptId", "workspaceSnapshotRef"]) optionalString(item[key], `checkpoints[${index}].${key}`, 256);
     for (const key of ["resourceClaimRefs", "externalRefs", "evidenceRefs", "issueRefs"]) {
       const refs = array(item[key], `checkpoints[${index}].${key}`);
       refs.forEach((ref, refIndex) => string(ref, `checkpoints[${index}].${key}[${refIndex}]`, 256));
@@ -440,6 +482,7 @@ function validateReferences(document: Record<string, unknown>): void {
   const plans = tableById(document, "planVersions", "planVersionId");
   const stages = tableById(document, "stageSpecs", "stageSpecId");
   const steps = tableById(document, "stepSpecs", "stepSpecId");
+  const runtimes = tableById(document, "stepRuntimes", "stepRuntimeId");
   const attempts = tableById(document, "executionAttempts", "attemptId");
   const intents = tableById(document, "actionIntents", "intentId");
   const actionAttempts = tableById(document, "actionAttempts", "actionAttemptId");
@@ -473,6 +516,16 @@ function validateReferences(document: Record<string, unknown>): void {
     if (!step) throw new AutomationSchemaError(`${field} references a missing step.`);
     return projectForStage(step.stageSpecId, `${field}.stageSpecId`);
   };
+  const projectForReceipt = (receiptId: unknown, field: string): string | null => {
+    if (receiptId === null) return null;
+    const receipt = receipts.get(string(receiptId, field, 256));
+    if (!receipt) throw new AutomationSchemaError(`${field} references a missing receipt.`);
+    const actionAttempt = actionAttempts.get(receipt.actionAttemptId as string);
+    if (!actionAttempt) throw new AutomationSchemaError(`${field} references a receipt with a missing action attempt.`);
+    const intent = intents.get(actionAttempt.intentId as string);
+    if (!intent) throw new AutomationSchemaError(`${field} references a receipt with a missing intent.`);
+    return intent.projectId as string;
+  };
 
   for (const project of projects.values()) {
     const projectId = project.projectId as string;
@@ -497,6 +550,12 @@ function validateReferences(document: Record<string, unknown>): void {
     if (!plan) throw new AutomationSchemaError("stageSpecs.planVersionId references a missing plan.");
   }
   for (const item of steps.values()) if (!stages.has(item.stageSpecId as string)) throw new AutomationSchemaError("stepSpecs.stageSpecId references a missing stage.");
+  for (const item of runtimes.values()) {
+    const step = steps.get(item.stepSpecId as string);
+    if (!step) throw new AutomationSchemaError("stepRuntimes.stepSpecId references a missing StepSpec.");
+    const attempt = requireSameProject(attempts, item.currentAttemptId, projectForStep(item.stepSpecId, "stepRuntimes.stepSpecId") as string, "stepRuntimes.currentAttemptId");
+    if (attempt && attempt.stepSpecId !== step.stepSpecId) throw new AutomationSchemaError("stepRuntimes.currentAttemptId does not belong to its StepSpec.");
+  }
   for (const item of attempts.values()) {
     const project = projects.get(item.projectId as string);
     const stage = stages.get(item.stageSpecId as string);
@@ -504,6 +563,9 @@ function validateReferences(document: Record<string, unknown>): void {
     if (!project || !stage || !step) throw new AutomationSchemaError("executionAttempts contains a missing parent reference.");
     const plan = plans.get(stage.planVersionId as string);
     if (!plan || plan.projectId !== project.projectId || step.stageSpecId !== stage.stageSpecId) throw new AutomationSchemaError("executionAttempts crosses a project or StepSpec boundary.");
+    const runtime = [...runtimes.values()].find((candidate) => candidate.stepSpecId === step.stepSpecId);
+    if (!runtime) throw new AutomationSchemaError("executionAttempts.stepSpecId has no StepRuntime.");
+    if (runtime.currentAttemptId !== null && !attempts.has(runtime.currentAttemptId as string)) throw new AutomationSchemaError("stepRuntimes.currentAttemptId references a missing attempt.");
   }
   for (const item of intents.values()) {
     if (!projects.has(item.projectId as string)) throw new AutomationSchemaError("actionIntents.projectId references a missing project.");
@@ -535,9 +597,15 @@ function validateReferences(document: Record<string, unknown>): void {
     for (const ref of [item.requirementVersionId, item.planVersionId]) requireSameProject(ref === item.requirementVersionId ? requirements : plans, ref, projectId, "checkpoint.versionRef");
     if (projectForStage(item.currentStageSpecId, "checkpoints.currentStageSpecId") !== null && projectForStage(item.currentStageSpecId, "checkpoints.currentStageSpecId") !== projectId) throw new AutomationSchemaError("checkpoints.currentStageSpecId crosses a project boundary.");
     if (projectForStep(item.currentStepSpecId, "checkpoints.currentStepSpecId") !== null && projectForStep(item.currentStepSpecId, "checkpoints.currentStepSpecId") !== projectId) throw new AutomationSchemaError("checkpoints.currentStepSpecId crosses a project boundary.");
+    if (item.currentStepRuntimeId !== null) {
+      const runtime = runtimes.get(string(item.currentStepRuntimeId, "checkpoints.currentStepRuntimeId", 256));
+      if (!runtime) throw new AutomationSchemaError("checkpoints.currentStepRuntimeId references a missing runtime.");
+      if (item.currentStepSpecId !== runtime.stepSpecId) throw new AutomationSchemaError("checkpoints.currentStepRuntimeId does not match currentStepSpecId.");
+      if (projectForStep(runtime.stepSpecId, "checkpoints.currentStepRuntimeId.stepSpecId") !== projectId) throw new AutomationSchemaError("checkpoints.currentStepRuntimeId crosses a project boundary.");
+    }
     requireSameProject(attempts, item.currentAttemptId, projectId, "checkpoints.currentAttemptId");
     requireSameProject(intents, item.lastActionIntentId, projectId, "checkpoints.lastActionIntentId");
-    requireSameProject(receipts, item.lastActionReceiptId, projectId, "checkpoints.lastActionReceiptId");
+    if (projectForReceipt(item.lastActionReceiptId, "checkpoints.lastActionReceiptId") !== null && projectForReceipt(item.lastActionReceiptId, "checkpoints.lastActionReceiptId") !== projectId) throw new AutomationSchemaError("checkpoints.lastActionReceiptId crosses a project boundary.");
     requireSameProject(snapshots, item.workspaceSnapshotRef, projectId, "checkpoints.workspaceSnapshotRef");
     for (const ref of item.resourceClaimRefs as string[]) requireSameProject(claims, ref, projectId, "checkpoints.resourceClaimRefs");
     for (const ref of item.externalRefs as string[]) requireSameProject(externals, ref, projectId, "checkpoints.externalRefs");
@@ -553,6 +621,7 @@ export function createEmptyAutomationDocument(): AutomationDocument {
     planVersions: [],
     stageSpecs: [],
     stepSpecs: [],
+    stepRuntimes: [],
     executionAttempts: [],
     actionIntents: [],
     actionAttempts: [],
@@ -588,7 +657,7 @@ function migratedTimestamp(value: unknown): string {
   return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : new Date(0).toISOString();
 }
 
-function migrateV0ToV1(value: Record<string, unknown>): AutomationDocument {
+function migrateV0ToV2(value: Record<string, unknown>): AutomationDocument {
   const legacyProjects = Array.isArray(value.projects) ? value.projects as LegacyProject[] : [];
   const document = createEmptyAutomationDocument();
   document.automationProjects = legacyProjects.map((project, index) => {
@@ -610,14 +679,122 @@ function migrateV0ToV1(value: Record<string, unknown>): AutomationDocument {
   return document;
 }
 
+function legacyRequirementPayload(item: Record<string, unknown>): { canonicalPayload: string; payloadSha256: string } {
+  const canonicalPayload = canonicalizeJson(JSON.stringify({
+    legacyContentRef: item.contentRef ?? null,
+    legacyStructuredPayloadRef: item.structuredPayloadRef ?? null,
+  }), "legacyRequirement.canonicalPayload");
+  return { canonicalPayload, payloadSha256: sha256Hex(canonicalPayload) };
+}
+
+function normalizeLegacyAudit(value: unknown, index: number, previousHash: string | null): Record<string, unknown> {
+  const item = record(value);
+  const event = {
+    eventId: typeof item.eventId === "string" && item.eventId ? item.eventId : `legacy-audit-${index + 1}`,
+    projectId: typeof item.projectId === "string" && item.projectId ? item.projectId : "legacy-project-unknown",
+    entityType: typeof item.entityType === "string" && item.entityType ? item.entityType : "Legacy",
+    entityId: typeof item.entityId === "string" && item.entityId ? item.entityId : `legacy-${index + 1}`,
+    eventType: typeof item.eventType === "string" && item.eventType ? item.eventType : "LEGACY_EVENT",
+    eventVersion: Number.isSafeInteger(item.eventVersion) && (item.eventVersion as number) > 0 ? item.eventVersion : 1,
+    sequence: index + 1,
+    aggregateRevision: Number.isSafeInteger(item.aggregateRevision) && (item.aggregateRevision as number) >= 0 ? item.aggregateRevision : null,
+    fromState: typeof item.fromState === "string" ? item.fromState : null,
+    toState: typeof item.toState === "string" ? item.toState : null,
+    prevHash: previousHash,
+    timestamp: migratedTimestamp(item.timestamp),
+    actorType: ["SYSTEM", "USER", "NATIVE_RUNTIME", "WEBGPT_RUNTIME", "AUTOMATION", "TEST"].includes(item.actorType as string) ? item.actorType : "SYSTEM",
+    actorRef: typeof item.actorRef === "string" ? item.actorRef : null,
+    boundedPayload: item.boundedPayload && typeof item.boundedPayload === "object" && !Array.isArray(item.boundedPayload) ? item.boundedPayload : {},
+    correlationId: typeof item.correlationId === "string" ? item.correlationId : null,
+    causationId: typeof item.causationId === "string" ? item.causationId : null,
+  };
+  const hash = createHash("sha256").update(JSON.stringify(event)).digest("hex");
+  return { ...event, hash };
+}
+
+function migrateV1ToV2(value: Record<string, unknown>): AutomationDocument {
+  const source = structuredClone(value) as Record<string, unknown>;
+  const document = createEmptyAutomationDocument() as unknown as Record<string, unknown>;
+  for (const table of ["automationProjects", "planVersions", "stageSpecs", "executionAttempts", "actionAttempts", "actionReceipts", "externalRefs", "evidences", "artifactRefs", "resourceClaims", "workspaceSnapshots", "policyVersions"] as const) {
+    document[table] = Array.isArray(source[table]) ? source[table] : [];
+  }
+  const requirements = Array.isArray(source.requirementVersions) ? source.requirementVersions : [];
+  document.requirementVersions = requirements.map((value) => {
+    const item = record(value);
+    const payload = typeof item.canonicalPayload === "string" && typeof item.payloadSha256 === "string"
+      ? { canonicalPayload: item.canonicalPayload, payloadSha256: item.payloadSha256 }
+      : legacyRequirementPayload(item);
+    return { ...item, contentRef: item.contentRef ?? null, structuredPayloadRef: item.structuredPayloadRef ?? null, ...payload };
+  });
+  const attempts = Array.isArray(source.executionAttempts) ? source.executionAttempts : [];
+  const steps = Array.isArray(source.stepSpecs) ? source.stepSpecs : [];
+  document.stepSpecs = steps.map((value) => {
+    const item = record(value);
+    return { ...item, specStatus: item.specStatus ?? (item.status === "SUPERSEDED" ? "SUPERSEDED" : "ACTIVE") };
+  }).map((item) => {
+    const clone = { ...item } as Record<string, unknown>;
+    delete clone.status;
+    delete clone.terminalResult;
+    return clone;
+  });
+  const suppliedRuntimes = Array.isArray(source.stepRuntimes) ? source.stepRuntimes : [];
+  const runtimeByStep = new Map<string, Record<string, unknown>>();
+  for (const value of suppliedRuntimes) {
+    const item = record(value);
+    runtimeByStep.set(String(item.stepSpecId), item);
+  }
+  document.stepRuntimes = (document.stepSpecs as Record<string, unknown>[]).map((step) => {
+    const old = steps.map(record).find((candidate) => candidate.stepSpecId === step.stepSpecId);
+    const supplied = runtimeByStep.get(String(step.stepSpecId));
+    const oldStatus = old?.status;
+    const lifecycle = supplied?.lifecycle ?? (["NOT_STARTED", "READY", "RUNNING", "VERIFYING", "REVIEWING", "TERMINAL"].includes(oldStatus as string) ? oldStatus : oldStatus === "SUPERSEDED" ? "TERMINAL" : "NOT_STARTED");
+    const currentAttemptId = supplied?.currentAttemptId ?? (attempts.map(record).filter((candidate) => candidate.stepSpecId === step.stepSpecId).at(-1)?.attemptId ?? null);
+    const timestamp = migratedTimestamp(supplied?.createdAt ?? step.createdAt);
+    return { stepRuntimeId: supplied?.stepRuntimeId ?? `runtime:${String(step.stepSpecId)}`, stepSpecId: step.stepSpecId, lifecycle, terminalResult: supplied?.terminalResult ?? (oldStatus === "SUPERSEDED" ? "SUPERSEDED" : old?.terminalResult ?? null), waitReason: supplied?.waitReason ?? "NONE", currentAttemptId, revision: supplied?.revision ?? 0, createdAt: timestamp, updatedAt: migratedTimestamp(supplied?.updatedAt ?? timestamp) };
+  });
+  document.actionIntents = (Array.isArray(source.actionIntents) ? source.actionIntents : []).map((value) => {
+    const item = record(value);
+    const actionType = String(item.actionType);
+    const targetRef = (item.targetRef ?? null) as string | null;
+    const sideEffectClass = String(item.sideEffectClass);
+    const payloadRef = (item.payloadRef ?? null) as string | null;
+    const payloadHash = (item.payloadHash ?? null) as string | null;
+    const expectedOutcomeRef = (item.expectedOutcomeRef ?? null) as string | null;
+    const executionOptions = item.executionOptions && typeof item.executionOptions === "object" && !Array.isArray(item.executionOptions) ? item.executionOptions : {};
+    return { ...item, payloadRef, payloadHash, executionOptions, expectedOutcomeRef, semanticSha256: computeActionSemanticSha256({ actionType, targetRef, sideEffectClass, payloadRef, payloadHash, executionOptions: executionOptions as Record<string, unknown>, expectedOutcomeRef }) };
+  });
+  const runtimeByStepId = new Map((document.stepRuntimes as Record<string, unknown>[]).map((runtime) => [String(runtime.stepSpecId), String(runtime.stepRuntimeId)]));
+  document.checkpoints = (Array.isArray(source.checkpoints) ? source.checkpoints : []).map((value) => {
+    const item = record(value);
+    return { ...item, currentStepRuntimeId: item.currentStepRuntimeId ?? (item.currentStepSpecId ? runtimeByStepId.get(String(item.currentStepSpecId)) ?? null : null) };
+  });
+  const legacyAudit = Array.isArray(source.auditEvents) ? source.auditEvents : [];
+  let previousHash: string | null = null;
+  document.auditEvents = legacyAudit.map((value, index) => {
+    const event = normalizeLegacyAudit(value, index, previousHash);
+    previousHash = event.hash as string;
+    return event;
+  });
+  document.automationSchemaVersion = 2;
+  return document as unknown as AutomationDocument;
+}
+
 export function migrateAutomationDocument(value: unknown): { document: AutomationDocument; migratedFrom: number | null } {
   const input = record(value);
-  const versionValue = input.automationSchemaVersion ?? input.schemaVersion ?? 0;
+  const hasAutomationVersion = Object.prototype.hasOwnProperty.call(input, "automationSchemaVersion");
+  const hasLegacyVersion = Object.prototype.hasOwnProperty.call(input, "schemaVersion");
+  if (hasAutomationVersion && hasLegacyVersion && input.automationSchemaVersion !== input.schemaVersion) throw new AutomationSchemaError("Automation schema version fields conflict.", "AUTOMATION_SCHEMA_VERSION_UNSUPPORTED");
+  const versionValue = hasAutomationVersion ? input.automationSchemaVersion : hasLegacyVersion ? input.schemaVersion : undefined;
+  if (versionValue === undefined) throw new AutomationSchemaError("Automation schema version is required.", "AUTOMATION_SCHEMA_VERSION_UNSUPPORTED");
   if (typeof versionValue !== "number" || !Number.isSafeInteger(versionValue)) throw new AutomationSchemaError("Automation schema version is invalid.");
   if (versionValue > AUTOMATION_SCHEMA_VERSION) throw new AutomationSchemaError("Automation schema version is newer than this runtime.", "AUTOMATION_SCHEMA_VERSION_UNSUPPORTED");
   if (versionValue === 0) {
-    const migrated = migrateV0ToV1(input);
+    const migrated = migrateV0ToV2(input);
     return { document: validateAutomationDocument(migrated), migratedFrom: 0 };
+  }
+  if (versionValue === 1) {
+    const migrated = migrateV1ToV2(input);
+    return { document: validateAutomationDocument(migrated), migratedFrom: 1 };
   }
   return { document: validateAutomationDocument(input), migratedFrom: null };
 }

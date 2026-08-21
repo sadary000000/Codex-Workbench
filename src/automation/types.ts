@@ -1,4 +1,4 @@
-export const AUTOMATION_SCHEMA_VERSION = 1 as const;
+export const AUTOMATION_SCHEMA_VERSION = 2 as const;
 
 export type AutomationSchemaVersion = typeof AUTOMATION_SCHEMA_VERSION;
 export type IsoTimestamp = string;
@@ -20,7 +20,9 @@ export type AutomationProjectLifecycle =
 export type RequirementVersionStatus = "DRAFT" | "CONFIRMED" | "ACTIVE" | "SUPERSEDED";
 export type PlanVersionStatus = "DRAFT" | "ACTIVE" | "SUPERSEDED";
 export type VersionedSpecStatus = "DRAFT" | "ACTIVE" | "SUPERSEDED";
-export type StepSpecStatus = "NOT_STARTED" | "READY" | "RUNNING" | "VERIFYING" | "REVIEWING" | "TERMINAL" | "SUPERSEDED";
+export type StepSpecStatus = "ACTIVE" | "SUPERSEDED";
+export type StepRuntimeLifecycle = "NOT_STARTED" | "READY" | "RUNNING" | "VERIFYING" | "REVIEWING" | "TERMINAL";
+export type StepRuntimeWaitReason = "NONE" | "RESOURCE" | "HUMAN" | "EXTERNAL" | "USER_CONTROL" | "RATE_LIMIT";
 export type StepTerminalResult = "COMPLETED" | "FAILED" | "BLOCKED" | "CANCELLED" | "SUPERSEDED" | "SKIPPED";
 export type StepKind = "PLANNER_STEP" | "SYSTEM_STEP";
 export type RiskClass = "LOW" | "MEDIUM" | "HIGH";
@@ -61,10 +63,14 @@ export interface RequirementVersion {
   projectId: string;
   version: number;
   status: RequirementVersionStatus;
-  /** Opaque reference only; the requirement body is deliberately outside this store. */
+  /** Optional provenance reference; it is never the requirement truth source. */
   contentRef: string | null;
-  /** Opaque reference only; never a copied prompt/transcript payload. */
+  /** Optional provenance reference; it is never the requirement truth source. */
   structuredPayloadRef: string | null;
+  /** Canonical bounded structured requirement payload owned by this immutable version. */
+  canonicalPayload: string;
+  /** SHA-256 of canonicalPayload. */
+  payloadSha256: string;
   createdAt: IsoTimestamp;
   confirmedAt: IsoTimestamp | null;
   supersedes: string | null;
@@ -101,10 +107,21 @@ export interface StepSpec {
   goal: string;
   riskClass: RiskClass;
   sideEffectClass: SideEffectClass;
-  status: StepSpecStatus;
-  terminalResult: StepTerminalResult | null;
+  specStatus: StepSpecStatus;
   createdAt: IsoTimestamp;
   supersedes: string | null;
+}
+
+export interface StepRuntime {
+  stepRuntimeId: string;
+  stepSpecId: string;
+  lifecycle: StepRuntimeLifecycle;
+  terminalResult: StepTerminalResult | null;
+  waitReason: StepRuntimeWaitReason;
+  currentAttemptId: string | null;
+  revision: number;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
 }
 
 export interface ExecutionAttempt {
@@ -129,6 +146,10 @@ export interface ActionIntent {
   actionType: string;
   targetRef: string | null;
   sideEffectClass: SideEffectClass;
+  payloadRef: string | null;
+  payloadHash: string | null;
+  executionOptions: BoundedMetadata;
+  semanticSha256: string;
   idempotencyRef: string | null;
   expectedOutcomeRef: string | null;
   state: ActionIntentState;
@@ -187,6 +208,7 @@ export interface Checkpoint {
   planVersionId: string | null;
   currentStageSpecId: string | null;
   currentStepSpecId: string | null;
+  currentStepRuntimeId: string | null;
   currentAttemptId: string | null;
   lastActionIntentId: string | null;
   lastActionReceiptId: string | null;
@@ -289,6 +311,7 @@ export interface AutomationDocument {
   planVersions: PlanVersion[];
   stageSpecs: StageSpec[];
   stepSpecs: StepSpec[];
+  stepRuntimes: StepRuntime[];
   executionAttempts: ExecutionAttempt[];
   actionIntents: ActionIntent[];
   actionAttempts: ActionAttempt[];
@@ -309,6 +332,7 @@ export interface AutomationTables {
   planVersions: PlanVersion;
   stageSpecs: StageSpec;
   stepSpecs: StepSpec;
+  stepRuntimes: StepRuntime;
   executionAttempts: ExecutionAttempt;
   actionIntents: ActionIntent;
   actionAttempts: ActionAttempt;

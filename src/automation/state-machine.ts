@@ -3,6 +3,7 @@ import type {
   ActionAttemptState,
   AutomationProjectLifecycle,
   ExecutionAttemptLifecycle,
+  StepRuntimeLifecycle,
   StepSpecStatus,
 } from "./types.ts";
 
@@ -68,6 +69,10 @@ export const automationProjectStateMachine = new StateMachine<AutomationProjectL
 ]);
 
 export const stepSpecStateMachine = new StateMachine<StepSpecStatus, string>("StepSpec", [
+  { from: "ACTIVE", event: "SUPERSEDE", to: "SUPERSEDED" },
+]);
+
+export const stepRuntimeStateMachine = new StateMachine<StepRuntimeLifecycle, string>("StepRuntime", [
   { from: "NOT_STARTED", event: "READY", to: "READY" },
   { from: "READY", event: "START", to: "RUNNING" },
   { from: "RUNNING", event: "VERIFY", to: "VERIFYING" },
@@ -78,8 +83,6 @@ export const stepSpecStateMachine = new StateMachine<StepSpecStatus, string>("St
   { from: "REVIEWING", event: "FAIL", to: "TERMINAL" },
   { from: "READY", event: "CANCEL", to: "TERMINAL" },
   { from: "RUNNING", event: "CANCEL", to: "TERMINAL" },
-  { from: "READY", event: "SUPERSEDE", to: "SUPERSEDED" },
-  { from: "NOT_STARTED", event: "SUPERSEDE", to: "SUPERSEDED" },
 ]);
 
 export const executionAttemptStateMachine = new StateMachine<ExecutionAttemptLifecycle, string>("ExecutionAttempt", [

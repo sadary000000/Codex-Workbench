@@ -13,7 +13,9 @@ import {
   executionAttemptStateMachine,
   StateMachine,
   stepSpecStateMachine,
+  stepRuntimeStateMachine,
 } from "./state-machine.ts";
+import { canonicalize, canonicalizeJson, computeActionSemanticSha256, sha256Hex } from "./canonical.ts";
 import type {
   ActionAttempt,
   ActionIntent,
@@ -47,6 +49,9 @@ import type {
   ResourceType,
   SideEffectClass,
   StepKind,
+  StepRuntime,
+  StepRuntimeLifecycle,
+  StepRuntimeWaitReason,
   StepSpec,
   StepSpecStatus,
   StepTerminalResult,
@@ -98,6 +103,8 @@ export interface RequirementVersionInput {
   status?: RequirementVersionStatus;
   contentRef?: string | null;
   structuredPayloadRef?: string | null;
+  canonicalPayload: string;
+  payloadSha256?: string;
   confirmedAt?: IsoTimestamp | null;
   supersedes?: string | null;
 }
@@ -131,7 +138,7 @@ export interface StepSpecInput {
   goal: string;
   riskClass: "LOW" | "MEDIUM" | "HIGH";
   sideEffectClass: SideEffectClass;
-  status?: StepSpecStatus;
+  specStatus?: StepSpecStatus;
   supersedes?: string | null;
 }
 
@@ -152,6 +159,10 @@ export interface ActionIntentInput {
   actionType: string;
   targetRef?: string | null;
   sideEffectClass: SideEffectClass;
+  payloadRef?: string | null;
+  payloadHash?: string | null;
+  executionOptions?: BoundedMetadata;
+  semanticSha256?: string;
   idempotencyRef?: string | null;
   expectedOutcomeRef?: string | null;
 }
@@ -179,6 +190,7 @@ export interface CheckpointInput {
   planVersionId?: string | null;
   currentStageSpecId?: string | null;
   currentStepSpecId?: string | null;
+  currentStepRuntimeId?: string | null;
   currentAttemptId?: string | null;
   lastActionIntentId?: string | null;
   lastActionReceiptId?: string | null;
@@ -195,6 +207,7 @@ export interface TransitionInput {
   boundedPayload?: BoundedMetadata;
   correlationId?: string | null;
   causationId?: string | null;
+  waitReason?: StepRuntimeWaitReason;
 }
 
 const ID_FIELDS: Record<AutomationTableName, string> = {
@@ -203,6 +216,7 @@ const ID_FIELDS: Record<AutomationTableName, string> = {
   planVersions: "planVersionId",
   stageSpecs: "stageSpecId",
   stepSpecs: "stepSpecId",
+  stepRuntimes: "stepRuntimeId",
   executionAttempts: "attemptId",
   actionIntents: "intentId",
   actionAttempts: "actionAttemptId",
@@ -311,6 +325,17 @@ export class AutomationTransaction {
     const valueId = entityId(name, value);
     const index = collection.findIndex((item) => entityId(name, item) === valueId);
     if (index < 0) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", `${name} ${valueId} was not found.`);
+    const previous = collection[index] as unknown as Record<string, unknown>;
+    if (name === "requirementVersions") {
+      for (const key of ["requirementVersionId", "projectId", "version", "contentRef", "structuredPayloadRef", "canonicalPayload", "payloadSha256", "createdAt", "supersedes"]) {
+        if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "RequirementVersion immutable payload cannot be replaced.");
+      }
+    }
+    if (name === "stepSpecs") {
+      for (const key of ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "goal", "riskClass", "sideEffectClass", "createdAt", "supersedes"]) {
+        if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StepSpec immutable definition cannot be replaced.");
+      }
+    }
     collection[index] = value;
   }
 
@@ -343,7 +368,7 @@ export class AutomationTransaction {
     return event;
   }
 
-  setState(name: "automationProjects" | "stepSpecs" | "executionAttempts" | "actionIntents", entityIdValue: string, field: "lifecycle" | "status" | "state", value: string): void {
+  setState(name: "automationProjects" | "stepSpecs" | "executionAttempts" | "actionIntents", entityIdValue: string, field: "lifecycle" | "specStatus" | "state", value: string): void {
     const record = this.require(name, entityIdValue) as unknown as Record<string, unknown>;
     record[field] = value;
   }
@@ -437,6 +462,16 @@ export class AutomationStore {
         if (old.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Requirement versions belong to different projects.");
         tx.replace("requirementVersions", { ...old, status: "SUPERSEDED" });
       }
+      let canonicalPayload: string;
+      try {
+        canonicalPayload = canonicalizeJson(input.canonicalPayload, "requirement.canonicalPayload");
+      } catch (error) {
+        throw new AutomationStoreError("AUTOMATION_INVALID", error instanceof Error ? error.message : "Requirement payload is not canonical.", error);
+      }
+      const payloadSha256 = sha256Hex(canonicalPayload);
+      if (input.payloadSha256 !== undefined && input.payloadSha256 !== payloadSha256) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", "Requirement payload SHA-256 does not match canonicalPayload.");
+      }
       const item: RequirementVersion = {
         requirementVersionId: id(input.requirementVersionId, "requirementVersionId"),
         projectId: input.projectId,
@@ -444,6 +479,8 @@ export class AutomationStore {
         status: input.status ?? (supersedes ? "ACTIVE" : "DRAFT"),
         contentRef: optionalText(input.contentRef, "requirement.contentRef", 256),
         structuredPayloadRef: optionalText(input.structuredPayloadRef, "requirement.structuredPayloadRef", 256),
+        canonicalPayload,
+        payloadSha256,
         createdAt: now(),
         confirmedAt: ensureTimestamp(input.confirmedAt, "requirement.confirmedAt"),
         supersedes,
@@ -499,11 +536,15 @@ export class AutomationStore {
       if (supersedes) {
         const old = tx.require("stepSpecs", supersedes);
         if (old.stageSpecId !== stage.stageSpecId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Step versions belong to different stages.");
-        tx.replace("stepSpecs", { ...old, status: "SUPERSEDED" });
+        tx.replace("stepSpecs", { ...old, specStatus: "SUPERSEDED" });
       }
-      const item: StepSpec = { stepSpecId: id(input.stepSpecId, "stepSpecId"), stageSpecId: input.stageSpecId, stepKey: text(input.stepKey, "step.stepKey", 256), specVersion: input.specVersion, kind: input.kind, goal: text(input.goal, "step.goal", 8_192), riskClass: input.riskClass, sideEffectClass: input.sideEffectClass, status: input.status ?? "NOT_STARTED", terminalResult: null, createdAt: now(), supersedes };
+      const timestamp = now();
+      const item: StepSpec = { stepSpecId: id(input.stepSpecId, "stepSpecId"), stageSpecId: input.stageSpecId, stepKey: text(input.stepKey, "step.stepKey", 256), specVersion: input.specVersion, kind: input.kind, goal: text(input.goal, "step.goal", 8_192), riskClass: input.riskClass, sideEffectClass: input.sideEffectClass, specStatus: input.specStatus ?? "ACTIVE", createdAt: timestamp, supersedes };
       tx.insert("stepSpecs", item);
+      const runtime: StepRuntime = { stepRuntimeId: `runtime:${item.stepSpecId}`, stepSpecId: item.stepSpecId, lifecycle: "NOT_STARTED", terminalResult: null, waitReason: "NONE", currentAttemptId: null, revision: 0, createdAt: timestamp, updatedAt: timestamp };
+      tx.insert("stepRuntimes", runtime);
       tx.appendAudit({ projectId: plan.projectId, entityType: "StepSpec", entityId: item.stepSpecId, eventType: "STEP_SPEC_CREATED", actorType: "SYSTEM", actorRef: null, boundedPayload: { stepKey: item.stepKey, version: item.specVersion }, correlationId: null, causationId: null });
+      tx.appendAudit({ projectId: plan.projectId, entityType: "StepRuntime", entityId: runtime.stepRuntimeId, eventType: "STEP_RUNTIME_CREATED", actorType: "SYSTEM", actorRef: null, boundedPayload: { stepSpecId: runtime.stepSpecId }, correlationId: null, causationId: null });
       return clone(item);
     });
   }
@@ -517,9 +558,17 @@ export class AutomationStore {
       if (plan.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Attempt stage is not part of the project.");
       if (step.stageSpecId !== stage.stageSpecId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Attempt must bind the exact StepSpec version.");
       if (tx.table("executionAttempts").some((attempt) => attempt.stepSpecId === input.stepSpecId && attempt.attemptNumber === input.attemptNumber)) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Attempt number already exists for this StepSpec.");
+      const runtime = tx.table("stepRuntimes").find((candidate) => candidate.stepSpecId === step.stepSpecId);
+      if (!runtime) throw new AutomationStoreError("AUTOMATION_INVALID", "StepSpec has no StepRuntime.");
+      if (runtime.currentAttemptId) {
+        const currentAttempt = tx.require("executionAttempts", runtime.currentAttemptId);
+        if (!["COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "RECOVERY_REQUIRED"].includes(currentAttempt.lifecycle)) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StepRuntime already has an active ExecutionAttempt.");
+      }
       const item: ExecutionAttempt = { attemptId: id(input.attemptId, "attemptId"), projectId: input.projectId, stageSpecId: input.stageSpecId, stepSpecId: input.stepSpecId, attemptNumber: input.attemptNumber, lifecycle: "CREATED", startedAt: null, completedAt: null, terminalResult: null, createdAt: now() };
       tx.insert("executionAttempts", item);
+      tx.replace("stepRuntimes", { ...runtime, currentAttemptId: item.attemptId, revision: runtime.revision + 1, updatedAt: now() });
       tx.appendAudit({ projectId: project.projectId, entityType: "ExecutionAttempt", entityId: item.attemptId, eventType: "ATTEMPT_CREATED", actorType: "SYSTEM", actorRef: null, boundedPayload: { stepSpecId: item.stepSpecId, attemptNumber: item.attemptNumber }, correlationId: null, causationId: null });
+      tx.appendAudit({ projectId: project.projectId, entityType: "StepRuntime", entityId: runtime.stepRuntimeId, eventType: "STEP_RUNTIME_ATTEMPT_BOUND", actorType: "SYSTEM", actorRef: null, boundedPayload: { attemptId: item.attemptId, revision: runtime.revision + 1 }, correlationId: null, causationId: null });
       return clone(item);
     });
   }
@@ -527,17 +576,25 @@ export class AutomationStore {
   async createActionIntent(input: ActionIntentInput): Promise<ActionIntent> {
     return this.transaction((tx) => {
       const project = tx.require("automationProjects", input.projectId);
+      const actionType = text(input.actionType, "intent.actionType", 256);
+      const targetRef = optionalText(input.targetRef, "intent.targetRef", 256);
+      const payloadRef = optionalText(input.payloadRef, "intent.payloadRef", 256);
+      const payloadHash = optionalText(input.payloadHash, "intent.payloadHash", 128);
+      const executionOptions = safeMetadata(input.executionOptions, "intent.executionOptions");
+      const expectedOutcomeRef = optionalText(input.expectedOutcomeRef, "intent.expectedOutcomeRef", 256);
+      const semanticSha256 = computeActionSemanticSha256({ actionType, targetRef, sideEffectClass: input.sideEffectClass, payloadRef, payloadHash, executionOptions, expectedOutcomeRef });
+      if (input.semanticSha256 !== undefined && input.semanticSha256 !== semanticSha256) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Action semantic SHA-256 does not match the canonical descriptor.");
       const idempotencyRef = optionalText(input.idempotencyRef, "intent.idempotencyRef", 256);
       const existing = idempotencyRef ? tx.table("actionIntents").find((item) => item.projectId === project.projectId && item.idempotencyRef === idempotencyRef) : null;
       if (existing) {
-        const same = existing.actionType === input.actionType && existing.targetRef === (input.targetRef ?? null) && existing.sideEffectClass === input.sideEffectClass;
+        const same = existing.semanticSha256 === semanticSha256;
         if (!same) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Idempotency reference has different action semantics.");
         return clone(existing);
       }
       if (input.stageSpecId) tx.require("stageSpecs", input.stageSpecId);
       if (input.stepSpecId) tx.require("stepSpecs", input.stepSpecId);
       if (input.attemptId) tx.require("executionAttempts", input.attemptId);
-      const item: ActionIntent = { intentId: id(input.intentId, "intentId"), projectId: project.projectId, stageSpecId: input.stageSpecId ?? null, stepSpecId: input.stepSpecId ?? null, attemptId: input.attemptId ?? null, actionType: text(input.actionType, "intent.actionType", 256), targetRef: optionalText(input.targetRef, "intent.targetRef", 256), sideEffectClass: input.sideEffectClass, idempotencyRef, expectedOutcomeRef: optionalText(input.expectedOutcomeRef, "intent.expectedOutcomeRef", 256), state: "PLANNED", createdAt: now() };
+      const item: ActionIntent = { intentId: id(input.intentId, "intentId"), projectId: project.projectId, stageSpecId: input.stageSpecId ?? null, stepSpecId: input.stepSpecId ?? null, attemptId: input.attemptId ?? null, actionType, targetRef, sideEffectClass: input.sideEffectClass, payloadRef, payloadHash, executionOptions, semanticSha256, idempotencyRef, expectedOutcomeRef, state: "PLANNED", createdAt: now() };
       tx.insert("actionIntents", item);
       tx.appendAudit({ projectId: project.projectId, entityType: "ActionIntent", entityId: item.intentId, eventType: "ACTION_INTENT_PERSISTED", actorType: "SYSTEM", actorRef: null, boundedPayload: { actionType: item.actionType, sideEffectClass: item.sideEffectClass }, correlationId: null, causationId: null });
       return clone(item);
@@ -583,7 +640,29 @@ export class AutomationStore {
   }
 
   async transitionStep(stepSpecId: string, event: string, input: TransitionInput = {}): Promise<StepSpec> {
-    return this.transitionEntity("stepSpecs", stepSpecId, "status", stepSpecStateMachine, event, input) as Promise<StepSpec>;
+    return this.transitionEntity("stepSpecs", stepSpecId, "specStatus", stepSpecStateMachine, event, input) as Promise<StepSpec>;
+  }
+
+  async transitionStepRuntime(stepRuntimeId: string, event: string, input: TransitionInput = {}): Promise<StepRuntime> {
+    return this.transaction((tx) => {
+      const runtime = tx.require("stepRuntimes", stepRuntimeId);
+      const step = tx.require("stepSpecs", runtime.stepSpecId);
+      const stage = tx.require("stageSpecs", step.stageSpecId);
+      const plan = tx.require("planVersions", stage.planVersionId);
+      let next: StepRuntimeLifecycle;
+      try {
+        next = stepRuntimeStateMachine.transition(runtime.lifecycle, event);
+      } catch (error) {
+        throw new AutomationStoreError("AUTOMATION_STATE_TRANSITION_INVALID", error instanceof Error ? error.message : "Illegal StepRuntime transition.", error);
+      }
+      const terminalResult = next === "TERMINAL"
+        ? event === "COMPLETE" ? "COMPLETED" : event === "FAIL" ? "FAILED" : event === "CANCEL" ? "CANCELLED" : runtime.terminalResult
+        : runtime.terminalResult;
+      const updated: StepRuntime = { ...runtime, lifecycle: next, terminalResult, waitReason: input.waitReason ?? (next === "TERMINAL" ? "NONE" : runtime.waitReason), revision: runtime.revision + 1, updatedAt: now() };
+      tx.replace("stepRuntimes", updated);
+      tx.appendAudit({ projectId: plan.projectId, entityType: "StepRuntime", entityId: runtime.stepRuntimeId, eventType: `STATE_${event}`, aggregateRevision: updated.revision, fromState: runtime.lifecycle, toState: next, actorType: input.actorType ?? "SYSTEM", actorRef: input.actorRef ?? null, boundedPayload: safeMetadata(input.boundedPayload, "transition.boundedPayload"), correlationId: input.correlationId ?? null, causationId: input.causationId ?? null });
+      return clone(updated);
+    });
   }
 
   async transitionExecutionAttempt(attemptId: string, event: string, input: TransitionInput = {}): Promise<ExecutionAttempt> {
@@ -594,7 +673,7 @@ export class AutomationStore {
     return this.transitionEntity("actionIntents", intentId, "state", actionIntentStateMachine, event, input) as Promise<ActionIntent>;
   }
 
-  private async transitionEntity<K extends "automationProjects" | "stepSpecs" | "executionAttempts" | "actionIntents", S extends string>(name: K, entityIdValue: string, field: "lifecycle" | "status" | "state", machine: StateMachine<S, string>, event: string, input: TransitionInput): Promise<unknown> {
+  private async transitionEntity<K extends "automationProjects" | "stepSpecs" | "executionAttempts" | "actionIntents", S extends string>(name: K, entityIdValue: string, field: "lifecycle" | "specStatus" | "state", machine: StateMachine<S, string>, event: string, input: TransitionInput): Promise<unknown> {
     return this.transaction((tx) => {
       const entity = tx.require(name, entityIdValue) as unknown as Record<string, unknown>;
       const current = entity[field];
@@ -617,9 +696,7 @@ export class AutomationStore {
       if (name === "automationProjects") {
         tx.replace("automationProjects", { ...(entity as unknown as AutomationProject), updatedAt: now(), revision: (entity.revision as number) + 1, lifecycle: next as AutomationProjectLifecycle });
       } else if (name === "stepSpecs") {
-        const updated = { ...(entity as unknown as StepSpec), status: next as StepSpecStatus };
-        if (next === "TERMINAL") updated.terminalResult = event === "COMPLETE" ? "COMPLETED" : event === "FAIL" ? "FAILED" : event === "CANCEL" ? "CANCELLED" : null;
-        tx.replace("stepSpecs", updated);
+        tx.replace("stepSpecs", { ...(entity as unknown as StepSpec), specStatus: next as StepSpecStatus });
       } else if (name === "executionAttempts") {
         const updated = { ...(entity as unknown as ExecutionAttempt), lifecycle: next as ExecutionAttemptLifecycle };
         if (event === "START") updated.startedAt = now();
@@ -628,6 +705,16 @@ export class AutomationStore {
           updated.terminalResult = event === "COMPLETE" ? "COMPLETED" : event === "FAIL" ? "FAILED" : event === "BLOCK" ? "BLOCKED" : event === "CANCEL" ? "CANCELLED" : null;
         }
         tx.replace("executionAttempts", updated);
+        const runtime = tx.table("stepRuntimes").find((candidate) => candidate.stepSpecId === updated.stepSpecId && candidate.currentAttemptId === updated.attemptId);
+        if (runtime) {
+          const runtimeLifecycle = event === "START" ? "RUNNING" : ["COMPLETED", "FAILED", "BLOCK", "CANCEL"].includes(event) ? "TERMINAL" : runtime.lifecycle;
+          const runtimeResult = runtimeLifecycle === "TERMINAL"
+            ? event === "COMPLETE" ? "COMPLETED" : event === "FAIL" ? "FAILED" : event === "BLOCK" ? "BLOCKED" : event === "CANCEL" ? "CANCELLED" : runtime.terminalResult
+            : runtime.terminalResult;
+          const runtimeUpdated = { ...runtime, lifecycle: runtimeLifecycle as StepRuntimeLifecycle, terminalResult: runtimeResult as StepRuntime["terminalResult"], waitReason: runtimeLifecycle === "TERMINAL" ? "NONE" : runtime.waitReason, revision: runtime.revision + 1, updatedAt: now() };
+          tx.replace("stepRuntimes", runtimeUpdated);
+          tx.appendAudit({ projectId, entityType: "StepRuntime", entityId: runtime.stepRuntimeId, eventType: `ATTEMPT_${event}_RUNTIME_SYNC`, aggregateRevision: runtimeUpdated.revision, fromState: runtime.lifecycle, toState: runtimeUpdated.lifecycle, actorType: input.actorType ?? "SYSTEM", actorRef: input.actorRef ?? null, boundedPayload: { attemptId: updated.attemptId }, correlationId: input.correlationId ?? null, causationId: input.causationId ?? null });
+        }
       } else {
         tx.replace("actionIntents", { ...(entity as unknown as ActionIntent), state: next as ActionIntent["state"] });
       }
@@ -644,23 +731,34 @@ export class AutomationStore {
         planVersionId: input.planVersionId ?? project.activePlanVersionId,
         currentStageSpecId: input.currentStageSpecId ?? null,
         currentStepSpecId: input.currentStepSpecId ?? null,
+        currentStepRuntimeId: input.currentStepRuntimeId ?? null,
         currentAttemptId: input.currentAttemptId ?? null,
         lastActionIntentId: input.lastActionIntentId ?? null,
         lastActionReceiptId: input.lastActionReceiptId ?? null,
         workspaceSnapshotRef: input.workspaceSnapshotRef ?? null,
       };
+      if (refs.currentStepRuntimeId) {
+        const runtime = tx.require("stepRuntimes", refs.currentStepRuntimeId);
+        if (refs.currentStepSpecId && runtime.stepSpecId !== refs.currentStepSpecId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Checkpoint StepRuntime does not belong to current StepSpec.");
+        refs.currentStepSpecId = refs.currentStepSpecId ?? runtime.stepSpecId;
+      } else if (refs.currentStepSpecId) {
+        const runtime = tx.table("stepRuntimes").find((candidate) => candidate.stepSpecId === refs.currentStepSpecId);
+        if (!runtime) throw new AutomationStoreError("AUTOMATION_INVALID", "Checkpoint current StepSpec has no StepRuntime.");
+        refs.currentStepRuntimeId = runtime.stepRuntimeId;
+      }
       const referenceChecks: Array<[AutomationTableName, string | null]> = [
         ["requirementVersions", refs.requirementVersionId],
         ["planVersions", refs.planVersionId],
         ["stageSpecs", refs.currentStageSpecId],
         ["stepSpecs", refs.currentStepSpecId],
+        ["stepRuntimes", refs.currentStepRuntimeId],
         ["executionAttempts", refs.currentAttemptId],
         ["actionIntents", refs.lastActionIntentId],
         ["actionReceipts", refs.lastActionReceiptId],
         ["workspaceSnapshots", refs.workspaceSnapshotRef],
       ];
       for (const [table, reference] of referenceChecks) if (reference) tx.require(table, reference);
-      const item: Checkpoint = { checkpointId: id(input.checkpointId, "checkpointId"), projectId, projectRevision: project.revision, requirementVersionId: refs.requirementVersionId, planVersionId: refs.planVersionId, currentStageSpecId: refs.currentStageSpecId, currentStepSpecId: refs.currentStepSpecId, currentAttemptId: refs.currentAttemptId, lastActionIntentId: refs.lastActionIntentId, lastActionReceiptId: refs.lastActionReceiptId, workspaceSnapshotRef: refs.workspaceSnapshotRef, resourceClaimRefs: list(input.resourceClaimRefs, "checkpoint.resourceClaimRefs"), externalRefs: list(input.externalRefs, "checkpoint.externalRefs"), evidenceRefs: list(input.evidenceRefs, "checkpoint.evidenceRefs"), issueRefs: list(input.issueRefs, "checkpoint.issueRefs"), createdAt: now() };
+      const item: Checkpoint = { checkpointId: id(input.checkpointId, "checkpointId"), projectId, projectRevision: project.revision, requirementVersionId: refs.requirementVersionId, planVersionId: refs.planVersionId, currentStageSpecId: refs.currentStageSpecId, currentStepSpecId: refs.currentStepSpecId, currentStepRuntimeId: refs.currentStepRuntimeId, currentAttemptId: refs.currentAttemptId, lastActionIntentId: refs.lastActionIntentId, lastActionReceiptId: refs.lastActionReceiptId, workspaceSnapshotRef: refs.workspaceSnapshotRef, resourceClaimRefs: list(input.resourceClaimRefs, "checkpoint.resourceClaimRefs"), externalRefs: list(input.externalRefs, "checkpoint.externalRefs"), evidenceRefs: list(input.evidenceRefs, "checkpoint.evidenceRefs"), issueRefs: list(input.issueRefs, "checkpoint.issueRefs"), createdAt: now() };
       tx.insert("checkpoints", item);
       tx.appendAudit({ projectId, entityType: "Checkpoint", entityId: item.checkpointId, eventType: "CHECKPOINT_CREATED", actorType: "SYSTEM", actorRef: null, boundedPayload: { projectRevision: item.projectRevision }, correlationId: null, causationId: null });
       return clone(item);

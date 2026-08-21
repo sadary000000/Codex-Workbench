@@ -14,6 +14,10 @@ import type { INativeAutomationAdapter, IWebGPTAutomationAdapter } from "../src/
 
 type Fixture = { root: string; store: AutomationStore };
 
+function requirementPayload(value: string): string {
+  return JSON.stringify({ goal: value, source: "test" });
+}
+
 async function fixture(): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-automation-"));
   return { root, store: new AutomationStore(join(root, "automation.db")) };
@@ -25,7 +29,7 @@ async function dispose(value: Fixture): Promise<void> {
 
 async function graph(store: AutomationStore) {
   const project = await store.createAutomationProject({ projectId: "project-1", name: "AUT-1 test" });
-  const requirement = await store.createRequirementVersion({ requirementVersionId: "requirement-1", projectId: project.projectId, version: 1, status: "ACTIVE", contentRef: "ref:requirement:1" });
+  const requirement = await store.createRequirementVersion({ requirementVersionId: "requirement-1", projectId: project.projectId, version: 1, status: "ACTIVE", contentRef: "ref:requirement:1", canonicalPayload: requirementPayload("foundation") });
   const plan = await store.createPlanVersion({ planVersionId: "plan-1", projectId: project.projectId, requirementVersionId: requirement.requirementVersionId, version: 1, status: "ACTIVE" });
   const stage = await store.createStageSpec({ stageSpecId: "stage-1", planVersionId: plan.planVersionId, stageKey: "AUT-1", specVersion: 1, status: "ACTIVE", ordinal: 1, goal: "foundation" });
   const step = await store.createStepSpec({ stepSpecId: "step-1", stageSpecId: stage.stageSpecId, stepKey: "store", specVersion: 1, kind: "SYSTEM_STEP", goal: "persist foundation", riskClass: "LOW", sideEffectClass: "PURE" });
@@ -39,9 +43,9 @@ test("creates an independent automation.db with schema version and survives reop
     assert.equal(project.projectId, "p");
     const inspection = await value.store.inspect();
     assert.equal(inspection.status, "valid");
-    assert.equal(inspection.document?.automationSchemaVersion, 1);
+    assert.equal(inspection.document?.automationSchemaVersion, 2);
     const raw = await readFile(value.store.filePath, "utf8");
-    assert.equal(JSON.parse(raw).automationSchemaVersion, 1);
+    assert.equal(JSON.parse(raw).automationSchemaVersion, 2);
     const reopened = new AutomationStore(value.store.filePath);
     assert.equal((await reopened.get("automationProjects", "p"))?.name, "independent");
   } finally {
@@ -59,7 +63,7 @@ test("migrates the explicit v0 fixture without importing V1/WebGPT state", async
     assert.equal(inspection.document?.automationProjects[0]?.projectId, "legacy");
     assert.deepEqual(inspection.document?.requirementVersions, []);
     await value.store.createAutomationProject({ projectId: "new", name: "new" });
-    assert.equal(JSON.parse(await readFile(value.store.filePath, "utf8")).automationSchemaVersion, 1);
+    assert.equal(JSON.parse(await readFile(value.store.filePath, "utf8")).automationSchemaVersion, 2);
   } finally {
     await dispose(value);
   }
@@ -72,8 +76,50 @@ test("rejects an unsupported or missing schema instead of treating it as a valid
     await assert.rejects(value.store.snapshot(), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_DB_VERSION_UNSUPPORTED");
     await writeFile(value.store.filePath, JSON.stringify({ projects: [] }), "utf8");
     const inspection = await value.store.inspect();
-    assert.equal(inspection.status, "valid");
-    assert.equal(inspection.migratedFrom, 0);
+    assert.equal(inspection.status, "invalid");
+    assert.equal(inspection.code, "AUTOMATION_DB_VERSION_UNSUPPORTED");
+    await writeFile(value.store.filePath, JSON.stringify({ automationSchemaVersion: 2, schemaVersion: 1 }), "utf8");
+    await assert.rejects(value.store.snapshot(), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_DB_VERSION_UNSUPPORTED");
+  } finally {
+    await dispose(value);
+  }
+});
+
+test("separates immutable StepSpec from mutable StepRuntime and binds attempts to the runtime", async () => {
+  const value = await fixture();
+  try {
+    const { project, stage, step } = await graph(value.store);
+    const originalSpec = await value.store.get("stepSpecs", step.stepSpecId);
+    assert.equal(originalSpec?.specStatus, "ACTIVE");
+    assert.equal("lifecycle" in (originalSpec ?? {}), false);
+    const runtime = await value.store.get("stepRuntimes", `runtime:${step.stepSpecId}`);
+    assert.equal(runtime?.lifecycle, "NOT_STARTED");
+    await value.store.transitionStepRuntime(runtime!.stepRuntimeId, "READY");
+    await value.store.transitionStepRuntime(runtime!.stepRuntimeId, "START");
+    const attempt = await value.store.createExecutionAttempt({ projectId: project.projectId, stageSpecId: stage.stageSpecId, stepSpecId: step.stepSpecId, attemptNumber: 1 });
+    const after = await value.store.get("stepSpecs", step.stepSpecId);
+    const afterRuntime = await value.store.get("stepRuntimes", runtime!.stepRuntimeId);
+    assert.deepEqual(after, originalSpec);
+    assert.equal(afterRuntime?.currentAttemptId, attempt.attemptId);
+    assert.equal(afterRuntime?.lifecycle, "RUNNING");
+    assert.equal(afterRuntime?.revision, 3);
+  } finally {
+    await dispose(value);
+  }
+});
+
+test("RequirementVersion owns a canonical immutable payload and rejects drift", async () => {
+  const value = await fixture();
+  try {
+    const project = await value.store.createAutomationProject({ projectId: "p", name: "requirements" });
+    const requirement = await value.store.createRequirementVersion({ projectId: project.projectId, version: 1, status: "ACTIVE", canonicalPayload: requirementPayload("stable") });
+    assert.equal(requirement.payloadSha256.length, 64);
+    const reopened = new AutomationStore(value.store.filePath);
+    assert.deepEqual(await reopened.get("requirementVersions", requirement.requirementVersionId), requirement);
+    await assert.rejects(value.store.transaction((tx) => tx.replace("requirementVersions", { ...requirement, canonicalPayload: requirementPayload("changed") })), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_CONFLICT");
+    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 2, status: "ACTIVE", canonicalPayload: JSON.stringify({ source: "test", goal: "stable" }) }), /canonical JSON/);
+    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 2, status: "ACTIVE", canonicalPayload: requirementPayload("stable"), payloadSha256: "0".repeat(64) }), /does not match/);
+    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 2, status: "ACTIVE", canonicalPayload: JSON.stringify({ token: "forbidden" }) }), /sensitive/);
   } finally {
     await dispose(value);
   }
@@ -99,8 +145,8 @@ test("versioned requirements remain immutable and attempts bind the exact StepSp
   const value = await fixture();
   try {
     const first = await value.store.createAutomationProject({ projectId: "p", name: "versions" });
-    const r1 = await value.store.createRequirementVersion({ requirementVersionId: "r1", projectId: first.projectId, version: 1, status: "ACTIVE", contentRef: "ref:r1" });
-    const r2 = await value.store.createRequirementVersion({ requirementVersionId: "r2", projectId: first.projectId, version: 2, status: "ACTIVE", contentRef: "ref:r2", supersedes: r1.requirementVersionId });
+    const r1 = await value.store.createRequirementVersion({ requirementVersionId: "r1", projectId: first.projectId, version: 1, status: "ACTIVE", contentRef: "ref:r1", canonicalPayload: requirementPayload("r1") });
+    const r2 = await value.store.createRequirementVersion({ requirementVersionId: "r2", projectId: first.projectId, version: 2, status: "ACTIVE", contentRef: "ref:r2", canonicalPayload: requirementPayload("r2"), supersedes: r1.requirementVersionId });
     assert.equal((await value.store.get("requirementVersions", "r1"))?.status, "SUPERSEDED");
     assert.equal((await value.store.get("automationProjects", "p"))?.activeRequirementVersionId, r2.requirementVersionId);
     const plan = await value.store.createPlanVersion({ planVersionId: "plan", projectId: first.projectId, requirementVersionId: r2.requirementVersionId, version: 1, status: "ACTIVE" });
@@ -109,7 +155,7 @@ test("versioned requirements remain immutable and attempts bind the exact StepSp
     const step2 = await value.store.createStepSpec({ stepSpecId: "step-v2", stageSpecId: stage.stageSpecId, stepKey: "work", specVersion: 2, kind: "SYSTEM_STEP", goal: "v2", riskClass: "LOW", sideEffectClass: "PURE", supersedes: step1.stepSpecId });
     const attempt = await value.store.createExecutionAttempt({ attemptId: "attempt-v1", projectId: first.projectId, stageSpecId: stage.stageSpecId, stepSpecId: step1.stepSpecId, attemptNumber: 1 });
     assert.equal(attempt.stepSpecId, step1.stepSpecId);
-    assert.equal((await value.store.get("stepSpecs", step1.stepSpecId))?.status, "SUPERSEDED");
+    assert.equal((await value.store.get("stepSpecs", step1.stepSpecId))?.specStatus, "SUPERSEDED");
     assert.equal((await value.store.get("stepSpecs", step2.stepSpecId))?.goal, "v2");
   } finally {
     await dispose(value);
@@ -121,7 +167,7 @@ test("valid transitions update state and audit atomically; illegal transitions d
   try {
     const { project, step } = await graph(value.store);
     await value.store.transitionProject(project.projectId, "ALIGN_REQUIREMENTS");
-    await value.store.transitionStep(step.stepSpecId, "READY");
+    await value.store.transitionStepRuntime(`runtime:${step.stepSpecId}`, "READY");
     const auditBefore = (await value.store.list("auditEvents")).length;
     await assert.rejects(value.store.transitionProject(project.projectId, "ALIGN_REQUIREMENTS"), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_STATE_TRANSITION_INVALID");
     assert.equal((await value.store.get("automationProjects", project.projectId))?.lifecycle, "ALIGNING_REQUIREMENTS");
@@ -141,7 +187,7 @@ test("audit tampering, orphan attempts, and invalid acquired claims fail closed"
     await assert.rejects(value.store.transaction((tx) => {
       tx.insert("actionAttempts", { actionAttemptId: "orphan", intentId: "missing", dispatchNumber: 1, state: "CREATED", startedAt: null, completedAt: null, executorRef: null, recoveryState: "KNOWN_NOT_STARTED" });
     }), (error: unknown) => error instanceof AutomationSchemaError || error instanceof AutomationStoreError);
-    await assert.rejects(value.store.createResourceClaim({ resourceClaimId: "bad-claim", projectId: project.projectId, resourceType: "WEBGPT_BROWSER", resourceKey: "browser", mode: "EXCLUSIVE", state: "ACQUIRED" }), (error: unknown) => error instanceof AutomationStoreError || error instanceof AutomationSchemaError);
+    await assert.rejects(value.store.createResourceClaim({ resourceClaimId: "bad-claim", projectId: project.projectId, resourceType: "WEBGPT_BROWSER", resourceKey: "browser", mode: "EXCLUSIVE", state: "ACQUIRED", ownerAttemptId: null }), (error: unknown) => error instanceof AutomationStoreError || error instanceof AutomationSchemaError);
     const parsed = JSON.parse(await readFile(value.store.filePath, "utf8")) as { auditEvents: Array<Record<string, unknown>> };
     parsed.auditEvents[0]!.hash = "tampered";
     await writeFile(value.store.filePath, JSON.stringify(parsed), "utf8");
@@ -167,7 +213,37 @@ test("intent is persisted before an attempt, idempotent, and unknown receipt is 
     assert.equal(receipt.reconcileState, "RECOVERY_REQUIRED");
     assert.equal((await value.store.get("actionIntents", intent.intentId))?.state, "UNCERTAIN");
     assert.equal((await value.store.get("actionAttempts", actionAttempt.actionAttemptId))?.recoveryState, "RECOVERY_REQUIRED");
+    await assert.rejects(value.store.transaction((tx) => {
+      tx.insert("actionAttempts", { actionAttemptId: "action-attempt-duplicate", intentId: intent.intentId, dispatchNumber: 2, state: "CREATED", startedAt: null, completedAt: null, executorRef: null, recoveryState: "KNOWN_NOT_STARTED" });
+    }), (error: unknown) => error instanceof AutomationSchemaError || error instanceof AutomationStoreError);
     await assert.rejects(value.store.createActionIntent({ projectId: project.projectId, actionType: "DIFFERENT", targetRef: intent.targetRef, sideEffectClass: intent.sideEffectClass, idempotencyRef: intent.idempotencyRef }), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_CONFLICT");
+    await assert.rejects(value.store.createActionIntent({ projectId: project.projectId, actionType: intent.actionType, targetRef: intent.targetRef, sideEffectClass: intent.sideEffectClass, payloadRef: "payload:new", idempotencyRef: intent.idempotencyRef }), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_CONFLICT");
+    assert.equal((await value.store.list("actionAttempts")).length, 1);
+  } finally {
+    await dispose(value);
+  }
+});
+
+test("migrates a v1 fixture to v2 and fails closed for future versions", async () => {
+  const value = await fixture();
+  try {
+    const { project, stage, step } = await graph(value.store);
+    const attempt = await value.store.createExecutionAttempt({ projectId: project.projectId, stageSpecId: stage.stageSpecId, stepSpecId: step.stepSpecId, attemptNumber: 1 });
+    const v2 = JSON.parse(await readFile(value.store.filePath, "utf8")) as Record<string, unknown>;
+    v2.automationSchemaVersion = 1;
+    v2.requirementVersions = (v2.requirementVersions as Record<string, unknown>[]).map(({ canonicalPayload, payloadSha256, ...item }) => item);
+    v2.stepSpecs = (v2.stepSpecs as Record<string, unknown>[]).map(({ specStatus, ...item }) => ({ ...item, status: "RUNNING", terminalResult: null }));
+    delete v2.stepRuntimes;
+    v2.checkpoints = [];
+    await writeFile(value.store.filePath, JSON.stringify(v2), "utf8");
+    const migrated = await new AutomationStore(value.store.filePath).inspect();
+    assert.equal(migrated.status, "valid");
+    assert.equal(migrated.migratedFrom, 1);
+    assert.equal(migrated.document?.automationSchemaVersion, 2);
+    assert.equal(migrated.document?.stepRuntimes[0]?.currentAttemptId, attempt.attemptId);
+    assert.equal(migrated.document?.requirementVersions[0]?.payloadSha256.length, 64);
+    await writeFile(value.store.filePath, JSON.stringify({ automationSchemaVersion: 3 }), "utf8");
+    await assert.rejects(new AutomationStore(value.store.filePath).snapshot(), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_DB_VERSION_UNSUPPORTED");
   } finally {
     await dispose(value);
   }
@@ -184,8 +260,26 @@ test("checkpoint, external refs, resource claims, and workspace snapshots surviv
     const checkpoint = await value.store.createCheckpoint(project.projectId, { currentStageSpecId: stage.stageSpecId, currentStepSpecId: step.stepSpecId, currentAttemptId: attempt.attemptId, workspaceSnapshotRef: snapshot.workspaceSnapshotId, resourceClaimRefs: [claim.resourceClaimId], externalRefs: [external.externalRefId] });
     const reopened = new AutomationStore(value.store.filePath);
     assert.equal((await reopened.get("checkpoints", checkpoint.checkpointId))?.currentAttemptId, attempt.attemptId);
+    assert.equal((await reopened.get("checkpoints", checkpoint.checkpointId))?.currentStepRuntimeId, `runtime:${step.stepSpecId}`);
     assert.equal(workspaceSnapshotsEqual(snapshot, (await reopened.get("workspaceSnapshots", snapshot.workspaceSnapshotId))!), true);
     assert.equal(workspaceSnapshotsEqual(snapshot, { ...snapshot, branch: "other" }), false);
+  } finally {
+    await dispose(value);
+  }
+});
+
+test("checkpoint runtime references are exact and receipt project is derived through the action graph", async () => {
+  const value = await fixture();
+  try {
+    const { project, stage, step } = await graph(value.store);
+    const attempt = await value.store.createExecutionAttempt({ projectId: project.projectId, stageSpecId: stage.stageSpecId, stepSpecId: step.stepSpecId, attemptNumber: 1 });
+    const intent = await value.store.createActionIntent({ projectId: project.projectId, actionType: "CHECKPOINT_TEST", targetRef: "target", sideEffectClass: "IDEMPOTENT", idempotencyRef: "checkpoint-key" });
+    await value.store.markActionIntentDispatchEligible(intent.intentId);
+    const actionAttempt = await value.store.createActionAttempt({ intentId: intent.intentId });
+    const receipt = await value.store.createActionReceipt({ actionAttemptId: actionAttempt.actionAttemptId, status: "SUCCEEDED" });
+    const checkpoint = await value.store.createCheckpoint(project.projectId, { currentStepSpecId: step.stepSpecId, currentStepRuntimeId: `runtime:${step.stepSpecId}`, currentAttemptId: attempt.attemptId, lastActionReceiptId: receipt.receiptId });
+    assert.equal(checkpoint.currentStepRuntimeId, `runtime:${step.stepSpecId}`);
+    await assert.rejects(value.store.createCheckpoint(project.projectId, { currentStepSpecId: step.stepSpecId, currentStepRuntimeId: "runtime:missing" }), /not found/);
   } finally {
     await dispose(value);
   }
