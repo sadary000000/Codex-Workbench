@@ -1,0 +1,18 @@
+{
+  "stage": "WEB-6.8 Project Create",
+  "check": "PASS",
+  "testCommand": "npm test",
+  "tests": 210,
+  "passed": 210,
+  "failed": 0,
+  "build": {
+    "standard": "BLOCKED_EPERM_LOCKED_EXE",
+    "temporary": "PASS"
+  },
+  "packageWin": {
+    "standard": "NOT_RUN_AFTER_STANDARD_BUILD_BLOCK",
+    "temporary": "PASS"
+  },
+  "audit": "0 vulnerabilities",
+  "realProjectCreateSmoke": "PENDING_STANDARD_PACKAGE_UNLOCK"
+}

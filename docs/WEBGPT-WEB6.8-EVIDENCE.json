@@ -1,0 +1,44 @@
+{
+  "stage": "WEB-6.8 Project Create",
+  "result": "BLOCKED_STANDARD_PACKAGE_LOCK",
+  "baseCommit": "aa615c7",
+  "implementationCommit": "4d8578b",
+  "v1CoreChanged": false,
+  "promptSent": false,
+  "automated": {
+    "check": "PASS",
+    "tests": { "passed": 210, "failed": 0 },
+    "audit": "0 vulnerabilities",
+    "diffCheck": "PASS",
+    "secretScan": "PASS"
+  },
+  "temporaryBuild": {
+    "root": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-web68-build",
+    "build": "PASS",
+    "package": "PASS",
+    "guiExecutable": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-web68-build\\package\\Codex Workbench V1.exe",
+    "cliExecutable": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-web68-build\\package\\Codex Workbench CLI.exe"
+  },
+  "reviewPackage": {
+    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\review\\WEBGPT-WEB6.8-STAGE-REVIEW-PACKAGE.zip"
+  },
+  "standardPackage": {
+    "build": "BLOCKED",
+    "error": "EPERM unlink dist/package/Codex Workbench V1.exe",
+    "lockingPids": [21236, 36564, 42488, 49592]
+  },
+  "realSmoke": {
+    "projectCreate": "NOT_RUN",
+    "duplicateProjectCreate": "NOT_RUN",
+    "createOpenNewChat": "NOT_RUN"
+  },
+  "identityRules": {
+    "remoteRegistry": "userData/webgpt/projects/projects.json",
+    "urlRoute": "/project/<id>",
+    "duplicateKeys": ["case-insensitive name", "projectId", "canonical projectUrl"]
+  },
+  "subagents": {
+    "runningAtGate": 0,
+    "completedAndClosed": 4
+  }
+}

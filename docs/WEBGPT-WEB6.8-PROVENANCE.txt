@@ -1,0 +1,12 @@
+stage=WEB-6.8 Project Create
+base_commit=aa615c7
+implementation_commit=4d8578b
+standard_package=D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+standard_package_status=LOCKED_BY_RUNNING_PROCESSES
+temporary_build_root=D:\办公\AI\Codex_Workbench_V1\dist-web68-build
+temporary_build_status=BUILD_PASS;PACKAGE_WIN_PASS
+review_package=dist/review/WEBGPT-WEB6.8-STAGE-REVIEW-PACKAGE.zip
+real_project_create_smoke=NOT_RUN
+prompt_sent=NO
+v1_frozen_core_changed=NO
+old_donor=D:\办公\AI\Codex_Workbench (read-only)
