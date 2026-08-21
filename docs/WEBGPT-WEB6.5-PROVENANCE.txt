@@ -1,0 +1,33 @@
+WEBGPT WEB-6.5 Official CLI ABI Provenance
+
+stage=WEB-6.5 Official CLI ABI Final Closeout
+base_commit=8dde7be
+implementation_commit=e255041
+freeze_commit=PENDING_DOC_FREEZE_COMMIT
+review_package_commit=PENDING_REVIEW_PACKAGE_COMMIT
+result=FIX_REQUIRED
+
+package_root=D:\办公\AI\Codex_Workbench_V1\dist\package
+gui_exe=Codex Workbench V1.exe
+gui_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+cli_exe=Codex Workbench CLI.exe
+cli_exe_sha256=1B83C919CD67C9247269E08767DB12E13E4F93481FFD7868F81EBA15F388DD67
+cli_runtime_exe=Codex Workbench CLI Runtime.exe
+cli_runtime_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+main_bundle_sha256=DEC232D46B36377DDF4E9BB29C9DBC824D5A8043B3872A8FF02D39F975EE7474
+renderer_bundle_sha256=94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1
+package_json_sha256=1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
+official_cli_source_sha256=009473D4E2DE3EF4EA2DB03E42FBD1B3BF05EF4454EA5524964CC8B48A4D3648
+
+toolchain=csc.exe Windows inbox C# compiler 4.8.9232.0
+dotnet_sdk=not installed
+native_c_cpp_compiler=not found
+external_software_installed=NO
+new_real_prompts=0
+cookies_tokens_profiles_in_package=NO
+web6_6_started=NO
+
+Notes:
+- The public CLI front door uses same-package stdio forwarding and no shell.
+- The front door is not a self-contained native PE; Windows .NET Framework is a target-machine dependency.
+- Electron outer EXE hash is a fixed shell; application provenance is verified by packaged app resources and source hashes.

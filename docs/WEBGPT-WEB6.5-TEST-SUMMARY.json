@@ -1,0 +1,74 @@
+{
+  "stage": "WEB-6.5 Official CLI ABI Final Closeout",
+  "result": "FIX_REQUIRED",
+  "timestamp": "2026-08-21",
+  "newRealPrompts": 0,
+  "automated": {
+    "npmRunCheck": "PASS",
+    "npmTest": "PASS 195/195",
+    "npmRunBuild": "PASS",
+    "npmRunPackageWin": "PASS",
+    "npmAuditOmitDev": "PASS 0 vulnerabilities",
+    "gitDiffCheck": "PENDING_FINAL_WORKTREE",
+    "secretScan": "PENDING_FINAL_WORKTREE"
+  },
+  "officialCli": {
+    "entry": "Codex Workbench CLI.exe",
+    "nodeExecFile": true,
+    "shell": false,
+    "userSeparatorRequired": false,
+    "nativeCrashObserved": false,
+    "invalidArgExitCode": 2,
+    "invalidArgJson": true
+  },
+  "runtime": {
+    "workbenchInstanceId": "82db6339-ec6d-45b3-a645-2638e8c8aa41",
+    "webgptRuntimeId": "70b3396a-dff3-431e-be33-306f517c69ea",
+    "sameInstanceAcrossOpenStatusControlAuto": true,
+    "coldWorkbenchStatus": "PASS_WORKBENCH_READY_WEBGPT_INITIALIZATION_PENDING",
+    "explicitOpen": "PASS",
+    "warmStatus": "PASS_WORKBENCH_WEBGPT_READY",
+    "controlAuto": "PASS"
+  },
+  "targetedReads": {
+    "latestOut": {
+      "result": "PASS",
+      "exitCode": 0,
+      "signal": null,
+      "outputBytes": 26,
+      "sha256": "b3bf787547cc7db959cab5609f672adde34d91fe4ea38a0949922dbb2f8a94f7"
+    },
+    "chatLatestOut": {
+      "result": "PASS",
+      "exitCode": 0,
+      "signal": null,
+      "outputBytes": 26,
+      "sha256": "b3bf787547cc7db959cab5609f672adde34d91fe4ea38a0949922dbb2f8a94f7",
+      "stdoutContainsAssistantBody": false,
+      "wrongChatReadCount": 0
+    },
+    "roleLatestOut": {
+      "result": "FIX_REQUIRED",
+      "exitCode": 1,
+      "signal": null,
+      "errorCode": "WEBGPT_TARGET_CHAT_MISMATCH",
+      "outputFileExists": false,
+      "silentRoleRebind": false,
+      "promptSent": false
+    }
+  },
+  "package": {
+    "guiExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "cliExeSha256": "1B83C919CD67C9247269E08767DB12E13E4F93481FFD7868F81EBA15F388DD67",
+    "cliRuntimeExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "mainBundleSha256": "DEC232D46B36377DDF4E9BB29C9DBC824D5A8043B3872A8FF02D39F975EE7474",
+    "rendererBundleSha256": "94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1",
+    "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F"
+  },
+  "scope": {
+    "v1FrozenCoreChanged": false,
+    "automationStarted": false,
+    "web6_6Started": false,
+    "cookiesTokensProfilesIncluded": false
+  }
+}

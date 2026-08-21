@@ -1,23 +1,66 @@
 {
-  "stage": "WEB-6.5 CLI Targeted Latest Read",
+  "stage": "WEB-6.5 Official CLI ABI Final Closeout",
   "result": "FIX_REQUIRED",
-  "gateFixCommit": "0d8a39f",
-  "reviewCommit": "0fe8437",
+  "implementationCommit": "e255041",
+  "freezeCommit": "PENDING_DOC_FREEZE_COMMIT",
   "realPromptBudget": { "max": 0, "used": 0 },
-  "v1FrozenCoreChanged": false,
-  "latest": { "result": "PASS", "output": { "exitCode": 0, "signal": null, "bytes": 26, "sha256Matches": true } },
-  "chatLatest": { "result": "PASS", "wrongChatReadCount": 0, "textLength": 26, "textSha256": "b3bf787547cc7db959cab5609f672adde34d91fe4ea38a0949922dbb2f8a94f7" },
-  "chatLatestOut": {
-    "rawUserOrder": { "result": "FAIL", "exitCode": 4294967295, "signal": null, "stdoutBytes": 0, "stderrBytes": 0, "outputFileExists": false },
-    "electronSeparator": { "result": "PASS", "exitCode": 0, "signal": null, "outputBytes": 26, "fileSha256Matches": true, "stdoutContainsAssistantBody": false }
+  "officialCli": {
+    "entry": "Codex Workbench CLI.exe",
+    "directControlPlane": "PASS",
+    "samePackageRuntime": "PASS",
+    "nodeExecFile": "PASS",
+    "shell": false,
+    "userElectronSeparatorRequired": false,
+    "nativeCrashObserved": false
   },
-  "roleLatestOut": { "result": "PASS", "exitCode": 0, "signal": null, "outputBytes": 26, "fileSha256Matches": true, "silentRoleRebind": false, "originalBindingRestored": true },
-  "coldStart": { "result": "PASS", "exitCode": 0, "signal": null, "workbenchReady": true, "guiRemainedAlive": true, "shell": "node execFile", "cmdShellUsed": false },
-  "targetAwareRead": { "result": "PASS", "wrongChatReadCount": 0 },
-  "web5RecoveryContractRegression": "PASS_AUTOMATED_NOT_REEXECUTED",
-  "web5IdempotencyContractRegression": "PASS_AUTOMATED_NOT_REEXECUTED",
-  "automatedRegression": { "npmRunCheck": "PASS", "npmTest": "PASS 191/191", "npmRunBuild": "PASS", "npmRunPackageWin": "PASS" },
+  "coldStart": {
+    "statusExitCode": 0,
+    "workbenchReady": true,
+    "initialWebgptState": "INITIALIZATION_PENDING",
+    "explicitOpenExitCode": 0,
+    "webgptReadyAfterOpen": true,
+    "guiRemainedAlive": true
+  },
+  "warmAttach": {
+    "statusExitCode": 0,
+    "workbenchReady": true,
+    "webgptReady": true,
+    "sameWorkbenchInstance": true,
+    "sameWebgptRuntime": true,
+    "workbenchInstanceId": "82db6339-ec6d-45b3-a645-2638e8c8aa41",
+    "webgptRuntimeId": "70b3396a-dff3-431e-be33-306f517c69ea"
+  },
+  "argvMatrix": {
+    "invalidArgs": { "result": "PASS", "exitCode": 2, "jsonValid": true, "errorCode": "CLI_INVALID_ARGUMENT" },
+    "status": { "result": "PASS", "exitCode": 0, "jsonValid": true },
+    "open": { "result": "PASS", "exitCode": 0, "jsonValid": true },
+    "controlAuto": { "result": "PASS", "exitCode": 0, "jsonValid": true },
+    "latestOut": { "result": "PASS", "exitCode": 0, "signal": null, "outputBytes": 26 },
+    "chatLatestOut": { "result": "PASS", "exitCode": 0, "signal": null, "outputBytes": 26 },
+    "roleLatestOut": { "result": "FIX_REQUIRED", "exitCode": 1, "signal": null, "errorCode": "WEBGPT_TARGET_CHAT_MISMATCH", "outputFileExists": false }
+  },
+  "targetedReadEvidence": {
+    "latestSha256": "b3bf787547cc7db959cab5609f672adde34d91fe4ea38a0949922dbb2f8a94f7",
+    "chatLatestSha256": "b3bf787547cc7db959cab5609f672adde34d91fe4ea38a0949922dbb2f8a94f7",
+    "stdoutContainsAssistantBody": false,
+    "wrongChatReadCount": 0,
+    "silentRoleRebind": false,
+    "nativeIdentityReplaced": false
+  },
+  "automated": {
+    "npmRunCheck": "PASS",
+    "npmTest": "PASS 195/195",
+    "npmRunBuild": "PASS",
+    "npmRunPackageWin": "PASS",
+    "npmAuditOmitDev": "PASS 0 vulnerabilities",
+    "gitDiffCheck": "PENDING_FINAL_WORKTREE",
+    "secretScan": "PENDING_FINAL_WORKTREE"
+  },
   "newRealPrompts": 0,
-  "knownBlocker": "Electron 43.3.0 packaged EXE exits at the native command-line boundary when a valid URI value is followed by another value-bearing switch without the -- separator. Fix requires an outer native launcher or a mandatory separator invocation.",
-  "web6_6Started": false
+  "v1FrozenCoreChanged": false,
+  "web6_6Started": false,
+  "knownBlockers": [
+    "Existing PLANNER Role Binding did not resolve to a confirmed target Chat during role latest --out; fail-closed WEBGPT_TARGET_CHAT_MISMATCH.",
+    "CLI front door is compiled with Windows inbox csc.exe and depends on Windows .NET Framework; no self-contained native compiler was available without installing software."
+  ]
 }
