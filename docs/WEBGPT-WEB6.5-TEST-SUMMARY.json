@@ -2,6 +2,9 @@
   "stage": "WEB-6.5 Official CLI ABI Final Closeout",
   "result": "FIX_REQUIRED",
   "timestamp": "2026-08-21",
+  "implementationCommit": "e255041",
+  "freezeCommit": "b36237a",
+  "reviewPackage": "dist/review/WEBGPT-WEB6.5-STAGE-REVIEW-PACKAGE.zip",
   "newRealPrompts": 0,
   "automated": {
     "npmRunCheck": "PASS",

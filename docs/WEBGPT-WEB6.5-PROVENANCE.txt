@@ -3,8 +3,8 @@ WEBGPT WEB-6.5 Official CLI ABI Provenance
 stage=WEB-6.5 Official CLI ABI Final Closeout
 base_commit=8dde7be
 implementation_commit=e255041
-freeze_commit=PENDING_DOC_FREEZE_COMMIT
-review_package_commit=PENDING_REVIEW_PACKAGE_COMMIT
+freeze_commit=b36237a
+review_package_commit=FINAL_HANDOFF_COMMIT
 result=FIX_REQUIRED
 
 package_root=D:\办公\AI\Codex_Workbench_V1\dist\package

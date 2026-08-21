@@ -102,6 +102,9 @@ control_after_auto: AUTO_CONTROL
 ## Package Provenance
 
 ```yaml
+implementation_commit: e255041
+freeze_commit: b36237a
+review_package_commit: FINAL_HANDOFF_COMMIT
 package: D:\办公\AI\Codex_Workbench_V1\dist\package
 gui_exe_sha256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
 cli_exe_sha256: 1B83C919CD67C9247269E08767DB12E13E4F93481FFD7868F81EBA15F388DD67

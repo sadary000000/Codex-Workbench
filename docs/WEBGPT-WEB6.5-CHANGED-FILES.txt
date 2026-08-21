@@ -1,0 +1,26 @@
+WEBGPT WEB-6.5 Official CLI ABI — Changed Files
+
+Implementation commit: e255041
+Documentation freeze commit: b36237a
+
+Product/tooling changes:
+- tools/official-cli/Program.cs
+- scripts/package-win.mjs
+- src/main/main.ts
+- src/main/webgpt-control.ts
+- tests/official-cli-contract.test.ts
+
+Review documents:
+- docs/WEBGPT-OFFICIAL-CLI-ABI.md
+- docs/WEBGPT-WEB6.5-CLI-TARGETED-LATEST.md
+- docs/WEBGPT-WEB6.5-STAGE-REVIEW.md
+- docs/WEBGPT-WEB6.5-FINAL-REAL-GATE.json
+- docs/WEBGPT-WEB6.5-TEST-SUMMARY.json
+- docs/WEBGPT-WEB6.5-PROVENANCE.txt
+
+Excluded from the review package:
+- Cookie, Token, Browser Profile
+- Prompt or Assistant body
+- Private Chat URL values
+- User-local planning documents
+- Old donor project files

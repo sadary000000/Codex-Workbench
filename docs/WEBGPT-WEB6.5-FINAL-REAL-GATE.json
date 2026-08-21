@@ -2,7 +2,7 @@
   "stage": "WEB-6.5 Official CLI ABI Final Closeout",
   "result": "FIX_REQUIRED",
   "implementationCommit": "e255041",
-  "freezeCommit": "PENDING_DOC_FREEZE_COMMIT",
+  "freezeCommit": "b36237a",
   "realPromptBudget": { "max": 0, "used": 0 },
   "officialCli": {
     "entry": "Codex Workbench CLI.exe",
