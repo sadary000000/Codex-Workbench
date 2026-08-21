@@ -4,11 +4,12 @@
 
 ```yaml
 stage: WEB-6.9 WebGPT V1 Final Freeze Review
-result: FINAL_FREEZE_CANDIDATE
+result: PASS_CANDIDATE
 web6_5r: PASS_FROZEN
 web6_6: PASS_FROZEN
 web6_7: PASS_FROZEN
 web6_8: PASS_FROZEN
+web6_9: PASS_CANDIDATE
 new_real_prompts_in_web6_9: 0
 automation: NOT_STARTED
 v1_frozen_core_changed: NO
@@ -110,6 +111,20 @@ Network Observer
 
 `NETWORK_STREAM_END` 只是候选，不等于最终完成。最终确认依赖目标页、User/Assistant 计数、Composer/生成状态和文本稳定性等受限页面探针。截图仅用于 debug/evidence，不进入完成状态机；不使用 OCR 或图像识别作为必需输入。
 
+## 证据等级与冻结声明
+
+本冻结只在报告中区分证据等级，不把代码审计、自动化测试和网页真实结果混写为同一种 PASS：
+
+| 能力/结论 | 证据等级 | 说明 |
+|---|---|---|
+| 单 Browser Runtime、Session、Lease、Control Plane 边界 | `PASS_CODE_AUDIT` + `PASS_AUTOMATED` | 由实现边界、契约测试和回归检查支持 |
+| Project inspect/open/create/new-chat context | `PASS_REAL` | 沿用已接受的 WEB-6.8 真实 smoke；无 Prompt 的 new-chat 是 Project context preparation |
+| Role exact target / latest / latest --out | `PASS_REAL` | 沿用 WEB-6.5R Fresh Chat 正向 Gate |
+| in-flight interruption → restart → no resend | `PASS_UPSTREAM_ACCEPTED` | WEB-5 最终真实 Gate 已记录同 requestId、`duplicatePromptCount=0`；允许终态为 `RECOVERY_REQUIRED` |
+| 复杂 Role send wrong-chat/interruption recovery | `UNKNOWN / EVIDENCE_DEFERRED` | 当前没有把该更强场景宣称为冻结能力 |
+
+`PASS_UPSTREAM_ACCEPTED` 表示本冻结包引用已经存在且可核对的上游最终证据，不代表本轮重新发送了网页 Prompt。`UNKNOWN / EVIDENCE_DEFERRED` 不否定已冻结的 Role exact-target routing，也不改变代码/自动化的 fail-closed recovery 语义。
+
 ## Role Registry
 
 Role 只允许：`REQUIREMENT`、`PLANNER`、`REVIEWER`。
@@ -189,11 +204,11 @@ CLI front door 使用 Node `execFile` / `shell: false` 语义转发到已认证 
 
 ## WEB-6.8 残留
 
-WEB-6.8 真实 smoke 曾创建两个测试 Project，未删除；这是因为 Project Delete 明确不在 WEB-6.8 scope，也没有在本阶段临时新增删除能力。该残留是已记录的非阻断限制，不改变 V1 identity，也不包含用户私人聊天内容。
+`NON_BLOCKING / OUT_OF_SCOPE`：WEB-6.8 真实 smoke 曾创建两个测试 Project，未删除；这是因为 Project Delete 明确不在 WEB-6.8 scope，也没有在本阶段临时新增删除能力。该残留不改变 V1 identity，也不包含用户私人聊天内容。
 
 ## Freeze Decision
 
-在 WEB-6.9 的自动 Gate 中复用 WEB-6.5R/6.6/6.7/6.8 的冻结证据，并完成当前 213/213 测试、build/package/audit/diff/secret 检查后，WebGPT V1 可提交为 `FINAL_FREEZE_CANDIDATE` 供 GPT 最终审查。冻结后本阶段不自动进入 Automation，也不规划后续阶段。
+在 WEB-6.9 的自动 Gate 中复用 WEB-6.5R/6.6/6.7/6.8 的冻结证据，并完成当前 213/213 测试、build/package/audit/diff/secret 检查后，WebGPT V1 可提交为 `PASS_CANDIDATE` 供 GPT 最终审查。WEB-6.9 尚未写成 FINAL_FROZEN；本阶段不自动进入 Automation，也不规划后续阶段。
 
 ## WEB-6.9 最小冻结修复
 

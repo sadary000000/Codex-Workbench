@@ -2,15 +2,27 @@ stage=WEB-6.9 WebGPT V1 Final Freeze Review
 result=PASS_CANDIDATE
 base_commit_before_freeze=1e356db
 product_code_changed=YES_MINIMAL_FREEZE_FIXES
+product_code_changed_this_fix=NO
 v1_core_changed=NO
 new_real_prompts=0
 automation=NOT_STARTED
+web6_5r=PASS_FROZEN
+web6_6=PASS_FROZEN
+web6_7=PASS_FROZEN
+web6_8=PASS_FROZEN
+web6_9=PASS_CANDIDATE
+evidence_grading=PASS_REAL; PASS_AUTOMATED; PASS_CODE_AUDIT; PASS_UPSTREAM_ACCEPTED; UNKNOWN/EVIDENCE_DEFERRED
+role_exact_target_evidence=PASS_REAL; source=docs/WEBGPT-WEB6.5R-FINAL-REAL-GATE.json and docs/WEBGPT-WEB6.5R-FRESH-CHAT-ROLE-CLOSEOUT.md
+role_complex_recovery_evidence=UNKNOWN/EVIDENCE_DEFERRED; not claimed as frozen capability
+inflight_no_resend_evidence=PASS_UPSTREAM_ACCEPTED; source=docs/WEBGPT-WEB5-FINAL-REAL-GATE-EVIDENCE.json and superseding section 24 of docs/WEBGPT-WEB5-STAGE-REVIEW.md
+inflight_no_resend_facts=sameRequestId=true; duplicatePromptCount=0; finalState=RECOVERY_REQUIRED; no new prompt in WEB-6.9
+code_automated_no_blind_resend=PASS_AUTOMATED
 
 standard_package_dir=D:\办公\AI\Codex_Workbench_V1\dist\package
 gui_exe=Codex Workbench V1.exe
 gui_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
 official_cli_exe=Codex Workbench CLI.exe
-official_cli_exe_sha256=FF22000156D1817183715624328C539CC6163160F415255B0C2A6725161D7A35
+official_cli_exe_sha256=7FD27B981C0021022E0BC65A8F23169CE570B57E556AD1AA0FECC5F717614921
 cli_runtime_exe=Codex Workbench CLI Runtime.exe
 cli_runtime_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
 main_js_sha256=0C91AD0F0D0FAFE758709C60E540B42346E9FE58B1765E50936A83655B9C3993
@@ -24,7 +36,7 @@ real_prompt_policy=MAX_NEW_REAL_PROMPTS=0; no new real prompt sent
 review_package_contents=WEBGPT-V1-FINAL-FREEZE.md; WEBGPT-V1-ARCHITECTURE.md; WEBGPT-V1-CAPABILITY-MATRIX.md; WEBGPT-V1-FAILURE-RECOVERY-MATRIX.md; WEBGPT-V1-CLI-CONTRACT.md; WEBGPT-WEB6.9-STAGE-REVIEW.md; WEBGPT-WEB6.9-PROVENANCE.txt
 review_package_excludes=Cookie; Browser Token; Browser profile; password; private chat content; raw upstream evidence with user URLs
 protected_inputs=old donor read-only; user dirty/untracked files preserved; no V1docs.zip/指导文档/dist-stage-a staged
-known_test_project_residue=YES; reason=Project Delete intentionally out of scope; two WEB-6.8 test Projects remain
+known_test_project_residue=NON_BLOCKING/OUT_OF_SCOPE; reason=Project Delete intentionally out of scope; two WEB-6.8 test Projects remain
 subagents=4 read-only audits naturally completed, reviewed, and closed
 running_subagents_at_gate=0
 legacy_project_status=unchanged; D:\办公\AI\Codex_Workbench read-only

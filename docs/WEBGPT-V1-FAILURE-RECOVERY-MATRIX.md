@@ -42,6 +42,18 @@ restart      -> RECOVERY_REQUIRED for unfinished work
 
 `TIMEOUT` 不会释放一个仍可能执行的 SEND lease，也不自动启动 retry send。`RECOVERY_REQUIRED` 会保留目标 Chat、requestId、idempotencyKey 和 bounded error；如果 Journal 损坏、identity 重复或语义不一致，系统拒绝静默修复。
 
+## 冻结证据等级
+
+| 能力/场景 | 证据等级 | 当前结论 |
+|---|---|---|
+| 代码/自动化 no-blind-resend、same-key reattach、Journal fail-closed recovery | `PASS_AUTOMATED` | 未确认提交结果前不会自动发送第二次 Prompt |
+| in-flight interruption → restart → no resend | `PASS_UPSTREAM_ACCEPTED` | WEB-5 最终真实 Gate 与 `WEBGPT-WEB5-FINAL-REAL-GATE-EVIDENCE.json` 记录同 `requestId`、`sameRequestId=true`、`duplicatePromptCount=0`；最终允许为 `RECOVERY_REQUIRED` |
+| Role exact target / latest / latest --out | `PASS_REAL` | WEB-6.5R Fresh Chat 正向 Gate 精确读取绑定目标 |
+| 复杂 Role send wrong-chat/interruption recovery | `UNKNOWN / EVIDENCE_DEFERRED` | 当前没有把更强的发送恢复场景宣称为冻结能力 |
+| Project inspect/open/create/new-chat context | `PASS_REAL` | WEB-6.8 accepted real smoke；无 Prompt new-chat 不伪造 Chat URL |
+
+`PASS_UPSTREAM_ACCEPTED` 不代表本轮新增网页 Prompt；本轮 `MAX_NEW_REAL_PROMPTS=0`。复杂 Role recovery 的 UNKNOWN 也不否定 exact-target binding、no silent rebind 和 no current-chat fallback。
+
 ## 恢复安全不变量
 
 ```text
@@ -54,3 +66,8 @@ no confirmed Project identity      -> no registry write
 ```
 
 所有失败路径均不得静默换 nativeThread、WebGPT Chat、Role binding、Project identity 或 Transcript truth。
+
+## 已接受的非阻断范围
+
+- `NON_BLOCKING / OUT_OF_SCOPE`：WEB-6.8 测试 Project 残留；Project Delete 不属于 V1。
+- `NON_BLOCKING / OUT_OF_SCOPE`：完整 ChatGPT Transcript persistence、Automation、multi-account/multi-session。
