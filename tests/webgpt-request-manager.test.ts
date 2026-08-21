@@ -126,6 +126,9 @@ test("WebGPT targeted latest reads are page-based, fail closed, and preserve Cha
     await assert.rejects(() => manager.readLatestCurrent(), { code: "NO_ASSISTANT_RESPONSE" });
     workspace.openChatUrlOverride = "https://chatgpt.com/c/other";
     await assert.rejects(() => manager.readLatestChat("https://chatgpt.com/c/test"), { code: "WEBGPT_TARGET_CHAT_MISMATCH" });
+    workspace.openChatUrlOverride = "https://www.chatgpt.com/c/test/?from=redirect#hash";
+    const canonicalRedirect = await manager.readLatestChat("https://chatgpt.com/c/test/?source=bound#fragment");
+    assert.equal(canonicalRedirect.assistantText, "WEBGPT_TEST_OK");
     await assert.rejects(() => manager.readLatestChat("https://chatgpt.com/settings"), { code: "CHAT_URL_INVALID" });
   } finally {
     await rm(directory, { recursive: true, force: true });

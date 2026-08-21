@@ -44,13 +44,18 @@ export function normalizeRoleChatUrl(value: string): string {
   if (url.port || url.username || url.password) {
     throw codedError("ROLE_CHAT_URL_INVALID", "Role Chat URL 不允许端口、用户名或密码。");
   }
-  const segments = url.pathname.split("/").filter(Boolean);
-  const isStandardChat = segments.length === 2 && segments[0] === "c" && Boolean(segments[1]);
-  const isGptScopedChat = segments.length === 4 && segments[0] === "g" && Boolean(segments[1]) && segments[2] === "c" && Boolean(segments[3]);
-  if (!isStandardChat && !isGptScopedChat) {
+  // Accept one optional trailing slash, then emit one canonical path. Do not
+  // filter empty segments: `/c//id` is not an equivalent Chat identity and
+  // must not be allowed to bypass collision or target checks.
+  const standardMatch = /^\/c\/([^/]+)\/?$/.exec(url.pathname);
+  const gptScopedMatch = /^\/g\/([^/]+)\/c\/([^/]+)\/?$/.exec(url.pathname);
+  if (!standardMatch && !gptScopedMatch) {
     throw codedError("ROLE_CHAT_URL_INVALID", "Role 必须绑定真实的 /c/<chat-id> 或 /g/<gpt-id>/c/<chat-id> Chat URL。");
   }
   url.hostname = "chatgpt.com";
+  url.pathname = standardMatch
+    ? `/c/${standardMatch[1]}`
+    : `/g/${gptScopedMatch![1]}/c/${gptScopedMatch![2]}`;
   url.search = "";
   url.hash = "";
   return url.toString();

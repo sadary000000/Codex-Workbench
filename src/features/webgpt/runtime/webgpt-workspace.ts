@@ -882,7 +882,10 @@ export class WebGptWorkspace implements WebGptPublicService {
         scheduler.noteProbe();
         if (expectedChatUrl) {
           let actualUrl = "";
-          try { actualUrl = normalizeChatUrl(probe.page.url); } catch { /* handled as a target mismatch */ }
+          // Role targets are stored in the strict Role canonical form. Use
+          // the same form while observing the page so harmless www/query/
+          // trailing-slash redirects do not become false target changes.
+          try { actualUrl = normalizeRoleChatUrl(normalizeChatUrl(probe.page.url)); } catch { /* handled as a target mismatch */ }
           if (actualUrl !== expectedChatUrl) throw this.codedError("TARGET_CHAT_CHANGED", "等待回复期间当前页面已离开目标 Chat。");
         }
         const changed = probe.page.assistantCount > baseline.page.assistantCount || probe.latestAssistantText !== baseline.latestAssistantText;

@@ -153,8 +153,11 @@ export class WebGptRequestManager {
       if (actualChatUrl !== targetChatUrl) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "浏览器当前 Chat 与指定目标不一致，已拒绝读取。", { targetChatUrl, actualChatUrl });
       await this.workspace.waitForTargetChatHistory(targetChatUrl);
       const latest = await this.workspace.readLatestResponse();
-      if (latest.chatUrl !== targetChatUrl) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "读取结果的 Chat 身份与指定目标不一致，已拒绝返回。", { targetChatUrl, actualChatUrl: latest.chatUrl });
-      return latest;
+      let latestChatUrl: string;
+      try { latestChatUrl = normalizeRoleChatUrl(normalizeChatUrl(typeof latest.chatUrl === "string" ? latest.chatUrl : "")); }
+      catch { throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "读取结果未携带可确认的 Chat 身份，已拒绝返回。", { targetChatUrl, actualChatUrl: null }); }
+      if (latestChatUrl !== targetChatUrl) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "读取结果的 Chat 身份与指定目标不一致，已拒绝返回。", { targetChatUrl, actualChatUrl: latestChatUrl });
+      return { ...latest, chatUrl: latestChatUrl };
     });
     return result;
   }

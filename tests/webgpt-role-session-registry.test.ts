@@ -41,11 +41,16 @@ test("Role Registry strictly validates Chat URLs, collisions, and explicit repla
       "https://chatgpt.com/foo/c/x",
       "file:///c/x",
       "https://chatgpt.com/c/x/extra",
+      "https://chatgpt.com/c//x",
+      "https://chatgpt.com/g/gpt//c/x",
     ]) assert.throws(() => normalizeRoleChatUrl(value), { code: "ROLE_CHAT_URL_INVALID" });
+    assert.equal(normalizeRoleChatUrl("https://www.chatgpt.com/c/shared/?from=redirect#hash"), "https://chatgpt.com/c/shared");
+    assert.equal(normalizeRoleChatUrl("https://chatgpt.com/g/gpt/c/shared/"), "https://chatgpt.com/g/gpt/c/shared");
     const registry = new WebGptRoleSessionRegistry({ storageDirectory: directory });
     await registry.bind("project-a", "PLANNER", "https://chatgpt.com/c/shared");
     await assert.rejects(() => registry.bind("project-a", "PLANNER", "https://chatgpt.com/c/other"), { code: "ROLE_ALREADY_BOUND" });
     await assert.rejects(() => registry.bind("project-b", "REVIEWER", "https://chatgpt.com/c/shared"), { code: "ROLE_BIND_CONFLICT" });
+    await assert.rejects(() => registry.bind("project-b", "REVIEWER", "https://www.chatgpt.com/c/shared/"), { code: "ROLE_BIND_CONFLICT" });
     const replaced = await registry.bind("project-a", "PLANNER", "https://chatgpt.com/c/other", null, true);
     assert.equal(replaced.chatUrl, "https://chatgpt.com/c/other");
   } finally {
