@@ -1,0 +1,20 @@
+WEB-6.6 intended implementation files (commit 3b528cc)
+
+package.json
+scripts/build.mjs
+scripts/generate-control-plane-schema.mjs
+scripts/package-win.mjs
+scripts/real-webgpt-web6.6-protocol-smoke.ts
+src/main/main.ts
+src/main/webgpt-control.ts
+src/shared/webgpt-control-plane-contract.ts
+tests/webgpt-control-plane-baseline.test.ts
+
+WEB-6.6 generated/review artifacts
+
+dist/contracts/control-plane.schema.json
+dist/package/resources/app/contracts/control-plane.schema.json
+dist/review/WEBGPT-WEB6.6-REAL-GATE.json
+dist/review/WEBGPT-WEB6.6-STAGE-REVIEW-PACKAGE.zip
+
+No V1 Frozen Core files, user local planning files, old donor files, or Auto_Agent files were intentionally changed.

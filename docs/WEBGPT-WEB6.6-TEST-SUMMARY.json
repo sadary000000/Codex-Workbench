@@ -1,0 +1,41 @@
+{
+  "stage": "WEB-6.6 Control Plane Protocol Baseline",
+  "generatedAt": "2026-08-21",
+  "implementationCommit": "3b528cca3276943b8e054d4d95e6d6a8bb7bd8fa",
+  "tests": {
+    "npm run check": "PASS",
+    "npm test": { "status": "PASS", "passed": 198, "failed": 0 },
+    "targeted control-plane tests": { "status": "PASS", "passed": 13, "failed": 0 },
+    "npm run build": "PASS",
+    "npm run package:win": "PASS",
+    "npm audit --omit=dev": { "status": "PASS", "vulnerabilities": 0 },
+    "git diff --check": "PASS",
+    "scoped secret scan": "PASS"
+  },
+  "realSmoke": {
+    "command": "npm run test:real:webgpt:protocol",
+    "status": "PASS",
+    "generatedAt": "2026-08-21T04:32:22.917Z",
+    "newRealPrompts": 0,
+    "statusExitCode": 0,
+    "protocolVersion": "1.0",
+    "compatibilityMode": "MODERN",
+    "clientType": "OFFICIAL_CLI",
+    "workbench": "READY",
+    "webgpt": "UNAVAILABLE",
+    "versionMismatch": "VERSION_MISMATCH",
+    "unsupportedCapability": "CAPABILITY_NOT_SUPPORTED",
+    "evidence": "dist/review/WEBGPT-WEB6.6-REAL-GATE.json"
+  },
+  "schema": {
+    "path": "dist/contracts/control-plane.schema.json",
+    "bytes": 11276,
+    "sha256": "b4d61e5902a720ba9cf405bce6a91fabe20fcd098bb1ea6ff3383f58e4b4b4db"
+  },
+  "scope": {
+    "v1FrozenCoreChanged": false,
+    "oldDonorChanged": false,
+    "autoAgentChanged": false,
+    "newRealPrompts": 0
+  }
+}

@@ -1,0 +1,24 @@
+WEB-6.6 Control Plane Protocol Baseline provenance
+
+implementation_commit=3b528cca3276943b8e054d4d95e6d6a8bb7bd8fa
+implementation_commit_short=3b528cc
+review_commit=final documentation/package commit (see git HEAD)
+
+package_gui=D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+package_gui_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+package_cli=D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
+package_cli_sha256=3CD0ECA979AC0A6C807C5B2198B6996E6A0F88858075C7D35D12A3D58EFB7809
+schema=dist/contracts/control-plane.schema.json
+schema_sha256=B4D61E5902A720BA9CF405BCE6A91FABE20FCD098BB1EA6FF3383F58E4B4B4DB
+packaged_schema_sha256=B4D61E5902A720BA9CF405BCE6A91FABE20FCD098BB1EA6FF3383F58E4B4B4DB
+
+real_smoke=PASS
+real_smoke_new_prompts=0
+real_smoke_evidence=dist/review/WEBGPT-WEB6.6-REAL-GATE.json
+
+checks=npm run check PASS; npm test 198/198 PASS; targeted control-plane 13/13 PASS; npm run build PASS; npm run package:win PASS; npm audit --omit=dev PASS; git diff --check PASS; scoped secret scan PASS
+
+protected_inputs=local 指导文档/*.docx, V1docs.zip if present, dist-stage-a/, old donor, old Auto_Agent
+protected_inputs_changed=NO
+v1_frozen_core_changed=NO
+named_pipe_changed=NO
