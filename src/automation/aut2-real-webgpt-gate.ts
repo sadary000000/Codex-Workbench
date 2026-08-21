@@ -12,7 +12,7 @@ const MAX_REAL_ALIGNMENT_REQUESTS = 3;
 
 export interface Aut2RealWebGptGateOptions {
   readonly store: AutomationStore;
-  readonly roleSession: Pick<WebGptRoleSessionService, "status" | "open" | "submit">;
+  readonly roleSession: Pick<WebGptRoleSessionService, "status" | "open" | "bind" | "submit">;
   readonly requestManager: Pick<WebGptRequestManager, "waitForRequest" | "getResult">;
   readonly openWorkspace: () => Promise<unknown>;
   readonly returnAutomationControl: () => Promise<unknown>;
@@ -21,7 +21,19 @@ export interface Aut2RealWebGptGateOptions {
   readonly automationProjectId?: string;
   readonly timeoutMs?: number;
   readonly outputPath: string;
+  readonly setupContext: Aut2RealWebGptSetupContext;
   readonly now?: () => string;
+}
+
+export interface Aut2RealWebGptSetupContext {
+  readonly originalBinding: { status: string; chatUrl: string };
+  readonly setupChatRef: string;
+  readonly setupRequestId: string;
+  readonly setupIdempotencyKey: string;
+  readonly setupPromptCount: number;
+  readonly newChatCount: number;
+  readonly stableChatMaterialized: true;
+  readonly latestAssistantSha256: string | null;
 }
 
 export interface Aut2RealWebGptGateEvidence {
@@ -67,6 +79,15 @@ export interface Aut2RealWebGptGateEvidence {
     readonly systemRejected: boolean;
     readonly activeRequirementVersionAfterUser: string | null;
   };
+  readonly setup: {
+    readonly status: "PASS_REAL_SETUP" | "FAIL";
+    readonly setupChatRef: string;
+    readonly setupRequestId: string;
+    readonly setupPromptCount: number;
+    readonly newChatCount: number;
+    readonly stableChatMaterialized: boolean;
+    readonly latestAssistantSha256: string | null;
+  };
   readonly idempotency: {
     readonly status: "PASS_AUTOMATED_PATH" | "FAIL";
     readonly sameRequestId: boolean;
@@ -75,7 +96,8 @@ export interface Aut2RealWebGptGateEvidence {
   };
   readonly attemptedRealRequests: number;
   readonly realPromptCount: number;
-  readonly newChatCount: 0;
+  readonly roleSetupPromptCount: number;
+  readonly newChatCount: number;
   readonly repairCount: 0;
   readonly errors: readonly { code: string; message: string }[];
   readonly createdAt: string;
@@ -112,15 +134,21 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
   let systemRejected = false;
   let idempotentSameRequestId = false;
   let idempotentSameSemanticSha256 = false;
-  let attemptedRealRequests = 0;
+  let attemptedRealRequests = options.setupContext.setupPromptCount;
+  let setupStatus: "PASS_REAL_SETUP" | "FAIL" = "FAIL";
 
   try {
+    if (!options.setupContext.setupChatRef || !options.setupContext.setupRequestId || options.setupContext.setupPromptCount < 1) {
+      throw gateError("SETUP_CONTEXT_INVALID", "A stable materialized setup Chat is required before the real Requirement Gate.");
+    }
     await options.openWorkspace();
     await options.returnAutomationControl();
     await options.automationControl();
     const initialBinding = await options.roleSession.status(webgptProjectId, REQUIREMENT_ROLE);
-    originalBinding = { status: initialBinding.status, chatUrl: initialBinding.chatUrl };
+    originalBinding = { ...options.setupContext.originalBinding };
     if (initialBinding.status !== "BOUND" || !initialBinding.chatUrl) throw gateError("REQUIREMENT_ROLE_NOT_BOUND", "The explicit REQUIREMENT Role is not BOUND.");
+    if (initialBinding.chatUrl !== options.setupContext.setupChatRef) throw gateError("SETUP_ROLE_BINDING_MISMATCH", "The REQUIREMENT Role is not bound to the materialized setup Chat.");
+    setupStatus = "PASS_REAL_SETUP";
     binding = { projectId: webgptProjectId, role: REQUIREMENT_ROLE, chatRef: initialBinding.chatUrl };
     await options.roleSession.open(webgptProjectId, REQUIREMENT_ROLE);
 
@@ -204,6 +232,13 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
     const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "AUT2_REAL_GATE_FAILED";
     errors.push({ code, message: safeMessage(error) });
   } finally {
+    if (originalBinding?.status === "BOUND" && originalBinding.chatUrl) {
+      try {
+        await options.roleSession.bind(webgptProjectId, REQUIREMENT_ROLE, originalBinding.chatUrl, true);
+      } catch (error) {
+        errors.push({ code: "REQUIREMENT_BINDING_RESTORE_FAILED", message: safeMessage(error) });
+      }
+    }
     try {
       finalBinding = await options.roleSession.status(webgptProjectId, REQUIREMENT_ROLE);
     } catch (error) {
@@ -256,6 +291,15 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
       systemRejected,
       activeRequirementVersionAfterUser: activeRequirementVersionAfterDraft,
     },
+    setup: {
+      status: setupStatus,
+      setupChatRef: options.setupContext.setupChatRef,
+      setupRequestId: options.setupContext.setupRequestId,
+      setupPromptCount: options.setupContext.setupPromptCount,
+      newChatCount: options.setupContext.newChatCount,
+      stableChatMaterialized: options.setupContext.stableChatMaterialized,
+      latestAssistantSha256: options.setupContext.latestAssistantSha256,
+    },
     idempotency: {
       status: idempotentSameRequestId && idempotentSameSemanticSha256 ? "PASS_AUTOMATED_PATH" : "FAIL",
       sameRequestId: idempotentSameRequestId,
@@ -263,8 +307,9 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
       noAdditionalRealPrompt: true,
     },
     attemptedRealRequests,
-    realPromptCount: requestIds.length,
-    newChatCount: 0,
+    realPromptCount: options.setupContext.setupPromptCount + requestIds.length,
+    roleSetupPromptCount: options.setupContext.setupPromptCount,
+    newChatCount: options.setupContext.newChatCount,
     repairCount: 0,
     errors,
     createdAt: now(),

@@ -1,5 +1,6 @@
+import { createHash, randomUUID } from "node:crypto";
 import { execFile as execFileCallback, spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -9,6 +10,9 @@ const root = process.cwd();
 const guiExecutable = process.env.WEBGPT_GUI_EXECUTABLE?.trim() || join(root, "dist", "package", "Codex Workbench V1.exe");
 const cliExecutable = process.env.WEBGPT_CLI_EXECUTABLE?.trim() || join(root, "dist", "package", "Codex Workbench CLI.exe");
 const webgptProjectId = process.env.AUT2_WEBGPT_PROJECT_ID?.trim() || "";
+const webgptProjectName = process.env.AUT2_WEBGPT_PROJECT_NAME?.trim() || "workts";
+const permanentEvidencePath = process.env.AUT2_GATE2_EVIDENCE_PATH?.trim() || join(root, "docs", "AUT-2-GATE-FIX-2-RUNTIME.json");
+const setupPrompt = "This chat is being initialized for a bounded automated requirement-alignment smoke test. Reply exactly: ROLE_READY. Do not infer or store any project requirements from this setup message.";
 const startedAt = new Date().toISOString();
 
 interface Invocation {
@@ -33,13 +37,13 @@ function lastJson(stdout: string): Record<string, unknown> | null {
   return null;
 }
 
-async function invoke(args: string[]): Promise<Invocation> {
+async function invoke(args: string[], timeout = 120_000): Promise<Invocation> {
   const began = Date.now();
   try {
     const value = await execFile(cliExecutable, ["webgpt", ...args, "--json"], {
       cwd: root,
       windowsHide: true,
-      timeout: 120_000,
+      timeout,
       maxBuffer: 4 * 1024 * 1024,
     });
     const parsed = lastJson(value.stdout);
@@ -68,6 +72,16 @@ async function invoke(args: string[]): Promise<Invocation> {
   }
 }
 
+function resultOf(invocation: Invocation): Record<string, unknown> | null {
+  return invocation.result ?? null;
+}
+
+function errorText(invocation: Invocation): string {
+  const error = invocation.result?.error;
+  if (error && typeof error === "object" && !Array.isArray(error)) return String((error as Record<string, unknown>).message ?? (error as Record<string, unknown>).code ?? invocation.error ?? "CLI failure");
+  return invocation.error ?? `CLI command failed: ${invocation.command ?? invocation.args.join(" ")}`;
+}
+
 function statusSummary(invocation: Invocation): Record<string, unknown> {
   const result = invocation.result ?? {};
   const page = result.page && typeof result.page === "object" && !Array.isArray(result.page) ? result.page as Record<string, unknown> : null;
@@ -79,17 +93,33 @@ function statusSummary(invocation: Invocation): Record<string, unknown> {
     workbench: result.workbench ?? null,
     webgpt: result.webgpt ?? null,
     controlOwner: result.controlOwner ?? null,
-    currentUrl: result.currentUrl ?? null,
+    currentUrl: result.currentUrl ?? result.url ?? null,
     pageHealthy: result.pageHealthy ?? null,
     loginRequired: page?.loginRequired ?? null,
     onChatPage: page?.onChatPage ?? null,
+    userCount: page?.userCount ?? null,
+    assistantCount: page?.assistantCount ?? null,
+    generating: page?.generating ?? null,
     identity: invocation.identity ?? null,
     error: invocation.error ?? null,
   };
 }
 
+async function waitForReady(): Promise<Invocation> {
+  const deadline = Date.now() + 120_000;
+  let latest = await invoke(["status"]);
+  while (Date.now() < deadline) {
+    const result = latest.result ?? {};
+    const page = result.page && typeof result.page === "object" && !Array.isArray(result.page) ? result.page as Record<string, unknown> : null;
+    if (latest.ok && result.workbench === "READY" && result.webgpt === "READY" && result.controlOwner === "AUTO_CONTROL" && page?.loginRequired !== true) return latest;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    latest = await invoke(["status"]);
+  }
+  throw new Error(`WEBGPT_RUNTIME_NOT_READY: ${errorText(latest)}`);
+}
+
 async function waitForEvidence(path: string, child: ReturnType<typeof spawn>): Promise<Record<string, unknown> | null> {
-  const deadline = Date.now() + 420_000;
+  const deadline = Date.now() + 600_000;
   while (Date.now() < deadline) {
     try {
       const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
@@ -101,13 +131,37 @@ async function waitForEvidence(path: string, child: ReturnType<typeof spawn>): P
   return null;
 }
 
+function chatUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const parsed = new URL(value.trim());
+    if (parsed.protocol !== "https:" || parsed.hostname !== "chatgpt.com") return null;
+    if (!/^\/(?:c\/[^/]+|g\/[^/]+\/c\/[^/]+)$/.test(parsed.pathname)) return null;
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+function hash(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function requireOk(invocation: Invocation, label: string): Record<string, unknown> {
+  if (!invocation.ok) throw new Error(`${label}_FAILED: ${errorText(invocation)}`);
+  return resultOf(invocation) ?? {};
+}
+
+function bindingOf(invocation: Invocation): { status: string; chatUrl: string } {
+  const result = requireOk(invocation, "ROLE_STATUS");
+  return { status: String(result.status ?? ""), chatUrl: String(result.chatUrl ?? "") };
+}
+
 const tempRoot = await mkdtemp(join(tmpdir(), "codex-workbench-aut2-real-"));
 const evidencePath = join(tempRoot, "evidence.json");
+const setupPath = join(tempRoot, "setup-context.json");
 const automationDb = join(tempRoot, "automation.db");
-// Do not invoke the CLI before spawning the custom-env GUI Host. On Windows
-// the official CLI's auto-start path uses explorer.exe and cannot propagate
-// the AUT2 gate environment into the real Electron main process. The caller
-// pre-cleans any exact packaged Host process before running this script.
+const setupKey = `aut2:setup:${Date.now()}:${randomUUID()}`;
 const closeBefore: Invocation = {
   args: ["close"],
   exitCode: null,
@@ -121,28 +175,102 @@ const environment = { ...process.env };
 delete environment.ELECTRON_RUN_AS_NODE;
 environment.AUT2_REAL_WEBGPT_GATE = "1";
 environment.AUT2_REAL_WEBGPT_GATE_OUTPUT = evidencePath;
+environment.AUT2_REAL_WEBGPT_GATE_SETUP_FILE = setupPath;
+environment.AUT2_REAL_WEBGPT_SETUP_TIMEOUT_MS = "420000";
 environment.AUT2_AUTOMATION_DB = automationDb;
 environment.AUT2_WEBGPT_PROJECT_ID = webgptProjectId;
-environment.AUT2_AUTOMATION_PROJECT_ID = "aut2-real-webgpt-gate";
+environment.AUT2_WEBGPT_PROJECT_NAME = webgptProjectName;
+environment.AUT2_AUTOMATION_PROJECT_ID = "aut2-real-webgpt-gate-2";
 environment.AUT2_REAL_WEBGPT_TIMEOUT_MS = "240000";
 const child = spawn(guiExecutable, [], { cwd: root, env: environment, windowsHide: false, stdio: "ignore" });
-await new Promise((resolve) => setTimeout(resolve, 2_000));
-const statusDuring = child.exitCode === null ? await invoke(["status"]) : null;
+let statusDuring: Invocation | null = null;
+let setupInvocations: Record<string, Invocation> = {};
+let setupContext: Record<string, unknown> | null = null;
+let setupFailure: string | null = null;
+try {
+  setupInvocations.open = await invoke(["open"], 120_000);
+  requireOk(setupInvocations.open, "OPEN_WORKSPACE");
+  setupInvocations.controlAuto = await invoke(["control", "auto"]);
+  if (!setupInvocations.controlAuto.ok) {
+    // A persisted recovery sweep may exceed the public 15s control command
+    // deadline after it has already switched the workspace to AUTO_CONTROL.
+    // Accept only an independently observed READY/AUTO_CONTROL state; never
+    // treat the timeout itself as success and never resend control blindly.
+    setupInvocations.controlAutoStateAfterTimeout = await waitForReady();
+  }
+  statusDuring = await waitForReady();
+  setupInvocations.statusBefore = statusDuring;
+  setupInvocations.roleStatusBefore = await invoke(["role", "status", "--project", webgptProjectId, "--role", "requirement"]);
+  const originalBinding = bindingOf(setupInvocations.roleStatusBefore);
+  if (originalBinding.status !== "BOUND" || !chatUrl(originalBinding.chatUrl)) throw new Error("ORIGINAL_REQUIREMENT_BINDING_NOT_BOUND");
+
+  setupInvocations.projectOpen = await invoke(["project", "open", "--name", webgptProjectName], 120_000);
+  requireOk(setupInvocations.projectOpen, "PROJECT_OPEN");
+  setupInvocations.projectNewChat = await invoke(["project", "new-chat", "--name", webgptProjectName], 120_000);
+  const newChat = requireOk(setupInvocations.projectNewChat, "PROJECT_NEW_CHAT");
+  const newChatPage = newChat.page && typeof newChat.page === "object" && !Array.isArray(newChat.page) ? newChat.page as Record<string, unknown> : {};
+  if (newChat.promptSent !== false || chatUrl(newChat.chatUrl) || newChatPage.composerFound !== true || newChat.chatMaterialized === true) throw new Error("FRESH_PROJECT_CHAT_CONTEXT_NOT_PENDING");
+
+  setupInvocations.setupSend = await invoke(["send", "--text", setupPrompt, "--idempotency-key", setupKey], 120_000);
+  const setupSent = requireOk(setupInvocations.setupSend, "SETUP_SEND");
+  const setupRequestId = String(setupSent.requestId ?? "");
+  if (!/^wgpt-/.test(setupRequestId)) throw new Error("SETUP_REQUEST_ID_MISSING");
+  setupInvocations.setupWait = await invoke(["wait", "--request-id", setupRequestId, "--timeout-ms", "180000"], 210_000);
+  const waited = requireOk(setupInvocations.setupWait, "SETUP_WAIT");
+  if (waited.state !== "COMPLETED") throw new Error(`SETUP_NOT_COMPLETED: ${String(waited.state ?? "unknown")}`);
+  setupInvocations.setupResult = await invoke(["result", "--request-id", setupRequestId], 120_000);
+  const setupResult = requireOk(setupInvocations.setupResult, "SETUP_RESULT");
+  const response = typeof setupResult.response === "string" ? setupResult.response.trim() : "";
+  if (response !== "ROLE_READY") throw new Error("SETUP_RESPONSE_NOT_ROLE_READY");
+  const materialized = chatUrl(setupResult.chatUrl);
+  if (!materialized) throw new Error("SETUP_RESULT_CHAT_URL_NOT_MATERIALIZED");
+  setupInvocations.setupChatLatest = await invoke(["chat", "latest", "--url", materialized], 120_000);
+  const latest = requireOk(setupInvocations.setupChatLatest, "SETUP_CHAT_LATEST");
+  if (latest.chatUrl !== materialized || Number(latest.assistantCount ?? 0) < 1 || latest.assistantText !== "ROLE_READY") throw new Error("SETUP_LATEST_CHAT_NOT_STABLE");
+  setupInvocations.statusAfterSetup = await invoke(["status"]);
+  const statusAfterPage = setupInvocations.statusAfterSetup.result?.page && typeof setupInvocations.statusAfterSetup.result.page === "object" && !Array.isArray(setupInvocations.statusAfterSetup.result.page)
+    ? setupInvocations.statusAfterSetup.result.page as Record<string, unknown>
+    : {};
+  if (statusAfterPage.userCount !== undefined && Number(statusAfterPage.userCount) < 1) throw new Error("SETUP_USER_COUNT_NOT_MATERIALIZED");
+
+  setupInvocations.roleBind = await invoke(["role", "bind", "--project", webgptProjectId, "--role", "requirement", "--url", materialized, "--replace"]);
+  requireOk(setupInvocations.roleBind, "ROLE_BIND");
+  setupInvocations.roleOpen = await invoke(["role", "open", "--project", webgptProjectId, "--role", "requirement"], 120_000);
+  const opened = requireOk(setupInvocations.roleOpen, "ROLE_OPEN");
+  if (chatUrl(opened.chatUrl) !== materialized) throw new Error("EXACT_REQUIREMENT_BINDING_NOT_CONFIRMED");
+
+  setupContext = {
+    originalBinding,
+    setupChatRef: materialized,
+    setupRequestId,
+    setupIdempotencyKey: setupKey,
+    setupPromptCount: 1,
+    newChatCount: 1,
+    stableChatMaterialized: true,
+    latestAssistantSha256: hash("ROLE_READY"),
+  };
+  await writeFile(setupPath, `${JSON.stringify(setupContext, null, 2)}\n`, "utf8");
+} catch (error) {
+  setupFailure = error instanceof Error ? error.message : String(error);
+  await writeFile(setupPath, `${JSON.stringify({ error: setupFailure })}\n`, "utf8");
+}
+
 const gateEvidence = await waitForEvidence(evidencePath, child);
+const finalRoleStatus = child.exitCode === null ? await invoke(["role", "status", "--project", webgptProjectId, "--role", "requirement"]) : null;
 const closeAfter = child.exitCode === null ? await invoke(["close"]) : null;
 if (child.exitCode === null) {
-  // `webgpt close` releases the control plane but intentionally does not
-  // close the Desktop Host. This bounded spike owns the exact packaged Host,
-  // so terminate only that child after collecting evidence to avoid leaving
-  // a single-instance process that can steal the next run's environment.
   child.kill();
   await new Promise((resolve) => setTimeout(resolve, 2_000));
 }
 await rm(tempRoot, { recursive: true, force: true });
 
 const result = gateEvidence?.result === "PASS_REAL" ? "PASS_REAL" : gateEvidence ? "FAIL" : "BLOCKED";
-console.log(JSON.stringify({
-  stage: "AUT-2",
+const gateAttemptedRealRequests = typeof gateEvidence?.attemptedRealRequests === "number" ? gateEvidence.attemptedRealRequests : 0;
+const gateRealPromptCount = typeof gateEvidence?.realPromptCount === "number" ? gateEvidence.realPromptCount : 0;
+const setupPromptCount = setupContext ? Number(setupContext.setupPromptCount ?? 0) : 0;
+const accountedRealPromptCount = Math.max(setupPromptCount, gateAttemptedRealRequests, gateRealPromptCount);
+const wrapperEvidence = {
+  stage: "AUT-2 Gate Fix 2",
   result,
   startedAt,
   officialCli: {
@@ -153,8 +281,32 @@ console.log(JSON.stringify({
     statusDuring: statusDuring ? statusSummary(statusDuring) : null,
     closeAfter: closeAfter ? statusSummary(closeAfter) : null,
   },
+  setup: {
+    projectName: webgptProjectName,
+    promptCount: setupContext ? 1 : 0,
+    newChatCount: setupContext ? 1 : 0,
+    setupChatRef: setupContext?.setupChatRef ?? null,
+    setupRequestId: setupContext?.setupRequestId ?? null,
+    setupIdempotencyKey: setupContext?.setupIdempotencyKey ?? null,
+    setupFailure,
+    commands: Object.fromEntries(Object.entries(setupInvocations).map(([key, invocation]) => [key, statusSummary(invocation)])),
+    finalRequirementBinding: finalRoleStatus ? statusSummary(finalRoleStatus) : null,
+    promptBodyLogged: false,
+    responseBodyLogged: false,
+    cookiesRead: false,
+    tokensRead: false,
+  },
+  accounting: {
+    realPromptCount: accountedRealPromptCount,
+    attemptedRealRequests: gateAttemptedRealRequests,
+    roleSetupPromptCount: setupPromptCount,
+    newChatCount: setupContext ? Number(setupContext.newChatCount ?? 0) : 0,
+    repairCount: 0,
+    source: "gate_evidence_attempted_requests_and_setup_context",
+  },
   gateEvidence,
   temporaryEvidence: "cleaned-after-run",
-  evidencePath,
-}, null, 2));
+};
+await writeFile(permanentEvidencePath, `${JSON.stringify(wrapperEvidence, null, 2)}\n`, "utf8");
+console.log(JSON.stringify(wrapperEvidence, null, 2));
 if (result !== "PASS_REAL") process.exitCode = 1;

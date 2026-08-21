@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from "electron";
 import { createHash, randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { extname, isAbsolute, join, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
@@ -31,7 +31,7 @@ import { createWebGptCliArgumentError, createWebGptCliFailure, presentWebGptCliO
 import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 import { AutomationStore } from "../automation/store.ts";
-import { runAut2RealWebGptGate } from "../automation/aut2-real-webgpt-gate.ts";
+import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../automation/aut2-real-webgpt-gate.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -153,6 +153,7 @@ async function startAut2RealWebGptGate(): Promise<void> {
   const outputPath = process.env.AUT2_REAL_WEBGPT_GATE_OUTPUT?.trim() || join(app.getPath("userData"), "aut2-real-webgpt-evidence.json");
   const webgptProjectId = process.env.AUT2_WEBGPT_PROJECT_ID?.trim() || "";
   if (!webgptProjectId) throw new Error("AUT2_WEBGPT_PROJECT_ID is required for the real Gate.");
+  const setupContext = await waitForAut2SetupContext(process.env.AUT2_REAL_WEBGPT_GATE_SETUP_FILE?.trim() || "");
   const evidence = await runAut2RealWebGptGate({
     store: automationStore,
     roleSession: getWebGptRoleService(),
@@ -164,10 +165,52 @@ async function startAut2RealWebGptGate(): Promise<void> {
     automationProjectId: process.env.AUT2_AUTOMATION_PROJECT_ID?.trim() || undefined,
     timeoutMs: Number(process.env.AUT2_REAL_WEBGPT_TIMEOUT_MS ?? 240_000),
     outputPath,
+    setupContext,
   });
   logger.info("aut2_real_webgpt_gate_finished", { result: evidence.result, attemptedRealRequests: evidence.attemptedRealRequests, realPromptCount: evidence.realPromptCount, outputPath });
   if (evidence.result !== "PASS_REAL") process.exitCode = 1;
   setTimeout(() => app.quit(), 50);
+}
+
+async function waitForAut2SetupContext(path: string): Promise<Aut2RealWebGptSetupContext> {
+  if (!path) throw new Error("AUT2_REAL_WEBGPT_GATE_SETUP_FILE is required for AUT-2 Gate Fix 2.");
+  const timeoutMs = Math.max(5_000, Math.min(600_000, Number(process.env.AUT2_REAL_WEBGPT_SETUP_TIMEOUT_MS ?? 420_000)));
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "setup context not written";
+  while (Date.now() < deadline) {
+    try {
+      const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("setup context must be an object");
+      const value = parsed as Record<string, unknown>;
+      if (typeof value.error === "string" && value.error) throw new Error(`AUT2_SETUP_FAILED:${value.error}`);
+      const original = value.originalBinding;
+      if (!original || typeof original !== "object" || Array.isArray(original)) throw new Error("originalBinding missing");
+      const originalRecord = original as Record<string, unknown>;
+      if (value.stableChatMaterialized !== true) throw new Error("stableChatMaterialized must be true");
+      const context: Aut2RealWebGptSetupContext = {
+        originalBinding: {
+          status: String(originalRecord.status ?? ""),
+          chatUrl: String(originalRecord.chatUrl ?? ""),
+        },
+        setupChatRef: String(value.setupChatRef ?? ""),
+        setupRequestId: String(value.setupRequestId ?? ""),
+        setupIdempotencyKey: String(value.setupIdempotencyKey ?? ""),
+        setupPromptCount: Number(value.setupPromptCount ?? 0),
+        newChatCount: Number(value.newChatCount ?? 0),
+        stableChatMaterialized: true,
+        latestAssistantSha256: typeof value.latestAssistantSha256 === "string" ? value.latestAssistantSha256 : null,
+      };
+      if (context.originalBinding.status !== "BOUND" || !context.originalBinding.chatUrl || !context.setupChatRef || !context.setupRequestId || context.setupPromptCount < 1 || context.newChatCount < 1 || !context.stableChatMaterialized) {
+        throw new Error("setup context failed bounded validation");
+      }
+      return context;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("AUT2_SETUP_FAILED:")) throw error;
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`AUT-2 setup materialization did not become ready within ${timeoutMs}ms: ${lastError}`);
 }
 
 function send(channel: string, payload: unknown): void {
