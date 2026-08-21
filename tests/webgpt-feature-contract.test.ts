@@ -36,6 +36,16 @@ test("WebGPT build/package boundary includes the independent feature directory",
   assert.match(tsconfig, /src\/\*\*\/\*\.ts/);
   assert.match(build, /tsc/);
   assert.match(pack, /["']features["']/);
+  assert.match(pack, /dist\/main\/main\.js/);
+});
+
+test("WebGPT latest output uses a durable shared text writer", () => {
+  const main = readFileSync(join(root, "src", "main", "main.ts"), "utf8");
+  const output = readFileSync(join(root, "src", "main", "webgpt-output.ts"), "utf8");
+  assert.match(main, /writeWebGptTextOutput/);
+  assert.match(output, /open\(outputPath, "wx"\)/);
+  assert.match(output, /await handle\.sync\(\)/);
+  assert.match(output, /await handle\?\.close\(\)/);
 });
 
 test("remote WebGPT pages do not receive the V1 preload bridge", () => {

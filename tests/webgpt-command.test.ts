@@ -112,3 +112,10 @@ test("WebGPT WEB-6.5 CLI parser keeps targeted latest reads explicit", () => {
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "latest", "--project", "project-a"]).kind, "error");
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "chat", "latest", "--url", "https://chatgpt.com/c/target", "--unknown"]).kind, "error");
 });
+
+test("WebGPT CLI accepts Electron's explicit argument separator", () => {
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "--", "webgpt", "chat", "latest", "--url", "https://chatgpt.com/c/target", "--out", "C:\\Temp\\latest.txt", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.chat.latest", json: true, url: "https://chatgpt.com/c/target", out: "C:\\Temp\\latest.txt" },
+  });
+});

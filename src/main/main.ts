@@ -26,6 +26,7 @@ import { isWebGptProjectOperationCommand, projectOperationBudgetMs } from "../fe
 import type { WebGptLatestResponse, WebGptRole } from "../features/webgpt/types.ts";
 import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
 import { WEBGPT_CONTROL_PROTOCOL_VERSION, WebGptControlServer, controlDescriptorPath, createControlDescriptor, publishControlDescriptor, removeControlDescriptor, runWebGptCli, type WebGptControlDescriptor, type WebGptControlIdentity, type WebGptControlRequest, type WebGptControlResponse } from "./webgpt-control.ts";
+import { writeWebGptTextOutput } from "./webgpt-output.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -218,14 +219,11 @@ async function latestControlResult(latest: WebGptLatestResponse, outputPathRaw?:
   if (!outputPathRaw) return { ...metadata, assistantText: latest.assistantText };
   if (latest.assistantText === null) throw codedError("NO_ASSISTANT_RESPONSE", "没有可写入的 Assistant 回复。", { ...metadata, assistantText: null });
   const outputPath = validateResultPath(outputPathRaw);
-  const bytes = Buffer.from(latest.assistantText, "utf8");
-  try {
-    await writeFile(outputPath, bytes, { flag: "wx" });
-  } catch (error) {
-    if ((error as { code?: string })?.code === "EEXIST") throw codedError("WEBGPT_LATEST_OUTPUT_EXISTS", "latest 输出文件已存在，为避免覆盖已拒绝写入。");
-    throw error;
-  }
-  return { ...metadata, assistantText: null, outputPath, outputBytes: bytes.byteLength };
+  const output = await writeWebGptTextOutput(outputPath, latest.assistantText, {
+    code: "WEBGPT_LATEST_OUTPUT_EXISTS",
+    message: "latest 输出文件已存在，为避免覆盖已拒绝写入。",
+  });
+  return { ...metadata, assistantText: null, ...output };
 }
 
 function publicWebGptState(state: import("../features/webgpt/types.ts").WebGptState): Record<string, unknown> {
@@ -376,14 +374,11 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
         }
         else if (request.out) {
           const outputPath = validateResultPath(request.out);
-          const bytes = Buffer.from(result.response, "utf8");
-          try {
-            await writeFile(outputPath, bytes, { flag: "wx" });
-          } catch (error) {
-            if ((error as { code?: string })?.code === "EEXIST") throw codedError("WEBGPT_RESULT_OUTPUT_EXISTS", "结果输出文件已存在，为避免覆盖已拒绝写入。");
-            throw error;
-          }
-          response = controlOk(request.command, { ...result, response: null, outputPath, outputBytes: bytes.byteLength });
+          const output = await writeWebGptTextOutput(outputPath, result.response, {
+            code: "WEBGPT_RESULT_OUTPUT_EXISTS",
+            message: "结果输出文件已存在，为避免覆盖已拒绝写入。",
+          });
+          response = controlOk(request.command, { ...result, response: null, ...output });
         } else response = controlOk(request.command, result);
       }
     } else if (request.command === "webgpt.screenshot") {
