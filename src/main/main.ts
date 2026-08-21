@@ -450,7 +450,7 @@ function cliOutput(invocation: WebGptCliCommand, response: WebGptControlResponse
   return `${response.command}: ERROR [${response.error?.code ?? "UNKNOWN"}] ${response.error?.message ?? "未知错误"}\n`;
 }
 
-async function runCliInvocation(invocation: WebGptCliInvocation): Promise<void> {
+async function runCliInvocation(invocation: WebGptCliInvocation, workbenchExecutablePath = process.execPath): Promise<void> {
   if (invocation.kind === "error") {
     const response: WebGptControlResponse = {
       version: WEBGPT_CONTROL_PROTOCOL_VERSION,
@@ -471,7 +471,7 @@ async function runCliInvocation(invocation: WebGptCliInvocation): Promise<void> 
     process.exit(2);
     return;
   }
-  const response = await runWebGptCli(invocation.command, process.execPath, controlDescriptorPath(app.getPath("userData")));
+  const response = await runWebGptCli(invocation.command, process.execPath, controlDescriptorPath(app.getPath("userData")), undefined, workbenchExecutablePath);
   const responseWithExit = {
     ...response,
     diagnostics: {
@@ -1423,8 +1423,16 @@ async function startWebGptControlPlane(): Promise<void> {
 }
 
 const cliInvocation = parseWebGptCliInvocation(process.argv);
+const officialCliMode = process.argv.includes("--workbench-official-cli");
 
-if (cliInvocation.kind !== "not-cli") {
+if (officialCliMode) {
+  app.whenReady().then(() => runCliInvocation(cliInvocation, join(dirname(process.execPath), "Codex Workbench V1.exe"))).catch(async (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    await new Promise<void>((resolveOutput) => process.stderr.write(`webgpt: ERROR [CLI_UNHANDLED] ${message}\n`, () => resolveOutput()));
+    await closeCliOutputStreams();
+    process.exit(1);
+  });
+} else if (cliInvocation.kind !== "not-cli") {
   void runCliInvocation(cliInvocation).catch(async (error) => {
     const message = error instanceof Error ? error.message : String(error);
     await new Promise<void>((resolveOutput) => process.stderr.write(`webgpt: ERROR [CLI_UNHANDLED] ${message}\n`, () => resolveOutput()));

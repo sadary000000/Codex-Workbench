@@ -497,6 +497,7 @@ export async function runWebGptCli(
   executablePath: string,
   descriptorPath: string,
   timeoutMs = WEBGPT_CONTROL_TIMEOUT_MS,
+  workbenchExecutablePath = executablePath,
 ): Promise<WebGptControlResponse> {
   const projectCommand = isWebGptProjectOperationCommand(command.name) ? command.name : null;
   const commandTimeout = projectCommand
@@ -563,7 +564,7 @@ export async function runWebGptCli(
     }
     if (!spawned && !controlReachable) {
       try {
-        spawnWorkbench(executablePath);
+        spawnWorkbench(workbenchExecutablePath);
         spawned = true;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
