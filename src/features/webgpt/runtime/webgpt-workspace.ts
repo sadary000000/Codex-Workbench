@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { shell, WebContentsView, type BaseWindow, type Rectangle, type Session } from "electron";
-import { buildWebGptCreateProjectChatScript, buildWebGptInspectProjectScript, buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
+import { buildWebGptCreateProjectChatScript, buildWebGptCreateProjectScript, buildWebGptInspectProjectScript, buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
 import { createWebGptSession, webGptSessionPath } from "../session/webgpt-session.ts";
 import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import { projectOperationBudgetMs, type WebGptProjectClickResult, type WebGptProjectOperationCommand, type WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
@@ -8,6 +8,7 @@ import { WebGptNetworkObserver } from "../network/network-observer.ts";
 import { WebGptCompletionProbeScheduler } from "../network/completion-scheduler.ts";
 import type { WebGptNetworkObservationContext, WebGptNetworkObserverDiagnostics, WebGptNetworkWaitDiagnostics } from "../network/network-types.ts";
 import { WebGptOperationArbiter } from "./webgpt-operation-arbiter.ts";
+import { normalizeWebGptProjectUrl, projectIdFromProjectUrl } from "./webgpt-project-registry.ts";
 import type {
   WebGptBounds,
   WebGptHealthStatus,
@@ -557,6 +558,64 @@ export class WebGptWorkspace implements WebGptPublicService {
     const name = projectName.trim();
     if (!name || name.length > 256) throw this.codedError("PROJECT_NAME_REQUIRED", "Project 名称必须是 1 到 256 个字符。");
     return this.runProjectOperation("webgpt.project.open", (operation) => this.openProjectForAutomationWithin(name, operation));
+  }
+
+  async createProjectForAutomation(projectName: string): Promise<Record<string, unknown>> {
+    if (this.closed) throw this.codedError("WEBGPT_CLOSED", "WebGPT Workspace 已关闭。");
+    const name = projectName.trim();
+    if (!name || name.length > 256 || [...name].some((character) => character < " ")) {
+      throw this.codedError("PROJECT_NAME_INVALID", "Project 名称必须是 1 到 256 个可见字符。");
+    }
+    return this.runProjectOperation("webgpt.project.create", async (operation) => {
+      operation.assert();
+      this.setVisible(true);
+      const currentUrl = this.view.webContents.getURL();
+      if (!currentUrl || currentUrl.startsWith("chrome-error://") || this.state.error) {
+        await this.load(WEBGPT_HOME_URL);
+        operation.assert();
+      }
+      operation.timeline.createActionStartAt = new Date().toISOString();
+      const result = await this.view.webContents.executeJavaScript(buildWebGptCreateProjectScript(name)) as Record<string, unknown>;
+      operation.timeline.createActionEndAt = new Date().toISOString();
+      operation.timeline.createActionResult = {
+        clicked: result?.clicked === true,
+        ambiguous: result?.ambiguous === true,
+        matchCount: typeof result?.matchCount === "number" ? result.matchCount : undefined,
+        actionCount: typeof result?.actionCount === "number" ? result.actionCount : undefined,
+        targetTag: typeof (result?.action as Record<string, unknown> | undefined)?.tag === "string" ? (result?.action as Record<string, unknown>).tag as string : null,
+        targetRole: typeof (result?.action as Record<string, unknown> | undefined)?.role === "string" ? (result?.action as Record<string, unknown>).role as string : null,
+      } satisfies WebGptProjectClickResult;
+      operation.assert();
+      if (result?.clicked !== true) {
+        const code = typeof result?.code === "string" ? result.code : "PROJECT_CREATE_FAILED";
+        if (["PROJECT_ALREADY_EXISTS", "PROJECT_CREATE_ACTION_NOT_FOUND", "PROJECT_CREATE_ACTION_AMBIGUOUS", "PROJECT_CREATE_SECTION_NOT_FOUND"].includes(code)) {
+          throw this.codedError(code, `WebGPT Project 创建未执行：${name}。`, { result });
+        }
+        throw this.codedError("PROJECT_CREATE_NOT_CONFIRMED", `WebGPT Project 创建动作未确认：${name}。`, { result });
+      }
+      operation.timeline.createConfirmStartAt = new Date().toISOString();
+      const projectUrlRaw = typeof result.projectUrl === "string" ? result.projectUrl : "";
+      const projectIdRaw = typeof result.projectId === "string" ? result.projectId.trim() : "";
+      let projectUrl: string;
+      try { projectUrl = normalizeWebGptProjectUrl(projectUrlRaw); }
+      catch (error) { throw this.codedError("PROJECT_CREATE_NOT_CONFIRMED", "远程 Project 已点击创建，但未返回有效 Project URL。", { result, reason: error instanceof Error ? error.message : String(error) }); }
+      const urlProjectId = projectIdFromProjectUrl(projectUrl);
+      if (!projectIdRaw || !urlProjectId || projectIdRaw !== urlProjectId) {
+        throw this.codedError("PROJECT_CREATE_NOT_CONFIRMED", "远程 Project 已点击创建，但 Project ID 与 URL 未能一致确认。", { projectId: projectIdRaw || null, projectUrl });
+      }
+      operation.timeline.createConfirmEndAt = new Date().toISOString();
+      return {
+        projectName: name,
+        projectId: projectIdRaw,
+        projectUrl,
+        created: true,
+        promptSent: false,
+        chatCreated: false,
+        action: result.action ?? null,
+        confirmation: result.confirm ?? null,
+        mode: this.state.mode,
+      };
+    });
   }
 
   async createChatInProjectForAutomation(projectName: string): Promise<Record<string, unknown>> {

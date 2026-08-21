@@ -24,7 +24,7 @@ export interface ControlPlaneClientInfo {
 export const CONTROL_PLANE_CAPABILITIES = [
   { name: "webgpt.control.v1", status: "STABLE", description: "Versioned Control Plane initialize and authenticated request routing." },
   { name: "webgpt.status", status: "STABLE", description: "Read WebGPT runtime health and public page state." },
-  { name: "webgpt.project", status: "STABLE", description: "Project inspection, navigation, and Project-scoped chat creation." },
+  { name: "webgpt.project", status: "STABLE", description: "Remote Project creation, inspection, navigation, and Project-scoped chat creation." },
   { name: "webgpt.role", status: "STABLE", description: "Project Role registry and target-safe routing." },
   { name: "webgpt.request-lifecycle", status: "STABLE", description: "Request status, wait, result, and idempotent send lifecycle." },
   { name: "webgpt.read-latest", status: "STABLE", description: "Targeted metadata/result reads without prompt submission." },
@@ -50,6 +50,7 @@ export const WEBGPT_CONTROL_COMMANDS = [
   "webgpt.chat.latest",
   "webgpt.project.inspect",
   "webgpt.project.open",
+  "webgpt.project.create",
   "webgpt.project.new-chat",
   "webgpt.role.list",
   "webgpt.role.status",

@@ -21,6 +21,8 @@ import {
   projectOperationBudgetMs,
   WEBGPT_PROJECT_INSPECT_CLI_TIMEOUT_MS,
   WEBGPT_PROJECT_INSPECT_OPERATION_TIMEOUT_MS,
+  WEBGPT_PROJECT_CREATE_CLI_TIMEOUT_MS,
+  WEBGPT_PROJECT_CREATE_OPERATION_TIMEOUT_MS,
   WEBGPT_PROJECT_NEW_CHAT_CLI_TIMEOUT_MS,
   WEBGPT_PROJECT_NEW_CHAT_OPERATION_TIMEOUT_MS,
   WEBGPT_PROJECT_OPEN_CLI_TIMEOUT_MS,
@@ -98,6 +100,18 @@ test("WebGPT Control Plane validates versioned, request-scoped allowlisted reque
     command: "webgpt.project.inspect",
     projectName: "workts",
   });
+  const create = parseWebGptControlRequest({
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "project-create-1",
+    command: "webgpt.project.create",
+    projectName: " demo ",
+  });
+  assert.deepEqual(create, {
+    version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+    requestId: "project-create-1",
+    command: "webgpt.project.create",
+    projectName: "demo",
+  });
   const badVersion = parseWebGptControlRequest({ version: 2, requestId: "req-2", command: "webgpt.status" });
   assert.equal("ok" in badVersion && badVersion.ok, false);
   assert.equal("error" in badVersion && badVersion.error?.code, "CONTROL_VERSION_UNSUPPORTED");
@@ -172,13 +186,16 @@ test("WebGPT Project navigation Control Plane requires a bounded project name", 
 
 test("Project navigation budgets leave a transport margin over bounded server work", () => {
   assert.equal(projectOperationBudgetMs("webgpt.project.inspect"), WEBGPT_PROJECT_INSPECT_OPERATION_TIMEOUT_MS);
+  assert.equal(projectOperationBudgetMs("webgpt.project.create"), WEBGPT_PROJECT_CREATE_OPERATION_TIMEOUT_MS);
   assert.equal(projectOperationBudgetMs("webgpt.project.open"), WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS);
   assert.equal(projectCliTimeoutMs("webgpt.project.inspect"), WEBGPT_PROJECT_INSPECT_CLI_TIMEOUT_MS);
   assert.equal(projectOperationBudgetMs("webgpt.project.new-chat"), WEBGPT_PROJECT_NEW_CHAT_OPERATION_TIMEOUT_MS);
   assert.equal(projectCliTimeoutMs("webgpt.project.open"), WEBGPT_PROJECT_OPEN_CLI_TIMEOUT_MS);
   assert.equal(projectCliTimeoutMs("webgpt.project.new-chat"), WEBGPT_PROJECT_NEW_CHAT_CLI_TIMEOUT_MS);
+  assert.equal(projectCliTimeoutMs("webgpt.project.create"), WEBGPT_PROJECT_CREATE_CLI_TIMEOUT_MS);
   assert.equal(WEBGPT_PROJECT_OPEN_CLI_TIMEOUT_MS > WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS, true);
   assert.equal(WEBGPT_PROJECT_NEW_CHAT_CLI_TIMEOUT_MS > WEBGPT_PROJECT_NEW_CHAT_OPERATION_TIMEOUT_MS, true);
+  assert.equal(WEBGPT_PROJECT_CREATE_CLI_TIMEOUT_MS > WEBGPT_PROJECT_CREATE_OPERATION_TIMEOUT_MS, true);
 });
 
 test("webgpt close does not cold-start a Workbench when no instance is running", async () => {

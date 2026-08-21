@@ -240,7 +240,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (command === "webgpt.send" && ((record.projectId !== undefined) !== (role !== undefined))) return controlError("PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 projectId 和 role。", command, requestId);
   if (command === "webgpt.request.status" && typeof record.targetRequestId !== "string") return controlError("REQUEST_ID_REQUIRED", "request status 必须提供 requestId。", command, requestId);
   if (command === "webgpt.request.list" && record.active !== true) return controlError("REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。", command, requestId);
-  if (["webgpt.project.inspect", "webgpt.project.open", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
+  if (["webgpt.project.inspect", "webgpt.project.open", "webgpt.project.create", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
   if (record.idempotencyKey !== undefined && command !== "webgpt.send") return controlError("CONTROL_IDEMPOTENCY_UNSUPPORTED", "idempotencyKey 只支持 send。", command, requestId);
   if (record.replace !== undefined && command !== "webgpt.role.new" && command !== "webgpt.role.bind") return controlError("CONTROL_REPLACE_INVALID", "replace 只支持 role new/bind。", command, requestId);
   const allowedByCommand: Record<string, readonly string[]> = {
@@ -257,6 +257,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.chat.latest": ["url", "out"],
     "webgpt.project.inspect": ["projectName"],
     "webgpt.project.open": ["projectName"],
+    "webgpt.project.create": ["projectName"],
     "webgpt.project.new-chat": ["projectName"],
     "webgpt.role.list": ["projectId"],
     "webgpt.role.status": ["projectId", "role"],

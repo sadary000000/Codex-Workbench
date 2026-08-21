@@ -8,6 +8,7 @@ import { isWebGptInterruptionTestHookEnabled, waitForWebGptInterruptionTestHook,
 import type { WebGptWorkspace } from "./webgpt-workspace.ts";
 import type { WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
 import type { WebGptOperationArbiter, WebGptOperationLease, WebGptOperationRequest, WebGptOperationType } from "./webgpt-operation-arbiter.ts";
+import { normalizeWebGptProjectUrl, WebGptProjectRegistry } from "./webgpt-project-registry.ts";
 
 const REQUEST_FILE = "requests.json";
 const RESULT_DIRECTORY = "results";
@@ -29,6 +30,7 @@ export interface WebGptRequestManagerOptions {
   onState?: (state: WebGptRequestStateEvent) => void;
   onTerminal?: (record: WebGptRequestRecord) => Promise<void> | void;
   validateTarget?: (record: WebGptRequestRecord) => Promise<void> | void;
+  projectRegistry?: WebGptProjectRegistry;
 }
 
 export interface WebGptRequestMetadata {
@@ -50,6 +52,7 @@ export class WebGptRequestManager {
   private readonly onState: (state: WebGptRequestStateEvent) => void;
   private readonly onTerminal: (record: WebGptRequestRecord) => Promise<void> | void;
   private readonly validateTarget?: (record: WebGptRequestRecord) => Promise<void> | void;
+  private readonly projectRegistry?: WebGptProjectRegistry;
   private readonly records = new Map<string, WebGptRequestRecord>();
   private readonly prompts = new Map<string, string>();
   private persistQueue: Promise<void> = Promise.resolve();
@@ -64,6 +67,7 @@ export class WebGptRequestManager {
     this.onState = options.onState ?? (() => undefined);
     this.onTerminal = options.onTerminal ?? (() => undefined);
     this.validateTarget = options.validateTarget;
+    this.projectRegistry = options.projectRegistry;
     this.loadPromise = this.load();
   }
 
@@ -181,6 +185,24 @@ export class WebGptRequestManager {
     await this.ensureAutomationControl();
     const result = await this.withBrowserLease({ source: "CLI", ownerKey: "control-plane", operationType: "PROJECT_NEW_CHAT" }, () => this.workspace.createChatInProjectForAutomation(projectName));
     return { ...result, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
+  }
+
+  async createProject(projectName: string): Promise<Record<string, unknown>> {
+    await this.ready();
+    await this.ensureAutomationControl();
+    const name = projectName.trim();
+    if (!name || name.length > 256 || [...name].some((character) => character < " ")) {
+      throw this.codedError("PROJECT_NAME_INVALID", "Project 名称必须是 1 到 256 个可见字符。");
+    }
+    if (!this.projectRegistry) throw this.codedError("PROJECT_CREATE_FAILED", "WebGPT Project Registry 尚未配置，已拒绝创建以避免丢失远程 Project 身份。");
+    const existing = await this.projectRegistry.findByName(name);
+    if (existing) throw this.codedError("PROJECT_ALREADY_EXISTS", "本地 WebGPT Project Registry 已存在同名 Project，已拒绝远程重复创建。", { name });
+    const result = await this.withBrowserLease({ source: "CLI", ownerKey: "control-plane", operationType: "PROJECT_CREATE" }, () => this.workspace.createProjectForAutomation(name));
+    const projectId = typeof result.projectId === "string" ? result.projectId.trim() : "";
+    const projectUrl = typeof result.projectUrl === "string" ? normalizeWebGptProjectUrl(result.projectUrl) : "";
+    if (!projectId || !projectUrl) throw this.codedError("PROJECT_CREATE_NOT_CONFIRMED", "远程 Project 创建结果缺少可持久化身份，已拒绝写入 Registry。", { name });
+    const record = await this.projectRegistry.create({ projectId, name, projectUrl });
+    return { ...result, project: record, projectId: record.projectId, projectUrl: record.projectUrl, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
   }
 
   getLastProjectOperationTimeline(): WebGptProjectOperationTimeline | null {

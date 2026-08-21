@@ -22,6 +22,7 @@ import { WebGptWorkspace, type WebGptBounds } from "../features/webgpt/index.ts"
 import { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
 import { WebGptRoleSessionRegistry } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
 import { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
+import { WebGptProjectRegistry } from "../features/webgpt/runtime/webgpt-project-registry.ts";
 import { isWebGptProjectOperationCommand, projectOperationBudgetMs } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
 import type { WebGptLatestResponse, WebGptRole } from "../features/webgpt/types.ts";
 import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
@@ -113,6 +114,7 @@ let webGptRuntimeId: string | null = null;
 let webGptRequestManager: WebGptRequestManager | null = null;
 let webGptRoleRegistry: WebGptRoleSessionRegistry | null = null;
 let webGptRoleService: WebGptRoleSessionService | null = null;
+let webGptProjectRegistry: WebGptProjectRegistry | null = null;
 let webGptControlRevision = 0;
 let webGptControlQueue: Promise<void> = Promise.resolve();
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
@@ -358,6 +360,10 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
       operationStartMs = Date.now();
       if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project open 必须提供 Project 名称。");
       else response = controlOk(request.command, await getWebGptRequestManager().openProject(request.projectName));
+    } else if (request.command === "webgpt.project.create") {
+      operationStartMs = Date.now();
+      if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project create 必须提供 Project 名称。");
+      else response = controlOk(request.command, await getWebGptRequestManager().createProject(request.projectName));
     } else if (request.command === "webgpt.project.new-chat") {
       operationStartMs = Date.now();
       if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project new-chat 必须提供 Project 名称。");
@@ -563,6 +569,7 @@ function getWebGptRequestManager(): WebGptRequestManager {
   webGptRequestManager = new WebGptRequestManager({
     workspace,
     storageDirectory: join(app.getPath("userData"), "webgpt", "requests"),
+    projectRegistry: getWebGptProjectRegistry(),
     onState: (state) => send(IPC.webGptRequestState, state),
     onTerminal: (record) => webGptRoleService?.handleTerminal(record),
     validateTarget: async (record) => {
@@ -574,6 +581,14 @@ function getWebGptRequestManager(): WebGptRequestManager {
     },
   });
   return webGptRequestManager;
+}
+
+function getWebGptProjectRegistry(): WebGptProjectRegistry {
+  if (webGptProjectRegistry) return webGptProjectRegistry;
+  webGptProjectRegistry = new WebGptProjectRegistry({
+    storageDirectory: join(app.getPath("userData"), "webgpt", "projects"),
+  });
+  return webGptProjectRegistry;
 }
 
 function getWebGptRoleRegistry(): WebGptRoleSessionRegistry {

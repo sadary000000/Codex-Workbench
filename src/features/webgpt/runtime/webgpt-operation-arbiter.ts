@@ -11,6 +11,7 @@ export type WebGptOperationType =
   | "OPEN_CHAT"
   | "PROJECT_INSPECT"
   | "PROJECT_OPEN"
+  | "PROJECT_CREATE"
   | "PROJECT_NEW_CHAT"
   | "ROLE_OPEN"
   | "ROLE_NEW"

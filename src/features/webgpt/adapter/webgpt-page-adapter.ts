@@ -191,6 +191,89 @@ export function buildWebGptOpenProjectScript(projectName: string): string {
 })(${JSON.stringify(projectName)})`;
 }
 
+export function buildWebGptCreateProjectScript(projectName: string): string {
+  return `((async (expectedName) => {
+  const visible = (element) => {
+    if (!(element instanceof Element)) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  };
+  const label = (element) => String(element.getAttribute("aria-label") || element.getAttribute("title") || element.innerText || element.textContent || element.getAttribute("data-testid") || "").replace(/\\s+/g, " ").trim();
+  const bounded = (element) => ({
+    tag: element?.tagName || null,
+    role: element?.getAttribute("role") || null,
+    ariaLabel: element?.getAttribute("aria-label") || null,
+    ariaExpanded: element?.getAttribute("aria-expanded") || null,
+    dataTestId: element?.getAttribute("data-testid") || null,
+    label: label(element).slice(0, 160),
+  });
+  const exactProjectRow = (scope) => [...scope.querySelectorAll("a, button, [role=\\"link\\"], [role=\\"button\\"], [role=\\"treeitem\\"]")]
+    .filter((element) => visible(element) && label(element) === expectedName);
+  const heading = [...document.querySelectorAll("h1, h2, h3, [role=\\"heading\\"], div, span")]
+    .find((element) => visible(element) && /^(项目|projects?)$/i.test(label(element)));
+  if (!heading) return { clicked: false, code: "PROJECT_CREATE_SECTION_NOT_FOUND", projectName: expectedName, matchCount: 0, actionCount: 0, actionLabels: [] };
+  const section = heading.closest("section, nav, aside, [role=\\"region\\"], [role=\\"tree\\"]") || heading.parentElement?.parentElement || heading.parentElement;
+  if (!section) return { clicked: false, code: "PROJECT_CREATE_SECTION_NOT_FOUND", projectName: expectedName, matchCount: 0, actionCount: 0, actionLabels: [] };
+  const existing = exactProjectRow(section);
+  if (existing.length > 0) return { clicked: false, code: "PROJECT_ALREADY_EXISTS", projectName: expectedName, matchCount: existing.length, actionCount: 0, actionLabels: [] };
+  const header = heading.parentElement || heading;
+  const controls = [...header.querySelectorAll("button, a, [role=\\"button\\"], [role=\\"link\\"]")].filter(visible);
+  const createPattern = /new project|create project|add project|新建项目|创建项目|新增项目/i;
+  const actions = controls.filter((element) => createPattern.test(label(element)));
+  if (actions.length === 0) return { clicked: false, code: "PROJECT_CREATE_ACTION_NOT_FOUND", projectName: expectedName, matchCount: 0, actionCount: controls.length, actionLabels: controls.slice(0, 8).map((element) => label(element).slice(0, 160)) };
+  if (actions.length > 1) return { clicked: false, code: "PROJECT_CREATE_ACTION_AMBIGUOUS", projectName: expectedName, matchCount: 0, actionCount: actions.length, actionLabels: actions.slice(0, 8).map((element) => label(element).slice(0, 160)) };
+  const dispatchClick = (target) => {
+    target.focus?.();
+    const pointer = { bubbles: true, cancelable: true, view: window, button: 0, buttons: 1 };
+    if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerdown", pointer));
+    target.dispatchEvent(new MouseEvent("mousedown", pointer));
+    if (typeof PointerEvent === "function") target.dispatchEvent(new PointerEvent("pointerup", { ...pointer, buttons: 0 }));
+    target.dispatchEvent(new MouseEvent("mouseup", { ...pointer, buttons: 0 }));
+    target.click();
+  };
+  const action = actions[0];
+  dispatchClick(action);
+  const actionEvidence = bounded(action);
+  const deadline = Date.now() + 10_000;
+  const findDialog = () => [...document.querySelectorAll("dialog, [role=\\"dialog\\"]")].find(visible) || null;
+  const findNameInput = (dialog) => [...dialog.querySelectorAll("input, textarea, [contenteditable=\\"true\\"], [role=\\"textbox\\"]")]
+    .find((element) => visible(element) && /project|name|项目|名称/i.test(String(element.getAttribute("aria-label") || element.getAttribute("placeholder") || element.getAttribute("name") || ""))) || null;
+  let dialog = null;
+  let input = null;
+  while (Date.now() < deadline && (!dialog || !input)) {
+    dialog = findDialog();
+    input = dialog ? findNameInput(dialog) : null;
+    if (!input) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (!dialog || !input) return { clicked: true, code: "PROJECT_CREATE_ACTION_NOT_CONFIRMED", projectName: expectedName, action: actionEvidence, actionCount: 1 };
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+  if (setter) setter.call(input, expectedName); else input.textContent = expectedName;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  const confirmPattern = /create|new|save|done|confirm|创建|新建|保存|完成|确定/i;
+  const confirmButtons = [...dialog.querySelectorAll("button, [role=\\"button\\"], input[type=\\"submit\\"]")].filter((element) => visible(element) && confirmPattern.test(label(element)));
+  if (confirmButtons.length !== 1) return { clicked: true, code: "PROJECT_CREATE_ACTION_AMBIGUOUS", projectName: expectedName, action: actionEvidence, confirmCount: confirmButtons.length };
+  const confirm = confirmButtons[0];
+  dispatchClick(confirm);
+  const resultDeadline = Date.now() + 10_000;
+  while (Date.now() < resultDeadline) {
+    const rows = exactProjectRow(section);
+    if (rows.length === 1) {
+      const row = rows[0];
+      const href = row instanceof HTMLAnchorElement ? row.href : String(row.getAttribute("href") || row.getAttribute("data-href") || row.getAttribute("data-url") || "");
+      const source = row.closest("a, [data-project-id], [data-id], [data-testid*=\\"project\\"], [role=\\"treeitem\\"]") || row;
+      const projectId = String(source.getAttribute("data-project-id") || source.getAttribute("data-id") || source.getAttribute("data-project-id") || "") || (href.match(/\\/(?:project|projects)\\/([^/?#]+)/i)?.[1] || "");
+      const projectUrl = href || (/\\/(?:project|projects)\\/[^/?#]+/i.test(location.pathname) ? location.href : "");
+      if (projectId && projectUrl) return { clicked: true, projectName: expectedName, projectId, projectUrl, matchCount: 1, action: actionEvidence, confirm: bounded(confirm), promptSent: false, chatCreated: false };
+      return { clicked: true, code: "PROJECT_CREATE_NOT_CONFIRMED", projectName: expectedName, matchCount: 1, action: actionEvidence, confirm: bounded(confirm) };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return { clicked: true, code: "PROJECT_CREATE_NOT_CONFIRMED", projectName: expectedName, matchCount: exactProjectRow(section).length, action: actionEvidence, confirm: bounded(confirm) };
+})(${JSON.stringify(projectName)}))`;
+}
+
 export function buildWebGptInspectProjectScript(projectName: string): string {
   return `((expectedName) => {
   const visible = (element) => {

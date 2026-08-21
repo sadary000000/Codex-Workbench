@@ -145,6 +145,7 @@ export interface WebGptPublicService {
   openHome(): Promise<WebGptState>;
   openChat(url: string): Promise<WebGptState>;
   openProjectForAutomation(projectName: string): Promise<Record<string, unknown>>;
+  createProjectForAutomation(projectName: string): Promise<Record<string, unknown>>;
   createChatInProjectForAutomation(projectName: string): Promise<Record<string, unknown>>;
   getCurrentUrl(): Promise<string>;
   getPageState(): Promise<WebGptPageState>;

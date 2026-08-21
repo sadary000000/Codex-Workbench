@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   isAllowedWebGptNavigation,
   buildWebGptCreateProjectChatScript,
+  buildWebGptCreateProjectScript,
   buildWebGptInspectProjectScript,
   buildWebGptOpenProjectScript,
   buildWebGptProjectProbeScript,
@@ -67,6 +68,7 @@ test("Project navigation scripts use exact bounded names and expose no page cont
   const createScript = buildWebGptCreateProjectChatScript("workts");
   const inspectScript = buildWebGptInspectProjectScript("workts");
   const probeScript = buildWebGptProjectProbeScript("workts");
+  const createProjectScript = buildWebGptCreateProjectScript("demo");
   assert.match(openScript, /workts/);
   assert.match(probeScript, /workts/);
   assert.match(probeScript, /aria-selected/);
@@ -96,4 +98,13 @@ test("Project navigation scripts use exact bounded names and expose no page cont
   assert.doesNotMatch(createScript, /document\.body\.innerText/);
   assert.doesNotMatch(openScript, /document\.body\.innerText/);
   assert.doesNotMatch(probeScript, /document\.body\.innerText/);
+  assert.match(createProjectScript, /PROJECT_CREATE_SECTION_NOT_FOUND/);
+  assert.match(createProjectScript, /PROJECT_ALREADY_EXISTS/);
+  assert.match(createProjectScript, /PROJECT_CREATE_NOT_CONFIRMED/);
+  assert.match(createProjectScript, /pointerdown/);
+  assert.match(createProjectScript, /dialog/);
+  assert.match(createProjectScript, /promptSent: false/);
+  assert.doesNotThrow(() => new Function(createProjectScript));
+  assert.doesNotMatch(createProjectScript, /document\.body\.innerText/);
+  assert.doesNotMatch(createProjectScript, /new chat|new-chat|新建对话|新聊天|新对话/i);
 });
