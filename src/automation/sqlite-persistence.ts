@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
@@ -18,6 +19,11 @@ export const AUTOMATION_WRITER_AUTHORITY = "Workbench Automation Host" as const;
 const TABLES: AutomationTableName[] = [
   "automationProjects",
   "requirementVersions",
+  "requirementAlignmentSessions",
+  "requirementAlignmentRounds",
+  "requirementQuestions",
+  "requirementAssumptions",
+  "requirementChangeRequests",
   "planVersions",
   "stageSpecs",
   "stepSpecs",
@@ -39,6 +45,11 @@ const TABLES: AutomationTableName[] = [
 const ID_FIELDS: Record<AutomationTableName, string> = {
   automationProjects: "projectId",
   requirementVersions: "requirementVersionId",
+  requirementAlignmentSessions: "alignmentSessionId",
+  requirementAlignmentRounds: "alignmentRoundId",
+  requirementQuestions: "questionId",
+  requirementAssumptions: "assumptionId",
+  requirementChangeRequests: "changeRequestId",
   planVersions: "planVersionId",
   stageSpecs: "stageSpecId",
   stepSpecs: "stepSpecId",
@@ -394,15 +405,37 @@ export class SqliteAutomationPersistence {
     const count = this.database.prepare("SELECT COUNT(*) AS count FROM automation_records").get() as { count?: number };
     if (existing !== null && existing !== String(AUTOMATION_PERSISTENCE_SCHEMA_VERSION)) throw new AutomationPersistenceError("AUTOMATION_DB_VERSION_UNSUPPORTED", "Automation SQLite persistence schema is newer or incompatible.");
     if (existing === null && Number(count.count ?? 0) > 0) throw new AutomationPersistenceError("AUTOMATION_DB_INVALID", "Automation SQLite records exist without persistence metadata.");
+    const existingFormat = this.meta("format");
+    if (existingFormat !== null && existingFormat !== AUTOMATION_PERSISTENCE_FORMAT) throw new AutomationPersistenceError("AUTOMATION_DB_VERSION_UNSUPPORTED", "Automation SQLite persistence format is unsupported.");
+    const existingDocumentVersion = this.meta("document_schema_version");
+    if (existingDocumentVersion !== null && (!/^\d+$/.test(existingDocumentVersion) || Number(existingDocumentVersion) > AUTOMATION_SCHEMA_VERSION || (Number(existingDocumentVersion) < AUTOMATION_SCHEMA_VERSION && Number(existingDocumentVersion) !== 2))) {
+      throw new AutomationPersistenceError("AUTOMATION_DB_VERSION_UNSUPPORTED", "Automation SQLite document schema is newer or has no supported migration path.");
+    }
+    let effectiveMigration = migration;
+    if (existingDocumentVersion === "2") {
+      const alreadyMigrated = this.meta("migration_source_schema_version") !== null;
+      if (!alreadyMigrated) {
+        const sourceBytes = readFileSync(this.filePath);
+        const backup = `${this.filePath}.v2-backup-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}.sqlite`;
+        mkdirSync(dirname(backup), { recursive: true });
+        if (!existsSync(backup)) copyFileSync(this.filePath, backup);
+        effectiveMigration = {
+          sourceSchemaVersion: 2,
+          sourceSha256: sha256(sourceBytes),
+          sourceBackupPath: backup,
+          migratedAt: now(),
+        };
+      }
+    }
     this.setMeta("format", AUTOMATION_PERSISTENCE_FORMAT);
     this.setMeta("persistence_schema_version", String(AUTOMATION_PERSISTENCE_SCHEMA_VERSION));
     this.setMeta("document_schema_version", String(AUTOMATION_SCHEMA_VERSION));
     this.setMeta("writer_authority", AUTOMATION_WRITER_AUTHORITY);
-    if (migration) {
-      this.setMeta("migration_source_schema_version", String(migration.sourceSchemaVersion));
-      this.setMeta("migration_source_sha256", migration.sourceSha256);
-      this.setMeta("migration_source_backup_path", migration.sourceBackupPath);
-      this.setMeta("migration_at", migration.migratedAt);
+    if (effectiveMigration) {
+      this.setMeta("migration_source_schema_version", String(effectiveMigration.sourceSchemaVersion));
+      this.setMeta("migration_source_sha256", effectiveMigration.sourceSha256);
+      this.setMeta("migration_source_backup_path", effectiveMigration.sourceBackupPath);
+      this.setMeta("migration_at", effectiveMigration.migratedAt);
     }
   }
 

@@ -1,4 +1,4 @@
-export const AUTOMATION_SCHEMA_VERSION = 2 as const;
+export const AUTOMATION_SCHEMA_VERSION = 3 as const;
 
 export type AutomationSchemaVersion = typeof AUTOMATION_SCHEMA_VERSION;
 export type IsoTimestamp = string;
@@ -44,7 +44,197 @@ export type ActionAttemptState = "CREATED" | "RUNNING" | "COMPLETED" | "FAILED" 
 export type ReceiptStatus = "SUCCEEDED" | "FAILED" | "UNKNOWN";
 export type ReconcileState = "NOT_REQUIRED" | "PENDING" | "RECONCILED" | "RECOVERY_REQUIRED";
 
+/**
+ * Requirement alignment is deliberately a bounded protocol.  These values
+ * describe how a missing requirement fact is resolved; they are not a
+ * transport or chat protocol state.
+ */
+export type RequirementResolutionMode =
+  | "USER"
+  | "USER_REQUIRED"
+  | "ASSUMPTION"
+  | "ASSUMPTION_ALLOWED"
+  | "AUTO"
+  | "AVAILABLE_CONTEXT"
+  | "USER_CONFIRMATION"
+  | "AUTO_INVESTIGATION"
+  | "NONE";
+
+export type RequirementAlignmentSessionStatus =
+  | "DRAFT"
+  | "ACTIVE"
+  | "OPEN"
+  | "WAITING_FOR_USER"
+  | "WAITING_AUTOMATIC_EVIDENCE"
+  | "BLOCKED"
+  | "RESOLVED"
+  | "CONFIRMED"
+  | "CANCELLED"
+  | "SUPERSEDED";
+export type RequirementAlignmentSessionState = RequirementAlignmentSessionStatus;
+
+export type RequirementAlignmentRoundStatus =
+  | "DRAFT"
+  | "ACTIVE"
+  | "OPEN"
+  | "WAITING_FOR_USER"
+  | "WAITING_AUTOMATIC_EVIDENCE"
+  | "BLOCKED"
+  | "RESOLVED"
+  | "CONFIRMED"
+  | "CANCELLED";
+export type RequirementAlignmentRoundState = RequirementAlignmentRoundStatus;
+
+export type RequirementQuestionStatus =
+  | "OPEN"
+  | "PENDING"
+  | "ANSWERED"
+  | "ASSUMED"
+  | "RESOLVED"
+  | "SKIPPED"
+  | "CANCELLED";
+export type RequirementQuestionState = RequirementQuestionStatus;
+
+export type RequirementAssumptionStatus =
+  | "PROPOSED"
+  | "ACTIVE"
+  | "ACCEPTED"
+  | "CONFIRMED"
+  | "REJECTED"
+  | "SUPERSEDED";
+export type RequirementAssumptionState = RequirementAssumptionStatus;
+
+export type RequirementAssumptionSource = "SYSTEM" | "USER" | "PROJECT_EVIDENCE";
+
+/** Stable, bounded contract for the Requirement alignment exchange. */
+export interface RequirementProtocol {
+  protocolName: "REQUIREMENT_ALIGNMENT";
+  protocolVersion: number;
+  questionBatching: "BATCHED";
+  maxQuestionsPerRound: number;
+  maxRoundsPerSession: number;
+  maxAssumptionsPerRound: number;
+  allowedResolutionModes: RequirementResolutionMode[];
+  blockingQuestionsRequireUser: true;
+  assumptionsMustBeExplicit: true;
+  trustBoundary: "BOUNDED_FIELDS_ONLY";
+}
+
+export interface RequirementAlignmentSession {
+  alignmentSessionId: string;
+  projectId: string;
+  goal?: string;
+  status: RequirementAlignmentSessionStatus;
+  protocolVersion: number;
+  currentRoundId: string | null;
+  webgptProjectRef?: string | null;
+  requirementRoleBindingRef?: string | null;
+  latestRequestRef?: string | null;
+  latestSemanticSha256?: string | null;
+  latestDraftVersionId?: string | null;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+  confirmedAt: IsoTimestamp | null;
+  completedAt?: IsoTimestamp | null;
+  revision?: number;
+}
+
+export interface RequirementAlignmentRound {
+  alignmentRoundId: string;
+  alignmentSessionId: string;
+  roundNumber: number;
+  status: RequirementAlignmentRoundStatus;
+  /** A round is the batch boundary; each question belongs to exactly one batch. */
+  questionIds: string[];
+  assumptionIds: string[];
+  evidenceRefs?: string[];
+  webgptRequestRef?: string | null;
+  providerSemanticHash?: string | null;
+  createdAt: IsoTimestamp;
+  completedAt: IsoTimestamp | null;
+}
+
+export interface RequirementQuestion {
+  questionId: string;
+  alignmentRoundId: string;
+  ordinal: number;
+  category?: string;
+  question: string;
+  whyNeeded?: string;
+  blocking: boolean;
+  resolutionMode: RequirementResolutionMode;
+  status: RequirementQuestionStatus;
+  answer: string | null;
+  answerRef: string | null;
+  assumptionId: string | null;
+  options?: string[];
+  defaultRecommendation?: string | null;
+  dependsOn?: string[];
+  createdAt: IsoTimestamp;
+  answeredAt: IsoTimestamp | null;
+  resolvedAt: IsoTimestamp | null;
+  metadata: BoundedMetadata;
+}
+
+export interface RequirementAssumption {
+  assumptionId: string;
+  alignmentSessionId: string;
+  alignmentRoundId: string | null;
+  statement: string;
+  impact?: string;
+  confidence?: "LOW" | "MEDIUM" | "HIGH";
+  blocking?: boolean;
+  status: RequirementAssumptionStatus;
+  source: RequirementAssumptionSource;
+  rationale: string | null;
+  evidenceRefs?: string[];
+  createdAt: IsoTimestamp;
+  resolvedAt: IsoTimestamp | null;
+  metadata: BoundedMetadata;
+}
+
 export type ActorType = "SYSTEM" | "USER" | "NATIVE_RUNTIME" | "WEBGPT_RUNTIME" | "AUTOMATION" | "TEST";
+
+export type RequirementChangeRequestStatus =
+  | "DRAFT"
+  | "ANALYZING"
+  | "WAITING_USER_CONFIRMATION"
+  | "APPROVED"
+  | "REJECTED"
+  | "APPLIED"
+  | "CANCELLED";
+export type RequirementReplanLevel = "NONE" | "STAGE" | "WORKFLOW" | "FOUNDATIONAL";
+
+export interface RequirementImpactAnalysis {
+  changedRequirementSections: string[];
+  acceptanceImpact: string[];
+  riskImpact: string[];
+  externalDependencyImpact: string[];
+  affectedPlanRefs: string[];
+  replanLevel: RequirementReplanLevel;
+  requiresPlannerReplan: boolean;
+  newBlockingQuestions: string[];
+  newAssumptions: string[];
+  analysisSha256: string;
+}
+
+/** Persisted proposal; the old RequirementVersion remains immutable. */
+export interface RequirementChangeRequest {
+  changeRequestId: string;
+  projectId: string;
+  baseRequirementVersionId: string;
+  requestedChange: string;
+  reason: string;
+  sourceActor: ActorType;
+  status: RequirementChangeRequestStatus;
+  impactAnalysis: RequirementImpactAnalysis | null;
+  candidateRequirementVersionId: string | null;
+  basePayloadSha256: string;
+  candidatePayloadSha256: string | null;
+  createdAt: IsoTimestamp;
+  updatedAt: IsoTimestamp;
+  revision: number;
+}
 
 export interface AutomationProject {
   projectId: string;
@@ -308,6 +498,11 @@ export interface AutomationDocument {
   automationSchemaVersion: AutomationSchemaVersion;
   automationProjects: AutomationProject[];
   requirementVersions: RequirementVersion[];
+  requirementAlignmentSessions: RequirementAlignmentSession[];
+  requirementAlignmentRounds: RequirementAlignmentRound[];
+  requirementQuestions: RequirementQuestion[];
+  requirementAssumptions: RequirementAssumption[];
+  requirementChangeRequests: RequirementChangeRequest[];
   planVersions: PlanVersion[];
   stageSpecs: StageSpec[];
   stepSpecs: StepSpec[];
@@ -329,6 +524,11 @@ export interface AutomationDocument {
 export interface AutomationTables {
   automationProjects: AutomationProject;
   requirementVersions: RequirementVersion;
+  requirementAlignmentSessions: RequirementAlignmentSession;
+  requirementAlignmentRounds: RequirementAlignmentRound;
+  requirementQuestions: RequirementQuestion;
+  requirementAssumptions: RequirementAssumption;
+  requirementChangeRequests: RequirementChangeRequest;
   planVersions: PlanVersion;
   stageSpecs: StageSpec;
   stepSpecs: StepSpec;

@@ -51,10 +51,10 @@ test("creates an independent automation.db with schema version and survives reop
     assert.equal(project.projectId, "p");
     const inspection = await value.store.inspect();
     assert.equal(inspection.status, "valid");
-    assert.equal(inspection.document?.automationSchemaVersion, 2);
+    assert.equal(inspection.document?.automationSchemaVersion, 3);
     const raw = await readFile(value.store.filePath);
     assert.equal(raw.subarray(0, 16).toString("ascii"), "SQLite format 3\0");
-    assert.equal((await value.store.persistenceDiagnostics()).documentSchemaVersion, 2);
+    assert.equal((await value.store.persistenceDiagnostics()).documentSchemaVersion, 3);
     const reopened = trackedStore(value);
     assert.equal((await reopened.get("automationProjects", "p"))?.name, "independent");
   } finally {
@@ -254,10 +254,10 @@ test("migrates a v1 fixture to v2 and fails closed for future versions", async (
     const migrated = await trackedStore(value).inspect();
     assert.equal(migrated.status, "valid");
     assert.equal(migrated.migratedFrom, 1);
-    assert.equal(migrated.document?.automationSchemaVersion, 2);
+    assert.equal(migrated.document?.automationSchemaVersion, 3);
     assert.equal(migrated.document?.stepRuntimes[0]?.currentAttemptId, attempt.attemptId);
     assert.equal(migrated.document?.requirementVersions[0]?.payloadSha256.length, 64);
-    await writeFile(value.store.filePath, JSON.stringify({ automationSchemaVersion: 3 }), "utf8");
+    await writeFile(value.store.filePath, JSON.stringify({ automationSchemaVersion: 4 }), "utf8");
     await assert.rejects(trackedStore(value).snapshot(), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_DB_VERSION_UNSUPPORTED");
   } finally {
     await dispose(value);

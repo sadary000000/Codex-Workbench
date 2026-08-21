@@ -30,6 +30,7 @@ import { WEBGPT_CONTROL_PROTOCOL_VERSION, WebGptControlServer, controlDescriptor
 import { createWebGptCliArgumentError, createWebGptCliFailure, presentWebGptCliOutput } from "./webgpt-cli-presenter.ts";
 import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
+import { AutomationStore } from "../automation/store.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -117,7 +118,33 @@ let webGptRoleService: WebGptRoleSessionService | null = null;
 let webGptProjectRegistry: WebGptProjectRegistry | null = null;
 let webGptControlRevision = 0;
 let webGptControlQueue: Promise<void> = Promise.resolve();
+let automationStore: AutomationStore | null = null;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
+
+function automationDatabasePath(): string {
+  const override = process.env.AUT2_AUTOMATION_DB?.trim();
+  return override || join(app.getPath("userData"), "automation", "automation.db");
+}
+
+async function startAutomationPersistence(): Promise<void> {
+  const store = new AutomationStore(automationDatabasePath());
+  await store.persistenceDiagnostics();
+  automationStore = store;
+  if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE !== "1") return;
+
+  const projectId = "aut2-normal-gui-project";
+  const existing = await store.get("automationProjects", projectId);
+  const project = existing ?? await store.createAutomationProject({ projectId, name: "AUT-2 normal GUI store gate" });
+  await store.close();
+  automationStore = null;
+  const reopened = new AutomationStore(automationDatabasePath());
+  const restored = await reopened.get("automationProjects", projectId);
+  const result = { mode: "normal-gui-host", created: !existing, projectId: project.projectId, reopened: restored?.projectId === projectId, persistence: await reopened.persistenceDiagnostics() };
+  await reopened.close();
+  console.log(JSON.stringify({ aut2NormalGuiStoreSmoke: result }));
+  if (!result.reopened) process.exitCode = 1;
+  setTimeout(() => app.quit(), 50);
+}
 
 function send(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
@@ -1511,12 +1538,22 @@ if (officialCliMode) {
     app.whenReady().then(() => {
       logger.info("app_ready", { cwd: runtimeCwd(), version: app.getVersion(), webGptCommand: initialWebGptCommand?.type ?? null });
       createWindow();
-      void startWebGptControlPlane();
       app.on("activate", () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
         else forwardPendingWebGptCommand();
       });
-    }).catch((error) => logError(logger, "app_start_failed", error));
+      return startAutomationPersistence().then(() => {
+        if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE === "1") return;
+        void startWebGptControlPlane();
+      });
+    }).catch((error) => {
+      logError(logger, "app_start_failed", error);
+      if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE === "1") {
+        process.exitCode = 1;
+        console.error(JSON.stringify({ aut2NormalGuiStoreSmoke: { mode: "normal-gui-host", ok: false, error: errorInfo(error).message } }));
+        app.quit();
+      }
+    });
 
     app.on("before-quit", (event) => {
       if (quittingForExit) return;
@@ -1528,6 +1565,8 @@ if (officialCliMode) {
           cancelPendingNativeApprovals();
           if (webGptControlServer) await webGptControlServer.close();
           if (webGptControlDescriptorFile) await removeControlDescriptor(webGptControlDescriptorFile);
+          if (automationStore) await automationStore.close();
+          automationStore = null;
           await runtimes.closeAll();
           if (projectMaps) await projectMaps.close();
           if (webGptWorkspace) webGptWorkspace.close();

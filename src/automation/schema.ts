@@ -12,6 +12,7 @@ import {
   type StepKind,
 } from "./types.ts";
 import { canonicalizeJson, computeActionSemanticSha256, sha256Hex } from "./canonical.ts";
+import { RequirementDomainError, validateRequirementDomain } from "./requirement-domain.ts";
 
 const PROJECT_LIFECYCLES = new Set<AutomationProjectLifecycle>([
   "DRAFT",
@@ -471,6 +472,37 @@ function validateCommonTables(document: Record<string, unknown>): void {
     timestamp(item.createdAt, `policyVersions[${index}].createdAt`);
     optionalString(item.supersedes, `policyVersions[${index}].supersedes`, 256);
   });
+
+  const changeRequests = array(document.requirementChangeRequests, "requirementChangeRequests");
+  const changeStatuses = new Set(["DRAFT", "ANALYZING", "WAITING_USER_CONFIRMATION", "APPROVED", "REJECTED", "APPLIED", "CANCELLED"]);
+  const replanLevels = new Set(["NONE", "STAGE", "WORKFLOW", "FOUNDATIONAL"]);
+  changeRequests.forEach((value, index) => {
+    const item = record(value);
+    const field = `requirementChangeRequests[${index}]`;
+    string(item.changeRequestId, `${field}.changeRequestId`, 256);
+    string(item.projectId, `${field}.projectId`, 256);
+    string(item.baseRequirementVersionId, `${field}.baseRequirementVersionId`, 256);
+    string(item.requestedChange, `${field}.requestedChange`, 16_384);
+    string(item.reason, `${field}.reason`, 16_384);
+    enumValue(item.sourceActor, `${field}.sourceActor`, new Set(["SYSTEM", "USER", "NATIVE_RUNTIME", "WEBGPT_RUNTIME", "AUTOMATION", "TEST"]));
+    enumValue(item.status, `${field}.status`, changeStatuses);
+    string(item.basePayloadSha256, `${field}.basePayloadSha256`, 128);
+    optionalString(item.candidateRequirementVersionId, `${field}.candidateRequirementVersionId`, 256);
+    optionalString(item.candidatePayloadSha256, `${field}.candidatePayloadSha256`, 128);
+    timestamp(item.createdAt, `${field}.createdAt`);
+    timestamp(item.updatedAt, `${field}.updatedAt`);
+    integer(item.revision, `${field}.revision`, 0);
+    if (item.impactAnalysis !== null) {
+      const impact = record(item.impactAnalysis);
+      for (const key of ["changedRequirementSections", "acceptanceImpact", "riskImpact", "externalDependencyImpact", "affectedPlanRefs", "newBlockingQuestions", "newAssumptions"] as const) {
+        const values = array(impact[key], `${field}.impactAnalysis.${key}`);
+        values.forEach((entry, entryIndex) => string(entry, `${field}.impactAnalysis.${key}[${entryIndex}]`, 4_096));
+      }
+      enumValue(impact.replanLevel, `${field}.impactAnalysis.replanLevel`, replanLevels);
+      if (typeof impact.requiresPlannerReplan !== "boolean") throw new AutomationSchemaError(`${field}.impactAnalysis.requiresPlannerReplan must be boolean.`);
+      string(impact.analysisSha256, `${field}.impactAnalysis.analysisSha256`, 128);
+    }
+  });
 }
 
 function tableById(document: Record<string, unknown>, table: string, key: string): Map<string, Record<string, unknown>> {
@@ -483,6 +515,7 @@ function tableById(document: Record<string, unknown>, table: string, key: string
 function validateReferences(document: Record<string, unknown>): void {
   const projects = tableById(document, "automationProjects", "projectId");
   const requirements = tableById(document, "requirementVersions", "requirementVersionId");
+  const changeRequests = tableById(document, "requirementChangeRequests", "changeRequestId");
   const plans = tableById(document, "planVersions", "planVersionId");
   const stages = tableById(document, "stageSpecs", "stageSpecId");
   const steps = tableById(document, "stepSpecs", "stepSpecId");
@@ -542,6 +575,13 @@ function validateReferences(document: Record<string, unknown>): void {
   for (const item of requirements.values()) {
     requireSameProject(projects, item.projectId, item.projectId as string, "requirementVersions.projectId");
     requireSameProject(requirements, item.supersedes, item.projectId as string, "requirementVersions.supersedes");
+  }
+  for (const item of changeRequests.values()) {
+    const projectId = item.projectId as string;
+    if (!projects.has(projectId)) throw new AutomationSchemaError("requirementChangeRequests.projectId references a missing project.");
+    const base = requireSameProject(requirements, item.baseRequirementVersionId, projectId, "requirementChangeRequests.baseRequirementVersionId");
+    if (base && base.payloadSha256 !== item.basePayloadSha256) throw new AutomationSchemaError("requirementChangeRequests.basePayloadSha256 does not match its base version.");
+    requireSameProject(requirements, item.candidateRequirementVersionId, projectId, "requirementChangeRequests.candidateRequirementVersionId");
   }
   for (const item of plans.values()) {
     requireSameProject(projects, item.projectId, item.projectId as string, "planVersions.projectId");
@@ -622,6 +662,11 @@ export function createEmptyAutomationDocument(): AutomationDocument {
     automationSchemaVersion: AUTOMATION_SCHEMA_VERSION,
     automationProjects: [],
     requirementVersions: [],
+    requirementAlignmentSessions: [],
+    requirementAlignmentRounds: [],
+    requirementQuestions: [],
+    requirementAssumptions: [],
+    requirementChangeRequests: [],
     planVersions: [],
     stageSpecs: [],
     stepSpecs: [],
@@ -649,7 +694,14 @@ export function validateAutomationDocument(value: unknown): AutomationDocument {
   const projects = array(document.automationProjects, "automationProjects");
   validateUniqueIds(projects, "projectId", "automationProjects");
   projects.forEach((item, index) => validateProject(record(item), index));
+  validateUniqueIds(array(document.requirementChangeRequests, "requirementChangeRequests"), "changeRequestId", "requirementChangeRequests");
   validateVersions(document);
+  try {
+    validateRequirementDomain(document);
+  } catch (error) {
+    if (error instanceof RequirementDomainError) throw new AutomationSchemaError(error.message);
+    throw error;
+  }
   validateCommonTables(document);
   validateReferences(document);
   return document as unknown as AutomationDocument;
@@ -661,7 +713,7 @@ function migratedTimestamp(value: unknown): string {
   return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : new Date(0).toISOString();
 }
 
-function migrateV0ToV2(value: Record<string, unknown>): AutomationDocument {
+function migrateV0ToV3(value: Record<string, unknown>): AutomationDocument {
   const legacyProjects = Array.isArray(value.projects) ? value.projects as LegacyProject[] : [];
   const document = createEmptyAutomationDocument();
   document.automationProjects = legacyProjects.map((project, index) => {
@@ -716,7 +768,7 @@ function normalizeLegacyAudit(value: unknown, index: number, previousHash: strin
   return { ...event, hash };
 }
 
-function migrateV1ToV2(value: Record<string, unknown>): AutomationDocument {
+function migrateV1ToV3(value: Record<string, unknown>): AutomationDocument {
   const source = structuredClone(value) as Record<string, unknown>;
   const document = createEmptyAutomationDocument() as unknown as Record<string, unknown>;
   for (const table of ["automationProjects", "planVersions", "stageSpecs", "executionAttempts", "actionAttempts", "actionReceipts", "externalRefs", "evidences", "artifactRefs", "resourceClaims", "workspaceSnapshots", "policyVersions"] as const) {
@@ -779,7 +831,22 @@ function migrateV1ToV2(value: Record<string, unknown>): AutomationDocument {
     previousHash = event.hash as string;
     return event;
   });
-  document.automationSchemaVersion = 2;
+  document.automationSchemaVersion = 3;
+  return document as unknown as AutomationDocument;
+}
+
+function migrateV2ToV3(value: Record<string, unknown>): AutomationDocument {
+  const document = structuredClone(value) as Record<string, unknown>;
+  document.automationSchemaVersion = 3;
+  for (const table of [
+    "requirementAlignmentSessions",
+    "requirementAlignmentRounds",
+    "requirementQuestions",
+    "requirementAssumptions",
+    "requirementChangeRequests",
+  ] as const) {
+    if (document[table] === undefined) document[table] = [];
+  }
   return document as unknown as AutomationDocument;
 }
 
@@ -793,12 +860,36 @@ export function migrateAutomationDocument(value: unknown): { document: Automatio
   if (typeof versionValue !== "number" || !Number.isSafeInteger(versionValue)) throw new AutomationSchemaError("Automation schema version is invalid.");
   if (versionValue > AUTOMATION_SCHEMA_VERSION) throw new AutomationSchemaError("Automation schema version is newer than this runtime.", "AUTOMATION_SCHEMA_VERSION_UNSUPPORTED");
   if (versionValue === 0) {
-    const migrated = migrateV0ToV2(input);
+    const migrated = migrateV0ToV3(input);
     return { document: validateAutomationDocument(migrated), migratedFrom: 0 };
   }
   if (versionValue === 1) {
-    const migrated = migrateV1ToV2(input);
+    const migrated = migrateV1ToV3(input);
     return { document: validateAutomationDocument(migrated), migratedFrom: 1 };
   }
-  return { document: validateAutomationDocument(input), migratedFrom: null };
+  if (versionValue === 2) {
+    const migrated = migrateV2ToV3(input);
+    return { document: validateAutomationDocument(migrated), migratedFrom: 2 };
+  }
+  const current = hasAutomationVersion ? input : { ...input, automationSchemaVersion: versionValue };
+  return { document: validateAutomationDocument(current), migratedFrom: null };
 }
+
+export {
+  REQUIREMENT_ALIGNMENT_PROTOCOL,
+  REQUIREMENT_MAX_ANSWER_LENGTH,
+  REQUIREMENT_MAX_ASSUMPTIONS_PER_ROUND,
+  REQUIREMENT_MAX_METADATA_ENTRIES,
+  REQUIREMENT_MAX_QUESTIONS_PER_ROUND,
+  REQUIREMENT_MAX_ROUNDS_PER_SESSION,
+  REQUIREMENT_MAX_TEXT_LENGTH,
+  REQUIREMENT_PROTOCOL,
+  REQUIREMENT_PROTOCOL_VERSION,
+  validateRequirementAlignmentDocument,
+  validateRequirementAlignmentRound,
+  validateRequirementAlignmentSession,
+  validateRequirementAssumption,
+  validateRequirementDomain,
+  validateRequirementProtocol,
+  validateRequirementQuestion,
+} from "./requirement-domain.ts";

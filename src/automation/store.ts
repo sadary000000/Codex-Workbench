@@ -224,6 +224,11 @@ export interface TransitionInput {
 const ID_FIELDS: Record<AutomationTableName, string> = {
   automationProjects: "projectId",
   requirementVersions: "requirementVersionId",
+  requirementAlignmentSessions: "alignmentSessionId",
+  requirementAlignmentRounds: "alignmentRoundId",
+  requirementQuestions: "questionId",
+  requirementAssumptions: "assumptionId",
+  requirementChangeRequests: "changeRequestId",
   planVersions: "planVersionId",
   stageSpecs: "stageSpecId",
   stepSpecs: "stepSpecId",

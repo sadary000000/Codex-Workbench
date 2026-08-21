@@ -141,6 +141,9 @@ test("migrates v2 JSON beside a rollback backup and preserves hashes and audit c
     const requirement = await value.store.createRequirementVersion({ projectId: project.projectId, version: 1, status: "ACTIVE", canonicalPayload: JSON.stringify({ goal: "stable" }) });
     const intent = await value.store.createActionIntent({ projectId: project.projectId, actionType: "MIGRATION_TEST", targetRef: "opaque:target", sideEffectClass: "IDEMPOTENT", idempotencyRef: "migration-key" });
     const source = await value.store.snapshot();
+    // The live store is now v3; explicitly downgrade only the serialized
+    // fixture so this test exercises the v2 -> v3 JSON migration path.
+    (source as unknown as { automationSchemaVersion: number }).automationSchemaVersion = 2;
     const raw = JSON.stringify(source);
     await value.store.close();
     await writeFile(value.path, raw, "utf8");
@@ -157,6 +160,38 @@ test("migrates v2 JSON beside a rollback backup and preserves hashes and audit c
     assert.deepEqual((await reopened.list("auditEvents")).map((event) => event.hash), source.auditEvents.map((event) => event.hash));
     await reopened.close();
   } finally {
+    await dispose(value);
+  }
+});
+
+test("migrates an existing v2 SQLite document in place without changing durable identities", async () => {
+  const value = await fixture();
+  let reopened: AutomationStore | null = null;
+  try {
+    const project = await value.store.createAutomationProject({ projectId: "sqlite-v2-project", name: "SQLite v2 migration" });
+    const requirement = await value.store.createRequirementVersion({ projectId: project.projectId, version: 1, status: "ACTIVE", canonicalPayload: JSON.stringify({ goal: "preserve this" }) });
+    const auditHashes = (await value.store.list("auditEvents")).map((event) => event.hash);
+    await value.store.close();
+
+    const database = new DatabaseSync(value.path);
+    database.prepare("UPDATE automation_meta SET meta_value = ? WHERE meta_key = ?").run("2", "document_schema_version");
+    database.close();
+
+    reopened = new AutomationStore(value.path);
+    const restoredProject = await reopened.get("automationProjects", project.projectId);
+    assert.equal(restoredProject?.projectId, project.projectId);
+    assert.equal(restoredProject?.name, project.name);
+    assert.equal(restoredProject?.lifecycle, project.lifecycle);
+    assert.equal(restoredProject?.activeRequirementVersionId, requirement.requirementVersionId);
+    assert.deepEqual(await reopened.get("requirementVersions", requirement.requirementVersionId), requirement);
+    const diagnostics = await reopened.persistenceDiagnostics();
+    assert.equal(diagnostics.documentSchemaVersion, AUTOMATION_SCHEMA_VERSION);
+    assert.equal(diagnostics.migration.sourceSchemaVersion, 2);
+    assert.ok(diagnostics.migration.sourceBackupPath?.endsWith(".sqlite"));
+    assert.equal((await reopened.list("auditEvents")).map((event) => event.hash).join("\n"), auditHashes.join("\n"));
+    assert.equal((await readdir(value.root)).some((name) => name.includes("v2-backup") && name.endsWith(".sqlite")), true);
+  } finally {
+    await reopened?.close();
     await dispose(value);
   }
 });
