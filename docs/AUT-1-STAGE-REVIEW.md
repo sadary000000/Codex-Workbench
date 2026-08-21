@@ -1,6 +1,6 @@
-# AUT-1 Stage Review
+# AUT-1 Gate Fix Stage Review
 
-## Stage
+## Executive result
 
 ```yaml
 stage: AUT-1 Domain Store + State Machine Foundation
@@ -9,119 +9,127 @@ aut0_status: NOT_FROZEN
 result: PASS_CANDIDATE
 ```
 
-AUT-1 只落地中立基础设施，不代表 AUT-0 已冻结，也不开始 AUT-2/Automation 产品层。真实 Native/WebGPT execution 在本阶段明确为 `NO`。
+本次 Gate Fix 只修复 AUT-1 foundation 语义，不进入 AUT-2，不连接真实 Native/WebGPT，不修改 V1 Frozen Core 或 WebGPT V1。
 
-## Scope resolution
+## Gate Fix scope
 
-### In scope
+### Fixed
 
-- 独立版本化 `automation.db` 文档和 v0 -> v1 migration；
-- Requirement/Plan/Stage/Step 版本 identity 与 `supersedes`；
-- Project/Step/Attempt/ActionIntent/ActionAttempt 状态机原语；
-- append-only AuditEvent sequence/hash 链和 state+audit 同事务提交；
-- ActionIntent / idempotency / ActionAttempt / Receipt / UNKNOWN recovery 原语；
-- Checkpoint、ExternalRef、Evidence、ArtifactRef、ResourceClaim、WorkspaceSnapshot、PolicyVersion；
-- Native/WebGPT adapter interface contract（仅 opaque refs）；
-- contract/unit/boundary tests 和文档/审查包。
+1. StepSpec immutable definition 与 StepRuntime mutable execution state 分离；ExecutionAttempt 绑定精确 StepSpec，Checkpoint 绑定同一 StepRuntime。
+2. RequirementVersion 自包含 bounded canonical payload，并以 `payloadSha256` 校验；外部 content/structured refs 降级为 provenance。
+3. ActionIntent 生成 canonical semantic descriptor 和 `semanticSha256`；同 project/idempotencyRef 的语义漂移 fail closed，不产生第二 Intent/ActionAttempt；schema 拒绝重复动作尝试快照。
+4. automation schema 从 v1 升级到 v2；显式 v0/v1 migration、缺失/冲突/未来版本 fail closed。
+5. Checkpoint runtime/spec/attempt/receipt 引用校验和 receipt 项目归属推导补全；state、runtime、audit 在同一 transaction 提交。
+6. 增加 persistence ADR，明确当前单进程单写者 JSON snapshot 的边界与迁移触发条件。
 
 ### Out of scope
 
-Planner、Reviewer、Requirement GPT、Verifier、Scheduler、Workflow Engine、Automation UI、真实 dispatcher、Native/WebGPT 调用、浏览器操作、V1 Frozen Core 变更、Prompt/Transcript/Cookie/Token 复制。
+AUT-0 冻结、Planner、Reviewer、Verifier、Scheduler、Workflow Engine、Automation UI、真实 dispatcher、自动 retry、Native/WebGPT execution、Browser/CLI 接入、V1 Frozen Core 和 WebGPT V1 均未实现或修改。
 
 ## Architecture boundary
 
 ```text
 V1 Frozen Core (unchanged)
         |
-        +-- AUT-1 neutral foundation
-              +-- independent automation.db
-              +-- domain schema/migrations
-              +-- state + audit transaction
-              +-- intent/attempt/receipt/checkpoint primitives
-              +-- opaque Native/WebGPT adapter contracts
+        +-- AUT-1 Provisional Foundation
+              +-- independent automation.db (schema v2)
+              +-- immutable Requirement/Plan/Stage/Step definitions
+              +-- StepRuntime + ExecutionAttempt state primitives
+              +-- ActionIntent semantic idempotency
+              +-- receipt/recovery/checkpoint primitives
+              +-- bounded audit/hash chain
 ```
 
-AUT-1 不成为第二套 Conversation/Transcript truth。Native Thread/Turn/Item 和 WebGPT Request 仍属于各自运行时；Automation 只保存外部 identity/status/hash/ref。
+AUT-1 不是第二套 Conversation/Transcript truth。Native Thread/Turn/Item 和 WebGPT Request 仍属于各自运行时；Automation 只保存明确的 bounded requirement payload、外部 identity/status/hash/ref 和恢复关系。
 
-## Implementation files
+## Changed files
+
+### Product foundation
 
 - `src/automation/types.ts`
+- `src/automation/canonical.ts`
 - `src/automation/schema.ts`
 - `src/automation/state-machine.ts`
 - `src/automation/store.ts`
-- `src/automation/adapters.ts`
 - `src/automation/index.ts`
+
+### Tests
+
 - `tests/automation-foundation.test.ts`
 
-## Key implementation evidence
+### Review documents
 
-1. `AutomationStore.transaction()` 使用串行写队列、draft、schema/reference validation、temp+fsync+rename。
-2. `automationSchemaVersion` 为 1；明确 v0 fixture 可迁移，新版本 fail closed。
-3. 版本实体保留旧 identity，Attempt 绑定具体 `stepSpecId`。
-4. `appendAudit()` 产生连续 sequence、prevHash/hash；AuditEvent 不允许通过通用 insert/replace 修改。
-5. Intent 必须先存在且为 `DISPATCH_ELIGIBLE`，才可产生 ActionAttempt；当前没有外部 dispatcher。
-6. UNKNOWN receipt 进入 `UNCERTAIN` / `RECOVERY_REQUIRED`，没有盲目重试。
-7. Adapter 仅使用 bounded opaque refs，不导入 V1/WebGPT runtime。
+- `docs/AUT-1-DOMAIN-STORE.md`
+- `docs/AUT-1-STATE-MACHINE.md`
+- `docs/AUT-1-INTENT-RECEIPT-RECOVERY.md`
+- `docs/AUT-1-PERSISTENCE-BOUNDARY.md`
+- `docs/AUT-1-PERSISTENCE-ADR.md`
+- `docs/AUT-1-STAGE-REVIEW.md`
+- `docs/AUT-1-PROVENANCE.txt`
+- `dist/review/AUT-1-TEST-SUMMARY.json`
 
-## Verification
+## Verification matrix
 
-| Gate | Result |
-| --- | --- |
-| independent automation.db / migration / reopen | PASS |
-| immutable versioning / exact StepSpec binding | PASS |
-| valid/invalid transitions and atomic rollback | PASS |
-| append-only audit/hash chain | PASS |
-| intent/idempotency/unknown receipt | PASS |
-| checkpoint/resource/workspace primitives | PASS |
-| adapter boundary | PASS |
-| `npm run check` | PASS |
-| `npm test` | 224/224 PASS |
-| `npm run build` | PASS |
-| `npm run package:win` | PASS |
-| `npm audit --omit=dev` | PASS, 0 vulnerabilities |
-| secret scan / `git diff --check` | PASS |
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| StepSpec/StepRuntime separation | PASS | 15 AUT-1 tests, immutable spec assertion, runtime transition/revision/currentAttempt |
+| Requirement canonical truth | PASS | canonical ordering/sha, wrong sha, sensitive key, immutable replace rejection |
+| Action semantic idempotency | PASS | same key replay, changed payload conflict, semantic hash schema validation, duplicate attempt snapshot rejection |
+| Schema migration | PASS | explicit v0→v2, v1→v2, reopen, missing/conflict/future version fail closed |
+| Checkpoint | PASS | runtime/spec matching, attempt binding, receipt graph project derivation, reopen |
+| State + audit atomicity | PASS | valid/invalid transition, rollback, contiguous sequence/hash chain |
+| Persistence boundary | PASS | independent `automation.db`, no V1/WebGPT adapter import, ADR recorded |
+| `npm run check` | PASS | TypeScript source and test typecheck |
+| `npm test` | 228/228 PASS | full local test suite |
+| `npm run build` | PASS | build script and control-plane schema |
+| `npm run package:win` | PASS | packaged GUI + CLI generated |
+| `npm audit --omit=dev` | PASS | 0 vulnerabilities |
+| `git diff --check` | PASS | no whitespace errors in scoped changes |
+| scoped high-confidence secret scan | PASS | 0 credential-pattern hits in Gate Fix source/test |
 
-## Boundary and privacy evidence
+## Persistence and privacy evidence
 
-AUT-1 专项测试确认：
+- `automation.db` is independent from V1 persistence, Native App Server, WebGPT registries and Browser profile.
+- canonical payload is bounded to 32 KiB with depth/node/key/string limits and sensitive-key rejection; no Prompt/Transcript/Response/Cookie/Token/Authorization/Password/Private Key/raw body/DOM/HTML is accepted as a field.
+- SHA-256 detects inconsistent canonical payloads; it is not a cryptographic signature.
+- failed callback/schema/hash/reference validation preserves the previous snapshot.
+- No real Native/WebGPT execution was started by this stage.
 
-- 独立文件不包含 V1/WebGPT transcript data；
-- sensitive metadata key 被拒绝；
-- orphan ActionAttempt、错误 acquired claim、audit tamper 会 fail closed；
-- transaction callback failure 不会落盘部分 audit/state；
-- 适配器只提供类型契约，不执行外部调用。
+## Known limitations / accepted boundary
 
-## Known limitations
-
-- JSON 文件是单进程单写者 foundation，不宣称跨进程 ACID；
-- ResourceClaim 当前是可持久化声明和一致性校验，不是容量仲裁/租约服务；
-- Checkpoint 是引用快照，不是完整 reconcile service；
-- Action Receipt 的真实采集、验证和外部状态 reconcile 留待后续阶段；
-- 尚未接入 main/IPC/CLI/Automation UI；
-- AUT-0 仍为 `NOT_FROZEN`。
+- JSON snapshot is a single-process single-writer foundation; it is not cross-process ACID and has no lock/CAS/writer epoch/WAL. See `AUT-1-PERSISTENCE-ADR.md`.
+- v1 migration cannot recover an absent legacy requirement body; it stores an explicit legacy reference envelope and does not claim to recreate missing text.
+- audit hash chain validates local continuity and tamper consistency, not author authenticity; non-state table mutation audit coverage remains a foundation limitation.
+- No dispatcher, receipt reconciliation, automatic retry, Planner continuation, UI or real execution exists.
+- AUT-0 remains `NOT_FROZEN` by instruction.
 
 ## Subagents
 
-4 个只读审计子代理分别检查 schema/storage、state/audit、intent/recovery、resource/workspace/adapters。它们没有修改共享文件；结果已由主 Agent 审核并反映在实现和测试中。Gate 前必须关闭全部已完成代理，`running_subagents=0`。
+| Agent | Task | Natural completion | Result | Adopted |
+| --- | --- | --- | --- | --- |
+| Hilbert | schema/runtime separation and migration read-only audit | completed | identified v1→v2, strict version and runtime-reference requirements | yes |
+| Galileo | RequirementVersion truth contract read-only audit | completed | identified canonical payload/hash, bounds, immutable replacement and legacy envelope requirements | yes |
+| Kepler | ActionIntent semantic idempotency read-only audit | completed | identified semantic descriptor, drift conflict and duplicate-attempt protections | yes |
+| Bernoulli | persistence/provenance/audit read-only audit | completed | identified single-writer ADR, dirty-file exclusion and provenance requirements | yes |
+
+All four agents made no shared-file edits, returned naturally, were reviewed, and were closed before Gate. `running_subagents=0`.
 
 ## Provenance
 
 ```text
-base_commit: 36938f0
-implementation_commit: 39fa88bf017d11d0644d8daffe479baf88e1f9f1
-review_commit: documentation/package commit recorded in final handoff
+base_commit: 283f277c82951f92e2f3789f5a033de0e6285f17
+gate_fix_commit: c777bb9c913fabd68bf6ac25d7c08f0a0a79efce
+review_commit: c777bb9c913fabd68bf6ac25d7c08f0a0a79efce (code review baseline; no separate implementation review commit)
 v1_core_changed: NO
 webgpt_v1_changed: NO
 real_native_execution_started: NO
 real_webgpt_execution_started: NO
 ```
 
-## Verification timestamp
-
-`2026-08-21T19:57:34+08:00` (local)
+审查包的 SHA-256 由 `dist/review/AUT-1-STAGE-REVIEW-PACKAGE.sha256` 提供，sidecar 是权威精确值；为避免 ZIP 自包含自哈希的循环，package hash 不嵌入 ZIP 内容。
 
 ## Gate
 
 ```text
-PASS_CANDIDATE; review package generated and ready for user/GPT review
+PASS_CANDIDATE; review package is prepared for user/GPT review
 ```

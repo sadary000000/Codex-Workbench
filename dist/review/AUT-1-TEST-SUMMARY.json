@@ -2,16 +2,18 @@
   "stage": "AUT-1 Domain Store + State Machine Foundation",
   "mode": "PROVISIONAL_FOUNDATION",
   "aut0Status": "NOT_FROZEN",
-  "implementationCommit": "39fa88bf017d11d0644d8daffe479baf88e1f9f1",
-  "timestamp": "2026-08-21T19:57:34+08:00",
+  "baseCommit": "283f277c82951f92e2f3789f5a033de0e6285f17",
+  "gateFixCommit": "c777bb9c913fabd68bf6ac25d7c08f0a0a79efce",
+  "reviewCommit": "c777bb9c913fabd68bf6ac25d7c08f0a0a79efce",
+  "timestamp": "2026-08-21T20:28:55+08:00",
   "automationTests": {
     "file": "tests/automation-foundation.test.ts",
-    "passed": 11,
+    "passed": 15,
     "failed": 0
   },
   "fullTests": {
     "command": "npm test",
-    "passed": 224,
+    "passed": 228,
     "failed": 0
   },
   "commands": {
@@ -20,10 +22,23 @@
     "npm run package:win": "PASS",
     "npm audit --omit=dev": "PASS (0 vulnerabilities)",
     "git diff --check": "PASS",
-    "secretScan": "PASS"
+    "scopedSecretScan": "PASS (0 high-confidence credential-pattern hits)"
+  },
+  "semanticGates": {
+    "specRuntimeSeparation": "PASS",
+    "requirementTruthContract": "PASS",
+    "actionSemanticIdempotency": "PASS",
+    "schemaMigration": "PASS",
+    "stateAuditAtomic": "PASS",
+    "checkpoint": "PASS",
+    "persistenceScope": "PASS"
   },
   "realExecution": {
     "native": "NOT_STARTED",
     "webgpt": "NOT_STARTED"
-  }
+  },
+  "v1CoreChanged": "NO",
+  "webgptV1Changed": "NO",
+  "reviewPackage": "dist/review/AUT-1-STAGE-REVIEW-PACKAGE.zip",
+  "reviewPackageSha256": "authoritative exact value is in dist/review/AUT-1-STAGE-REVIEW-PACKAGE.sha256; self-hash is intentionally external"
 }

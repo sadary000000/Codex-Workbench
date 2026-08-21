@@ -1,28 +1,37 @@
 {
-  "stage": "AUT-1",
-  "evidenceKind": "domain-foundation-contract",
-  "automationDb": {
-    "schemaVersion": 1,
-    "migration": "v0-to-v1",
-    "atomicWrite": "temp-fsync-rename",
-    "independentFromV1": true
+  "stage": "AUT-1 Gate Fix",
+  "result": "PASS_CANDIDATE",
+  "scope": "Foundation semantics hardening only",
+  "baseCommit": "283f277c82951f92e2f3789f5a033de0e6285f17",
+  "gateFixCommit": "c777bb9c913fabd68bf6ac25d7c08f0a0a79efce",
+  "v1CoreChanged": false,
+  "webgptV1Changed": false,
+  "realNativeExecutionStarted": false,
+  "realWebgptExecutionStarted": false,
+  "tests": {
+    "automationFoundation": "15/15",
+    "full": "228/228",
+    "check": "PASS",
+    "build": "PASS",
+    "packageWin": "PASS",
+    "audit": "0 vulnerabilities",
+    "diffCheck": "PASS",
+    "secretScan": "0 high-confidence credential-pattern hits"
   },
-  "stateMachine": {
-    "invalidTransitionsFailClosed": true,
-    "stateAndAuditSameTransaction": true,
-    "auditAppendOnlyHashChain": true
+  "semanticGates": [
+    "StepSpec immutable / StepRuntime mutable separation",
+    "RequirementVersion canonical payload and SHA",
+    "ActionIntent semantic SHA idempotency",
+    "v0/v1 to v2 schema migration and future-version fail-closed",
+    "state/runtime/audit atomic transaction",
+    "Checkpoint StepRuntime and receipt graph references",
+    "single-writer persistence ADR"
+  ],
+  "subagents": {
+    "count": 4,
+    "completed": 4,
+    "editedSharedFiles": false,
+    "runningAtGate": 0
   },
-  "intentReceiptRecovery": {
-    "intentBeforeAttempt": true,
-    "idempotencyConflictDetected": true,
-    "unknownReceiptRecoveryRequired": true,
-    "externalDispatchStarted": false
-  },
-  "identityBoundary": {
-    "nativeThreadTurnItemCopied": false,
-    "webgptTranscriptCopied": false,
-    "cookieOrTokenStored": false,
-    "v1CoreChanged": false,
-    "webgptV1Changed": false
-  }
+  "packageSha256": "authoritative exact value is in dist/review/AUT-1-STAGE-REVIEW-PACKAGE.sha256; self-hash is intentionally external"
 }

@@ -2,7 +2,7 @@
 
 ## 独立文件
 
-AUT-1 使用单独的 `automation.db`。它不复用或修改：
+AUT-1 使用单独的 `automation.db`，schema v2。它不复用或修改：
 
 - V1 `workbench-state.json`；
 - Native App Server / Thread persistence；
@@ -23,16 +23,19 @@ read current snapshot
   -> atomic rename to automation.db
 ```
 
-回调抛错、非法状态、引用缺失、隐私键或 hash 链不合法时不会替换旧文件。Store 实例内的 Promise tail 保证单写者顺序；多进程并发写入、锁服务、远程数据库和跨文件事务明确不属于 AUT-1。
+回调抛错、非法状态、引用缺失、隐私键、canonical payload/hash 或 audit 链不合法时不会替换旧文件。Store 实例内的 Promise tail 保证单写者顺序；这不是跨进程锁。
 
-## 隐私边界
+## Requirement 真值和隐私
 
-Metadata 只允许 bounded scalar values，并拒绝 prompt/response/transcript/cookie/token/authorization/password/credential/secret/stdout/stderr/raw body 等敏感键。Requirement 正文只能通过 opaque `contentRef` 表示，adapter 只接受/返回受限 ref/hash。
+RequirementVersion 自身保存 bounded `canonicalPayload` 与 `payloadSha256`，因此外部 `contentRef` 不是唯一真值。canonical payload 只接受稳定 JSON object，最大 32 KiB、深度 8、节点 256、对象键 64、叶字符串 8 KiB；敏感键拒绝。它不允许保存 Prompt、Transcript、Response、Cookie、Token、Authorization、Password、Private Key、raw body、DOM 或 HTML。SHA 提供完整性校验，不提供签名真实性。
 
 ## 迁移
 
-当前仅提供显式 v0 -> v1 迁移和未来版本拒绝。迁移结果在下一次成功 transaction 时以同样的原子提交方式写回；不会自动导入 V1 或 WebGPT 数据。
+- 显式 `schemaVersion: 0` 迁移为完整 v2 空文档并保留 legacy project 基础信息。
+- 显式 schema v1 迁移为 v2：旧 StepSpec 拆成 `specStatus + StepRuntime`，旧 RequirementVersion 形成可审计的 legacy reference envelope 并重新计算 payload SHA，旧 ActionIntent 补齐语义字段，Checkpoint 补齐 runtime ref，Audit 链重新规范化。
+- 缺少版本、冲突版本、未来版本或迁移后的引用/hash 不一致均 fail closed。
+- 读取迁移结果不会偷偷覆盖原文件；下一次成功 transaction 才以相同 atomic rename 写回 v2。
 
-## 风险和后续审查
+## 已知限制
 
-JSON 文件适合本地、有限规模、单写者 foundation，不宣称多进程 ACID。若未来允许多进程/独立 CLI writer，必须增加 lock/CAS/writer epoch，并重新做迁移与崩溃恢复审查。
+JSON 文件适合本地、有限规模、单写者 foundation，不宣称多进程 ACID。多进程/独立 CLI writer、写放大或数据集增长达到阈值时必须按 `AUT-1-PERSISTENCE-ADR.md` 重新评审并迁移。

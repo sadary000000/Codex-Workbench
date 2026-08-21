@@ -1,10 +1,10 @@
-AUT-1 Domain Store + State Machine Foundation
+AUT-1 Domain Store + State Machine Foundation — Gate Fix
 
 mode=PROVISIONAL_FOUNDATION
 aut0_status=NOT_FROZEN
-base_commit=36938f0
-implementation_commit=39fa88bf017d11d0644d8daffe479baf88e1f9f1
-review_commit=documentation/package commit recorded in final handoff
+base_commit=283f277c82951f92e2f3789f5a033de0e6285f17
+gate_fix_commit=c777bb9c913fabd68bf6ac25d7c08f0a0a79efce
+review_commit=c777bb9c913fabd68bf6ac25d7c08f0a0a79efce
 v1_core_changed=NO
 webgpt_v1_changed=NO
 real_native_execution_started=NO
@@ -12,10 +12,10 @@ real_webgpt_execution_started=NO
 
 source_files:
   src/automation/types.ts
+  src/automation/canonical.ts
   src/automation/schema.ts
   src/automation/state-machine.ts
   src/automation/store.ts
-  src/automation/adapters.ts
   src/automation/index.ts
   tests/automation-foundation.test.ts
 
@@ -24,11 +24,29 @@ review_documents:
   docs/AUT-1-STATE-MACHINE.md
   docs/AUT-1-INTENT-RECEIPT-RECOVERY.md
   docs/AUT-1-PERSISTENCE-BOUNDARY.md
+  docs/AUT-1-PERSISTENCE-ADR.md
   docs/AUT-1-STAGE-REVIEW.md
+  docs/AUT-1-PROVENANCE.txt
+  dist/review/AUT-1-TEST-SUMMARY.json
+
+verification_timestamp=2026-08-21T20:28:55+08:00
+node=v24.18.0
+npm=11.16.0
+typescript=5.7.3
+automation_tests=15/15 PASS
+full_tests=228/228 PASS
+checks=npm run check PASS; npm test 228/228 PASS; npm run build PASS; npm run package:win PASS; npm audit --omit=dev PASS (0 vulnerabilities); git diff --check PASS; scoped high-confidence secret scan PASS (0 hits)
 
 review_package=dist/review/AUT-1-STAGE-REVIEW-PACKAGE.zip
-package_sha256=recorded in dist/review/AUT-1-STAGE-REVIEW-PACKAGE.sha256 (external sidecar avoids self-reference)
+package_sha256_sidecar=dist/review/AUT-1-STAGE-REVIEW-PACKAGE.sha256 (authoritative exact value; self-hash intentionally kept outside the ZIP to avoid circular provenance)
 
-verification_timestamp=2026-08-21T19:57:34+08:00
+dirty_file_policy:
+  only scoped AUT-1 source/test/docs/package files were changed or staged by this Gate Fix
+  pre-existing WebGPT review deletions/modifications, dist-stage-a, and user navigation-doc docx files were not staged
+  old donor D:\\办公\\AI\\Codex_Workbench remained read-only and dirty baseline was preserved
+  D:\\办公\\AI\\Auto_Agent remained clean
 
-No Native Thread/Turn/Item, WebGPT transcript, Prompt/Response, Cookie, Token, Browser Profile, or user secret is included in the review package.
+privacy_boundary:
+  no Native Thread/Turn/Item
+  no WebGPT transcript, Prompt/Response, Cookie, Token, Browser Profile, password, or user secret
+  no real Native/WebGPT execution
