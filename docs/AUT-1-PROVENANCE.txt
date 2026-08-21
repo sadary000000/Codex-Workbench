@@ -1,0 +1,34 @@
+AUT-1 Domain Store + State Machine Foundation
+
+mode=PROVISIONAL_FOUNDATION
+aut0_status=NOT_FROZEN
+base_commit=36938f0
+implementation_commit=39fa88bf017d11d0644d8daffe479baf88e1f9f1
+review_commit=documentation/package commit recorded in final handoff
+v1_core_changed=NO
+webgpt_v1_changed=NO
+real_native_execution_started=NO
+real_webgpt_execution_started=NO
+
+source_files:
+  src/automation/types.ts
+  src/automation/schema.ts
+  src/automation/state-machine.ts
+  src/automation/store.ts
+  src/automation/adapters.ts
+  src/automation/index.ts
+  tests/automation-foundation.test.ts
+
+review_documents:
+  docs/AUT-1-DOMAIN-STORE.md
+  docs/AUT-1-STATE-MACHINE.md
+  docs/AUT-1-INTENT-RECEIPT-RECOVERY.md
+  docs/AUT-1-PERSISTENCE-BOUNDARY.md
+  docs/AUT-1-STAGE-REVIEW.md
+
+review_package=dist/review/AUT-1-STAGE-REVIEW-PACKAGE.zip
+package_sha256=recorded in dist/review/AUT-1-STAGE-REVIEW-PACKAGE.sha256 (external sidecar avoids self-reference)
+
+verification_timestamp=2026-08-21T19:57:34+08:00
+
+No Native Thread/Turn/Item, WebGPT transcript, Prompt/Response, Cookie, Token, Browser Profile, or user secret is included in the review package.
