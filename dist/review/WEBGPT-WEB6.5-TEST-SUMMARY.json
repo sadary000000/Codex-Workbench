@@ -1,13 +1,49 @@
 {
-  "stage": "WEB-6.5 CLI Targeted Latest Read",
-  "npmRunCheck": "PASS",
-  "npmTest": { "result": "PASS", "passed": 184, "failed": 0, "skipped": 0 },
-  "npmRunBuild": "PASS",
-  "npmRunPackageWin": "PASS",
-  "npmAuditOmitDev": { "result": "PASS", "vulnerabilities": 0 },
-  "gitDiffCheck": "PASS",
-  "secretScan": { "result": "PASS", "credentialValuesFound": false, "scope": "WEB-6.5 changed files and review artifacts" },
-  "realPromptCount": 0,
-  "realPromptBudget": 1,
-  "notes": "Real completed-response Gates were not claimed because the existing local runtime was in active-request and USER_CONTROL states."
+  "stage": "WEB-6.5 Final Review Package",
+  "result": "BLOCKED",
+  "generatedForManualSubmission": true,
+  "generatedAt": "2026-08-21",
+  "tests": {
+    "npm run check": "PASS",
+    "npm test": "PASS 184/184",
+    "npm run build": "PASS",
+    "npm run package:win": "PASS",
+    "npm audit --omit=dev": "PASS 0 vulnerabilities",
+    "git diff --check": "PASS with newline warnings only",
+    "secretScan": "PASS no credential values"
+  },
+  "implementationCommit": "48b0f7041dc6056294677be914263e6902732c66",
+  "reviewFreezeCommit": "this review-package commit; actual hash is recorded by Git HEAD",
+  "baseCommit": "3504c67",
+  "realPromptBudget": {
+    "max": 1,
+    "used": 1,
+    "additionalPromptSent": false,
+    "rateLimitTriggered": false
+  },
+  "realEvidence": {
+    "positiveRequest": "PASS",
+    "targetedLatest": "PASS",
+    "roleLatestAndRestore": "PASS",
+    "coldStartExecFile": "PASS",
+    "inflightInterruptionRestartNoResend": "NOT_PROVEN",
+    "wrongChatReadCount": 0,
+    "duplicatePromptCountObserved": 0
+  },
+  "package": {
+    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+    "outerExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "mainBundleSha256": "A8D51A0F0658918C01EECD9B21AA7EA74FD2875EE71D954DAAB2881D3B0C49D5",
+    "rendererBundleSha256": "94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1",
+    "packageManifestSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F"
+  },
+  "privacy": {
+    "promptBodyIncluded": false,
+    "assistantBodyIncluded": false,
+    "cookieIncluded": false,
+    "tokenIncluded": false,
+    "browserProfileIncluded": false,
+    "privateChatContentIncluded": false
+  },
+  "nextAction": "USER_SUBMIT_REVIEW_PACKAGE_TO_GPT"
 }

@@ -1,0 +1,105 @@
+{
+  "stage": "WEB-6.5 CLI Targeted Latest Read - Final Closeout",
+  "result": "BLOCKED",
+  "implementationGate": "PASS",
+  "realPromptBudget": {
+    "max": 1,
+    "used": 1,
+    "rateLimitTriggered": false
+  },
+  "v1FrozenCoreChanged": false,
+  "webgptCodeChanged": true,
+  "journal": {
+    "recordCount": 64,
+    "terminalCount": 45,
+    "nonterminalCount": 19,
+    "byState": {
+      "COMPLETED": 34,
+      "FAILED": 11,
+      "RECOVERY_REQUIRED": 17,
+      "PAUSED_FOR_USER": 2
+    },
+    "currentLiveSendStates": 0
+  },
+  "positiveRead": {
+    "result": "PASS",
+    "requestId": "wgpt-7a12d14a-af85-46ba-bf30-dc2d83e2731f",
+    "state": "COMPLETED",
+    "resultBytes": 26,
+    "resultSha256": "b3bf787547cc7db959cab5609f672adde34d91fe4ea38a0949922dbb2f8a94f7",
+    "latestHashMatchesResult": true,
+    "latestOutHashMatchesResult": true,
+    "promptBodyRecorded": false,
+    "assistantBodyRecorded": false
+  },
+  "targetedLatest": {
+    "result": "PASS",
+    "targetUrlPattern": "https://chatgpt.com/g/<gpt-id>/c/<chat-id>",
+    "targetMatches": true,
+    "assistantCount": 1,
+    "generating": false,
+    "textLength": 26,
+    "wrongChatReadCount": 0,
+    "projectRouteToTargetChat": true
+  },
+  "roleRecovery": {
+    "result": "PASS",
+    "role": "PLANNER",
+    "temporaryTestBindingOnly": true,
+    "exactTargetRead": true,
+    "silentRebind": false,
+    "originalBindingRestored": true,
+    "nativeChatIdentityReplaced": false
+  },
+  "coldStart": {
+    "result": "PASS",
+    "shell": "node execFile",
+    "cmdShellUsed": false,
+    "coldElapsedMs": 1848,
+    "warmElapsedMs": 167,
+    "coldExitCode": 0,
+    "warmExitCode": 0,
+    "workbenchReady": true,
+    "guiRemainedAlive": true
+  },
+  "inflightInterruptionRestart": {
+    "result": "NOT_PROVEN",
+    "freshGeneratingWindowObserved": false,
+    "sameRequestIdAfterRestart": "NOT_ESTABLISHED",
+    "duplicatePromptCountObserved": 0,
+    "idempotencyKeyPersistedInRealRecord": false,
+    "semanticSha256Present": true,
+    "reason": "The only allowed real Prompt completed before a safe GENERATING-window interruption could be captured; no second Prompt was sent."
+  },
+  "automatedRegression": {
+    "npmRunCheck": "PASS",
+    "npmTest": "PASS 184/184",
+    "npmRunBuild": "PASS",
+    "npmRunPackageWin": "PASS",
+    "npmAuditOmitDev": "PASS 0 vulnerabilities",
+    "gitDiffCheck": "PASS",
+    "secretScan": "PASS"
+  },
+  "provenance": {
+    "baseCommit": "3504c67",
+    "implementationCommit": "48b0f7041dc6056294677be914263e6902732c66",
+    "reviewFreezeCommit": "this review-package commit; actual hash is recorded by Git HEAD",
+    "packagePath": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+    "outerExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "mainBundleSha256": "A8D51A0F0658918C01EECD9B21AA7EA74FD2875EE71D954DAAB2881D3B0C49D5",
+    "rendererBundleSha256": "94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1",
+    "packageManifestSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F"
+  },
+  "subagents": {
+    "runningAtGate": 0,
+    "completed": ["Cicero", "Nietzsche"],
+    "closedAfterReview": true
+  },
+  "knownLimitations": [
+    "Fresh real in-flight interruption/restart/no-resend evidence is not established.",
+    "The one real request record has no persisted non-empty idempotencyKey; contract/unit idempotency remains PASS.",
+    "chat latest --out had an additional Windows execFile edge in one observation; latest --out passed and this edge was not used as a PASS."
+  ],
+  "nextAction": "USER_SUBMIT_REVIEW_PACKAGE_TO_GPT",
+  "web6_6Started": false
+}

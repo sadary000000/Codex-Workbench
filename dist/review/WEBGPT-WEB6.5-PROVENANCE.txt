@@ -1,13 +1,34 @@
-stage=WEB-6.5 CLI Targeted Latest Read
-base_commit=10e03e7
-implementation_commit=4ebf743
-package_path=D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
-outer_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
-main_bundle_sha256=BB5C1264627DE9FFC63925CB40174B0AE73528AF3A013E4294C21EFBE7E7DD6D
-renderer_bundle_sha256=94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1
-package_manifest_sha256=1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
-webgpt_request_manager_bundle_sha256=26C81C87B214052CAF58DAC94BDF35E8C049146292551DAB4A8429EC22C2265F
-webgpt_workspace_bundle_sha256=4C7A0FC06C3D2A02A1EA1A9B364ADFD2259E47492957A3CB42015339895EA700
-webgpt_arbiter_bundle_sha256=BE587453247A6D24D86381973CADC9D9CC0ABCA00E33BDFF8675ACD372CC6B20
-real_prompt_count=0
-review_artifacts_body_free=true
+WEBGPT-WEB6.5 FINAL PROVENANCE
+generated: 2026-08-21
+status: BLOCKED (A1 fresh real interruption/restart evidence not proven)
+base_commit: 3504c67
+implementation_commit: 48b0f7041dc6056294677be914263e6902732c66
+review_freeze_commit: this review-package commit (actual hash is recorded by Git HEAD)
+
+package_path: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+outer_exe_sha256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+package_manifest_path: resources/app/package.json
+package_manifest_sha256: 1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
+main_bundle_path: resources/app/dist/main/main.js
+main_bundle_sha256: A8D51A0F0658918C01EECD9B21AA7EA74FD2875EE71D954DAAB2881D3B0C49D5
+renderer_bundle_path: resources/app/dist/renderer/renderer.js
+renderer_bundle_sha256: 94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1
+webgpt_request_manager_bundle_sha256: AD48EAFA23C5C958C400D86CF9B96041919EE5F92C268545CAF0AC6E436EA2CD
+webgpt_workspace_bundle_sha256: 6191A82BDD4E56FA2028D416ECE9CA69D2446768E8D7C120E88589A542F0668F
+webgpt_role_registry_bundle_sha256: 1AFD28930255A83C5B6265EC989233A65B5CF524E7C9165A3736073ACEE8BD58
+webgpt_control_bundle_sha256: 5877B067B485F001EDE6769496E8F0B288DEA4F986161931280979DAA3668A91
+
+real_prompt_budget: 1/1
+positive_request_result: PASS
+targeted_latest_result: PASS
+role_read_result: PASS
+cold_start_execFile_result: PASS
+inflight_restart_result: NOT_PROVEN
+wrong_chat_read_count: 0
+duplicate_prompt_count_observed: 0
+persisted_real_idempotency_key: NOT_PRESENT
+
+privacy_boundary: no prompt body, assistant body, cookie, token, browser profile, auth material, or private chat body included
+subagents: Cicero and Nietzsche completed naturally, reviewed, and closed
+running_subagents_at_gate: 0
+next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
