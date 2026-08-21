@@ -1,0 +1,56 @@
+{
+  "stage": "WEB-6.5R Role Targeted Latest Final Closeout",
+  "result": "BLOCKED",
+  "newRealPrompts": 0,
+  "v1FrozenCoreChanged": false,
+  "baseCommit": "ce7a50f99922525585fcba4d2c9fbd2d8a0bf06b",
+  "implementationCommit": "5e371b1",
+  "web6_6ProtocolBaseline": "PASS_FROZEN",
+  "currentSafePreflight": {
+    "status": "PASS",
+    "controlAuto": "PASS",
+    "roleBindingsObserved": 3,
+    "bindingStatuses": ["BOUND", "BOUND", "BOUND"]
+  },
+  "chatLatestReference": {
+    "result": "FAIL_CURRENT_ENVIRONMENT",
+    "targetCount": 3,
+    "mismatchCount": 3,
+    "errorCode": "WEBGPT_TARGET_CHAT_MISMATCH",
+    "targetIdentitySha256": [
+      "f96675b53274c716a3cf32197252aca90232fdbdc563e08c4dffc9594e7885f1",
+      "552ae380de83dcfa4157a3583588847bef2a39a280ddd15f993bf65abc94e5b9",
+      "cb1df65f41f6c4825e27cbb38d81317c88e9024b33f95a11ef4de5baccdaf1df"
+    ],
+    "assistantBodyRecorded": false
+  },
+  "temporaryRoleBinding": {
+    "result": "BLOCKED",
+    "created": false,
+    "reason": "No safe completed Chat A was available in the current runtime; existing long-lived bindings were not replaced."
+  },
+  "roleLatest": {
+    "result": "NOT_PASSED",
+    "failClosedError": "WEBGPT_TARGET_CHAT_MISMATCH"
+  },
+  "roleLatestOut": {
+    "result": "NOT_PASSED",
+    "outputFileCreated": false,
+    "assistantBodyInStdout": false
+  },
+  "safety": {
+    "wrongChatReadCountObserved": 0,
+    "silentRoleRebind": false,
+    "fallbackCurrentChat": false,
+    "bindingMutationPerformed": false
+  },
+  "subagents": {
+    "currentStageCount": 4,
+    "naturalCompletionCount": 4,
+    "closedAfterReviewCount": 4
+  },
+  "package": {
+    "temporaryBuild": "PASS",
+    "standardPackageRefresh": "BLOCKED_EPERM_RUNNING_EXE_LOCK"
+  }
+}
