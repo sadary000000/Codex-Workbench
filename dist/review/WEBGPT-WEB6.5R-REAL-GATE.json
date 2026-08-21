@@ -1,56 +1,59 @@
 {
   "stage": "WEB-6.5R Role Targeted Latest Final Closeout",
   "result": "BLOCKED",
-  "newRealPrompts": 0,
-  "v1FrozenCoreChanged": false,
   "baseCommit": "ce7a50f99922525585fcba4d2c9fbd2d8a0bf06b",
-  "implementationCommit": "5e371b1",
-  "web6_6ProtocolBaseline": "PASS_FROZEN",
-  "currentSafePreflight": {
-    "status": "PASS",
-    "controlAuto": "PASS",
-    "roleBindingsObserved": 3,
-    "bindingStatuses": ["BOUND", "BOUND", "BOUND"]
+  "priorImplementationCommit": "5e371b1",
+  "newRealPrompts": 0,
+  "freshProjectComposerAttempts": 1,
+  "realGate": {
+    "chatLatestKnownTarget": "FAIL_CLOSED_TARGET_CHAT_MISMATCH",
+    "temporaryRoleBinding": "NOT_CREATED",
+    "roleLatestPositive": false,
+    "roleLatestOutPositive": false,
+    "wrongChatPromptCount": 0,
+    "silentRoleRebind": "NO_OBSERVED",
+    "fallbackToCurrentChat": "NO"
   },
-  "chatLatestReference": {
-    "result": "FAIL_CURRENT_ENVIRONMENT",
-    "targetCount": 3,
-    "mismatchCount": 3,
-    "errorCode": "WEBGPT_TARGET_CHAT_MISMATCH",
-    "targetIdentitySha256": [
-      "f96675b53274c716a3cf32197252aca90232fdbdc563e08c4dffc9594e7885f1",
-      "552ae380de83dcfa4157a3583588847bef2a39a280ddd15f993bf65abc94e5b9",
-      "cb1df65f41f6c4825e27cbb38d81317c88e9024b33f95a11ef4de5baccdaf1df"
-    ],
-    "assistantBodyRecorded": false
+  "projectNewChat": {
+    "pencilActionConfirmed": true,
+    "projectContextConfirmed": true,
+    "realChatMaterializedBeforeFirstPrompt": false,
+    "currentContract": {
+      "chatUrl": null,
+      "chatCreated": false,
+      "chatMaterialized": false,
+      "chatContextReady": true,
+      "awaitingFirstPrompt": true,
+      "promptSent": false
+    }
   },
-  "temporaryRoleBinding": {
-    "result": "BLOCKED",
-    "created": false,
-    "reason": "No safe completed Chat A was available in the current runtime; existing long-lived bindings were not replaced."
+  "closeCli": {
+    "command": "webgpt close --json",
+    "sourceImplementation": "PASS",
+    "controlPlaneAllowlist": "PASS",
+    "gracefulQuitPath": "PASS_BY_STATIC_CONTRACT",
+    "noAutostartWhenNoInstance": "PASS",
+    "temporaryPackage": "PASS",
+    "standardPackage": "APP_RESOURCES_SYNCED_OUTER_EXE_LOCKED",
+    "liveAgainstExistingOldProcess": "CONTROL_COMMAND_UNSUPPORTED_EXPECTED"
   },
-  "roleLatest": {
-    "result": "NOT_PASSED",
-    "failClosedError": "WEBGPT_TARGET_CHAT_MISMATCH"
-  },
-  "roleLatestOut": {
-    "result": "NOT_PASSED",
-    "outputFileCreated": false,
-    "assistantBodyInStdout": false
-  },
-  "safety": {
-    "wrongChatReadCountObserved": 0,
-    "silentRoleRebind": false,
-    "fallbackCurrentChat": false,
-    "bindingMutationPerformed": false
+  "automated": {
+    "npmRunCheck": "PASS",
+    "npmTest": "PASS 200/200",
+    "targetedCloseAndContractTests": "PASS 31/31",
+    "targetedRoleRequestTests": "PASS 16/16",
+    "npmAuditOmitDev": "PASS 0 vulnerabilities",
+    "gitDiffCheck": "PASS",
+    "secretScan": "PASS"
   },
   "subagents": {
-    "currentStageCount": 4,
-    "naturalCompletionCount": 4,
-    "closedAfterReviewCount": 4
+    "currentStageCompleted": 4,
+    "naturallyCompleted": 4,
+    "closedAfterReview": 4,
+    "runningAtGate": 0
   },
-  "package": {
-    "temporaryBuild": "PASS",
-    "standardPackageRefresh": "BLOCKED_EPERM_RUNNING_EXE_LOCK"
-  }
+  "v1FrozenCoreChanged": false,
+  "automationStarted": false,
+  "privacy": "NO_COOKIE_NO_TOKEN_NO_PROMPT_BODY_NO_ASSISTANT_BODY_NO_BROWSER_PROFILE",
+  "blocker": "Existing Workbench processes lock standard dist/package; standard package refresh and live close against the new command require the user to close the old package once or run the refreshed package later."
 }

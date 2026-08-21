@@ -84,3 +84,48 @@ real new prompts                      0
 ```text
 next_action: USER_SUBMIT_THIS_REVIEW_PACKAGE_TO_GPT
 ```
+
+## 本轮审查整理与最小 CLI 补充（2026-08-21）
+
+本轮没有宣称上面的 Role 正向 Gate 已通过；上一轮的真实阻塞仍然成立：
+
+- 既有 Role binding 的目标 Chat 在真实页面导航后不可达，chat latest 统一返回
+  WEBGPT_TARGET_CHAT_MISMATCH，系统保持 fail-closed。
+- 没有发送新的真实 Prompt，也没有改变长期 Role binding。
+
+同时根据用户补充的真实网页行为修正了 Project new-chat 的语义：
+
+``` text
+Project 行的铅笔
+  → 打开目标 Project 的“新聊天”编辑器
+  → 此时尚未 materialize /c/<chat-id>
+  → 第一次 Prompt 才创建真实 Chat
+```
+
+因此当前 webgpt project new-chat --name <name> --json 在确认 Project
+上下文和 Composer 后返回 chatUrl: null、chatCreated: false、
+chatMaterialized: false、awaitingFirstPrompt: true，并明确
+promptSent: false。它不再把 Project disclosure 或 Project 首页误报为已创建 Chat，
+也不发送 Prompt。
+
+为替代下一轮的 Windows 应用控制，新增官方 CLI：
+
+``` text
+Codex Workbench CLI.exe webgpt close --json
+```
+
+该命令通过现有 authenticated Control Plane 请求 Electron 正常退出，复用既有
+before-quit 清理路径；不强杀进程、不点击窗口、不使用坐标控制。没有正在运行的
+Workbench 时返回 WORKBENCH_NOT_RUNNING，不会为了 close 冷启动 GUI。
+
+本轮自动验证已从上一版的 198/198 更新为 200/200；标准 dist/package
+仍因当前运行中的旧版 Workbench 进程锁定而无法刷新，源码构建/打包已在独立临时
+CODEX_WORKBENCH_DIST 下通过。故本轮结论仍为 BLOCKED，不能把临时包
+冒充标准最终包。
+
+随后已将临时包的最新应用资源和未被占用的 CLI/CLI Runtime 文件同步到标准
+dist/package；正在运行的 GUI 外壳和被占用的 Electron DLL 没有覆盖。使用 Node
+execFile 实际调用标准 CLI 的 close 命令时，当前旧进程返回
+CONTROL_COMMAND_UNSUPPORTED；这是旧进程尚未加载本轮 close 路由的预期结果，命令
+没有发送 Prompt，也没有强制关闭该旧进程。旧进程正常退出并重新打开标准 EXE 后，
+再执行同一条 close 命令才是本轮新路由的 live smoke。

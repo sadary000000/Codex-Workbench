@@ -3,18 +3,23 @@
   "result": "BLOCKED",
   "baseCommit": "ce7a50f99922525585fcba4d2c9fbd2d8a0bf06b",
   "implementationCommit": "5e371b1",
+  "workingTreeFollowUp": "project_new_chat_context_semantics_and_webgpt_close_cli",
   "newRealPrompts": 0,
   "automated": {
     "npmRunCheck": "PASS",
-    "npmTest": "PASS 198/198",
+    "npmTest": "PASS 200/200",
     "targetedRoleRequestTests": "PASS 16/16",
+    "targetedCloseAndContractTests": "PASS 31/31",
     "npmAuditOmitDev": "PASS 0 vulnerabilities",
     "gitDiffCheck": "PASS",
     "secretScan": "PASS"
   },
   "package": {
     "temporaryDistBuild": "PASS",
-    "standardDistPackageRefresh": "BLOCKED EPERM running Workbench EXE lock"
+    "standardDistPackageRefresh": "APP RESOURCES SYNCED; OUTER EXE/DLL LOCKED",
+    "closeCliSourceAndTemporaryPackage": "PASS",
+    "closeCliNoAutostartContract": "PASS",
+    "closeCliLiveAgainstExistingOldProcess": "CONTROL_COMMAND_UNSUPPORTED_EXPECTED"
   },
   "v1FrozenCoreChanged": false,
   "futureStagePlanningByCodex": false,

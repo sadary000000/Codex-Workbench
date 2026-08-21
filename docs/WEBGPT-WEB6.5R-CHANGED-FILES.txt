@@ -1,6 +1,10 @@
 src/features/webgpt/runtime/webgpt-role-session-registry.ts
 src/features/webgpt/runtime/webgpt-request-manager.ts
 src/features/webgpt/runtime/webgpt-workspace.ts
+src/main/main.ts
+src/main/webgpt-command.ts
+src/main/webgpt-control.ts
+src/shared/webgpt-control-plane-contract.ts
 tests/webgpt-role-session-registry.test.ts
 tests/webgpt-request-manager.test.ts
 docs/WEBGPT-WEB6.5R-ROLE-TARGETED-LATEST-FINAL.md
@@ -8,3 +12,7 @@ docs/WEBGPT-WEB6.5R-STAGE-REVIEW.md
 docs/WEBGPT-WEB6.5R-TEST-SUMMARY.json
 docs/WEBGPT-WEB6.5R-CHANGED-FILES.txt
 docs/WEBGPT-WEB6.5R-PROVENANCE.txt
+docs/WEBGPT-OFFICIAL-CLI-ABI.md
+tests/webgpt-command.test.ts
+tests/webgpt-control-contract.test.ts
+tests/webgpt-feature-contract.test.ts
