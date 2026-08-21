@@ -4,37 +4,45 @@
 
 ```yaml
 stage: WEB-6.8 Project Create
-result: BLOCKED_STANDARD_PACKAGE_LOCK
+result: PASS_CANDIDATE
+base_commit: 3328b2f
 implementation_commit: 4d8578b
+fix_commit: a569ba6
 v1_core_changed: NO
-remote_project_registry: IMPLEMENTED
+remote_project_registry: PASS
 control_plane_command: webgpt.project.create
 prompt_sent_by_create_path: NO
-next_action: 关闭正在运行的标准 Workbench EXE 后重跑标准 build/package，并执行真实 Project Create smoke
+next_action: USER_SUBMIT_REVIEW_PACKAGE_TO_GPT
 ```
 
-WEB-6.8 已完成代码实现和自动化契约验证。标准 `dist/package/Codex Workbench V1.exe` 当前被 4 个正在运行的进程锁定，标准 `npm run build` 在清理输出目录时收到 Windows `EPERM unlink`，因此本报告不把旧标准 EXE 当作本阶段包，也不虚报真实网页 Project 创建通过。
+本阶段补齐了远程 WebGPT Project 的创建入口，并在最新标准打包 EXE 上完成真实 CLI 闭环：
 
-在独立临时输出目录 `dist-web68-build` 中，`npm run build` 与 `npm run package:win` 均已通过，证明本阶段源码可以编译并打包；临时输出仅用于验证，未作为标准发布包替换锁定文件。
+```text
+open → control auto → project create
+      → duplicate guard
+      → inspect → project open → project new-chat
+```
+
+真实创建只填写 Project 名称并点击“创建项目”；没有发送网页 Prompt，也没有点击全局“新聊天”。创建成功后返回并持久化了远程 Project identity。`project new-chat` 在本阶段按既有无 Prompt 契约只准备 Project Chat 上下文，返回 `awaitingFirstPrompt=true`、`chatCreated=false`，不伪造 Chat URL。
 
 ## 2. Scope Resolution
 
 ### In scope
 
-- 新增 `webgpt project create --name <project-name> --json` CLI。
-- 新增版本化 Control Plane 命令 `webgpt.project.create`。
-- 通过既有 Browser Lease / Operation Arbiter / WebGptWorkspace / Page Adapter 链路完成 Project 创建动作。
-- 用语义 DOM 定位 Project 区域、创建动作、名称输入框和确认按钮。
-- 只在页面返回可确认的 Project ID + Project URL 后成功。
-- 远程 WebGPT Project 使用独立 Registry 持久化，并按名称、ID、URL 拒绝重复身份。
-- 统一映射创建失败、重复、动作不支持和无法确认等错误。
+- `webgpt project create --name <project-name> --json`。
+- 版本化 Control Plane 命令 `webgpt.project.create`。
+- 既有 Browser Lease / Operation Arbiter / WebGptWorkspace / Page Adapter 链路。
+- 使用语义 DOM 定位 Project 区域、`新项目` 按钮、创建对话框输入框和 `创建项目` 确认按钮。
+- 创建结果的远程 Project ID / URL 确认与独立 Registry 持久化。
+- 同名、同 ID、同 URL 的 fail-closed duplicate handling。
+- 既有 `project inspect/open/new-chat` 回归。
 
 ### Out of scope
 
 - V1 Native Thread / Turn / Item / Runtime Registry / Conversation truth。
 - 本地 Workbench Project 的 `cwd` 生命周期。
-- ChatGPT 页面内容读取、Prompt 发送、Chat 历史和新 Chat 创建。
-- Automation、Workflow、Planner、Reviewer、Scheduler、多账号、删除/重命名/批量迁移。
+- Prompt 发送、Chat 历史管理、Project 删除/重命名/迁移/批量管理。
+- Automation、Workflow、Planner、Reviewer、Scheduler、多账号。
 - OCR、坐标点击、自研 Playwright/Selenium/CDP 默认实现。
 
 ## 3. Architecture Boundary
@@ -51,44 +59,35 @@ V1 Frozen Core
       └─ WebGptProjectRegistry (remote identity only)
 ```
 
-远程 Project Registry 与本地 `V1PersistenceStore` 的 ProjectRecord 分离。远程 Project 不需要也不会伪造本地 `cwd`；本地 Project 归属、Native Thread 身份和 V1 运行事实没有改变。
+远程 Project Registry 位于 `userData/webgpt/projects/projects.json`，与 V1 本地 `ProjectRecord/cwd` 分离。没有新增 Conversation、Transcript、Task 或 Automation 事实源。
 
 ## 4. Implementation
 
-### CLI / Control Plane
+### Page Adapter 的真实 DOM 修复
 
-- CLI parser 接受 `project create --name <name>`，仅允许 `--name` 和 `--json`。
-- `WEBGPT_CONTROL_COMMANDS` 与生成的 schema 通过单一源自动包含 `webgpt.project.create`。
-- Control Plane 要求 `projectName`，按命令字段白名单拒绝多余字段。
-- Project Create 使用独立 90 秒服务预算和 5 秒 CLI 传输余量，沿用现有请求诊断与取消边界。
+真实页面取证得到：
 
-### Page Adapter
+- 项目分组标题为 `DIV.group/sidebar-expando-section-header`，子标题为 `H2.__menu-label`。
+- 项目列表首次打开时先显示 loading shimmer；`open` 的 `ready=true` 不等于 Project 列表已经加载。
+- 列表加载后，真实创建按钮为 `BUTTON aria-label="新项目"`。
+- 创建窗口内只有一个可见输入框，但没有可靠的“项目/名称” aria-label 或 placeholder；示例 placeholder 是动态文本。
+- 创建成功后页面使用真实路由 `/g/<project-id>/project`，不是旧实现假设的唯一 `/project/<id>` 路由。
 
-新增 `buildWebGptCreateProjectScript`：
+对应修复：
 
-- 先在“项目 / Projects”语义区域内检查精确同名 Project，发现已存在即返回 `PROJECT_ALREADY_EXISTS`，不点击、不创建。
-- 只在该区域标题附近寻找“新建项目 / 创建项目 / New Project / Create Project”动作。
-- 对话框内填入名称并触发 input/change，再点击唯一语义确认按钮。
-- 仅返回受限的 action、confirm、Project ID、Project URL 和状态字段；不返回页面正文、聊天内容、Cookie 或 Token。
-- 创建后缺少可确认身份、发现 ID/URL 不一致或结果超时均 fail-closed。
+- 只等待目标语义创建按钮出现，不重试点击、不扩大 Control Plane deadline。
+- 语义匹配补充 `新项目`。
+- 已确认的创建对话框内只有一个可见输入框时才使用该输入框；多个输入框则继续 fail-closed。
+- 以页面实际 Project route、Project 标题/上下文和变更后的 URL 确认创建结果。
+- Registry 接受并规范化 `/g/<id>/project`，同时保留既有 `/project/<id>`、`/projects/<id>` 兼容路径。
+- diagnostics 只记录受限 DOM 属性和 bounded action labels，不记录页面正文、Prompt、Cookie 或 Token。
 
-### Registry
+### Registry / Control Plane
 
-新增 `src/features/webgpt/runtime/webgpt-project-registry.ts`：
-
-- 写入 `userData/webgpt/projects/projects.json`，版本为 1。
-- 使用临时文件 + rename 原子持久化。
-- 只接受 `https://chatgpt.com/project/<id>` 或等价 `/projects/<id>` 路由，并 canonicalize 到 `/project/<id>`。
-- 按大小写不敏感名称、Project ID、canonical URL 检测重复。
-- 不保存 Cookie、Token、认证信息、页面正文或浏览器 Profile。
-
-### Main / Request Manager
-
-- 主进程为 WebGPT Request Manager 注入独立 Registry。
-- 创建前先检查 Registry，重复名称在浏览器副作用前返回 `PROJECT_ALREADY_EXISTS`。
-- 创建动作使用 `PROJECT_CREATE` Browser Lease，不会与其它浏览器操作并发。
-- 远程结果确认后才写 Registry；失败不会写入替代身份，也不会重试创建。
-- 返回中明确 `created: true`、`promptSent: false`、`chatCreated: false`。
+- 创建前先检查 Registry；同名 create 在浏览器动作之前返回 `PROJECT_ALREADY_EXISTS`。
+- 创建成功后仅写入已确认的 `projectId/name/projectUrl/timestamps`。
+- `promptSent=false`、`chatCreated=false` 是创建结果的明确字段。
+- 失败不合成替代 ID，不写入未确认身份，不自动重复创建。
 
 ## 5. Error Mapping
 
@@ -101,84 +100,73 @@ V1 Frozen Core
 | `PROJECT_CREATE_NOT_CONFIRMED` | `RECOVERY_REQUIRED` | 点击或结果缺少可确认身份 |
 | `PROJECT_CREATE_FAILED` | `INTERNAL_ERROR` | 未分类的创建失败 |
 
-## 6. Tests
+## 6. Real CLI Smoke
 
-自动化结果：
-
-```text
-npm run check  PASS
-npm test       210/210 PASS
-npm audit --omit=dev  0 vulnerabilities
-git diff --check  PASS（仅有既存换行提示，无 whitespace error）
-secret scan     PASS（仅命中既有 Control Plane authToken 字段定义/脱敏逻辑，无运行时凭据）
-```
-
-新增覆盖：
-
-- CLI create 成功解析、空名称、重复 `--name`、未知参数。
-- Control Plane create 解析、字段白名单和独立操作预算。
-- Page Adapter 创建脚本的语义动作、重复保护、fail-closed、无正文/Prompt selector。
-- Registry 创建、重开加载、名称/ID/URL 重复、非法 URL、ID/URL 一致性、原子文件不变性。
-- Request Manager 创建成功、创建前重复短路、页面失败不伪造身份、不发送 Prompt。
-
-## 7. Build / Package
-
-### 标准输出
-
-```text
-npm run build
-FAIL: EPERM unlink D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
-```
-
-已确认锁定进程：PID `21236`, `36564`, `42488`, `49592`，均为该标准 EXE。未强杀、未覆盖、未删除用户正在运行的实例。
-
-### 独立临时输出
-
-```text
-CODEX_WORKBENCH_DIST=D:\办公\AI\Codex_Workbench_V1\dist-web68-build npm run build       PASS
-CODEX_WORKBENCH_DIST=D:\办公\AI\Codex_Workbench_V1\dist-web68-build npm run package:win PASS
-```
-
-临时包路径：
-
-```text
-D:\办公\AI\Codex_Workbench_V1\dist-web68-build\package\Codex Workbench V1.exe
-D:\办公\AI\Codex_Workbench_V1\dist-web68-build\package\Codex Workbench CLI.exe
-```
-
-这些临时 EXE 只证明编译/打包边界，不替代标准 `dist/package`，也未被用于声称真实网页 Gate 通过。
-
-## 8. Real App / WebGPT Smoke
+所有真实 CLI 均通过 Node `child_process.execFile` 调用；没有使用 PowerShell 直接执行 EXE 命令。测试使用唯一名称：
 
 ```yaml
-project_create: NOT_RUN
-duplicate_project_create: NOT_RUN
-create_open_new_chat: NOT_RUN
-prompt_sent_by_this_stage: NO
+project_name: WEB68_PASS_1787307133490
+project_id: g-p-6a8824828c248191b748e0e92b76958c
+created_project_url: https://chatgpt.com/g/g-p-6a8824828c248191b748e0e92b76958c/project
+prompt_sent: false
 ```
 
-原因是当前标准 EXE 仍在运行且被锁定；使用旧标准实例执行会混入旧代码，不能作为 WEB-6.8 证据。没有为规避锁定而启动第二套共享用户数据实例，也没有在 ChatGPT 账户中创建未验证的 Project。
+| 操作 | 结果 | 关键证据 |
+|---|---|---|
+| `webgpt open --json` | PASS | `ready=true`，登录态可用，Composer 可见 |
+| `webgpt control auto --json` | PASS | `mode=AUTO_CONTROL` |
+| `webgpt project create --name ... --json` | PASS | `exitCode=0`，`created=true`，action=`新项目`，confirm=`创建项目`，`promptSent=false` |
+| 同名 `project create` | PASS | `exitCode=2`，canonical=`INVALID_ARGUMENT`，`legacyCode=PROJECT_ALREADY_EXISTS`，未再次执行浏览器动作 |
+| `webgpt project inspect --name ... --json` | PASS | `found=true`，`matchCount=1`，目标行 `DIV[role=button]`，hover actions 为“打开项目首页”和项目选项 |
+| `webgpt project open --name ... --json` | PASS | Project 标题上下文匹配，`projectRoute=true`，Composer 可见 |
+| `webgpt project new-chat --name ... --json` | PASS | `chatContextReady=true`，`awaitingFirstPrompt=true`，`chatCreated=false`，`promptSent=false` |
 
-解锁后的最小真实验证顺序：
+### Project route note
+
+ChatGPT 在创建后实际使用 `/g/<id>/project`，随后打开同一 Project 时可能把页面 URL 展示为带名称 slug 的 `/g/<id>-<name>/project` 形式。真实 smoke 以精确 Project 名称上下文、Project route 和 Composer 绑定共同确认，没有把页面 slug 当作新的 Workbench Project identity，也没有创建替代 Project。
+
+## 7. Automated Verification
 
 ```text
-关闭全部标准 Codex Workbench V1.exe
-更新标准 dist/package
-使用最新 EXE：webgpt control auto
-webgpt project create --name <一次性唯一测试名> --json
-再次执行同名 create，确认 INVALID_ARGUMENT / legacyCode=PROJECT_ALREADY_EXISTS
-使用返回的 Project 身份执行 project open，再执行 project new-chat
-确认全程 promptSent=false，且没有点击全局 New Chat
+npm run check       PASS
+npm test            PASS — 210/210
+npm run build       PASS
+npm run package:win PASS
+npm audit --omit=dev PASS — 0 vulnerabilities
+git diff --check    PASS
+secret scan         PASS — 0 high-confidence credential pattern hits in intended source/test files
+```
+
+新增/回归覆盖：
+
+- CLI / Control Plane create contract、参数白名单、JSON/Error Envelope。
+- Page Adapter 的真实语义按钮、动态输入框、route confirmation、无正文/Prompt selector。
+- Registry 创建、重开加载、名称/ID/URL duplicate、实际 `/g/<id>/project` route。
+- Request Manager 创建成功、重复短路、页面失败不伪造身份、不发送 Prompt。
+- WEB-6.5R、WEB-6.6、WEB-6.7 既有测试全部保持通过。
+
+## 8. Package Provenance
+
+```yaml
+package_gui: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+package_cli: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
+gui_sha256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+cli_sha256: D69E97ED569234C39FC7984B36FFEF6CC114E7503355CD3A7675BD5DE80B64A5
+main_js_sha256: 7AD3572023D4161C4A52421BB2DDCD956D704B47DEF7795BABF404C46EAD8852
+renderer_js_sha256: 94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1
+package_json_sha256: 1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
+implementation_commit: 4d8578b
+fix_commit: a569ba6
 ```
 
 ## 9. Subagents
 
 | Agent | 任务 | 结果 | 状态 |
 |---|---|---|---|
-| Linnaeus | 调用链与 Page Adapter 审计 | 确认 CLI→Control Plane→Lease→Workspace→Adapter；建议独立远程 Registry | 已自然完成并关闭 |
+| Linnaeus | 调用链与 Page Adapter 审计 | 确认 CLI→Control Plane→Lease→Workspace→Adapter | 已自然完成并关闭 |
 | Harvey | CLI / Control Plane 契约审计 | 确认命令白名单、错误映射和预算接入点 | 已自然完成并关闭 |
-| Godel | Registry / 本地 Project 边界审计 | 确认远程 Project 不应混入本地 cwd ProjectRecord | 已自然完成并关闭 |
-| Erdos | WEB-6.5R / 6.6 / 6.7 回归审计 | 确认新增命令不应改变既有 Role、Protocol、Presenter 行为 | 已自然完成并关闭 |
+| Godel | Registry / 本地 Project 边界审计 | 确认远程 Project 不混入本地 cwd ProjectRecord | 已自然完成并关闭 |
+| Erdos | WEB-6.5R / 6.6 / 6.7 回归审计 | 确认新增命令未改变既有 Role、Protocol、Presenter | 已自然完成并关闭 |
 
 ```text
 running_subagents_at_gate: 0
@@ -189,41 +177,39 @@ running_subagents_at_gate: 0
 ```yaml
 v1_frozen_core_changed: NO
 legacy_project_changed: NO
-old_donor: D:\办公\AI\Codex_Workbench（只读；保留既有 dirty baseline，未操作）
+old_donor: D:\办公\AI\Codex_Workbench — 只读，既有 dirty baseline 保留
 old_auto_agent: 未修改
 V1docs.zip: 保持用户原状态，未加入
 dist-stage-a: 保持用户原状态，未加入/修改/删除
 指导文档/*.docx: 保持用户原状态，未加入/修改/删除
 ```
 
-本阶段产品源码只新增 WebGPT Project Create 边界；已有用户 dirty baseline（旧 WEB-6.5R 文档、历史 review 删除项、规划文档和 `dist-stage-a`）未被清理或重置。
+本次只提交 WEB-6.8 相关源码/测试修复和本阶段文档/审查包；不清理、不 reset、不覆盖其他用户已有 dirty 文件或历史 review 删除项。
 
-## 11. Known Limitations / Blockers
+## 11. Known Limitations
 
-### Blocker
-
-- 标准 `dist/package/Codex Workbench V1.exe` 被运行中进程锁定，无法完成标准 build/package 更新。
-- 因此真实网页 Project Create 和 duplicate smoke 尚未执行，不能将本阶段标为最终 PASS。
-
-### Accepted limitation for this stage
-
-- ChatGPT Project DOM 可能随服务端 UI 改版；Page Adapter 对未识别的 section/action/dialog fail-closed，并保留受限诊断。
-- 本阶段不实现删除、重命名、迁移和多账号。
+- ChatGPT Project 页面属于外部 UI；未识别的 section/action/dialog 会 fail-closed，并保留 bounded diagnostics。
+- `project new-chat` 在不发送 Prompt 的前提下只准备 Project Chat 上下文；真正 Chat URL 需要用户后续发送第一条 Prompt，本阶段不伪造该身份。
+- ChatGPT 可能在同一 Project 上使用不同的 URL slug；Workbench 以 Project 名称上下文和已确认 remote identity 共同保护，不把 slug 变化当作新 Project。
+- 本阶段不实现 Project 删除、重命名、迁移、批量管理和多账号。
 
 ## 12. Gate
 
 ```yaml
-error_taxonomy: PASS
-error_envelope: PASS
-cli_project_create_contract: PASS
-remote_registry: PASS
-browser_lease_boundary: PASS
+project_create: PASS
+duplicate_handling: PASS
+project_registry: PASS
+cli_contract: PASS
+control_plane: PASS
+open_regression: PASS
+new_chat_context_regression: PASS
 automated_tests: PASS
-temporary_build_package: PASS
-standard_build_package: BLOCKED_BY_RUNNING_EXE
-real_project_create_smoke: PENDING
+standard_build_package: PASS
+real_project_create_smoke: PASS
+real_duplicate_project_create_smoke: PASS
+real_open_new_chat_smoke: PASS
 v1_core_changed: NO
-gate: BLOCKED_STANDARD_PACKAGE_LOCK
+gate: PASS_CANDIDATE
 ```
 
-本报告完成后不自动提交 GPT；待标准 EXE 关闭并完成真实 smoke 后再形成最终 `PASS_CANDIDATE` 审查结论。
+本阶段完成后不自动进入 WEB-6.9/WEB-7，不自动提交 GPT；审查资料包交由用户手动提交。

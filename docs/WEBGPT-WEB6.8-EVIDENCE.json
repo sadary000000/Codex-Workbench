@@ -1,49 +1,116 @@
 {
   "stage": "WEB-6.8 Project Create",
-  "result": "BLOCKED_STANDARD_PACKAGE_LOCK",
-  "baseCommit": "aa615c7",
+  "result": "PASS_CANDIDATE",
+  "baseCommit": "3328b2f",
   "implementationCommit": "4d8578b",
+  "fixCommit": "a569ba6",
   "v1CoreChanged": false,
   "promptSent": false,
+  "realSmoke": {
+    "testName": "WEB68_PASS_1787307133490",
+    "open": {
+      "result": "PASS",
+      "ready": true,
+      "loginRequired": false,
+      "composerFound": true,
+      "requestId": "ce17ba66-de18-4692-8d8a-8b919791a08f"
+    },
+    "controlAuto": {
+      "result": "PASS",
+      "mode": "AUTO_CONTROL",
+      "requestId": "6a2e7e06-7b34-4a2b-adb2-d84cc0b42db6"
+    },
+    "projectCreate": {
+      "result": "PASS",
+      "requestId": "444b0c3f-c883-49fb-a20b-8102c5c1eea2",
+      "exitCode": 0,
+      "projectName": "WEB68_PASS_1787307133490",
+      "projectId": "g-p-6a8824828c248191b748e0e92b76958c",
+      "projectUrl": "https://chatgpt.com/g/g-p-6a8824828c248191b748e0e92b76958c/project",
+      "created": true,
+      "promptSent": false,
+      "chatCreated": false,
+      "createActionLabel": "新项目",
+      "confirmActionLabel": "创建项目",
+      "operationOutcome": "PASS"
+    },
+    "duplicateProjectCreate": {
+      "result": "PASS",
+      "requestId": "723135eb-cbce-4bb4-9ae3-c1db26a70733",
+      "exitCode": 2,
+      "canonicalError": "INVALID_ARGUMENT",
+      "legacyCode": "PROJECT_ALREADY_EXISTS",
+      "browserActionExecuted": false
+    },
+    "projectInspect": {
+      "result": "PASS",
+      "requestId": "5734c204-a448-40f5-b250-8993a0babd8f",
+      "found": true,
+      "matchCount": 1,
+      "rowTag": "DIV",
+      "rowRole": "button",
+      "hoverActionLabels": ["打开项目首页", "打开 WEB68_PASS_1787307133490 的项目选项"]
+    },
+    "projectOpen": {
+      "result": "PASS",
+      "requestId": "21ececc5-9630-446c-867a-48d59f9a1776",
+      "contextMatch": true,
+      "projectRoute": true,
+      "composerFound": true,
+      "url": "https://chatgpt.com/g/g-p-6a8824828c248191b748e0e92b76958c-web68-pass-1787307133490/project"
+    },
+    "projectNewChat": {
+      "result": "PASS",
+      "requestId": "54f0366f-e6d9-48e9-8b5b-c157d752755c",
+      "chatContextReady": true,
+      "awaitingFirstPrompt": true,
+      "chatCreated": false,
+      "promptSent": false,
+      "actionSource": "project-row-new-chat-pencil"
+    }
+  },
+  "domEvidence": {
+    "projectSectionHeader": "DIV.group/sidebar-expando-section-header with H2.__menu-label",
+    "createButton": "BUTTON aria-label=新项目",
+    "confirmButton": "创建项目",
+    "nameInput": "single visible dialog input; no stable semantic name/placeholder",
+    "forbiddenInteraction": ["global New Chat", "coordinate click", "prompt send"]
+  },
+  "identityRules": {
+    "remoteRegistry": "userData/webgpt/projects/projects.json",
+    "acceptedRoutes": ["/project/<id>", "/projects/<id>", "/g/<id>/project"],
+    "duplicateKeys": ["case-insensitive name", "projectId", "canonical projectUrl"]
+  },
   "automated": {
     "check": "PASS",
     "tests": { "passed": 210, "failed": 0 },
+    "build": "PASS",
+    "packageWin": "PASS",
     "audit": "0 vulnerabilities",
     "diffCheck": "PASS",
     "secretScan": "PASS"
   },
-  "temporaryBuild": {
-    "root": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-web68-build",
-    "build": "PASS",
-    "package": "PASS",
-    "guiExecutable": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-web68-build\\package\\Codex Workbench V1.exe",
-    "cliExecutable": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-web68-build\\package\\Codex Workbench CLI.exe"
-  },
-  "reviewPackage": {
-    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\review\\WEBGPT-WEB6.8-STAGE-REVIEW-PACKAGE.zip"
-  },
-  "standardPackage": {
-    "build": "BLOCKED",
-    "error": "EPERM unlink dist/package/Codex Workbench V1.exe",
-    "lockingPids": [21236, 36564, 42488, 49592]
-  },
-  "realSmoke": {
-    "projectCreate": "NOT_RUN",
-    "duplicateProjectCreate": "NOT_RUN",
-    "createOpenNewChat": "NOT_RUN"
-  },
-  "identityRules": {
-    "remoteRegistry": "userData/webgpt/projects/projects.json",
-    "urlRoute": "/project/<id>",
-    "duplicateKeys": ["case-insensitive name", "projectId", "canonical projectUrl"]
+  "package": {
+    "gui": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+    "cli": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench CLI.exe",
+    "guiSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "cliSha256": "D69E97ED569234C39FC7984B36FFEF6CC114E7503355CD3A7675BD5DE80B64A5",
+    "mainJsSha256": "7AD3572023D4161C4A52421BB2DDCD956D704B47DEF7795BABF404C46EAD8852",
+    "rendererJsSha256": "94E053CB5726F14905580F2F917317DF89DA1A3913E41B0134BBAA935A723BA1",
+    "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F"
   },
   "subagents": {
-    "runningAtGate": 0,
-    "completedAndClosed": 4
+    "completedAndClosed": 4,
+    "runningAtGate": 0
   },
   "legacyProject": {
     "path": "D:\\办公\\AI\\Codex_Workbench",
     "status": "PRE_EXISTING_DIRTY_BASELINE_PRESERVED",
     "modifiedByStage": false
+  },
+  "userFiles": {
+    "V1docsZip": "PRESERVED",
+    "distStageA": "PRESERVED",
+    "navigationDocs": "PRESERVED"
   }
 }

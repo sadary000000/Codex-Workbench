@@ -1,0 +1,13 @@
+WEB-6.8 intended changed files
+
+src/features/webgpt/adapter/webgpt-page-adapter.ts
+src/features/webgpt/runtime/webgpt-operation-budget.ts
+src/features/webgpt/runtime/webgpt-project-registry.ts
+src/features/webgpt/runtime/webgpt-workspace.ts
+tests/webgpt-page-adapter.test.ts
+tests/webgpt-project-registry.test.ts
+docs/WEBGPT-WEB6.8-PROJECT-CREATE-STAGE-REVIEW.md
+docs/WEBGPT-WEB6.8-EVIDENCE.json
+docs/WEBGPT-WEB6.8-TEST-SUMMARY.txt
+docs/WEBGPT-WEB6.8-CHANGED-FILES.txt
+docs/WEBGPT-WEB6.8-PROVENANCE.txt

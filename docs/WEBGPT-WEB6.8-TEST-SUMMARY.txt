@@ -1,0 +1,24 @@
+WEB-6.8 Project Create — Test Summary
+
+npm run check=PASS
+npm test=PASS (210/210)
+npm run build=PASS
+npm run package:win=PASS
+npm audit --omit=dev=PASS (0 vulnerabilities)
+git diff --check=PASS
+secret scan=PASS (0 high-confidence credential pattern hits in intended source/test files)
+
+Real CLI smoke=PASS
+  open=PASS
+  control auto=PASS
+  project create=PASS
+  duplicate project create=PASS (INVALID_ARGUMENT / PROJECT_ALREADY_EXISTS)
+  project inspect=PASS
+  project open=PASS
+  project new-chat context=PASS (awaitingFirstPrompt=true; chatCreated=false)
+  promptSent=false
+
+Regression:
+  WEB-6.5R=PASS (covered by full test suite)
+  WEB-6.6=PASS (covered by full test suite)
+  WEB-6.7=PASS (covered by full test suite)
