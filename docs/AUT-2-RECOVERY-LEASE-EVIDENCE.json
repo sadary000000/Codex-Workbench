@@ -1,0 +1,123 @@
+{
+  "stage": "AUT-2 Gate Fix 5",
+  "result": "BLOCKED",
+  "recordedAt": "2026-08-21T21:28:19.815Z",
+  "gateFix4Commit": "95cdbbd",
+  "initial": {
+    "source": "previous Fix4 evidence plus Fix5 read-only status probe",
+    "controlOwner": "AUTO_CONTROL",
+    "webgpt": "UNAVAILABLE",
+    "pageHealthy": false,
+    "activeInFlightRequestStates": {
+      "SUBMITTED": 0,
+      "RUNNING": 0,
+      "GENERATING": 0
+    },
+    "journalStateCounts": {
+      "RECOVERY_REQUIRED": 19,
+      "PAUSED_FOR_USER": 2,
+      "COMPLETED": 44,
+      "FAILED": 11
+    },
+    "recoveryLeaseObserved": true,
+    "promptCountBeforeRecovery": 0
+  },
+  "boundedWait": {
+    "startedAt": "2026-08-21T21:18:20.668Z",
+    "maxWaitMs": 120000,
+    "elapsedMs": 121769,
+    "pollIntervalMs": 5000,
+    "polls": 6,
+    "promptCountDuringRecovery": 0,
+    "leaseDrainedDuringWait": false,
+    "observedState": "WORKBENCH_START_TIMEOUT"
+  },
+  "normalLifecycle": {
+    "closeCommand": "webgpt close --json",
+    "normalCloseUsed": true,
+    "normalCloseResult": {
+      "ok": true,
+      "closeMode": "GRACEFUL"
+    },
+    "normalRestartUsed": true,
+    "restartExecutable": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+    "restartProbeMaxWaitMs": 90000,
+    "restartProbeReachedReady": false,
+    "openCommandAfterRestart": {
+      "command": "webgpt open --json",
+      "ok": true,
+      "ready": true,
+      "loginRequired": false,
+      "mode": "USER_CONTROL"
+    }
+  },
+  "control": {
+    "fix5ControlAutoCalls": 1,
+    "controlAutoResult": {
+      "ok": false,
+      "code": "TIMEOUT",
+      "legacyCode": "WORKBENCH_START_TIMEOUT",
+      "retryable": true
+    },
+    "postRecoveryStatus": {
+      "workbench": "READY",
+      "webgpt": "READY",
+      "controlOwner": "AUTO_CONTROL",
+      "pageHealthy": true,
+      "browserResource": {
+        "mode": "FREE",
+        "activeOperationId": null,
+        "activeRequestId": null,
+        "activeOperationType": null,
+        "queueDepth": 0,
+        "queueLimit": 8
+      }
+    }
+  },
+  "exactRequirementChat": {
+    "projectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+    "projectName": "workts",
+    "role": "REQUIREMENT",
+    "targetChatUrl": "https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workts/c/6a88873d-0af0-83e8-a2e7-202adf2560f8",
+    "openChatCommand": {
+      "command": "webgpt open-chat --url <target> --json",
+      "ok": true,
+      "pageHealthy": true,
+      "mode": "AUTO_CONTROL"
+    },
+    "readOnlyExactChatProbes": {
+      "attemptCount": 4,
+      "ok": false,
+      "code": "TARGET_CHAT_MISMATCH",
+      "userAction": "reopen_target_chat"
+    },
+    "originalBindingAfterFailure": {
+      "projectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+      "role": "REQUIREMENT",
+      "chatUrl": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+      "temporarilyRebound": false,
+      "restored": true
+    }
+  },
+  "promptAccounting": {
+    "newBusinessPrompts": 0,
+    "newRepairPrompts": 0,
+    "newSetupPrompts": 0,
+    "newTestChats": 0,
+    "cumulativeRealPrompts": "7/12",
+    "cumulativeRepairPrompts": "2/3",
+    "cumulativeNewChats": "2/3"
+  },
+  "safety": {
+    "blindResend": false,
+    "replacementChat": false,
+    "promptBodiesLogged": false,
+    "responseBodiesLogged": false,
+    "cookiesRead": false,
+    "tokensRead": false,
+    "v1CoreChanged": false,
+    "webgptV1Changed": false,
+    "aut3Started": false
+  },
+  "conclusion": "Recovery control eventually reported AUTO_CONTROL/FREE after graceful close, restart, open, and exact navigation, but the existing REQUIREMENT test Chat could not pass the read-only exact identity check. AUT-2 real roundtrip was not started and the Gate remains BLOCKED."
+}

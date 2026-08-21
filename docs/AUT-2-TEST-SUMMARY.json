@@ -1,9 +1,9 @@
 {
-  "stage": "AUT-2 Gate Fix 4",
+  "stage": "AUT-2 Gate Fix 5",
   "result": "FIX_REQUIRED",
   "baseCommit": "80d57f6",
   "priorFix3ImplementationCommit": "917c060",
-  "implementationCommit": "UNCOMMITTED_WORKTREE",
+  "implementationCommit": "95cdbbd",
   "executedAt": "2026-08-22",
   "checks": {
     "npm run check": "PASS",
@@ -29,14 +29,21 @@
     "latestStatus": "BLOCKED",
     "firstFix4Attempt": "FAIL",
     "firstFix4Alignment": "READY_FOR_DRAFT_WITHOUT_INITIAL_NEEDS_INPUT",
-    "latestSetup": "STABLE_CHAT_REUSE_BLOCKED",
-    "latestBlocker": "USER_CONTROL_THEN_RECOVERY_LEASE_CONTROL_AUTO_TIMEOUT",
+    "latestSetup": "GRACEFUL_CLOSE_RESTART_EXACT_READ_BLOCKED",
+    "latestBlocker": "TARGET_CHAT_MISMATCH_AFTER_GRACEFUL_CLOSE_RESTART",
     "newBusinessPromptsLatest": 0,
     "newRepairPromptsLatest": 0,
     "newChatsLatest": 0,
     "setupPromptsLatest": 0,
     "bindingRestoredOnSetupFailure": true,
-    "evidence": "docs/AUT-2-GATE-FIX-4-RUNTIME.json"
+    "recoveryLeaseEvidence": "docs/AUT-2-RECOVERY-LEASE-EVIDENCE.json",
+    "runtimeEvidence": "docs/AUT-2-GATE-FIX-5-RUNTIME.json",
+    "normalClose": "GRACEFUL",
+    "normalRestart": true,
+    "postRecoveryControlOwner": "AUTO_CONTROL",
+    "postRecoveryBrowserResource": "FREE",
+    "exactTargetChatRead": "TARGET_CHAT_MISMATCH",
+    "evidence": "docs/AUT-2-GATE-FIX-5-RUNTIME.json"
   },
   "cumulativeBudget": {
     "realPrompts": "7/12",

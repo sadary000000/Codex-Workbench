@@ -1,6 +1,6 @@
 {
   "stage": "AUT-2 Requirement Alignment + Baseline + Change Request",
-  "gateFix": "AUT-2 Gate Fix 4 — Transport / Semantic Contract Separation + Final Real Requirement Roundtrip",
+  "gateFix": "AUT-2 Gate Fix 5 — Recovery Lease Drain + Final Real Requirement Roundtrip",
   "hardMaxRealPrompts": 12,
   "targetMaxRealPrompts": 10,
   "cumulativeLocalRealPrompts": 7,
@@ -26,8 +26,8 @@
     "repairCount": 0,
     "chatScope": "same reused Project workts REQUIREMENT test Chat",
     "result": "BLOCKED",
-    "failure": "AUT2_SETUP_BUDGET_EXHAUSTED: stable Chat reuse returned USER_CONTROL; control auto timed out while a recovery lease was active",
-    "evidenceFile": "docs/AUT-2-GATE-FIX-4-RUNTIME.json"
+    "failure": "TARGET_CHAT_MISMATCH: after graceful close/restart and exact open-chat, stable REQUIREMENT Chat read remained fail-closed",
+    "evidenceFile": "docs/AUT-2-GATE-FIX-5-RUNTIME.json"
   },
   "lastGateAttempt": {
     "result": "BLOCKED",
@@ -35,10 +35,16 @@
     "newRepairPromptsDispatched": 0,
     "setupPromptsDispatched": 0,
     "newChatsCreated": 0,
-    "reuseFailure": "USER_CONTROL",
+    "reuseFailure": "TARGET_CHAT_MISMATCH_AFTER_RESTART",
     "controlAutoFailure": "TIMEOUT/WORKBENCH_START_TIMEOUT",
     "activeRecoveryLeaseObserved": true,
-    "evidenceFile": "docs/AUT-2-GATE-FIX-4-RUNTIME.json"
+    "boundedWaitMs": 120000,
+    "normalCloseUsed": true,
+    "normalRestartUsed": true,
+    "finalControlOwner": "AUTO_CONTROL",
+    "finalBrowserResourceMode": "FREE",
+    "targetChatReadFailure": "TARGET_CHAT_MISMATCH",
+    "evidenceFile": "docs/AUT-2-GATE-FIX-5-RUNTIME.json"
   },
   "finalEvidence": {
     "evidenceFile": "docs/AUT-2-GATE-FIX-4-RUNTIME.json",
@@ -54,5 +60,5 @@
     "tokensRead": false
   },
   "createdAt": "2026-08-21T18:31:33.1172293Z",
-  "note": "Cumulative counts cover the local Gate Fix 3 attempts: two setup prompts/chats plus two original and two repair business prompts. The final invocation reused a stable setup Chat and sent no setup Prompt."
+  "note": "Cumulative counts cover prior local Gate attempts: two setup prompts/chats plus three original and two repair business prompts. Gate Fix 5 used bounded read/status, graceful close, normal restart, open-chat and chat latest only; it sent no new Prompt, repair, setup Prompt or Chat."
 }
