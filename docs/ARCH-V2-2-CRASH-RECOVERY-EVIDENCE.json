@@ -1,0 +1,13 @@
+{
+  "stage": "ARCH-V2-2",
+  "command": "npm run test:real:shared-host-recovery",
+  "result": "PASS",
+  "firstProcessId": 34456,
+  "restartedProcessId": 41152,
+  "firstNativeThreadId": "01a029ce-69c0-7653-a14b-583c9235c576",
+  "secondNativeThreadId": "01a029ce-6bdf-7e22-9516-b61f68bba487",
+  "statesAfterResume": ["READY", "READY"],
+  "sameNativeThreadIds": true,
+  "replacementThread": false,
+  "promptReplayedDuringRecovery": false
+}

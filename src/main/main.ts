@@ -4,6 +4,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { extname, isAbsolute, join, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
+import { AppServerHost } from "../codex/app-server-host.ts";
+import { resolveCodexCommand } from "../codex/codex-command.ts";
 import { MAP_DYNAMIC_TOOL_SPEC, MAP_TOOL_CALL_METHOD } from "../codex/map-tool.ts";
 import { errorInfo, isNoRolloutError } from "../shared/error-info.ts";
 import { createLogger, logError, type Logger } from "../shared/logger.ts";
@@ -104,6 +106,7 @@ const IPC = Object.freeze({
 
 let mainWindow: BrowserWindow | null = null;
 const runtimes = new RuntimeRegistry<NativeThreadRuntime>();
+let nativeAppServerHost: AppServerHost | null = null;
 let currentNativeThreadId: string | null = null;
 let threadSwitchSequence = 0;
 let persistence: V1PersistenceStore | null = null;
@@ -965,6 +968,24 @@ function runtimeCwd(): string {
   return process.env.CODEX_WORKBENCH_CWD?.trim() || process.cwd();
 }
 
+function getNativeAppServerHost(): AppServerHost {
+  if (nativeAppServerHost) return nativeAppServerHost;
+  nativeAppServerHost = new AppServerHost({
+    command: resolveCodexCommand(),
+    // The App Server process cwd is only a neutral host launch directory;
+    // every Native Thread still carries its own explicit `cwd` in
+    // thread/start and thread/resume params.
+    cwd: runtimeCwd(),
+    clientInfo: {
+      name: "codex-workbench-v1",
+      title: "Codex Workbench V1 Shared App Server Host",
+      version: "0.1.0",
+    },
+    experimentalApi: false,
+  });
+  return nativeAppServerHost;
+}
+
 function getConversationMaps(): ConversationMapCoordinator {
   if (conversationMaps) return conversationMaps;
   conversationMaps = new ConversationMapCoordinator({
@@ -1109,6 +1130,18 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
     // latest switch request wins. Concurrent runtime resumes must not race
     // on this single historical binding file.
     persistBindingOnResume: false,
+    // Ordinary model-facing Native Threads share one initialized Host. Map
+    // compatibility runtimes keep their existing isolated path because they
+    // require a separate dynamic-tool capability domain.
+    ...(target.mapToolEnabled
+      ? {}
+      : {
+          clientFactory: (clientOptions) => getNativeAppServerHost().createThreadClient({
+            onServerRequest: clientOptions.onServerRequest,
+            onProcessExit: clientOptions.onProcessExit,
+          }),
+          skipInitialize: true,
+        }),
     onEvent: (event) => {
       logger.info("native_event", { method: event.method, threadId: event.threadId, turnId: event.turnId, itemId: event.itemId });
       send(IPC.event, event);
@@ -2053,6 +2086,7 @@ if (officialCliMode) {
           if (automationStore) await automationStore.close();
           automationStore = null;
           await runtimes.closeAll();
+          if (nativeAppServerHost) await nativeAppServerHost.close();
           if (projectMaps) await projectMaps.close();
           if (webGptWorkspace) webGptWorkspace.close();
         } catch (error) {

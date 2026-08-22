@@ -34,7 +34,9 @@
     "test:real:webgpt:arbiter": "node --experimental-strip-types scripts/real-webgpt-web6.4-arbiter-smoke.ts",
     "test:real:webgpt:protocol": "node --experimental-strip-types scripts/real-webgpt-web6.6-protocol-smoke.ts",
     "test:real:aut3:planner": "node --experimental-strip-types scripts/aut3-real-planner-gate.ts",
-    "test:real:aut2-fix10-aut3": "node --experimental-strip-types scripts/aut2-real-webgpt-gate.ts"
+    "test:real:aut2-fix10-aut3": "node --experimental-strip-types scripts/aut2-real-webgpt-gate.ts",
+    "test:protocol:arch-v2-2": "node scripts/verify-arch-v2-2-protocol.mjs",
+    "test:real:shared-host-recovery": "node --experimental-strip-types scripts/real-shared-host-recovery-smoke.ts"
   },
   "devDependencies": {
     "@types/node": "22.10.2",

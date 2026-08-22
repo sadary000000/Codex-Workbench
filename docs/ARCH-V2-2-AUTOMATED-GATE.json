@@ -1,0 +1,23 @@
+{
+  "stage": "ARCH-V2-2",
+  "automatedGate": {
+    "npmRunCheck": "PASS",
+    "npmTest": "304/304 PASS",
+    "build": "PASS",
+    "packageWin": "PASS",
+    "npmAuditOmitDev": "0 vulnerabilities",
+    "gitDiffCheck": "PASS (line-ending warnings only)",
+    "secretScan": "PASS"
+  },
+  "targeted": {
+    "sharedHostUnit": "2/2 PASS",
+    "protocolGeneration": "PASS / repeatable",
+    "realMultiThread": "PASS",
+    "realSharedHostRecovery": "PASS",
+    "realNavigation": "PASS",
+    "realWorkspace": "PASS",
+    "realMap": "PASS",
+    "realResumedMap": "PASS",
+    "realProjectMap": "PASS"
+  }
+}

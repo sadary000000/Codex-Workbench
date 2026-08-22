@@ -1,0 +1,28 @@
+{
+  "stage": "ARCH-V2-2",
+  "command": "npm run test:real:multi-thread",
+  "result": "PASS",
+  "hostProcessId": 3028,
+  "threadIds": [
+    "01a029d4-52e4-7143-832b-1c1a3aa7e952",
+    "01a029d4-52e4-7143-832b-1c31f1bf7f22"
+  ],
+  "cwdCount": 2,
+  "turnIds": [
+    "01a029d4-5374-7b12-b90e-f84af2ff8242",
+    "01a029d4-5375-7b90-9e8c-c6ac5f1a6bbf"
+  ],
+  "turnStatuses": ["completed", "completed"],
+  "eventMarkers": {
+    "a": [
+      "turn/started:01a029d4-52e4-7143-832b-1c1a3aa7e952",
+      "turn/completed:01a029d4-52e4-7143-832b-1c1a3aa7e952"
+    ],
+    "b": [
+      "turn/started:01a029d4-52e4-7143-832b-1c31f1bf7f22",
+      "turn/completed:01a029d4-52e4-7143-832b-1c31f1bf7f22"
+    ]
+  },
+  "sameHostProcess": true,
+  "crossThreadEventObserved": false
+}

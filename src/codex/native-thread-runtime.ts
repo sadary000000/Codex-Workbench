@@ -39,6 +39,8 @@ export interface NativeThreadRuntimeOptions {
   command?: string;
   timeoutMs?: number;
   clientFactory?: (options: AppServerClientOptions) => AppServerClientPort;
+  /** The supplied client owns an already-initialized shared App Server Host. */
+  skipInitialize?: boolean;
   onEvent?: (event: NativeEvent) => void;
   onServerRequest?: (message: JsonRpcMessage) => Promise<unknown> | unknown;
   onTurnStartRequest?: (request: ComposerRequestDiagnostics) => void;
@@ -159,6 +161,7 @@ export class NativeThreadRuntime {
   private readonly command: string;
   private readonly timeoutMs: number;
   private readonly clientFactory: (options: AppServerClientOptions) => AppServerClientPort;
+  private readonly skipInitialize: boolean;
   private readonly onEvent: NativeThreadRuntimeOptions["onEvent"];
   private readonly onServerRequest: NativeThreadRuntimeOptions["onServerRequest"];
   private readonly onTurnStartRequest: NativeThreadRuntimeOptions["onTurnStartRequest"];
@@ -190,6 +193,7 @@ export class NativeThreadRuntime {
     this.command = options.command ?? resolveCodexCommand();
     this.timeoutMs = Math.min(Math.max(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1_000), DEFAULT_TIMEOUT_MS);
     this.clientFactory = options.clientFactory ?? ((clientOptions) => new AppServerProcessClient(clientOptions));
+    this.skipInitialize = options.skipInitialize ?? false;
     this.onEvent = options.onEvent;
     this.onServerRequest = options.onServerRequest;
     this.onTurnStartRequest = options.onTurnStartRequest;
@@ -321,18 +325,21 @@ export class NativeThreadRuntime {
       this.client = client;
       this.unsubscribe = client.onMessage((message) => this.emitMessage(message));
       await client.start();
-      const initialized = validateInitializeResult(await client.request("initialize", {
-        clientInfo: {
-          name: "codex-workbench-v1",
-          title: "Codex Workbench V1",
-          version: "0.1.0",
-        },
-        // Codex CLI requires this capability before accepting
-        // thread/start.dynamicTools. A resumed Thread cannot register that
-        // field in the current ABI, so do not advertise it on resume.
-        capabilities: { experimentalApi: this.dynamicTools.length > 0 && !requestedId },
-      }, this.timeoutMs));
-      client.notify("initialized", {});
+      let initialized: unknown = null;
+      if (!this.skipInitialize) {
+        initialized = validateInitializeResult(await client.request("initialize", {
+          clientInfo: {
+            name: "codex-workbench-v1",
+            title: "Codex Workbench V1",
+            version: "0.1.0",
+          },
+          // Codex CLI requires this capability before accepting
+          // thread/start.dynamicTools. A resumed Thread cannot register that
+          // field in the current ABI, so do not advertise it on resume.
+          capabilities: { experimentalApi: this.dynamicTools.length > 0 && !requestedId },
+        }, this.timeoutMs));
+        client.notify("initialized", {});
+      }
       this.initialized = true;
       if (requestedId) {
         this.nativeThreadIdValue = requestedId;
