@@ -24,6 +24,8 @@ export interface Aut2RealWebGptGateOptions {
   readonly timeoutMs?: number;
   readonly outputPath: string;
   readonly setupContext: Aut2RealWebGptSetupContext;
+  /** Fix8 forensic mode: send one business request and stop at the first round. */
+  readonly firstRoundOnly?: boolean;
   readonly now?: () => string;
 }
 
@@ -139,11 +141,12 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
   const idempotencyKeys: string[] = [];
   const semanticSha256: string[] = [];
   const responseDiagnostics: RequirementResponseDiagnosticEvent[] = [];
+  const firstRoundOnly = options.firstRoundOnly === true;
   if (!Number.isSafeInteger(options.setupContext.remainingRealPrompts) || options.setupContext.remainingRealPrompts < 0 || !Number.isSafeInteger(options.setupContext.remainingRepairPrompts) || options.setupContext.remainingRepairPrompts < 0) {
     throw gateError("SETUP_CONTEXT_INVALID", "The setup context must carry bounded remaining real and repair prompt budgets.");
   }
-  const realPromptBudget = { used: 0, max: Math.min(MAX_NEW_REAL_PROMPTS, Math.max(0, options.setupContext.remainingRealPrompts)) };
-  const repairBudget = { used: 0, max: Math.min(MAX_REPAIR_PROMPTS_PER_GATE, Math.max(0, options.setupContext.remainingRepairPrompts)) };
+  const realPromptBudget = { used: 0, max: Math.min(firstRoundOnly ? 1 : MAX_NEW_REAL_PROMPTS, Math.max(0, options.setupContext.remainingRealPrompts)) };
+  const repairBudget = { used: 0, max: firstRoundOnly ? 0 : Math.min(MAX_REPAIR_PROMPTS_PER_GATE, Math.max(0, options.setupContext.remainingRepairPrompts)) };
   const runtimeRequestIds: string[] = [];
   const runtimeIdempotencyKeys: string[] = [];
   const runtimeSemanticSha256: string[] = [];
@@ -235,43 +238,45 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
     roundCount = draftResult.round.roundNumber;
     if (!independentQuestionsSameRound) throw gateError("BATCH_ALIGNMENT_TOO_SMALL", "The first real Requirement round did not contain at least three independent questions.");
 
-    let current = draftResult;
-    for (let attempt = 0; attempt < MAX_REAL_ALIGNMENT_REQUESTS - 1; attempt += 1) {
-      const questions = await questionsForRound(options.store, current.round.alignmentRoundId);
-      const answers: Record<string, string> = {};
-      for (const question of questions) answers[question.questionId] = syntheticAnswer(question.question);
-      await service.answerQuestions({ sessionId, roundId: current.round.alignmentRoundId, answers });
-      current = await service.requestDraft({ sessionId, binding });
-      recordRequest(current, requestIds, idempotencyKeys, semanticSha256);
-      if (current.status === "DRAFT_READY") break;
-      if (current.status !== "WAITING_FOR_USER" || current.envelope?.status !== "NEEDS_INPUT") throw gateError("REQUIREMENT_ROUND_BLOCKED", "The Requirement round became blocked before a draft was produced.");
-      roundCount = current.round.roundNumber;
+    if (!firstRoundOnly) {
+      let current = draftResult;
+      for (let attempt = 0; attempt < MAX_REAL_ALIGNMENT_REQUESTS - 1; attempt += 1) {
+        const questions = await questionsForRound(options.store, current.round.alignmentRoundId);
+        const answers: Record<string, string> = {};
+        for (const question of questions) answers[question.questionId] = syntheticAnswer(question.question);
+        await service.answerQuestions({ sessionId, roundId: current.round.alignmentRoundId, answers });
+        current = await service.requestDraft({ sessionId, binding });
+        recordRequest(current, requestIds, idempotencyKeys, semanticSha256);
+        if (current.status === "DRAFT_READY") break;
+        if (current.status !== "WAITING_FOR_USER" || current.envelope?.status !== "NEEDS_INPUT") throw gateError("REQUIREMENT_ROUND_BLOCKED", "The Requirement round became blocked before a draft was produced.");
+        roundCount = current.round.roundNumber;
+      }
+      draftResult = current;
+      if (draftResult.status !== "DRAFT_READY" || !draftResult.draft || !draftResult.request) throw gateError("DRAFT_NOT_READY", "Synthetic answers did not produce a Requirement draft within the bounded round budget.");
+      draftRequestId = draftResult.request.requestId;
+      draftIdempotencyKey = draftResult.request.idempotencyKey;
+      draftSemanticSha256 = draftResult.request.semanticSha256;
+      requirementVersionId = draftResult.draft.requirementVersionId;
+      payloadSha256 = draftResult.draft.payloadSha256;
+      const afterDraft = await options.store.get("automationProjects", automationProjectId);
+      activeRequirementVersionAfterDraft = afterDraft?.activeRequirementVersionId ?? null;
+
+      const replay = await service.requestDraft({ sessionId, binding });
+      idempotentSameRequestId = replay.request?.requestId === draftResult.request.requestId;
+      idempotentSameSemanticSha256 = replay.request?.semanticSha256 === draftResult.request.semanticSha256;
+      if (!idempotentSameRequestId || !idempotentSameSemanticSha256 || replay.draft?.requirementVersionId !== requirementVersionId) throw gateError("IDEMPOTENCY_REATTACH_FAILED", "The same resolved Requirement request did not reattach to the existing draft.");
+
+      try { await service.confirmRequirement({ projectId: automationProjectId, requirementVersionId, expectedPayloadSha256: payloadSha256, actor: "WEBGPT" }); }
+      catch { webgptRejected = true; }
+      try { await service.confirmRequirement({ projectId: automationProjectId, requirementVersionId, expectedPayloadSha256: payloadSha256, actor: "SYSTEM" }); }
+      catch { systemRejected = true; }
+      await service.confirmRequirement({ projectId: automationProjectId, requirementVersionId, expectedPayloadSha256: payloadSha256, actor: "USER" });
+      userConfirmation = "PASS_REAL_RUNTIME";
+      const afterConfirmation = await options.store.get("automationProjects", automationProjectId);
+      const activeAfterConfirmation = afterConfirmation?.activeRequirementVersionId ?? null;
+      if (activeAfterConfirmation !== requirementVersionId || activeRequirementVersionAfterDraft !== null || !webgptRejected || !systemRejected) throw gateError("CONFIRMATION_GUARD_FAILED", "USER confirmation or non-USER confirmation guard did not converge as required.");
+      activeRequirementVersionAfterDraft = activeAfterConfirmation;
     }
-    draftResult = current;
-    if (draftResult.status !== "DRAFT_READY" || !draftResult.draft || !draftResult.request) throw gateError("DRAFT_NOT_READY", "Synthetic answers did not produce a Requirement draft within the bounded round budget.");
-    draftRequestId = draftResult.request.requestId;
-    draftIdempotencyKey = draftResult.request.idempotencyKey;
-    draftSemanticSha256 = draftResult.request.semanticSha256;
-    requirementVersionId = draftResult.draft.requirementVersionId;
-    payloadSha256 = draftResult.draft.payloadSha256;
-    const afterDraft = await options.store.get("automationProjects", automationProjectId);
-    activeRequirementVersionAfterDraft = afterDraft?.activeRequirementVersionId ?? null;
-
-    const replay = await service.requestDraft({ sessionId, binding });
-    idempotentSameRequestId = replay.request?.requestId === draftResult.request.requestId;
-    idempotentSameSemanticSha256 = replay.request?.semanticSha256 === draftResult.request.semanticSha256;
-    if (!idempotentSameRequestId || !idempotentSameSemanticSha256 || replay.draft?.requirementVersionId !== requirementVersionId) throw gateError("IDEMPOTENCY_REATTACH_FAILED", "The same resolved Requirement request did not reattach to the existing draft.");
-
-    try { await service.confirmRequirement({ projectId: automationProjectId, requirementVersionId, expectedPayloadSha256: payloadSha256, actor: "WEBGPT" }); }
-    catch { webgptRejected = true; }
-    try { await service.confirmRequirement({ projectId: automationProjectId, requirementVersionId, expectedPayloadSha256: payloadSha256, actor: "SYSTEM" }); }
-    catch { systemRejected = true; }
-    await service.confirmRequirement({ projectId: automationProjectId, requirementVersionId, expectedPayloadSha256: payloadSha256, actor: "USER" });
-    userConfirmation = "PASS_REAL_RUNTIME";
-    const afterConfirmation = await options.store.get("automationProjects", automationProjectId);
-    const activeAfterConfirmation = afterConfirmation?.activeRequirementVersionId ?? null;
-    if (activeAfterConfirmation !== requirementVersionId || activeRequirementVersionAfterDraft !== null || !webgptRejected || !systemRejected) throw gateError("CONFIRMATION_GUARD_FAILED", "USER confirmation or non-USER confirmation guard did not converge as required.");
-    activeRequirementVersionAfterDraft = activeAfterConfirmation;
   } catch (error) {
     const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "AUT2_REAL_GATE_FAILED";
     errors.push({ code, message: safeMessage(error) });
@@ -298,7 +303,7 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
   const repairCount = responseDiagnostics.reduce((total, event) => total + event.repairCount, 0);
   const evidence: Aut2RealWebGptGateEvidence = {
     stage: "AUT-2",
-    result: errors.length === 0 && userConfirmation === "PASS_REAL_RUNTIME" ? "PASS_REAL" : "FAIL",
+    result: errors.length === 0 && (firstRoundOnly ? independentQuestionsSameRound : userConfirmation === "PASS_REAL_RUNTIME") ? "PASS_REAL" : "FAIL",
     goalSha256: sha256(SYNTHETIC_GOAL),
     webgptProjectId,
     automationProjectId,

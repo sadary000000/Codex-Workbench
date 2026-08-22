@@ -1,0 +1,91 @@
+{
+  "stage": "AUT-2 Fix8 Requirement Schema Mismatch Forensics",
+  "sensitiveContentStored": false,
+  "rawResponseStored": false,
+  "historicalFailure": {
+    "source": "AUT-2-FINAL-REAL-GATE-RUNTIME.json",
+    "jsonParseStage": "passed",
+    "schemaValidationStage": "failed",
+    "semanticValidationStage": "not_attempted",
+    "topLevelKeys": [
+      "requirementProtocolVersion",
+      "status",
+      "payload"
+    ],
+    "nestedShape": "NOT_OBSERVED_IN_HISTORICAL_EVIDENCE",
+    "issues": [
+      {
+        "path": "$.payload.questions[0].resolutionMode",
+        "rule": "enum",
+        "receivedType": "string",
+        "allowedEnum": [
+          "USER_REQUIRED",
+          "ASSUMPTION_ALLOWED",
+          "AVAILABLE_CONTEXT",
+          "AUTO_INVESTIGATION"
+        ],
+        "receivedEnum": "SINGLE_SELECT"
+      }
+    ]
+  },
+  "historicalRepairForensicRead": {
+    "source": "same canonical REQUIREMENT Chat via chat latest",
+    "jsonParseStage": "passed",
+    "schemaValidationStage": "failed",
+    "semanticValidationStage": "not_attempted",
+    "responseCharCount": 1231,
+    "responseSha256": "75368fd8a9b826e3a82abe5e044a81442678a16de05ec32894d8519eb1445d5c",
+    "topLevelKeys": [
+      "requirementProtocolVersion",
+      "status",
+      "payload"
+    ],
+    "shape": {
+      "requirementProtocolVersion": { "type": "number", "matchesExpected": true },
+      "status": { "type": "string", "value": "NEEDS_INPUT", "matchesEnum": true },
+      "payload": { "type": "object", "keys": ["questions"] },
+      "questions": { "exists": true, "type": "array", "count": 5 },
+      "question0": {
+        "exists": true,
+        "type": "object",
+        "keys": ["category", "question", "whyNeeded", "blocking", "resolutionMode", "options", "defaultRecommendation"]
+      },
+      "assumptions": { "exists": false, "type": null, "count": null },
+      "draft": { "exists": false, "type": null },
+      "blocked": { "codeExists": false, "reasonExists": false, "retryableExists": false }
+    },
+    "issues": [
+      {
+        "path": "$.payload.questions[0].resolutionMode",
+        "rule": "enum",
+        "receivedType": "string",
+        "allowedEnum": [
+          "USER_REQUIRED",
+          "ASSUMPTION_ALLOWED",
+          "AVAILABLE_CONTEXT",
+          "AUTO_INVESTIGATION"
+        ],
+        "receivedEnum": "SINGLE_SELECT"
+      }
+    ]
+  },
+  "fix8FirstRound": {
+    "source": "AUT-2-FIX8-FIRST-ROUND-REAL-EVIDENCE.json",
+    "jsonParseStage": "passed",
+    "schemaValidationStage": "passed",
+    "semanticValidationStage": "passed",
+    "responseCharCount": 1231,
+    "responseSha256": "ea0bb932653e4bc774ddbbc106b0e6a41131bcc06e14245349cf111c67f2c090",
+    "topLevelKeys": [
+      "requirementProtocolVersion",
+      "status",
+      "payload"
+    ],
+    "status": "NEEDS_INPUT",
+    "questionCount": 5,
+    "validationIssues": [],
+    "repairPromptCount": 0,
+    "newChatCount": 0,
+    "persistenceGate": "FAIL: AUTOMATION_SCHEMA_INVALID / questionIds crosses a round boundary"
+  }
+}

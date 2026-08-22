@@ -166,6 +166,7 @@ async function startAut2RealWebGptGate(): Promise<void> {
     timeoutMs: Number(process.env.AUT2_REAL_WEBGPT_TIMEOUT_MS ?? 240_000),
     outputPath,
     setupContext,
+    firstRoundOnly: process.env.AUT2_FIX8_FIRST_ROUND === "1",
   });
   logger.info("aut2_real_webgpt_gate_finished", { result: evidence.result, attemptedRealRequests: evidence.attemptedRealRequests, realPromptCount: evidence.realPromptCount, outputPath });
   if (evidence.result !== "PASS_REAL") process.exitCode = 1;

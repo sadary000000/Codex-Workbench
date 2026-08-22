@@ -140,6 +140,8 @@ test("aligns a batch, resolves context, calls explicit REQUIREMENT WebGPT, and r
     assert.equal(first.request?.binding.chatRef, binding().chatRef);
     assert.match(first.request?.prompt ?? "", /top-level keys must be exactly requirementProtocolVersion, status, and payload/);
     assert.match(first.request?.prompt ?? "", /NEEDS_INPUT payload must be/);
+    assert.match(first.request?.prompt ?? "", /resolutionMode must be exactly one of USER_REQUIRED, ASSUMPTION_ALLOWED, AVAILABLE_CONTEXT, or AUTO_INVESTIGATION/);
+    assert.match(first.request?.prompt ?? "", /Do not use UI control labels such as SINGLE_SELECT/);
     assert.doesNotMatch(first.request?.prompt ?? "", /Protocol identity to echo|Request semanticSha256 to echo/);
     assert.equal(first.request?.prompt.includes(first.request?.semanticSha256 ?? ""), false);
     assert.equal(webgpt.requests.length, 1);

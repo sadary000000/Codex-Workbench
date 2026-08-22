@@ -1,0 +1,526 @@
+{
+  "stage": "AUT-2 Gate Fix 4",
+  "result": "FAIL",
+  "startedAt": "2026-08-22T04:59:40.236Z",
+  "officialCli": {
+    "executable": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench CLI.exe",
+    "guiHost": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+    "guiExecutableUsedAsPublicCli": false,
+    "closeBefore": {
+      "ok": false,
+      "exitCode": 1,
+      "elapsedMs": 233,
+      "command": "webgpt.close",
+      "workbench": null,
+      "webgpt": null,
+      "controlOwner": null,
+      "currentUrl": null,
+      "chatUrl": null,
+      "pageHealthy": null,
+      "loginRequired": null,
+      "onChatPage": null,
+      "userCount": null,
+      "assistantCount": null,
+      "assistantTextSha256": null,
+      "generating": null,
+      "identity": null,
+      "error": "Command failed: D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench CLI.exe webgpt close --json\n"
+    },
+    "statusDuring": {
+      "ok": true,
+      "exitCode": 0,
+      "elapsedMs": 213,
+      "command": "webgpt.status",
+      "workbench": "READY",
+      "webgpt": "READY",
+      "controlOwner": "AUTO_CONTROL",
+      "currentUrl": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+      "chatUrl": null,
+      "pageHealthy": true,
+      "loginRequired": false,
+      "onChatPage": true,
+      "userCount": 0,
+      "assistantCount": 0,
+      "assistantTextSha256": null,
+      "generating": false,
+      "identity": {
+        "workbenchInstanceId": "6388761e-221a-45d8-bc63-693a3e331097",
+        "webgptRuntimeId": "ff6322dc-8a65-4b8d-9847-8b107d8f93b1",
+        "sessionKey": "default",
+        "revision": 92
+      },
+      "error": null
+    },
+    "closeAfter": null
+  },
+  "setup": {
+    "projectName": "workts",
+    "promptCount": 0,
+    "newChatCount": 0,
+    "setupChatRef": "https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315-workts/c/6a891d7c-abf4-83e8-879a-d477e472576a",
+    "setupRequestId": "reused:external-evidence",
+    "setupIdempotencyKey": "reused:external-evidence",
+    "setupFailure": null,
+    "commands": {
+      "open": {
+        "ok": true,
+        "exitCode": 0,
+        "elapsedMs": 1475,
+        "command": "webgpt.open",
+        "workbench": null,
+        "webgpt": null,
+        "controlOwner": null,
+        "currentUrl": "https://chatgpt.com/",
+        "chatUrl": null,
+        "pageHealthy": null,
+        "loginRequired": false,
+        "onChatPage": true,
+        "userCount": 0,
+        "assistantCount": 0,
+        "assistantTextSha256": null,
+        "generating": false,
+        "identity": {
+          "workbenchInstanceId": "6388761e-221a-45d8-bc63-693a3e331097",
+          "webgptRuntimeId": "ff6322dc-8a65-4b8d-9847-8b107d8f93b1",
+          "sessionKey": "default",
+          "revision": 11
+        },
+        "error": null
+      },
+      "controlAuto": {
+        "ok": false,
+        "exitCode": 1,
+        "elapsedMs": 15308,
+        "command": "webgpt.control.auto",
+        "workbench": null,
+        "webgpt": null,
+        "controlOwner": null,
+        "currentUrl": null,
+        "chatUrl": null,
+        "pageHealthy": null,
+        "loginRequired": null,
+        "onChatPage": null,
+        "userCount": null,
+        "assistantCount": null,
+        "assistantTextSha256": null,
+        "generating": null,
+        "identity": null,
+        "error": "Command failed: D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench CLI.exe webgpt control auto --json\n"
+      },
+      "controlAutoStateAfterTimeout": {
+        "ok": true,
+        "exitCode": 0,
+        "elapsedMs": 207,
+        "command": "webgpt.status",
+        "workbench": "READY",
+        "webgpt": "READY",
+        "controlOwner": "AUTO_CONTROL",
+        "currentUrl": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+        "chatUrl": null,
+        "pageHealthy": true,
+        "loginRequired": false,
+        "onChatPage": true,
+        "userCount": 0,
+        "assistantCount": 0,
+        "assistantTextSha256": null,
+        "generating": false,
+        "identity": {
+          "workbenchInstanceId": "6388761e-221a-45d8-bc63-693a3e331097",
+          "webgptRuntimeId": "ff6322dc-8a65-4b8d-9847-8b107d8f93b1",
+          "sessionKey": "default",
+          "revision": 91
+        },
+        "error": null
+      },
+      "statusBefore": {
+        "ok": true,
+        "exitCode": 0,
+        "elapsedMs": 213,
+        "command": "webgpt.status",
+        "workbench": "READY",
+        "webgpt": "READY",
+        "controlOwner": "AUTO_CONTROL",
+        "currentUrl": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+        "chatUrl": null,
+        "pageHealthy": true,
+        "loginRequired": false,
+        "onChatPage": true,
+        "userCount": 0,
+        "assistantCount": 0,
+        "assistantTextSha256": null,
+        "generating": false,
+        "identity": {
+          "workbenchInstanceId": "6388761e-221a-45d8-bc63-693a3e331097",
+          "webgptRuntimeId": "ff6322dc-8a65-4b8d-9847-8b107d8f93b1",
+          "sessionKey": "default",
+          "revision": 92
+        },
+        "error": null
+      },
+      "roleStatusBefore": {
+        "ok": true,
+        "exitCode": 0,
+        "elapsedMs": 209,
+        "command": "webgpt.role.status",
+        "workbench": null,
+        "webgpt": null,
+        "controlOwner": null,
+        "currentUrl": null,
+        "chatUrl": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+        "pageHealthy": null,
+        "loginRequired": null,
+        "onChatPage": null,
+        "userCount": null,
+        "assistantCount": null,
+        "assistantTextSha256": null,
+        "generating": null,
+        "identity": {
+          "workbenchInstanceId": "6388761e-221a-45d8-bc63-693a3e331097",
+          "webgptRuntimeId": "ff6322dc-8a65-4b8d-9847-8b107d8f93b1",
+          "sessionKey": "default",
+          "revision": 96
+        },
+        "error": null
+      },
+      "projectOpen": {
+        "ok": true,
+        "exitCode": 0,
+        "elapsedMs": 8839,
+        "command": "webgpt.project.open",
+        "workbench": null,
+        "webgpt": null,
+        "controlOwner": null,
+        "currentUrl": null,
+        "chatUrl": null,
+        "pageHealthy": null,
+        "loginRequired": false,
+        "onChatPage": true,
+        "userCount": 0,
+        "assistantCount": 0,
+        "assistantTextSha256": null,
+        "generating": false,
+        "identity": {
+          "workbenchInstanceId": "6388761e-221a-45d8-bc63-693a3e331097",
+          "webgptRuntimeId": "ff6322dc-8a65-4b8d-9847-8b107d8f93b1",
+          "sessionKey": "default",
+          "revision": 135
+        },
+        "error": null
+      },
+      "reuseChatLatest": {
+        "ok": true,
+        "exitCode": 0,
+        "elapsedMs": 3218,
+        "command": "webgpt.chat.latest",
+        "workbench": null,
+        "webgpt": null,
+        "controlOwner": null,
+        "currentUrl": null,
+        "chatUrl": "https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315-workts/c/6a891d7c-abf4-83e8-879a-d477e472576a",
+        "pageHealthy": null,
+        "loginRequired": null,
+        "onChatPage": null,
+        "userCount": null,
+        "assistantCount": null,
+        "assistantTextSha256": "75368fd8a9b826e3a82abe5e044a81442678a16de05ec32894d8519eb1445d5c",
+        "generating": null,
+        "identity": {
+          "workbenchInstanceId": "6388761e-221a-45d8-bc63-693a3e331097",
+          "webgptRuntimeId": "ff6322dc-8a65-4b8d-9847-8b107d8f93b1",
+          "sessionKey": "default",
+          "revision": 157
+        },
+        "error": null
+      },
+      "roleBind": {
+        "ok": true,
+        "exitCode": 0,
+        "elapsedMs": 201,
+        "command": "webgpt.role.bind",
+        "workbench": null,
+        "webgpt": null,
+        "controlOwner": null,
+        "currentUrl": null,
+        "chatUrl": "https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315-workts/c/6a891d7c-abf4-83e8-879a-d477e472576a",
+        "pageHealthy": null,
+        "loginRequired": null,
+        "onChatPage": null,
+        "userCount": null,
+        "assistantCount": null,
+        "assistantTextSha256": null,
+        "generating": null,
+        "identity": {
+          "workbenchInstanceId": "6388761e-221a-45d8-bc63-693a3e331097",
+          "webgptRuntimeId": "ff6322dc-8a65-4b8d-9847-8b107d8f93b1",
+          "sessionKey": "default",
+          "revision": 157
+        },
+        "error": null
+      },
+      "roleOpen": {
+        "ok": true,
+        "exitCode": 0,
+        "elapsedMs": 2362,
+        "command": "webgpt.role.open",
+        "workbench": null,
+        "webgpt": null,
+        "controlOwner": null,
+        "currentUrl": null,
+        "chatUrl": "https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315-workts/c/6a891d7c-abf4-83e8-879a-d477e472576a",
+        "pageHealthy": null,
+        "loginRequired": false,
+        "onChatPage": true,
+        "userCount": 0,
+        "assistantCount": 0,
+        "assistantTextSha256": null,
+        "generating": false,
+        "identity": {
+          "workbenchInstanceId": "6388761e-221a-45d8-bc63-693a3e331097",
+          "webgptRuntimeId": "ff6322dc-8a65-4b8d-9847-8b107d8f93b1",
+          "sessionKey": "default",
+          "revision": 167
+        },
+        "error": null
+      },
+      "reuseChatLatestAfterBind": {
+        "ok": true,
+        "exitCode": 0,
+        "elapsedMs": 3351,
+        "command": "webgpt.chat.latest",
+        "workbench": null,
+        "webgpt": null,
+        "controlOwner": null,
+        "currentUrl": null,
+        "chatUrl": "https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315-workts/c/6a891d7c-abf4-83e8-879a-d477e472576a",
+        "pageHealthy": null,
+        "loginRequired": null,
+        "onChatPage": null,
+        "userCount": null,
+        "assistantCount": null,
+        "assistantTextSha256": "75368fd8a9b826e3a82abe5e044a81442678a16de05ec32894d8519eb1445d5c",
+        "generating": null,
+        "identity": {
+          "workbenchInstanceId": "6388761e-221a-45d8-bc63-693a3e331097",
+          "webgptRuntimeId": "ff6322dc-8a65-4b8d-9847-8b107d8f93b1",
+          "sessionKey": "default",
+          "revision": 188
+        },
+        "error": null
+      }
+    },
+    "finalRequirementBinding": null,
+    "promptBodyLogged": false,
+    "responseBodyLogged": false,
+    "cookiesRead": false,
+    "tokensRead": false
+  },
+  "accounting": {
+    "realPromptCount": 1,
+    "cumulativeRealPromptCount": 10,
+    "attemptedRealRequests": 1,
+    "roleSetupPromptCount": 0,
+    "cumulativeRoleSetupPrompts": 2,
+    "newChatCount": 0,
+    "cumulativeNewChats": 2,
+    "repairCount": 0,
+    "dispatchedRepairPromptCount": 0,
+    "cumulativeRepairCount": 3,
+    "hardMaxRealPrompts": 12,
+    "hardMaxRepairPrompts": 3,
+    "hardMaxNewChats": 3,
+    "source": "gate_evidence_request_diagnostics_and_setup_context"
+  },
+  "gateEvidence": {
+    "stage": "AUT-2",
+    "result": "FAIL",
+    "goalSha256": "2ece01820ade0d99e65ca4841bf4441610d222428b3f6642a9fe91527628d779",
+    "webgptProjectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+    "automationProjectId": "aut2-real-webgpt-gate-2",
+    "requirementBinding": {
+      "role": "REQUIREMENT",
+      "status": "BOUND",
+      "chatRef": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+      "originalChatRef": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+      "finalChatRef": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+      "restored": true
+    },
+    "alignment": {
+      "status": "FAIL",
+      "firstRoundQuestionCount": 0,
+      "firstRoundUniqueQuestionCount": 0,
+      "recognizedQuestionTopics": [],
+      "independentQuestionsSameRound": false,
+      "sessionStatusAfterNeedsInput": null,
+      "requestIds": [],
+      "idempotencyKeys": [],
+      "semanticSha256": [],
+      "roundCount": 0
+    },
+    "draft": {
+      "status": "FAIL",
+      "requestId": null,
+      "idempotencyKey": null,
+      "semanticSha256": null,
+      "requirementVersionId": null,
+      "payloadSha256": null,
+      "activeRequirementVersionBefore": null,
+      "activeRequirementVersionAfterDraft": null,
+      "gptSelfConfirmation": "NOT_REQUESTED"
+    },
+    "confirmation": {
+      "user": "FAIL",
+      "webgptRejected": false,
+      "systemRejected": false,
+      "activeRequirementVersionAfterUser": null
+    },
+    "setup": {
+      "status": "PASS_REAL_SETUP",
+      "setupChatRef": "https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315-workts/c/6a891d7c-abf4-83e8-879a-d477e472576a",
+      "setupRequestId": "reused:external-evidence",
+      "setupPromptCount": 0,
+      "newChatCount": 0,
+      "stableChatMaterialized": true,
+      "latestAssistantSha256": null
+    },
+    "idempotency": {
+      "status": "FAIL",
+      "sameRequestId": false,
+      "sameSemanticSha256": false,
+      "noAdditionalRealPrompt": true
+    },
+    "responseContract": {
+      "originalRequestId": "wgpt-f0c1b5c8-096a-4377-9377-12a59e1aa70d",
+      "originalResultSha256": "ea0bb932653e4bc774ddbbc106b0e6a41131bcc06e14245349cf111c67f2c090",
+      "parseFailureCategory": null,
+      "repairTriggered": false,
+      "repairRequestId": null,
+      "repairSemanticSha256": null,
+      "repairResultSha256": null,
+      "repairCount": 0,
+      "finalParseResult": "PASS",
+      "finalAlignmentStatus": "NEEDS_INPUT",
+      "runtimeRequestIds": [
+        "wgpt-f0c1b5c8-096a-4377-9377-12a59e1aa70d"
+      ],
+      "runtimeIdempotencyKeys": [
+        "aut2:alignment:2c5ed2c5-eed2-4664-99a4-eedd0111d1e7:round:9a2efb8c-8370-43d2-be51-27784f0ea8f3:00ab2e31999743ebef3047cea3b5eca3"
+      ],
+      "runtimeSemanticSha256": [
+        "6fc84d828361838fc3410d1c6e5b552961403599a7b7c0648b2fa6e565545df4"
+      ],
+      "events": [
+        {
+          "originalRequestId": "wgpt-f0c1b5c8-096a-4377-9377-12a59e1aa70d",
+          "originalIdempotencyKey": "aut2:alignment:2c5ed2c5-eed2-4664-99a4-eedd0111d1e7:round:9a2efb8c-8370-43d2-be51-27784f0ea8f3:00ab2e31999743ebef3047cea3b5eca3",
+          "originalSemanticSha256": "418656b4d3e58b17cc3bbd2f8e09aefa280042fdf412fedaa442d55d33e26e57",
+          "originalResultSha256": "ea0bb932653e4bc774ddbbc106b0e6a41131bcc06e14245349cf111c67f2c090",
+          "original": {
+            "responseCharCount": 1231,
+            "responseSha256": "ea0bb932653e4bc774ddbbc106b0e6a41131bcc06e14245349cf111c67f2c090",
+            "candidateCount": 1,
+            "candidateCharCount": 1231,
+            "startsWithFence": false,
+            "endsWithFence": false,
+            "braceBalance": 0,
+            "jsonParseStage": "passed",
+            "schemaValidationStage": "passed",
+            "semanticValidationStage": "passed",
+            "topLevelType": "object",
+            "topLevelKeys": [
+              "requirementProtocolVersion",
+              "status",
+              "payload"
+            ],
+            "shape": {
+              "requirementProtocolVersion": {
+                "type": "number",
+                "matchesExpected": true
+              },
+              "status": {
+                "type": "string",
+                "value": "NEEDS_INPUT",
+                "matchesEnum": true
+              },
+              "payload": {
+                "type": "object",
+                "keys": [
+                  "questions"
+                ]
+              },
+              "questions": {
+                "exists": true,
+                "type": "array",
+                "count": 5
+              },
+              "question0": {
+                "exists": true,
+                "type": "object",
+                "keys": [
+                  "category",
+                  "question",
+                  "whyNeeded",
+                  "blocking",
+                  "resolutionMode",
+                  "options",
+                  "defaultRecommendation"
+                ]
+              },
+              "assumptions": {
+                "exists": false,
+                "type": null,
+                "count": null
+              },
+              "draft": {
+                "exists": false,
+                "type": null
+              },
+              "blocked": {
+                "codeExists": false,
+                "reasonExists": false,
+                "retryableExists": false
+              }
+            },
+            "validationIssues": [],
+            "errorOffset": null,
+            "category": null,
+            "truncatedSuspected": false,
+            "errorCode": null
+          },
+          "parseFailureCategory": null,
+          "repairTriggered": false,
+          "repairRequestId": null,
+          "repairIdempotencyKey": null,
+          "repairSemanticSha256": null,
+          "repairResultSha256": null,
+          "repair": null,
+          "repairCount": 0,
+          "finalParseResult": "PASS",
+          "finalParseSource": "original",
+          "finalAlignmentStatus": "NEEDS_INPUT"
+        }
+      ]
+    },
+    "attemptedRealRequests": 1,
+    "realPromptCount": 1,
+    "dispatchedRealPromptCount": 1,
+    "realPromptBudget": {
+      "used": 1,
+      "max": 1
+    },
+    "repairPromptBudget": {
+      "used": 0,
+      "max": 0
+    },
+    "roleSetupPromptCount": 0,
+    "newChatCount": 0,
+    "repairCount": 0,
+    "errors": [
+      {
+        "code": "AUTOMATION_SCHEMA_INVALID",
+        "message": "round:1328fa48-0cae-4719-8a66-680c56e5e23f.questionIds crosses a round boundary."
+      }
+    ],
+    "createdAt": "2026-08-22T05:00:30.074Z"
+  },
+  "temporaryEvidence": "cleaned-after-run"
+}

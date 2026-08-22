@@ -1,0 +1,42 @@
+{
+  "stage": "AUT-2 Fix8 Requirement Schema Mismatch Forensics",
+  "sensitiveContentStored": false,
+  "comparison": {
+    "historicalOriginal": {
+      "source": "AUT-2-FINAL-REAL-GATE-RUNTIME.json",
+      "observed": "top-level-only",
+      "topLevelKeys": ["requirementProtocolVersion", "status", "payload"],
+      "nestedShape": "NOT_PROVEN",
+      "schemaValidation": "failed"
+    },
+    "historicalRepair": {
+      "source": "same canonical Chat read via chat latest",
+      "responseSha256": "75368fd8a9b826e3a82abe5e044a81442678a16de05ec32894d8519eb1445d5c",
+      "topLevelKeys": ["requirementProtocolVersion", "status", "payload"],
+      "payloadKeys": ["questions"],
+      "questionCount": 5,
+      "question0Keys": ["category", "question", "whyNeeded", "blocking", "resolutionMode", "options", "defaultRecommendation"],
+      "resolutionMode": "SINGLE_SELECT",
+      "schemaValidation": "failed"
+    },
+    "fix8FirstRound": {
+      "source": "AUT-2-FIX8-FIRST-ROUND-REAL-EVIDENCE.json",
+      "responseSha256": "ea0bb932653e4bc774ddbbc106b0e6a41131bcc06e14245349cf111c67f2c090",
+      "topLevelKeys": ["requirementProtocolVersion", "status", "payload"],
+      "payloadKeys": ["questions"],
+      "questionCount": 5,
+      "question0Keys": ["category", "question", "whyNeeded", "blocking", "resolutionMode", "options", "defaultRecommendation"],
+      "resolutionMode": "schema-valid enum value observed",
+      "schemaValidation": "passed",
+      "semanticValidation": "passed"
+    }
+  },
+  "diffConclusion": {
+    "sameTopLevelEnvelope": true,
+    "sameFailureCategoryHistoricalOriginalAndRepair": true,
+    "nestedHistoricalOriginalDifferenceProven": false,
+    "repairChangedOnlyRequestOrResponseIdentity": true,
+    "fix8SchemaMismatchResolved": true,
+    "remainingFailure": "Automation persistence round-boundary invariant, not response schema"
+  }
+}

@@ -27,6 +27,7 @@ export const REQUIREMENT_MODEL_RESPONSE_INSTRUCTIONS = [
   "The top-level keys must be exactly requirementProtocolVersion, status, and payload.",
   "Use requirementProtocolVersion=1.",
   "Allowed status values are NEEDS_INPUT, READY_FOR_DRAFT, and BLOCKED.",
+  "Question resolutionMode must be exactly one of USER_REQUIRED, ASSUMPTION_ALLOWED, AVAILABLE_CONTEXT, or AUTO_INVESTIGATION. For a blocking fact that the user must answer, use USER_REQUIRED. Do not use UI control labels such as SINGLE_SELECT.",
   "NEEDS_INPUT payload must be {questions: [{category, question, whyNeeded, blocking, resolutionMode, options?, defaultRecommendation?, dependsOn?}], assumptions?: [{statement, rationale?, impact?, confidence?, blocking?}]} and questions must contain at least one item.",
   "READY_FOR_DRAFT payload must be {draft: {goal, context?, constraints?, acceptanceCriteria?, assumptions?, nonGoals?}}.",
   "BLOCKED payload must be {code, reason, retryable}.",
@@ -227,6 +228,47 @@ export type RequirementResponseFailureCategory =
 
 export type RequirementResponseParseStage = "not_attempted" | "passed" | "failed";
 
+export type RequirementJsonType = "object" | "array" | "string" | "number" | "boolean" | "null";
+
+export type RequirementValidationRule =
+  | "type"
+  | "required"
+  | "unexpected"
+  | "enum"
+  | "bounds"
+  | "format"
+  | "semantic"
+  | "union";
+
+/**
+ * Sanitized validator output. It records only schema shape and bounded
+ * protocol symbols; it never carries a question, answer, prompt, or response
+ * body. This is intentionally suitable for diagnostics and review evidence.
+ */
+export interface RequirementValidationIssue {
+  readonly path: string;
+  readonly rule: RequirementValidationRule;
+  readonly expectedType?: RequirementJsonType;
+  readonly receivedType?: RequirementJsonType | null;
+  readonly missingRequiredKeys?: readonly string[];
+  readonly unexpectedKeys?: readonly string[];
+  readonly allowedEnum?: readonly string[];
+  readonly receivedEnum?: string | null;
+  readonly arrayIndex?: number | null;
+  readonly unionBranch?: string | null;
+}
+
+export interface RequirementResponseShape {
+  readonly requirementProtocolVersion: { readonly type: RequirementJsonType | null; readonly matchesExpected: boolean };
+  readonly status: { readonly type: RequirementJsonType | null; readonly value: string | null; readonly matchesEnum: boolean };
+  readonly payload: { readonly type: RequirementJsonType | null; readonly keys: readonly string[] };
+  readonly questions: { readonly exists: boolean; readonly type: RequirementJsonType | null; readonly count: number | null };
+  readonly question0: { readonly exists: boolean; readonly type: RequirementJsonType | null; readonly keys: readonly string[] };
+  readonly assumptions: { readonly exists: boolean; readonly type: RequirementJsonType | null; readonly count: number | null };
+  readonly draft: { readonly exists: boolean; readonly type: RequirementJsonType | null };
+  readonly blocked: { readonly codeExists: boolean; readonly reasonExists: boolean; readonly retryableExists: boolean };
+}
+
 /**
  * Bounded, non-content diagnostics for a provider response. This type is
  * intentionally limited to shape, counts, hashes, and validation stages; it
@@ -243,8 +285,10 @@ export interface RequirementResponseDiagnostics {
   readonly jsonParseStage: RequirementResponseParseStage;
   readonly schemaValidationStage: RequirementResponseParseStage;
   readonly semanticValidationStage: RequirementResponseParseStage;
-  readonly topLevelType: "object" | "array" | "string" | "number" | "boolean" | "null" | null;
+  readonly topLevelType: RequirementJsonType | null;
   readonly topLevelKeys: readonly string[];
+  readonly shape: RequirementResponseShape | null;
+  readonly validationIssues: readonly RequirementValidationIssue[];
   readonly errorOffset: number | null;
   readonly category: RequirementResponseFailureCategory | null;
   readonly truncatedSuspected: boolean;
@@ -254,12 +298,15 @@ export interface RequirementResponseDiagnostics {
 export class RequirementContractError extends Error {
   readonly code: RequirementContractErrorCode;
   readonly path: string | null;
+  readonly validationIssues: readonly RequirementValidationIssue[];
 
-  constructor(code: RequirementContractErrorCode, message: string, path: string | null = null) {
+  constructor(code: RequirementContractErrorCode, message: string, path: string | null = null, validationIssues: readonly RequirementValidationIssue[] = []) {
     super(path ? `${path}: ${message}` : message);
     this.name = "RequirementContractError";
     this.code = code;
     this.path = path;
+    const issues = validationIssues.length > 0 ? validationIssues : defaultValidationIssues(code, path);
+    this.validationIssues = issues.map((issue) => ({ ...issue, path: normalizeValidationPath(issue.path) }));
   }
 }
 
@@ -470,6 +517,7 @@ export function diagnoseRequirementResponse(rawResponse: unknown, error: Require
   const firstParsed = firstCandidate ? safeJsonParse(firstCandidate) : safeJsonParse(trimmed);
   const topLevelType = jsonType(firstParsed);
   const topLevelKeys = isRecord(firstParsed) ? Object.keys(firstParsed).slice(0, MAX_REQUIREMENT_OBJECT_KEYS).map((key) => key.slice(0, 128)) : [];
+  const shape = firstParsed === null ? null : responseShape(firstParsed);
   const code = error?.code ?? null;
   const jsonFailed = code === "JSON_INVALID" || code === "JSON_NOT_FOUND" || code === "JSON_AMBIGUOUS" || code === "JSON_ROOT_NOT_OBJECT" || code === "JSON_TOO_LARGE";
   const jsonPassed = firstCandidate !== null && !jsonFailed;
@@ -497,6 +545,8 @@ export function diagnoseRequirementResponse(rawResponse: unknown, error: Require
     semanticValidationStage: semanticFailed ? "failed" : schemaFailed || !jsonPassed ? "not_attempted" : "passed",
     topLevelType,
     topLevelKeys,
+    shape,
+    validationIssues: error?.validationIssues ?? [],
     errorOffset: scan.firstErrorOffset,
     category,
     truncatedSuspected: scan.unbalancedObjectSeen || (startsWithFence !== endsWithFence) || /(?:\.\.\.|…)$/.test(trimmed),
@@ -536,11 +586,23 @@ export function validateRequirementSemanticResponse(value: unknown): Requirement
   const item = asRecord(value, "semanticResponse");
   assertExactKeys(item, ["requirementProtocolVersion", "status", "payload"], "semanticResponse");
   if (item.requirementProtocolVersion !== REQUIREMENT_PROTOCOL_VERSION) {
-    throw new RequirementContractError("SCHEMA_INVALID", `requirementProtocolVersion must equal ${REQUIREMENT_PROTOCOL_VERSION}.`, "semanticResponse.requirementProtocolVersion");
+    throw new RequirementContractError("SCHEMA_INVALID", `requirementProtocolVersion must equal ${REQUIREMENT_PROTOCOL_VERSION}.`, "semanticResponse.requirementProtocolVersion", [{
+      path: "semanticResponse.requirementProtocolVersion",
+      rule: "enum",
+      receivedType: jsonType(item.requirementProtocolVersion),
+      allowedEnum: [String(REQUIREMENT_PROTOCOL_VERSION)],
+      receivedEnum: typeof item.requirementProtocolVersion === "string" ? item.requirementProtocolVersion : null,
+    }]);
   }
   const status = item.status;
   if (status !== "NEEDS_INPUT" && status !== "READY_FOR_DRAFT" && status !== "BLOCKED") {
-    throw new RequirementContractError("SCHEMA_INVALID", "status is not a supported requirement semantic response status.", "semanticResponse.status");
+    throw new RequirementContractError("SCHEMA_INVALID", "status is not a supported requirement semantic response status.", "semanticResponse.status", [{
+      path: "semanticResponse.status",
+      rule: "enum",
+      receivedType: jsonType(status),
+      allowedEnum: [...REQUIREMENT_ENVELOPE_STATUSES],
+      receivedEnum: typeof status === "string" ? status : null,
+    }]);
   }
   if (status === "NEEDS_INPUT") return { requirementProtocolVersion: REQUIREMENT_PROTOCOL_VERSION, status, payload: validateNeedsInputPayload(item.payload) };
   if (status === "READY_FOR_DRAFT") return { requirementProtocolVersion: REQUIREMENT_PROTOCOL_VERSION, status, payload: validateReadyForDraftPayload(item.payload) };
@@ -574,11 +636,23 @@ export function validateRequirementEnvelope(value: unknown, context: Requirement
   assertExactKeys(item, ["requirementProtocolVersion", "status", "projectId", "role", "requestId", "idempotencyKey", "semanticSha256", "payload"], "envelope");
 
   if (item.requirementProtocolVersion !== REQUIREMENT_PROTOCOL_VERSION) {
-    throw new RequirementContractError("SCHEMA_INVALID", `requirementProtocolVersion must equal ${REQUIREMENT_PROTOCOL_VERSION}.`, "envelope.requirementProtocolVersion");
+    throw new RequirementContractError("SCHEMA_INVALID", `requirementProtocolVersion must equal ${REQUIREMENT_PROTOCOL_VERSION}.`, "envelope.requirementProtocolVersion", [{
+      path: "envelope.requirementProtocolVersion",
+      rule: "enum",
+      receivedType: jsonType(item.requirementProtocolVersion),
+      allowedEnum: [String(REQUIREMENT_PROTOCOL_VERSION)],
+      receivedEnum: typeof item.requirementProtocolVersion === "string" ? item.requirementProtocolVersion : null,
+    }]);
   }
   const status = item.status;
   if (status !== "NEEDS_INPUT" && status !== "READY_FOR_DRAFT" && status !== "BLOCKED") {
-    throw new RequirementContractError("SCHEMA_INVALID", "status is not a supported requirement envelope status.", "envelope.status");
+    throw new RequirementContractError("SCHEMA_INVALID", "status is not a supported requirement envelope status.", "envelope.status", [{
+      path: "envelope.status",
+      rule: "enum",
+      receivedType: jsonType(status),
+      allowedEnum: [...REQUIREMENT_ENVELOPE_STATUSES],
+      receivedEnum: typeof status === "string" ? status : null,
+    }]);
   }
   const projectId = assertProjectId(item.projectId, "envelope.projectId");
   if (projectId !== context.projectId) {
@@ -686,7 +760,12 @@ function validateEnvelopeContext(context: RequirementEnvelopeContext): void {
 function validateNeedsInputPayload(value: unknown): NeedsInputPayload {
   const item = asRecord(value, "envelope.payload");
   assertExactKeys(item, ["questions", "assumptions"], "envelope.payload", ["assumptions"]);
-  if (!Array.isArray(item.questions)) throw new RequirementContractError("SCHEMA_INVALID", "questions must be an array.", "envelope.payload.questions");
+  if (!Array.isArray(item.questions)) throw new RequirementContractError("SCHEMA_INVALID", "questions must be an array.", "envelope.payload.questions", [{
+    path: "envelope.payload.questions",
+    rule: "type",
+    expectedType: "array",
+    receivedType: jsonType(item.questions),
+  }]);
   if (item.questions.length === 0) throw new RequirementContractError("SEMANTIC_INVALID", "NEEDS_INPUT requires at least one question.", "envelope.payload.questions");
   if (item.questions.length > 32) throw new RequirementContractError("JSON_BOUNDS_EXCEEDED", "questions exceeds 32 items.", "envelope.payload.questions");
   const questions = item.questions.map((question, index) => validateRequirementQuestionResponse(question, `envelope.payload.questions[${index}]`));
@@ -730,7 +809,13 @@ function validateRequirementQuestionResponse(value: unknown, path: string): Requ
   const blocking = assertBoolean(item.blocking, `${path}.blocking`);
   const resolutionMode = item.resolutionMode;
   if (!REQUIREMENT_QUESTION_RESOLUTION_MODES.includes(resolutionMode as RequirementQuestionResolutionMode)) {
-    throw new RequirementContractError("SCHEMA_INVALID", "resolutionMode is not supported by the Requirement response contract.", `${path}.resolutionMode`);
+    throw new RequirementContractError("SCHEMA_INVALID", "resolutionMode is not supported by the Requirement response contract.", `${path}.resolutionMode`, [{
+      path: `${path}.resolutionMode`,
+      rule: "enum",
+      receivedType: jsonType(resolutionMode),
+      allowedEnum: [...REQUIREMENT_QUESTION_RESOLUTION_MODES],
+      receivedEnum: typeof resolutionMode === "string" ? resolutionMode : null,
+    }]);
   }
   if (blocking && (resolutionMode === "AVAILABLE_CONTEXT" || resolutionMode === "AUTO_INVESTIGATION")) {
     throw new RequirementContractError("SEMANTIC_INVALID", "blocking questions must use a user-resolvable resolutionMode.", `${path}.resolutionMode`);
@@ -838,7 +923,7 @@ function findBalancedJsonObjectEnd(raw: string, start: number): number | null {
 
 function asRecord(value: unknown, path: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new RequirementContractError("SCHEMA_INVALID", "value must be a JSON object.", path);
+    throw new RequirementContractError("SCHEMA_INVALID", "value must be a JSON object.", path, [{ path, rule: "type", expectedType: "object", receivedType: jsonType(value) }]);
   }
   return value as Record<string, unknown>;
 }
@@ -850,11 +935,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function assertExactKeys(item: Record<string, unknown>, allowed: readonly string[], path: string, optional: readonly string[] = []): void {
   const allowedSet = new Set(allowed);
   for (const key of Object.keys(item)) {
-    if (!allowedSet.has(key)) throw new RequirementContractError("SCHEMA_INVALID", `unknown field '${key}'.`, `${path}.${key}`);
+    if (!allowedSet.has(key)) throw new RequirementContractError("SCHEMA_INVALID", `unknown field '${key}'.`, `${path}.${key}`, [{
+      path: `${path}.${key}`,
+      rule: "unexpected",
+      unexpectedKeys: [key.slice(0, 128)],
+    }]);
   }
   for (const key of allowed) {
     if (!optional.includes(key) && !Object.prototype.hasOwnProperty.call(item, key)) {
-      throw new RequirementContractError("SCHEMA_INVALID", `required field '${key}' is missing.`, `${path}.${key}`);
+      throw new RequirementContractError("SCHEMA_INVALID", `required field '${key}' is missing.`, `${path}.${key}`, [{
+        path: `${path}.${key}`,
+        rule: "required",
+        missingRequiredKeys: [key],
+      }]);
     }
   }
 }
@@ -873,7 +966,7 @@ function assertIdempotencyKey(value: unknown, path: string): string {
 
 function assertChatRef(value: unknown, path: string): string {
   const result = assertToken(value, path, MAX_REQUIREMENT_CHAT_REF_CHARS);
-  if (CURRENT_CHAT_SENTINEL.test(result)) throw new RequirementContractError("SEMANTIC_INVALID", "chatRef must be an explicit bound target, not a current-chat sentinel.", path);
+  if (CURRENT_CHAT_SENTINEL.test(result)) throw new RequirementContractError("SEMANTIC_INVALID", "chatRef must be an explicit bound target, not a current-chat sentinel.", path, [{ path, rule: "semantic", receivedType: "string" }]);
   return result;
 }
 
@@ -883,35 +976,41 @@ function assertPrompt(value: unknown, path: string): string {
 
 function assertToken(value: unknown, path: string, maxChars: number): string {
   const result = assertText(value, path, maxChars);
-  if (CONTROL_CHARACTER.test(result)) throw new RequirementContractError("SCHEMA_INVALID", "value contains a control character.", path);
+  if (CONTROL_CHARACTER.test(result)) throw new RequirementContractError("SCHEMA_INVALID", "value contains a control character.", path, [{ path, rule: "format", receivedType: "string" }]);
   return result;
 }
 
 function assertText(value: unknown, path: string, maxChars: number): string {
-  if (typeof value !== "string" || value.trim().length === 0) throw new RequirementContractError("SCHEMA_INVALID", "value must be a non-empty string.", path);
-  if (value.length > maxChars) throw new RequirementContractError("JSON_BOUNDS_EXCEEDED", `value exceeds ${maxChars} characters.`, path);
-  if (value !== value.trim()) throw new RequirementContractError("SCHEMA_INVALID", "value must not have leading or trailing whitespace.", path);
+  if (typeof value !== "string" || value.trim().length === 0) throw new RequirementContractError("SCHEMA_INVALID", "value must be a non-empty string.", path, [{ path, rule: "type", expectedType: "string", receivedType: jsonType(value) }]);
+  if (value.length > maxChars) throw new RequirementContractError("JSON_BOUNDS_EXCEEDED", `value exceeds ${maxChars} characters.`, path, [{ path, rule: "bounds", expectedType: "string", receivedType: "string" }]);
+  if (value !== value.trim()) throw new RequirementContractError("SCHEMA_INVALID", "value must not have leading or trailing whitespace.", path, [{ path, rule: "format", expectedType: "string", receivedType: "string" }]);
   return value;
 }
 
 function assertExactRole(value: unknown, path: string): RequirementRole {
-  if (value !== REQUIREMENT_ROLE) throw new RequirementContractError("SEMANTIC_INVALID", `role must be exactly ${REQUIREMENT_ROLE}.`, path);
+  if (value !== REQUIREMENT_ROLE) throw new RequirementContractError("SEMANTIC_INVALID", `role must be exactly ${REQUIREMENT_ROLE}.`, path, [{
+    path,
+    rule: "enum",
+    receivedType: jsonType(value),
+    allowedEnum: [REQUIREMENT_ROLE],
+    receivedEnum: typeof value === "string" ? value : null,
+  }]);
   return REQUIREMENT_ROLE;
 }
 
 function assertSemanticSha256(value: unknown, path: string): string {
-  if (typeof value !== "string" || !SHA256_HEX.test(value)) throw new RequirementContractError("SCHEMA_INVALID", "semanticSha256 must be a lowercase SHA-256 hex digest.", path);
+  if (typeof value !== "string" || !SHA256_HEX.test(value)) throw new RequirementContractError("SCHEMA_INVALID", "semanticSha256 must be a lowercase SHA-256 hex digest.", path, [{ path, rule: "format", expectedType: "string", receivedType: jsonType(value) }]);
   return value;
 }
 
 function assertBoolean(value: unknown, path: string): boolean {
-  if (typeof value !== "boolean") throw new RequirementContractError("SCHEMA_INVALID", "value must be boolean.", path);
+  if (typeof value !== "boolean") throw new RequirementContractError("SCHEMA_INVALID", "value must be boolean.", path, [{ path, rule: "type", expectedType: "boolean", receivedType: jsonType(value) }]);
   return value;
 }
 
 function assertStringList(value: unknown, path: string, maxItems: number, maxChars: number): readonly string[] {
-  if (!Array.isArray(value)) throw new RequirementContractError("SCHEMA_INVALID", "value must be an array of strings.", path);
-  if (value.length > maxItems) throw new RequirementContractError("JSON_BOUNDS_EXCEEDED", `array exceeds ${maxItems} items.`, path);
+  if (!Array.isArray(value)) throw new RequirementContractError("SCHEMA_INVALID", "value must be an array of strings.", path, [{ path, rule: "type", expectedType: "array", receivedType: jsonType(value) }]);
+  if (value.length > maxItems) throw new RequirementContractError("JSON_BOUNDS_EXCEEDED", `array exceeds ${maxItems} items.`, path, [{ path, rule: "bounds", expectedType: "array", receivedType: "array" }]);
   const result = value.map((item, index) => assertText(item, `${path}[${index}]`, maxChars));
   if (new Set(result).size !== result.length) throw new RequirementContractError("SEMANTIC_INVALID", "array entries must be unique.", path);
   return result;
@@ -985,7 +1084,8 @@ function safeJsonParse(value: string): unknown {
   try { return JSON.parse(value) as unknown; } catch { return null; }
 }
 
-function jsonType(value: unknown): RequirementResponseDiagnostics["topLevelType"] {
+function jsonType(value: unknown): RequirementJsonType | null {
+  if (value === undefined) return null;
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   if (typeof value === "object") return "object";
@@ -993,6 +1093,76 @@ function jsonType(value: unknown): RequirementResponseDiagnostics["topLevelType"
   if (typeof value === "number") return "number";
   if (typeof value === "boolean") return "boolean";
   return null;
+}
+
+function responseShape(value: unknown): RequirementResponseShape | null {
+  if (!isRecord(value)) return null;
+  const payload = isRecord(value.payload) ? value.payload : null;
+  const questionsValue = payload?.questions;
+  const questions = Array.isArray(questionsValue) ? questionsValue : null;
+  const firstQuestion = questions?.[0];
+  const assumptionsValue = payload?.assumptions;
+  const assumptions = Array.isArray(assumptionsValue) ? assumptionsValue : null;
+  const draftValue = payload?.draft;
+  const blockedValue = payload && isRecord(payload) ? payload : null;
+  return {
+    requirementProtocolVersion: {
+      type: jsonType(value.requirementProtocolVersion),
+      matchesExpected: value.requirementProtocolVersion === REQUIREMENT_PROTOCOL_VERSION,
+    },
+    status: {
+      type: jsonType(value.status),
+      value: typeof value.status === "string" ? value.status.slice(0, 64) : null,
+      matchesEnum: typeof value.status === "string" && REQUIREMENT_ENVELOPE_STATUSES.includes(value.status as RequirementEnvelopeStatus),
+    },
+    payload: {
+      type: jsonType(value.payload),
+      keys: payload ? Object.keys(payload).slice(0, MAX_REQUIREMENT_OBJECT_KEYS).map((key) => key.slice(0, 128)) : [],
+    },
+    questions: {
+      exists: Object.prototype.hasOwnProperty.call(payload ?? {}, "questions"),
+      type: jsonType(questionsValue),
+      count: questions ? questions.length : null,
+    },
+    question0: {
+      exists: firstQuestion !== undefined,
+      type: jsonType(firstQuestion),
+      keys: isRecord(firstQuestion) ? Object.keys(firstQuestion).slice(0, MAX_REQUIREMENT_OBJECT_KEYS).map((key) => key.slice(0, 128)) : [],
+    },
+    assumptions: {
+      exists: Object.prototype.hasOwnProperty.call(payload ?? {}, "assumptions"),
+      type: jsonType(assumptionsValue),
+      count: assumptions ? assumptions.length : null,
+    },
+    draft: {
+      exists: Object.prototype.hasOwnProperty.call(payload ?? {}, "draft"),
+      type: jsonType(draftValue),
+    },
+    blocked: {
+      codeExists: Boolean(blockedValue && Object.prototype.hasOwnProperty.call(blockedValue, "code")),
+      reasonExists: Boolean(blockedValue && Object.prototype.hasOwnProperty.call(blockedValue, "reason")),
+      retryableExists: Boolean(blockedValue && Object.prototype.hasOwnProperty.call(blockedValue, "retryable")),
+    },
+  };
+}
+
+function defaultValidationIssues(code: RequirementContractErrorCode, path: string | null): readonly RequirementValidationIssue[] {
+  if (!path) return [];
+  const rule: RequirementValidationRule = code === "JSON_BOUNDS_EXCEEDED"
+    ? "bounds"
+    : code === "SEMANTIC_INVALID"
+      ? "semantic"
+      : code === "SCHEMA_INVALID"
+        ? "union"
+        : "format";
+  return [{ path, rule }];
+}
+
+function normalizeValidationPath(path: string): string {
+  if (path === "envelope" || path === "semanticResponse") return "$";
+  if (path.startsWith("envelope.")) return `$${path.slice("envelope".length)}`;
+  if (path.startsWith("semanticResponse.")) return `$${path.slice("semanticResponse".length)}`;
+  return path;
 }
 
 function responseFailureCategory(input: {

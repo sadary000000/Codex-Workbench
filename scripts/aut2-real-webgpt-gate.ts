@@ -18,14 +18,15 @@ const MAX_CUMULATIVE_REAL_PROMPTS = 12;
 const MAX_CUMULATIVE_REPAIR_PROMPTS = 3;
 const MAX_CUMULATIVE_NEW_CHATS = 3;
 const MAX_CUMULATIVE_SETUP_PROMPTS = 2;
+const fix8FirstRound = process.env.AUT2_FIX8_FIRST_ROUND === "1";
 const setupPrompt = "This chat is being initialized for a bounded automated requirement-alignment smoke test. Reply exactly: ROLE_READY. Do not infer or store any project requirements from this setup message.";
 const startedAt = new Date().toISOString();
 
 interface RealPromptBudgetSnapshot {
-  readonly cumulativeLocalRealPrompts: number;
-  readonly cumulativeRepairPrompts: number;
-  readonly cumulativeNewChats: number;
-  readonly cumulativeRoleSetupPrompts: number;
+  readonly realPromptCount: number;
+  readonly repairPromptCount: number;
+  readonly newChatCount: number;
+  readonly setupPromptCount: number;
 }
 
 async function readRealPromptBudget(): Promise<RealPromptBudgetSnapshot> {
@@ -38,10 +39,10 @@ async function readRealPromptBudget(): Promise<RealPromptBudgetSnapshot> {
     return value;
   };
   return {
-    cumulativeLocalRealPrompts: numberAt(parsed.cumulativeLocalRealPrompts, "cumulativeLocalRealPrompts"),
-    cumulativeRepairPrompts: numberAt(parsed.cumulativeRepairPrompts, "cumulativeRepairPrompts"),
-    cumulativeNewChats: numberAt(parsed.cumulativeNewChats, "cumulativeNewChats"),
-    cumulativeRoleSetupPrompts: numberAt(parsed.cumulativeRoleSetupPrompts ?? breakdown.requirementSetup, "cumulativeRoleSetupPrompts"),
+    realPromptCount: numberAt(parsed.realPromptCount ?? parsed.cumulativeLocalRealPrompts, "realPromptCount"),
+    repairPromptCount: numberAt(parsed.repairPromptCount ?? parsed.cumulativeRepairPrompts, "repairPromptCount"),
+    newChatCount: numberAt(parsed.newChatCount ?? parsed.cumulativeNewChats, "newChatCount"),
+    setupPromptCount: numberAt(parsed.setupPromptCount ?? parsed.cumulativeRoleSetupPrompts ?? breakdown.requirementSetup, "setupPromptCount"),
   };
 }
 
@@ -225,16 +226,19 @@ async function reusableSetupCandidate(): Promise<ReusableSetupCandidate | null> 
 }
 
 const budgetBefore = await readRealPromptBudget();
-if (budgetBefore.cumulativeLocalRealPrompts > MAX_CUMULATIVE_REAL_PROMPTS
-  || budgetBefore.cumulativeRepairPrompts > MAX_CUMULATIVE_REPAIR_PROMPTS
-  || budgetBefore.cumulativeNewChats > MAX_CUMULATIVE_NEW_CHATS
-  || budgetBefore.cumulativeRoleSetupPrompts > MAX_CUMULATIVE_SETUP_PROMPTS) {
+if (budgetBefore.realPromptCount > MAX_CUMULATIVE_REAL_PROMPTS
+  || budgetBefore.repairPromptCount > MAX_CUMULATIVE_REPAIR_PROMPTS
+  || budgetBefore.newChatCount > MAX_CUMULATIVE_NEW_CHATS
+  || budgetBefore.setupPromptCount > MAX_CUMULATIVE_SETUP_PROMPTS) {
   throw new Error("AUT2_BUDGET_EXCEEDED: the persisted cumulative budget is already over its hard limit; no WebGPT action was attempted.");
 }
-const remainingRealPrompts = MAX_CUMULATIVE_REAL_PROMPTS - budgetBefore.cumulativeLocalRealPrompts;
-const remainingRepairPrompts = MAX_CUMULATIVE_REPAIR_PROMPTS - budgetBefore.cumulativeRepairPrompts;
-if (remainingRealPrompts <= 0 || remainingRepairPrompts <= 0) {
+const remainingRealPrompts = MAX_CUMULATIVE_REAL_PROMPTS - budgetBefore.realPromptCount;
+const remainingRepairPrompts = MAX_CUMULATIVE_REPAIR_PROMPTS - budgetBefore.repairPromptCount;
+if (remainingRealPrompts <= 0 || (!fix8FirstRound && remainingRepairPrompts <= 0)) {
   throw new Error("AUT2_BUDGET_EXHAUSTED: no bounded real/repair prompt remains; no WebGPT action was attempted.");
+}
+if (fix8FirstRound && !process.env.AUT2_REUSE_CHAT_URL?.trim()) {
+  throw new Error("AUT2_FIX8_REUSE_REQUIRED: Fix8 must use the existing canonical REQUIREMENT Chat and cannot create a new Chat.");
 }
 
 const tempRoot = await mkdtemp(join(tmpdir(), "codex-workbench-aut2-real-"));
@@ -254,6 +258,7 @@ environment.AUT2_WEBGPT_PROJECT_ID = webgptProjectId;
 environment.AUT2_WEBGPT_PROJECT_NAME = webgptProjectName;
 environment.AUT2_AUTOMATION_PROJECT_ID = "aut2-real-webgpt-gate-2";
 environment.AUT2_REAL_WEBGPT_TIMEOUT_MS = "240000";
+environment.AUT2_FIX8_FIRST_ROUND = fix8FirstRound ? "1" : "0";
 const child = spawn(guiExecutable, [], { cwd: root, env: environment, windowsHide: false, stdio: "ignore" });
 let statusDuring: Invocation | null = null;
 let setupInvocations: Record<string, Invocation> = {};
@@ -326,7 +331,8 @@ try {
     }
   }
   if (!reused) {
-    if (budgetBefore.cumulativeRoleSetupPrompts >= MAX_CUMULATIVE_SETUP_PROMPTS || budgetBefore.cumulativeNewChats >= MAX_CUMULATIVE_NEW_CHATS) {
+    if (fix8FirstRound) throw new Error("AUT2_FIX8_REUSE_FAILED: existing canonical REQUIREMENT Chat could not be read and no fallback Chat may be created.");
+    if (budgetBefore.setupPromptCount >= MAX_CUMULATIVE_SETUP_PROMPTS || budgetBefore.newChatCount >= MAX_CUMULATIVE_NEW_CHATS) {
       throw new Error("AUT2_SETUP_BUDGET_EXHAUSTED: stable Chat reuse failed and creating another setup Chat/Prompt is forbidden by the cumulative budget.");
     }
     setupInvocations.projectNewChat = await invoke(["project", "new-chat", "--name", webgptProjectName], 120_000);
@@ -434,15 +440,15 @@ const wrapperEvidence = {
   },
   accounting: {
     realPromptCount: accountedRealPromptCount,
-    cumulativeRealPromptCount: budgetBefore.cumulativeLocalRealPrompts + accountedRealPromptCount,
+    cumulativeRealPromptCount: budgetBefore.realPromptCount + accountedRealPromptCount,
     attemptedRealRequests: gateAttemptedRealRequests,
     roleSetupPromptCount: setupPromptCount,
-    cumulativeRoleSetupPrompts: budgetBefore.cumulativeRoleSetupPrompts + setupPromptCount,
+    cumulativeRoleSetupPrompts: budgetBefore.setupPromptCount + setupPromptCount,
     newChatCount: setupContext ? Number(setupContext.newChatCount ?? 0) : 0,
-    cumulativeNewChats: budgetBefore.cumulativeNewChats + (setupContext ? Number(setupContext.newChatCount ?? 0) : 0),
+    cumulativeNewChats: budgetBefore.newChatCount + (setupContext ? Number(setupContext.newChatCount ?? 0) : 0),
     repairCount: typeof gateEvidence?.repairCount === "number" ? gateEvidence.repairCount : 0,
     dispatchedRepairPromptCount: gateDispatchedRepairPromptCount,
-    cumulativeRepairCount: budgetBefore.cumulativeRepairPrompts + gateDispatchedRepairPromptCount,
+    cumulativeRepairCount: budgetBefore.repairPromptCount + gateDispatchedRepairPromptCount,
     hardMaxRealPrompts: MAX_CUMULATIVE_REAL_PROMPTS,
     hardMaxRepairPrompts: MAX_CUMULATIVE_REPAIR_PROMPTS,
     hardMaxNewChats: MAX_CUMULATIVE_NEW_CHATS,

@@ -3,22 +3,25 @@
   "gateFix": "AUT-2 Gate Fix 5 — Recovery Lease Drain + Final Real Requirement Roundtrip",
   "hardMaxRealPrompts": 12,
   "targetMaxRealPrompts": 10,
-  "cumulativeLocalRealPrompts": 7,
+  "realPromptCount": 10,
+  "businessOriginalPromptCount": 5,
+  "repairPromptCount": 3,
+  "setupPromptCount": 2,
+  "otherExplicitPromptCount": 0,
+  "newChatCount": 2,
   "cumulativeBreakdown": {
     "requirementSetup": 2,
-    "alignmentOriginal": 3,
-    "alignmentRepair": 2,
+    "alignmentOriginal": 4,
+    "alignmentRepair": 3,
     "answersToDraft": 0,
     "draftRepair": 0,
     "changeRequest": 0,
     "changeRepair": 0
   },
   "hardMaxRoleSetupPrompts": 2,
-  "cumulativeRoleSetupPrompts": 2,
   "hardMaxNewChats": 3,
-  "cumulativeNewChats": 2,
   "hardMaxRepairPrompts": 3,
-  "cumulativeRepairPrompts": 2,
+  "countingInvariant": "realPromptCount = businessOriginalPromptCount + repairPromptCount + setupPromptCount + otherExplicitPromptCount",
   "finalInvocation": {
     "realPromptCount": 0,
     "setupPromptCount": 0,
@@ -28,6 +31,16 @@
     "result": "BLOCKED",
     "failure": "TARGET_CHAT_MISMATCH: after graceful close/restart and exact open-chat, stable REQUIREMENT Chat read remained fail-closed",
     "evidenceFile": "docs/AUT-2-GATE-FIX-5-RUNTIME.json"
+  },
+  "followUpVisibleRetry": {
+    "additionalReadAttempts": 3,
+    "visibleOpenChatAttempts": 2,
+    "newBusinessPrompts": 0,
+    "newRepairPrompts": 0,
+    "newSetupPrompts": 0,
+    "newChats": 0,
+    "result": "TARGET_CHAT_MISMATCH",
+    "evidenceFile": "docs/AUT-2-VISIBLE-READ-RETRY-EVIDENCE.json"
   },
   "lastGateAttempt": {
     "result": "BLOCKED",
@@ -59,6 +72,36 @@
     "cookiesRead": false,
     "tokensRead": false
   },
-  "createdAt": "2026-08-21T18:31:33.1172293Z",
-  "note": "Cumulative counts cover prior local Gate attempts: two setup prompts/chats plus three original and two repair business prompts. Gate Fix 5 used bounded read/status, graceful close, normal restart, open-chat and chat latest only; it sent no new Prompt, repair, setup Prompt or Chat."
+  "latestFinalRequirementGate": {
+    "realPromptCount": 2,
+    "businessOriginalPromptCount": 1,
+    "repairPromptCount": 1,
+    "setupPromptCount": 0,
+    "otherExplicitPromptCount": 0,
+    "newChatCount": 0,
+    "repairCount": 1,
+    "result": "FAIL",
+    "failure": "MALFORMED_REQUIREMENT_RESPONSE / SCHEMA_INVALID: original and bounded repair responses parsed as JSON but both failed the local Requirement schema",
+    "evidenceFile": "docs/AUT-2-FINAL-REAL-GATE-RUNTIME.json",
+    "originalRequestId": "wgpt-a2467948-5c4a-4811-8e45-696792f5f43e",
+    "repairRequestId": "wgpt-27d24eb1-4f57-477a-a803-1e94da7f1ff6",
+    "businessPromptBodyLogged": false,
+    "responseBodyLogged": false
+  },
+  "fix8FirstRoundGate": {
+    "realPromptCount": 1,
+    "businessOriginalPromptCount": 1,
+    "repairPromptCount": 0,
+    "setupPromptCount": 0,
+    "otherExplicitPromptCount": 0,
+    "newChatCount": 0,
+    "result": "FAIL",
+    "schemaResult": "PASS",
+    "failure": "AUTOMATION_SCHEMA_INVALID: round.questionIds crosses a round boundary after a valid NEEDS_INPUT response was parsed.",
+    "evidenceFile": "docs/AUT-2-FIX8-FIRST-ROUND-REAL-EVIDENCE.json",
+    "promptBodyLogged": false,
+    "responseBodyLogged": false
+  },
+  "createdAt": "2026-08-22T12:14:50+08:00",
+  "note": "Canonical counters cover prior attempts plus Fix7 setup, the final schema-failure gate, and Fix8: realPromptCount is 10/12, businessOriginalPromptCount is 5, repairPromptCount is 3/3, setupPromptCount is 2/2, otherExplicitPromptCount is 0, and newChatCount is 2/3. Fix8 reused the same fresh Chat, sent one business original with no repair, parsed a valid NEEDS_INPUT response, then failed closed on an Automation Store round-boundary invariant; it did not enter AUT-3."
 }

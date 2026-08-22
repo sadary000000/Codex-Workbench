@@ -152,6 +152,96 @@ test("diagnoses malformed responses without retaining response content", () => {
   assert.equal(semantic.category, "G_SEMANTIC_MISMATCH");
 });
 
+test("emits sanitized field-level schema diagnostics and response shape", () => {
+  const invalid = JSON.stringify({
+    requirementProtocolVersion: REQUIREMENT_PROTOCOL_VERSION,
+    status: "NEEDS_INPUT",
+    payload: {
+      questions: [{
+        category: "SCOPE",
+        question: "Which bounded choice is required?",
+        whyNeeded: "The implementation contract needs this choice.",
+        blocking: true,
+        resolutionMode: "SINGLE_SELECT",
+        options: ["A", "B"],
+      }],
+    },
+  });
+
+  let contractError: unknown;
+  try {
+    parseRequirementSemanticResponse(invalid);
+    assert.fail("expected schema mismatch");
+  } catch (error) {
+    contractError = error;
+  }
+  assert.ok(contractError instanceof RequirementContractError);
+  assert.equal(contractError.code, "SCHEMA_INVALID");
+  assert.deepEqual(contractError.validationIssues, [{
+    path: "$.payload.questions[0].resolutionMode",
+    rule: "enum",
+    receivedType: "string",
+    allowedEnum: ["USER_REQUIRED", "ASSUMPTION_ALLOWED", "AVAILABLE_CONTEXT", "AUTO_INVESTIGATION"],
+    receivedEnum: "SINGLE_SELECT",
+  }]);
+
+  const diagnostics = diagnoseRequirementResponse(invalid, contractError);
+  assert.deepEqual(diagnostics.validationIssues, contractError.validationIssues);
+  assert.equal(diagnostics.shape?.questions.count, 1);
+  assert.deepEqual(diagnostics.shape?.question0.keys, ["category", "question", "whyNeeded", "blocking", "resolutionMode", "options"]);
+  assert.equal(diagnostics.shape?.assumptions.exists, false);
+  assert.equal(diagnostics.shape?.draft.exists, false);
+  assert.equal(diagnostics.shape?.blocked.codeExists, false);
+});
+
+test("emits required, unexpected, and wrong-type diagnostics without response content", () => {
+  const missing = JSON.stringify({
+    requirementProtocolVersion: REQUIREMENT_PROTOCOL_VERSION,
+    status: "READY_FOR_DRAFT",
+    payload: { draft: { context: "missing goal" } },
+  });
+  assert.throws(() => parseRequirementSemanticResponse(missing), (error: unknown) => {
+    assert.ok(error instanceof RequirementContractError);
+    assert.deepEqual(error.validationIssues, [{
+      path: "$.payload.draft.goal",
+      rule: "required",
+      missingRequiredKeys: ["goal"],
+    }]);
+    return true;
+  });
+
+  const unexpected = JSON.stringify({
+    requirementProtocolVersion: REQUIREMENT_PROTOCOL_VERSION,
+    status: "READY_FOR_DRAFT",
+    payload: { draft: { goal: "bounded", extraField: true } },
+  });
+  assert.throws(() => parseRequirementSemanticResponse(unexpected), (error: unknown) => {
+    assert.ok(error instanceof RequirementContractError);
+    assert.deepEqual(error.validationIssues, [{
+      path: "$.payload.draft.extraField",
+      rule: "unexpected",
+      unexpectedKeys: ["extraField"],
+    }]);
+    return true;
+  });
+
+  const wrongType = JSON.stringify({
+    requirementProtocolVersion: REQUIREMENT_PROTOCOL_VERSION,
+    status: "NEEDS_INPUT",
+    payload: { questions: "not-an-array" },
+  });
+  assert.throws(() => parseRequirementSemanticResponse(wrongType), (error: unknown) => {
+    assert.ok(error instanceof RequirementContractError);
+    assert.deepEqual(error.validationIssues, [{
+      path: "$.payload.questions",
+      rule: "type",
+      expectedType: "array",
+      receivedType: "string",
+    }]);
+    return true;
+  });
+});
+
 test("validates schema and semantic identity fail closed", () => {
   const parsed = parseRequirementEnvelope(raw(readyEnvelope()), context);
   assert.equal(parsed.projectId, context.projectId);
