@@ -5,6 +5,7 @@
 ```yaml
 stage: AUT-2-FIX11
 result: BLOCKED
+implementation_commit: bdeb307
 preflight_fix_applied: YES
 phase5_real_gate: NOT_ENTERED
 aut2_ready: NO

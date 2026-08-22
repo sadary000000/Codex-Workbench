@@ -1,6 +1,7 @@
 stage=AUT-2-FIX11
 base_commit=d6db469
 prior_implementation_commit=d23f5b6
+implementation_commit=bdeb307
 scope=production reconciliation; scope-aware preflight; canonical role reachability
 result=BLOCKED
 preflight_fix_applied=YES

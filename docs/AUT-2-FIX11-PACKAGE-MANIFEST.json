@@ -1,7 +1,7 @@
 {
   "stage": "AUT-2-FIX11",
   "package": "AUT-2-FIX11-RECOVERY-REVIEW-PACKAGE.zip",
-  "implementationCommit": "pending",
+  "implementationCommit": "bdeb307",
   "baseCommit": "d6db469",
   "includedFiles": [
     "docs/AUT-2-FIX11-CANONICAL-ROLE-REACHABILITY.json",
