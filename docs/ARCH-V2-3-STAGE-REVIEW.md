@@ -5,6 +5,7 @@
 ```yaml
 stage: ARCH-V2-3 Query / Command / Reconcile Separation
 base_commit: 7b1fb2a7243297fe46806a1396358376c17f2f7d
+implementation_commit: 791a68d
 goal: make query surfaces pure, commands explicit, and provider reconciliation explicit
 v1_core_changed: NO
 webgpt_prompt_sent: NO

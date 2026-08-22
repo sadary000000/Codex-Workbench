@@ -26,6 +26,7 @@ architecture_boundary:
 ## Baseline
 
 - Base: `7b1fb2a7243297fe46806a1396358376c17f2f7d`
+- Implementation commit: `791a68d` (`feat: implement arch-v2-3 query command reconcile separation`)
 - ARCH-V2-1 / ARCH-V2-2 已由 GPT PASS；本阶段不重做 Shared Host、Native truth 或 Map 设计。
 - 本阶段没有真实 WebGPT Prompt，也没有读取用户 Cookie、Token、聊天内容或生产 Automation 数据。
 
