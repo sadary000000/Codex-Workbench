@@ -1,0 +1,29 @@
+{
+  "stage": "ARCH-V2-4",
+  "generatedAt": "2026-08-23",
+  "realPromptsSentByThisStage": 0,
+  "passing": [
+    { "command": "npm run test:real:navigation", "result": "PASS", "evidence": "same Native Thread IDs across project/standalone switching and restart" },
+    { "command": "npm run test:real:workspace", "result": "PASS", "evidence": "interrupt/continue/restart retained the same Native Thread ID" },
+    { "command": "npm run test:real:multi-thread", "result": "PASS", "evidence": "two Native Threads completed with isolated event markers" },
+    { "command": "npm run test:real:shared-host-recovery", "result": "PASS", "evidence": "sameNativeThreadIds=true and noReplacementThread=true" },
+    { "command": "npm run test:protocol:arch-v2-2", "result": "PASS", "evidence": "repeatable generated TS/JSON schema" },
+    { "command": "npm run test:real:map", "result": "PASS", "evidence": "real Map dynamic tool patch accepted and cleaned up" },
+    { "command": "npm run test:real:project-map", "result": "PASS", "evidence": "maintenance Thread isolated from normal project navigation" },
+    { "command": "npm run test:real:webgpt:protocol", "result": "PASS", "evidence": "Control Plane initialize/status contract, newRealPrompts=0" }
+  ],
+  "disclosedFailures": [
+    {
+      "command": "npm run test:real:webgpt:arbiter",
+      "result": "FAIL",
+      "failure": "control auto returned TIMEOUT after webgpt open returned USER_CONTROL",
+      "realPromptCount": 0,
+      "credentialsRead": false,
+      "pageContentLogged": false,
+      "journalMutated": true,
+      "journalSha256Before": "E116AC8E7C4B914F849D4BD82FD774C37F643EA47796D969D3DB634E2B5E77B0",
+      "journalSha256After": "7D2F2CD73E151BF9FAA01B91B0FCFA36B9FFED23B2A1EFDF4B15A0F4838661CE",
+      "scope": "pre-existing WebGPT control/recovery boundary; not changed by ARCH-V2-4; blocks a read-only production gate"
+    }
+  ]
+}
