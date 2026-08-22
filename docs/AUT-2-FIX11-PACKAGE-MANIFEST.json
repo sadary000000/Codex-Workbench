@@ -1,0 +1,35 @@
+{
+  "stage": "AUT-2-FIX11",
+  "package": "AUT-2-FIX11-RECOVERY-REVIEW-PACKAGE.zip",
+  "implementationCommit": "pending",
+  "baseCommit": "d6db469",
+  "includedFiles": [
+    "docs/AUT-2-FIX11-CANONICAL-ROLE-REACHABILITY.json",
+    "docs/AUT-2-FIX11-CANONICAL-ROLE-REACHABILITY.md",
+    "docs/AUT-2-FIX11-OLD-PLANNER-REQUEST-PROVENANCE.json",
+    "docs/AUT-2-FIX11-OLD-PLANNER-REQUEST-PROVENANCE.md",
+    "docs/AUT-2-FIX11-PREFLIGHT-PREDICATE-AUDIT.md",
+    "docs/AUT-2-FIX11-PRODUCTION-JOURNAL-AUDIT.json",
+    "docs/AUT-2-FIX11-PRODUCTION-JOURNAL-AUDIT.md",
+    "docs/AUT-2-FIX11-PROVENANCE.txt",
+    "docs/AUT-2-FIX11-STAGE-REVIEW.md",
+    "docs/AUT-2-FIX11-TEST-SUMMARY.json",
+    "docs/AUT-2-FIX10-TRUE-SAME-SESSION-E2E.json",
+    "docs/AUT-3-REAL-PLANNER-EVIDENCE-FIX10.json",
+    "docs/AUT-3-AUT2-HANDOFF-EVIDENCE.json"
+  ],
+  "excludedCategories": [
+    "cookies",
+    "tokens",
+    "control-plane credentials",
+    "browser profiles",
+    "private prompt or response bodies",
+    "raw user Journal",
+    "unrelated worktree changes"
+  ],
+  "realGateStatus": {
+    "aut2": "NOT_RUN_BLOCKED_BY_PREFLIGHT",
+    "aut3": "NOT_RUN_BLOCKED_BY_PREFLIGHT",
+    "promptCountThisTurn": 0
+  }
+}

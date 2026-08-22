@@ -699,7 +699,10 @@ export class WebGptRequestManager {
       throw this.codedError("WEBGPT_REQUEST_JOURNAL_INVALID", "Request Journal 无法读取或不是有效 JSON；已拒绝静默重建请求记录。 ");
     }
     if (!parsed || ![1, 2].includes(parsed.version as number) || !Array.isArray(parsed.requests)) throw this.codedError("WEBGPT_REQUEST_JOURNAL_INVALID", "Request Journal schema 无效；已拒绝静默重建请求记录。 ");
-    let changed = parsed.version !== 2;
+    // Schema migration is persistent; restart recovery classification is
+    // derived in memory. A read-only status/preflight must not rewrite every
+    // historical non-terminal record or erase its original error evidence.
+    const schemaChanged = parsed.version !== 2;
     const seenIdempotencyKeys = new Set<string>();
     for (const candidate of parsed.requests) {
       if (!candidate || typeof candidate !== "object") continue;
@@ -711,11 +714,10 @@ export class WebGptRequestManager {
         record.state = "RECOVERY_REQUIRED";
         record.error = { code: "WORKBENCH_RESTARTED", message: "Workbench 重启后无法盲目重放未完成网页请求；请用同一 idempotency key 重新连接，或显式执行恢复校验。" };
         record.completedAt = null;
-        changed = true;
       }
       this.records.set(record.requestId, record);
     }
-    if (changed) await this.persist();
+    if (schemaChanged) await this.persist();
   }
 
   private normalizeRecord(value: Partial<WebGptRequestRecord>): WebGptRequestRecord {

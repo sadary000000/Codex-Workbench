@@ -1,0 +1,36 @@
+{
+  "stage": "AUT-2-FIX11",
+  "requestId": "wgpt-f799139b-93f8-42dd-aa02-cadc08eebfd6",
+  "classification": "HISTORICAL_ISOLATED_GATE_REQUEST",
+  "productionJournal": false,
+  "origin": {
+    "stage": "AUT-3 Real Planner Gate",
+    "automationProjectId": "aut3-real-planner-1787379835984",
+    "requirementFixture": "aut3-confirmed-requirement-1787379836043",
+    "role": "PLANNER",
+    "targetChatUrl": "https://chatgpt.com/c/6a865d2c-69fc-83ee-9845-1c236f19d7b9",
+    "journalKind": "temporary isolated Request Journal",
+    "finalKnownState": "RECOVERY_REQUIRED",
+    "responsePresent": false,
+    "repairOrResend": false
+  },
+  "temporaryEnvironment": {
+    "automationDatabase": "%TEMP%\\codex-workbench-aut3-real-*\\automation.db",
+    "requestJournal": "%TEMP%\\codex-workbench-aut3-real-*\\webgpt-requests",
+    "cleanedAfterGate": true,
+    "productionResultFile": false
+  },
+  "currentProductionChecks": {
+    "requestFound": false,
+    "cliStatus": "NOT_FOUND",
+    "currentBrowserLease": "NOT_PROVEN",
+    "aut2ToAut3Handoff": "NOT_GENERATED",
+    "alignmentSessionId": null,
+    "requirementVersionId": null
+  },
+  "safetyCounters": {
+    "promptSentInFix11": 0,
+    "chatCreatedInFix11": 0,
+    "roleBindingMutationInFix11": 0
+  }
+}

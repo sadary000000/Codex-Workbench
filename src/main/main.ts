@@ -24,7 +24,7 @@ import { WebGptRoleSessionRegistry } from "../features/webgpt/runtime/webgpt-rol
 import { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
 import { WebGptProjectRegistry } from "../features/webgpt/runtime/webgpt-project-registry.ts";
 import { isWebGptProjectOperationCommand, projectOperationBudgetMs } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
-import type { WebGptLatestResponse, WebGptRole } from "../features/webgpt/types.ts";
+import type { WebGptLatestResponse, WebGptRequestRecord, WebGptRole } from "../features/webgpt/types.ts";
 import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
 import { WEBGPT_CONTROL_PROTOCOL_VERSION, WebGptControlServer, controlDescriptorPath, createControlDescriptor, publishControlDescriptor, removeControlDescriptor, runWebGptCli, type WebGptControlDescriptor, type WebGptControlIdentity, type WebGptControlRequest, type WebGptControlResponse } from "./webgpt-control.ts";
 import { createWebGptCliArgumentError, createWebGptCliFailure, presentWebGptCliOutput } from "./webgpt-cli-presenter.ts";
@@ -33,6 +33,7 @@ import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from 
 import { AutomationStore } from "../automation/store.ts";
 import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../automation/aut2-real-webgpt-gate.ts";
 import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
+import { classifyWebGptActionReadiness, type WebGptActionScope } from "../automation/webgpt-action-readiness.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -155,13 +156,23 @@ async function startAut2RealWebGptGate(): Promise<void> {
   const webgptProjectId = process.env.AUT2_WEBGPT_PROJECT_ID?.trim() || "";
   if (!webgptProjectId) throw new Error("AUT2_WEBGPT_PROJECT_ID is required for the real Gate.");
   const setupContext = await waitForAut2SetupContext(process.env.AUT2_REAL_WEBGPT_GATE_SETUP_FILE?.trim() || "");
+  const fix11Preflight = await aut2RequirementPreflight(webgptProjectId);
+  if (fix11Preflight.ok !== true) {
+    await writeAut2Fix11BlockedEvidence(outputPath, webgptProjectId, process.env.AUT2_AUTOMATION_PROJECT_ID?.trim() || "", setupContext, fix11Preflight);
+    logger.info("aut2_fix11_preflight_blocked", { outputPath, promptSent: false });
+    process.exitCode = 1;
+    setTimeout(() => app.quit(), 50);
+    return;
+  }
   const evidence = await runAut2RealWebGptGate({
     store: automationStore,
     roleSession: getWebGptRoleService(),
     requestManager: getWebGptRequestManager(),
     openWorkspace: () => getWebGptRequestManager().openWorkspace(),
     returnAutomationControl: () => getWebGptWorkspace().returnAutomationControl(),
-    automationControl: () => getWebGptRequestManager().automationControl(),
+    // Fix11 preflight is action-scoped. Do not sweep every historical
+    // RECOVERY_REQUIRED record when the real gate returns control.
+    automationControl: () => getWebGptWorkspace().returnAutomationControl().then(() => undefined),
     webgptProjectId,
     automationProjectId: process.env.AUT2_AUTOMATION_PROJECT_ID?.trim() || undefined,
     timeoutMs: Number(process.env.AUT2_REAL_WEBGPT_TIMEOUT_MS ?? 240_000),
@@ -210,13 +221,32 @@ async function startAut2Fix10AndAut3RealGate(): Promise<void> {
   const automationProjectId = process.env.AUT2_AUTOMATION_PROJECT_ID?.trim() || process.env.AUT3_AUTOMATION_PROJECT_ID?.trim() || "";
   if (!webgptProjectId || !automationProjectId) throw new Error("AUT-2 Fix10/AUT-3 handoff Gate requires WebGPT and Automation Project IDs.");
   const setupContext = await waitForAut2SetupContext(process.env.AUT2_REAL_WEBGPT_GATE_SETUP_FILE?.trim() || "");
+  const fix11Preflight = await aut2RequirementPreflight(webgptProjectId);
+  if (fix11Preflight.ok !== true) {
+    await writeAut2Fix11BlockedEvidence(aut2OutputPath, webgptProjectId, automationProjectId, setupContext, fix11Preflight);
+    const blocked = {
+      stage: "AUT-3",
+      result: "BLOCKED",
+      webgptProjectId,
+      automationProjectId,
+      promptSent: false,
+      preflight: { status: "NOT_RUN", reason: "AUT2_FIX11_PREFLIGHT_NOT_READY" },
+      error: { code: "AUT2_FIX11_PREFLIGHT_NOT_READY", message: "AUT-3 did not run because AUT-2 Fix11 production preflight was not ready." },
+    };
+    await writeFile(aut3OutputPath, `${JSON.stringify(blocked, null, 2)}\n`, "utf8");
+    process.exitCode = 1;
+    setTimeout(() => app.quit(), 50);
+    return;
+  }
   const aut2Evidence = await runAut2RealWebGptGate({
     store: automationStore,
     roleSession: getWebGptRoleService(),
     requestManager: getWebGptRequestManager(),
     openWorkspace: () => getWebGptRequestManager().openWorkspace(),
     returnAutomationControl: () => getWebGptWorkspace().returnAutomationControl(),
-    automationControl: () => getWebGptRequestManager().automationControl(),
+    // Fix11 preflight is action-scoped. Do not sweep every historical
+    // RECOVERY_REQUIRED record when the combined gate returns control.
+    automationControl: () => getWebGptWorkspace().returnAutomationControl().then(() => undefined),
     webgptProjectId,
     automationProjectId,
     timeoutMs: Number(process.env.AUT2_REAL_WEBGPT_TIMEOUT_MS ?? 240_000),
@@ -511,19 +541,116 @@ async function webGptStatusResult(): Promise<Record<string, unknown>> {
   };
 }
 
+async function collectWebGptActionReadiness(action: WebGptActionScope): Promise<{
+  status: Record<string, unknown>;
+  activeRequests: Awaited<ReturnType<WebGptRequestManager["activeSummary"]>>;
+  requestRecords: WebGptRequestRecord[];
+  unavailableRequestIds: string[];
+  browserResource: Record<string, unknown>;
+  readiness: ReturnType<typeof classifyWebGptActionReadiness>;
+}> {
+  const status = await webGptStatusResult();
+  const requestManager = getWebGptRequestManager();
+  const activeRequests = await requestManager.activeSummary();
+  const loaded = await Promise.all(activeRequests.map(async (summary) => {
+    try {
+      return { record: await requestManager.requestStatus(summary.requestId, false), unavailable: false };
+    } catch {
+      return { record: null, unavailable: true };
+    }
+  }));
+  const requestRecords = loaded.flatMap((item) => item.record ? [item.record] : []);
+  const unavailableRequestIds = loaded.flatMap((item, index) => item.unavailable ? [activeRequests[index]!.requestId] : []);
+  const browserResource = status.browserResource && typeof status.browserResource === "object" && !Array.isArray(status.browserResource)
+    ? status.browserResource as Record<string, unknown>
+    : {};
+  const readiness = classifyWebGptActionReadiness({ action, records: requestRecords, unavailableRequestIds, browserResource });
+  return { status, activeRequests, requestRecords, unavailableRequestIds, browserResource, readiness };
+}
+
+async function aut2RequirementPreflight(webgptProjectId: string): Promise<Record<string, unknown>> {
+  const scoped = await collectWebGptActionReadiness({
+    projectId: webgptProjectId,
+    role: "REQUIREMENT",
+    targetChatUrl: "",
+  });
+  const status = scoped.status;
+  const browserResource = scoped.browserResource;
+  let requirement: { projectId: string; role: WebGptRole; status: string; chatUrl: string } | null = null;
+  let bindingError: { code: string; message: string } | null = null;
+  try {
+    const binding = await getWebGptRoleService().status(webgptProjectId, "REQUIREMENT");
+    requirement = { projectId: binding.projectId, role: binding.role, status: binding.status, chatUrl: binding.chatUrl };
+  } catch (error) {
+    const info = errorInfo(error);
+    bindingError = { code: String(info.code ?? "UNKNOWN"), message: info.message.slice(0, 500) };
+  }
+  const runtimeReady = status.workbench === "READY"
+    && status.webgpt === "READY"
+    && status.controlOwner === "AUTO_CONTROL"
+    && status.pageHealthy === true;
+  const browserFree = browserResource.activeOperationId == null
+    && browserResource.activeRequestId == null
+    && Number(browserResource.queueDepth ?? 0) === 0;
+  const exactRequirement = requirement?.projectId === webgptProjectId
+    && requirement.role === "REQUIREMENT"
+    && requirement.status === "BOUND"
+    && Boolean(requirement.chatUrl);
+  const actionReadiness = classifyWebGptActionReadiness({
+    action: { projectId: webgptProjectId, role: "REQUIREMENT", targetChatUrl: requirement?.chatUrl ?? "" },
+    records: scoped.requestRecords,
+    unavailableRequestIds: scoped.unavailableRequestIds,
+    browserResource,
+  });
+  let targetRead: Record<string, unknown> = { status: "NOT_RUN", chatUrl: requirement?.chatUrl || null };
+  if (runtimeReady && browserFree && exactRequirement && actionReadiness.ok) {
+    try {
+      const latest = await getWebGptRequestManager().readLatestChat(requirement!.chatUrl, { projectId: webgptProjectId, role: "REQUIREMENT", operationType: "CURRENT" });
+      targetRead = { status: "PASS", chatUrl: latest.chatUrl, assistantCount: latest.assistantCount, generating: latest.generating, textSha256: latest.textSha256 };
+    } catch (error) {
+      const info = errorInfo(error);
+      targetRead = { status: "FAIL", chatUrl: requirement?.chatUrl || null, errorCode: info.code, errorMessage: info.message.slice(0, 500) };
+    }
+  } else {
+    targetRead = { status: "NOT_RUN", chatUrl: requirement?.chatUrl || null, reason: "fix11_preflight_not_ready" };
+  }
+  return {
+    ok: runtimeReady && browserFree && exactRequirement && actionReadiness.ok && targetRead.status === "PASS",
+    runtime: { workbench: status.workbench, webgpt: status.webgpt, controlOwner: status.controlOwner, pageHealthy: status.pageHealthy, currentUrl: status.currentUrl },
+    activeRequestCount: scoped.activeRequests.length,
+    activeRequests: scoped.activeRequests,
+    browserResource: {
+      activeOperationId: browserResource.activeOperationId ?? null,
+      activeRequestId: browserResource.activeRequestId ?? null,
+      queueDepth: Number(browserResource.queueDepth ?? 0),
+      mode: browserResource.mode ?? null,
+    },
+    journalReconciliation: actionReadiness,
+    requirementBinding: requirement
+      ? { projectId: requirement.projectId, role: requirement.role, status: requirement.status, chatUrl: requirement.chatUrl }
+      : { projectId: null, role: "REQUIREMENT", status: "UNAVAILABLE", chatUrl: null, error: bindingError },
+    targetRead,
+    automationStorePath: automationStore?.filePath ?? null,
+  };
+}
+
 /**
  * AUT-3 is allowed to send a Planner Prompt only from a clean production
  * runtime. In particular, a stale/unknown request in the production Journal
  * is a recovery blocker, never a reason to resend blindly.
  */
 async function aut3PlannerPreflight(webgptProjectId: string, recoveryRequestId: string | null): Promise<Record<string, unknown>> {
-  const status = await webGptStatusResult();
   const requestManager = getWebGptRequestManager();
-  const activeRequests = await requestManager.activeSummary();
-  const browserResource = status.browserResource && typeof status.browserResource === "object" && !Array.isArray(status.browserResource)
-    ? status.browserResource as Record<string, unknown>
-    : {};
   const planner = await getWebGptRoleService().status(webgptProjectId, "PLANNER");
+  const scoped = await collectWebGptActionReadiness({
+    projectId: webgptProjectId,
+    role: "PLANNER",
+    targetChatUrl: planner.chatUrl || "",
+  });
+  const status = scoped.status;
+  const activeRequests = scoped.activeRequests;
+  const browserResource = scoped.browserResource;
+  const actionReadiness = scoped.readiness;
   const requirement = await getWebGptRoleService().status(webgptProjectId, "REQUIREMENT");
   const reviewer = await getWebGptRoleService().status(webgptProjectId, "REVIEWER");
   let recovery: Record<string, unknown> = { status: "NOT_REQUESTED", requestId: recoveryRequestId };
@@ -545,7 +672,9 @@ async function aut3PlannerPreflight(webgptProjectId: string, recoveryRequestId: 
     }
   }
   const journalClean = activeRequests.length === 0;
-  const browserFree = browserResource.activeOperationId === null && Number(browserResource.queueDepth ?? 0) === 0;
+  const browserFree = browserResource.activeOperationId == null
+    && browserResource.activeRequestId == null
+    && Number(browserResource.queueDepth ?? 0) === 0;
   const runtimeReady = status.workbench === "READY"
     && status.webgpt === "READY"
     && status.controlOwner === "AUTO_CONTROL"
@@ -553,7 +682,7 @@ async function aut3PlannerPreflight(webgptProjectId: string, recoveryRequestId: 
   const exactPlanner = planner.projectId === webgptProjectId && planner.role === "PLANNER" && planner.status === "BOUND" && Boolean(planner.chatUrl);
   const rolesProtected = requirement.status === "BOUND" && reviewer.status === "BOUND";
   let targetRead: Record<string, unknown> = { status: "NOT_RUN", chatUrl: planner.chatUrl || null };
-  if (runtimeReady && journalClean && browserFree && exactPlanner) {
+  if (runtimeReady && actionReadiness.ok && browserFree && exactPlanner) {
     try {
       const latest = await requestManager.readLatestChat(planner.chatUrl, { projectId: webgptProjectId, role: "PLANNER", operationType: "CURRENT" });
       targetRead = { status: "PASS", chatUrl: latest.chatUrl, assistantCount: latest.assistantCount, generating: latest.generating, textSha256: latest.textSha256 };
@@ -566,10 +695,12 @@ async function aut3PlannerPreflight(webgptProjectId: string, recoveryRequestId: 
   }
   const recoverySafe = recovery.status === "NOT_REQUESTED" || recovery.status === "FOUND" && !["QUEUED", "SUBMITTING", "SUBMITTED", "GENERATING", "INDETERMINATE", "RECOVERY_REQUIRED", "TIMEOUT"].includes(String(recovery.state));
   return {
-    ok: runtimeReady && journalClean && browserFree && exactPlanner && rolesProtected && targetRead.status === "PASS" && recoverySafe,
+    ok: runtimeReady && actionReadiness.ok && browserFree && exactPlanner && rolesProtected && targetRead.status === "PASS" && recoverySafe,
     runtime: { workbench: status.workbench, webgpt: status.webgpt, controlOwner: status.controlOwner, pageHealthy: status.pageHealthy, currentUrl: status.currentUrl },
     activeRequestCount: activeRequests.length,
     activeRequests,
+    legacyGlobalJournalClean: journalClean,
+    journalReconciliation: actionReadiness,
     browserResource: {
       activeOperationId: browserResource.activeOperationId ?? null,
       activeRequestId: browserResource.activeRequestId ?? null,
@@ -581,7 +712,33 @@ async function aut3PlannerPreflight(webgptProjectId: string, recoveryRequestId: 
     reviewerBinding: { projectId: reviewer.projectId, role: reviewer.role, status: reviewer.status, chatUrl: reviewer.chatUrl },
     targetRead,
     recovery,
+    automationStorePath: automationStore?.filePath ?? null,
   };
+}
+
+async function writeAut2Fix11BlockedEvidence(
+  outputPath: string,
+  webgptProjectId: string,
+  automationProjectId: string,
+  setupContext: Aut2RealWebGptSetupContext,
+  preflight: Record<string, unknown>,
+): Promise<void> {
+  await writeFile(outputPath, `${JSON.stringify({
+    stage: "AUT-2-FIX11",
+    result: "BLOCKED",
+    webgptProjectId,
+    automationProjectId,
+    preflight,
+    promptSent: false,
+    currentGatePromptCount: 0,
+    setupPromptCount: setupContext.setupPromptCount,
+    newChatCount: setupContext.newChatCount,
+    repairPromptCount: 0,
+    roleBindingMutation: 0,
+    journalMutation: 0,
+    v1FrozenCoreChanged: false,
+    nextAction: "resolve_fix11_preflight_then_rerun_aut2",
+  }, null, 2)}\n`, "utf8");
 }
 
 async function handleWebGptControlRequest(request: WebGptControlRequest): Promise<WebGptControlResponse> {

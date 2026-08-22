@@ -131,7 +131,16 @@ test("AUT-3 production preflight blocks recovery uncertainty before any Planner 
       store: value.store,
       roleSession: {
         async status(projectId, role) {
-          return { projectId, role, status: "BOUND", chatUrl: `https://chatgpt.com/c/${role.toLowerCase()}` };
+          return {
+            projectId,
+            role,
+            status: "BOUND",
+            chatUrl: `https://chatgpt.com/c/${role.toLowerCase()}`,
+            title: null,
+            createdAt: "2026-08-22T00:00:00.000Z",
+            updatedAt: "2026-08-22T00:00:00.000Z",
+            lastUsedAt: null,
+          };
         },
         async submit() {
           submitCalls += 1;

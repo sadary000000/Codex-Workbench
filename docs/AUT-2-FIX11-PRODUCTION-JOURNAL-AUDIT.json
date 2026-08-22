@@ -1,0 +1,110 @@
+{
+  "stage": "AUT-2-FIX11",
+  "source": "C:/Users/sadar/AppData/Roaming/codex-workbench-v1/webgpt/requests/requests.json",
+  "readOnlyInspection": true,
+  "recordCount": 85,
+  "stateCounts": {
+    "COMPLETED": 50,
+    "FAILED": 11,
+    "PAUSED_FOR_USER": 2,
+    "QUEUED": 1,
+    "RECOVERY_REQUIRED": 21
+  },
+  "nonTerminalCount": 24,
+  "roleCountsAmongNonTerminal": {
+    "REQUIREMENT": 6,
+    "PLANNER": 3,
+    "UNSCOPED": 15
+  },
+  "runtimeSnapshot": {
+    "workbench": "READY",
+    "webgpt": "UNAVAILABLE",
+    "controlOwner": null,
+    "browserResource": null,
+    "pageHealthy": false,
+    "currentUrlObserved": false
+  },
+  "derivedDispositionOnly": true,
+  "persistenceChangedByFix11Code": false,
+  "productionLoaderSideEffectObservedDuringAudit": {
+    "occurred": true,
+    "recordCountChanged": false,
+    "stateCountsChanged": false,
+    "errorFieldNormalization": "21 RECOVERY_REQUIRED records were rewritten in memory and persisted by the pre-existing request-manager load path as WORKBENCH_RESTARTED.",
+    "source": "read-only packaged status probe started by the audit subprocess",
+    "rollback": "not performed; user data was not overwritten by a manual rollback"
+  },
+  "scopeActions": {
+    "requirement": {
+      "projectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+      "role": "REQUIREMENT",
+      "targetChatUrl": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+      "ok": false,
+      "dispositionCounts": {
+        "ACTIVE_BLOCKING": 0,
+        "SAFE_TO_RECONCILE": 2,
+        "STALE_CANDIDATE": 0,
+        "HISTORICAL_NONTERMINAL_BUT_NOT_ACTIVE": 7,
+        "UNKNOWN_BLOCKING": 15
+      },
+      "blockerCount": 15,
+      "blockingRequestIds": [
+        "wgpt-44e656d5-1d72-48ac-a578-c16a472ccf39",
+        "wgpt-d8c930ce-0e1f-4a50-85a0-66b90f80c925",
+        "wgpt-57da239a-d659-48be-9312-8882114c2462",
+        "wgpt-1f764f95-4060-4727-8600-1f2af6d9deab",
+        "wgpt-087811c6-3f44-4289-ac21-5605329ae54e",
+        "wgpt-0ac7b273-4d18-4801-b6e3-97275bf82974",
+        "wgpt-2502d506-260c-46e0-b2a1-83bedbfb728c",
+        "wgpt-564f135a-286a-4896-8f5f-797369a9cf4d",
+        "wgpt-f97574f5-4f73-4ae3-9652-a9aac3e129a8",
+        "wgpt-b33b51d4-9130-4e10-9c94-5f6868d4644f",
+        "wgpt-6f363f58-139b-4eab-899b-53e94c3e5ee7",
+        "wgpt-989da006-07f1-439a-9f5c-ee7c5d12bc7c",
+        "wgpt-b58e42b5-c2b0-4945-8780-bd1a3fb579bb",
+        "wgpt-24b78c80-9222-4316-acd9-255fe6a582c7",
+        "wgpt-13270834-c441-4ca3-8730-a7943f12a14a"
+      ]
+    },
+    "planner": {
+      "projectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+      "role": "PLANNER",
+      "targetChatUrl": "https://chatgpt.com/c/6a865d2c-69fc-83ee-9845-1c236f19d7b9",
+      "ok": false,
+      "dispositionCounts": {
+        "ACTIVE_BLOCKING": 0,
+        "SAFE_TO_RECONCILE": 2,
+        "STALE_CANDIDATE": 0,
+        "HISTORICAL_NONTERMINAL_BUT_NOT_ACTIVE": 6,
+        "UNKNOWN_BLOCKING": 16
+      },
+      "blockerCount": 16,
+      "blockingRequestIds": [
+        "wgpt-44e656d5-1d72-48ac-a578-c16a472ccf39",
+        "wgpt-d8c930ce-0e1f-4a50-85a0-66b90f80c925",
+        "wgpt-57da239a-d659-48be-9312-8882114c2462",
+        "wgpt-1f764f95-4060-4727-8600-1f2af6d9deab",
+        "wgpt-087811c6-3f44-4289-ac21-5605329ae54e",
+        "wgpt-0ac7b273-4d18-4801-b6e3-97275bf82974",
+        "wgpt-2502d506-260c-46e0-b2a1-83bedbfb728c",
+        "wgpt-564f135a-286a-4896-8f5f-797369a9cf4d",
+        "wgpt-f97574f5-4f73-4ae3-9652-a9aac3e129a8",
+        "wgpt-b33b51d4-9130-4e10-9c94-5f6868d4644f",
+        "wgpt-6f363f58-139b-4eab-899b-53e94c3e5ee7",
+        "wgpt-989da006-07f1-439a-9f5c-ee7c5d12bc7c",
+        "wgpt-b58e42b5-c2b0-4945-8780-bd1a3fb579bb",
+        "wgpt-79d283e8-ad34-490a-9bec-43cbeecbbc11",
+        "wgpt-0fd7e44d-0d16-4f61-bca4-fb74d9199b8c",
+        "wgpt-f9bf3a7f-a9aa-46dd-ad74-82853e380d4e"
+      ]
+    }
+  },
+  "safetyCounters": {
+    "newBusinessPrompts": 0,
+    "repairPrompts": 0,
+    "setupPrompts": 0,
+    "newChats": 0,
+    "roleBindingMutations": 0,
+    "journalMutationsByFix11": 0
+  }
+}

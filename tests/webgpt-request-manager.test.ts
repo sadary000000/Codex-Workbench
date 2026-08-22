@@ -256,6 +256,44 @@ test("WebGPT Request Manager marks unfinished persisted work indeterminate after
   }
 });
 
+test("WebGPT read-only restart classification does not rewrite a v2 Journal", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-readonly-journal-"));
+  const record = {
+    requestId: "wgpt-readonly",
+    idempotencyKey: "readonly-key",
+    semanticSha256: "semantic",
+    state: "RECOVERY_REQUIRED",
+    projectId: "project-a",
+    role: "REQUIREMENT",
+    targetChatUrl: "https://chatgpt.com/c/target",
+    chatUrl: "https://chatgpt.com/c/target",
+    promptChars: 12,
+    promptSha256: "hash",
+    baselineUserCount: 1,
+    baselineAssistantCount: 0,
+    sendStartedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    submittedAt: new Date().toISOString(),
+    completedAt: null,
+    resultPath: null,
+    resultSha256: null,
+    resultBytes: null,
+    lastKnownPageState: null,
+    error: { code: "WEBGPT_RESPONSE_TIMEOUT", message: "original evidence" },
+  };
+  const original = JSON.stringify({ version: 2, requests: [record] });
+  try {
+    await writeFile(join(directory, "requests.json"), original, "utf8");
+    const manager = new WebGptRequestManager({ workspace: new FakeWorkspace() as never, storageDirectory: directory });
+    const recovered = await manager.requestStatus("wgpt-readonly", false);
+    assert.equal(recovered.state, "RECOVERY_REQUIRED");
+    assert.equal(recovered.error?.code, "WORKBENCH_RESTARTED");
+    assert.equal(await readFile(join(directory, "requests.json"), "utf8"), original);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("WebGPT Request Manager returns the original Request for an idempotent retry and rejects semantic drift", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-idempotency-"));
   const workspace = new FakeWorkspace();

@@ -1,0 +1,83 @@
+{
+  "stage": "AUT-2-FIX11",
+  "result": "BLOCKED",
+  "preflightFixApplied": true,
+  "phase5RealGate": "NOT_ENTERED",
+  "baseCommit": "d6db469",
+  "implementationCommit": "pending",
+  "checks": {
+    "npmRunCheck": "PASS",
+    "npmTest": {
+      "status": "PASS",
+      "passed": 299,
+      "failed": 0
+    },
+    "targetedTests": {
+      "status": "PASS",
+      "passed": 24,
+      "failed": 0,
+      "files": [
+        "tests/webgpt-action-readiness.test.ts",
+        "tests/webgpt-request-manager.test.ts",
+        "tests/aut3-planner.test.ts"
+      ]
+    },
+    "npmRunBuild": "PASS",
+    "npmRunPackageWin": "PASS",
+    "npmAuditOmitDev": {
+      "status": "PASS",
+      "vulnerabilities": 0
+    },
+    "gitDiffCheck": "PASS",
+    "secretScan": "PASS"
+  },
+  "realGates": {
+    "aut2": "NOT_RUN_BLOCKED_BY_PREFLIGHT",
+    "aut3": "NOT_RUN_BLOCKED_BY_PREFLIGHT",
+    "businessPrompts": 0,
+    "repairPrompts": 0,
+    "setupPrompts": 0,
+    "newChats": 0,
+    "roleBindingMutations": 0
+  },
+  "runtimeEvidence": {
+    "workbench": "READY",
+    "webgpt": "UNAVAILABLE",
+    "controlOwner": null,
+    "browserResource": null,
+    "requirementReachability": "NOT_PROVEN",
+    "plannerReachability": "NOT_PROVEN"
+  },
+  "journalAudit": {
+    "records": 85,
+    "nonterminal": 24,
+    "requirement": {
+      "ACTIVE_BLOCKING": 0,
+      "SAFE_TO_RECONCILE": 2,
+      "STALE_CANDIDATE": 0,
+      "HISTORICAL_NONTERMINAL_BUT_NOT_ACTIVE": 7,
+      "UNKNOWN_BLOCKING": 15
+    },
+    "planner": {
+      "ACTIVE_BLOCKING": 0,
+      "SAFE_TO_RECONCILE": 2,
+      "STALE_CANDIDATE": 0,
+      "HISTORICAL_NONTERMINAL_BUT_NOT_ACTIVE": 6,
+      "UNKNOWN_BLOCKING": 16
+    },
+    "fix11JournalMutations": 0,
+    "preExistingLoaderNormalizationObserved": true,
+    "preExistingLoaderNormalizationDetails": "A packaged read-only status probe normalized 21 RECOVERY_REQUIRED error fields to WORKBENCH_RESTARTED; record and state counts were unchanged."
+  },
+  "subagents": {
+    "completed": 5,
+    "closed": 5,
+    "runningAtGate": 0
+  },
+  "sensitiveData": {
+    "cookiesIncluded": false,
+    "tokensIncluded": false,
+    "privatePromptBodiesIncluded": false,
+    "rawControlPlaneCredentialsIncluded": false
+  }
+}

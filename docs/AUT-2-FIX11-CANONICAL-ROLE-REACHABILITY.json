@@ -1,0 +1,37 @@
+{
+  "stage": "AUT-2-FIX11",
+  "result": "BLOCKED",
+  "projectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+  "roleRegistry": {
+    "source": "C:/Users/sadar/AppData/Roaming/codex-workbench-v1/webgpt/roles/role-sessions.json",
+    "REQUIREMENT": { "status": "BOUND", "chatUrl": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc" },
+    "PLANNER": { "status": "BOUND", "chatUrl": "https://chatgpt.com/c/6a865d2c-69fc-83ee-9845-1c236f19d7b9" },
+    "REVIEWER": { "status": "BOUND", "chatUrl": "https://chatgpt.com/c/6a865d36-a53c-83ee-aa28-d4cbd50c85b3" }
+  },
+  "liveRuntime": {
+    "browserTabObserved": false,
+    "currentUrl": null,
+    "workbench": "READY",
+    "webgpt": "UNAVAILABLE",
+    "controlOwner": null,
+    "pageHealthy": false,
+    "browserResource": null
+  },
+  "reachability": {
+    "REQUIREMENT": "NOT_PROVEN",
+    "PLANNER": "NOT_PROVEN",
+    "REVIEWER": "NOT_PROVEN"
+  },
+  "historicalIdentityFindings": {
+    "deletedChat": "historical g-p target confirmed deleted in AUT-2 Fix6",
+    "identitySourceMismatch": "proven by earlier g- latest/readback and Fix10 reuse paths",
+    "routeAlias": "NOT_PROVEN",
+    "canonicalizationBug": "NOT_PROVEN",
+    "conversationIdOnlyMatching": "forbidden"
+  },
+  "safetyCounters": {
+    "promptSent": 0,
+    "chatCreated": 0,
+    "roleBindingMutation": 0
+  }
+}
