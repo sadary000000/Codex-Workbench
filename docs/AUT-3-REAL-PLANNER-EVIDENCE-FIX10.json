@@ -1,0 +1,41 @@
+{
+  "stage": "AUT-3 Real Planner Fix10",
+  "result": "BLOCKED",
+  "recordedAt": "2026-08-22T08:32:52.325Z",
+  "reason": "AUT2_HANDOFF_NOT_READY",
+  "automationProjectId": "aut2-fix10-aut3-real",
+  "webgptProjectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+  "requirement": {},
+  "handoff": { "status": "NOT_GENERATED", "requirementVersionId": null, "payloadSha256": null },
+  "preflight": {
+    "status": "NOT_RUN_BY_AUT3_GATE",
+    "reason": "Handoff was not ready; the gate returned before Planner preflight/send.",
+    "readOnlyProductionAudit": {
+      "journalRecordCount": 85,
+      "journalNonterminalCount": 24,
+      "journalQueuedCount": 1,
+      "journalRecoveryRequiredCount": 21,
+      "plannerNonterminalCount": 3,
+      "historicalPlannerRequestId": "wgpt-f799139b-93f8-42dd-aa02-cadc08eebfd6",
+      "historicalPlannerRequestPresent": false
+    }
+  },
+  "recovery": {
+    "status": "BLOCKED_PLANNER_RECOVERY",
+    "requestId": "wgpt-f799139b-93f8-42dd-aa02-cadc08eebfd6",
+    "journalState": "NOT_FOUND_IN_PRODUCTION_JOURNAL",
+    "blindResend": false,
+    "newPlannerPromptSent": false
+  },
+  "realPlanner": {
+    "promptSent": false,
+    "requestId": null,
+    "idempotencyKey": null,
+    "targetChatUrl": null,
+    "responseBodyLogged": false,
+    "promptBodyLogged": false,
+    "repairPromptCount": 0
+  },
+  "persistence": { "status": "NOT_RUN", "planVersionId": null },
+  "safety": { "nativeExecutorStarted": false, "reviewerStarted": false, "v1CoreChanged": false, "webgptV1Changed": false }
+}

@@ -1,0 +1,16 @@
+{
+  "stage": "AUT-2 to AUT-3 handoff",
+  "result": "BLOCKED",
+  "status": "NOT_GENERATED",
+  "recordedAt": "2026-08-22T08:32:52.325Z",
+  "reason": "AUT-2 Fix10 did not produce a verified same-session confirmed RequirementVersion.",
+  "automationProjectId": "aut2-fix10-aut3-real",
+  "webgptProjectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+  "alignmentSessionId": null,
+  "requirementVersionId": null,
+  "payloadSha256": null,
+  "sameSessionStatus": "NOT_RUN",
+  "sourceEvidencePath": "D:/办公/AI/Codex_Workbench_V1/docs/AUT-2-FIX10-TRUE-SAME-SESSION-E2E.json",
+  "plannerPromptSent": false,
+  "nativeIdentityChanged": false
+}

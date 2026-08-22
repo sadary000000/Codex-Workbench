@@ -1,0 +1,16 @@
+{
+  "stage": "AUT-2 Fix10",
+  "hardMaxCumulativeRealPrompts": 14,
+  "historicalCumulativeBefore": 12,
+  "remainingBefore": 2,
+  "currentGate": {
+    "businessPromptCount": 0,
+    "repairPromptCount": 0,
+    "setupPromptCount": 0,
+    "newChatCount": 0,
+    "result": "BLOCKED_BEFORE_PROMPT"
+  },
+  "cumulativeAfter": 12,
+  "budgetExceeded": false,
+  "source": "two_real_fix10_reuse_attempts_and_request_journal_audit"
+}

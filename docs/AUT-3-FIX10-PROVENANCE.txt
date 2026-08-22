@@ -1,0 +1,12 @@
+stage=AUT-3 Real Planner Gate Fix10
+result=BLOCKED
+base_commit=d23f5b6fbe7defa2bccefcd5d516864d384046e2
+handoff=NOT_READY
+planner_prompt_sent=NO
+plan_version_persisted=NO
+production_journal_nonterminal=24
+production_journal_planner_nonterminal=3
+historical_planner_request_present=NO
+preflight_unit_test=PASS
+running_subagents_at_gate=0
+review_package=dist/review/AUT-3-FIX10-STAGE-REVIEW-PACKAGE.zip

@@ -1,0 +1,84 @@
+{
+  "stage": "AUT-2 Fix10",
+  "result": "BLOCKED",
+  "evidenceLevel": "REAL_ATTEMPT_BLOCKED_BEFORE_BUSINESS_PROMPT",
+  "recordedAt": "2026-08-22T08:32:52.325Z",
+  "implementationCommit": "d23f5b6fbe7defa2bccefcd5d516864d384046e2",
+  "project": {
+    "name": "workts",
+    "webgptProjectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+    "automationProjectId": "aut2-fix10-aut3-real"
+  },
+  "sameSession": {
+    "status": "NOT_RUN",
+    "automationProjectId": "aut2-fix10-aut3-real",
+    "alignmentSessionId": null,
+    "checkpoints": {},
+    "persistedQuestionIds": [],
+    "answersQuestionIds": [],
+    "questionIdsSha256": null,
+    "answersQuestionIdsSha256": null,
+    "questionIdsExact": false,
+    "sameAutomationProject": false,
+    "sameAlignmentSession": false,
+    "sameAnswerRound": false,
+    "interaction": "NOT_RUN"
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "targetChatUrl": "https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workts/c/6a891d7c-abf4-83e8-879a-d477e472576a",
+      "setupPromptCount": 0,
+      "newChatCount": 0,
+      "businessPromptCount": 0,
+      "result": "BLOCKED",
+      "errorCode": "AUT2_REUSE_FAILED",
+      "error": "Existing canonical REQUIREMENT Chat could not be read; Fix10 forbids fallback Chat/setup Prompt."
+    },
+    {
+      "attempt": 2,
+      "targetChatUrl": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc",
+      "setupPromptCount": 0,
+      "newChatCount": 0,
+      "businessPromptCount": 0,
+      "result": "BLOCKED",
+      "errorCode": "AUT2_REUSE_FAILED",
+      "error": "The currently bound REQUIREMENT Chat also failed chat/latest identity/history confirmation."
+    }
+  ],
+  "promptAccounting": {
+    "historicalCumulativeBefore": 12,
+    "currentGateBusinessPromptCount": 0,
+    "currentGateRepairPromptCount": 0,
+    "currentGateSetupPromptCount": 0,
+    "currentGateNewChatCount": 0,
+    "hardMaxCumulativeRealPrompts": 14,
+    "remainingBusinessPromptBudget": 2,
+    "noPromptSentAfterBlock": true
+  },
+  "handoff": {
+    "status": "NOT_GENERATED",
+    "reason": "AUT-2 did not produce a confirmed RequirementVersion."
+  },
+  "safety": {
+    "promptBodyLogged": false,
+    "responseBodyLogged": false,
+    "cookiesRead": false,
+    "tokensRead": false,
+    "replacementChatCreated": false,
+    "nativeIdentityChanged": false,
+    "blindResend": false
+  },
+  "productionJournalAudit": {
+    "path": "C:/Users/sadar/AppData/Roaming/codex-workbench-v1/webgpt/requests/requests.json",
+    "recordCount": 85,
+    "nonterminalCount": 24,
+    "queuedCount": 1,
+    "recoveryRequiredCount": 21,
+    "plannerNonterminalCount": 3,
+    "historicalPlannerRequestPresent": false,
+    "historicalPlannerRequestId": "wgpt-f799139b-93f8-42dd-aa02-cadc08eebfd6",
+    "readOnly": true,
+    "modified": false
+  }
+}

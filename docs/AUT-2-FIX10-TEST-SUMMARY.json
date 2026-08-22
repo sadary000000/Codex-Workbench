@@ -1,0 +1,23 @@
+{
+  "stage": "AUT-2 Fix10 + AUT-3 handoff hardening",
+  "implementationCommit": "d23f5b6fbe7defa2bccefcd5d516864d384046e2",
+  "tests": {
+    "npmRunCheck": "PASS",
+    "npmTest": { "pass": 292, "fail": 0, "status": "PASS" },
+    "build": "PASS",
+    "packageWin": "PASS",
+    "npmAuditOmitDev": "PASS_0_VULNERABILITIES",
+    "gitDiffCheck": "PASS",
+    "secretScan": { "status": "PASS", "matchingFiles": 0, "matches": 0 }
+  },
+  "newContractCoverage": {
+    "aut3PreflightBlocksBeforePlannerSubmit": "PASS",
+    "plannerSubmitCallsWhenBlocked": 0,
+    "questionIdCanonicalHash": "IMPLEMENTED"
+  },
+  "realGate": {
+    "aut2": "BLOCKED_BEFORE_BUSINESS_PROMPT",
+    "aut3": "NOT_RUN_BECAUSE_HANDOFF_NOT_READY",
+    "businessPromptCount": 0
+  }
+}

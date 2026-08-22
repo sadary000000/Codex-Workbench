@@ -1,0 +1,17 @@
+stage=AUT-2 Fix10
+result=BLOCKED
+base_commit=7f2256f49dace26bd1ed877bb3b7c1d0ea1c1b03
+implementation_commit=d23f5b6fbe7defa2bccefcd5d516864d384046e2
+product_code_scope=AUT gate / Planner recovery preflight / main wiring; no Native Core or Renderer changes
+automated_tests=292/292 PASS
+build=PASS
+package=PASS
+audit=0 vulnerabilities
+secret_scan=0 matching files, 0 matches
+real_aut2=BLOCKED before business Prompt; 0 business Prompt
+real_aut3=NOT RUN because AUT-2 handoff was not ready
+production_journal_records=85
+production_journal_nonterminal=24
+production_journal_old_planner_present=NO
+running_subagents_at_gate=0
+review_package=dist/review/AUT-2-FIX10-STAGE-REVIEW-PACKAGE.zip
