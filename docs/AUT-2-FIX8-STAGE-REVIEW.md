@@ -3,7 +3,7 @@
 ```yaml
 stage: AUT-2 Fix8 Requirement Schema Mismatch Forensics
 base_commit: 712167e3a862290763b3ce806c30a31b97fdbef1
-implementation_commit: pending-focused-commit
+implementation_commit: 24a18e8
 result: FIX_REQUIRED
 exact_mismatch: $.payload.questions[0].resolutionMode
 schema_rule: enum
@@ -18,6 +18,7 @@ new_chats: 0
 real_first_round: FAIL
 first_round_status: FAIL
 aut3_started: NO
+review_package_sha256: reported at handoff; not embedded to avoid a self-referential archive hash
 ```
 
 ## Scope
@@ -59,6 +60,23 @@ The valid Fix8 `NEEDS_INPUT` response exposed an existing persistence defect: th
 - REQUIREMENT binding restored to the original Chat.
 - PLANNER/REVIEWER unchanged.
 - AUT-3 not started.
+
+## Automated Gate
+
+| Check | Result |
+|---|---|
+| `npm run check` | PASS |
+| `npm test` | PASS, 286/286 |
+| `npm run build` | PASS |
+| `npm run package:win` | PASS |
+| `npm audit --omit=dev` | PASS, 0 vulnerabilities |
+| `git diff --check` | PASS, only existing line-ending warnings |
+| scoped high-confidence secret scan | PASS |
+| JSON evidence parse | PASS |
+
+## Real smoke
+
+The packaged CLI/GUI path reused the existing canonical Chat and completed exactly one business Prompt. It produced a valid `NEEDS_INPUT` response with five questions and no repair. The production persistence step then failed closed on `AUTOMATION_SCHEMA_INVALID`; no second Prompt was attempted.
 
 ## Gate
 
