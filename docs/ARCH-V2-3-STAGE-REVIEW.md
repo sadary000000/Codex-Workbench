@@ -56,4 +56,4 @@ No ARCH-V2-4, External Action, Workflow, Planner, Scheduler, WebGPT real Prompt,
 
 ## Gate status
 
-`READY_FOR_GPT_REVIEW` — local implementation Gate is complete; GPT review remains. This stage does not enter ARCH-V2-4.
+`PASS / FROZEN` — GPT Gate PASS with no required ARCH-V2-3 fixes. ARCH-V2-4 was explicitly authorized by the returned complete instruction; no ARCH-V2-4 implementation is included in this stage commit.
