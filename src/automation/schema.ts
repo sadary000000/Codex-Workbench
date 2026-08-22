@@ -33,6 +33,9 @@ const EXTERNAL_REF_KINDS = new Set<ExternalRefKind>([
   "NATIVE_THREAD",
   "NATIVE_TURN",
   "WEBGPT_REQUEST",
+  "WEBGPT_PROVIDER_REQUEST",
+  "WEBGPT_PROVIDER_OBSERVATION",
+  "WEBGPT_RESOURCE_LEASE",
   "WEBGPT_ROLE_BINDING",
   "WORKBENCH_PROJECT",
   "GIT_COMMIT",
@@ -369,6 +372,9 @@ function validateCommonTables(document: Record<string, unknown>): void {
     optionalString(item.startedAt, `actionAttempts[${index}].startedAt`, 64);
     optionalString(item.completedAt, `actionAttempts[${index}].completedAt`, 64);
     optionalString(item.executorRef, `actionAttempts[${index}].executorRef`, 256);
+    optionalString(item.providerRequestRef ?? null, `actionAttempts[${index}].providerRequestRef`, 256);
+    optionalString(item.providerObservationRef ?? null, `actionAttempts[${index}].providerObservationRef`, 256);
+    optionalString(item.providerSemanticSha256 ?? null, `actionAttempts[${index}].providerSemanticSha256`, 128);
     enumValue(item.recoveryState, `actionAttempts[${index}].recoveryState`, new Set(["KNOWN_NOT_STARTED", "IN_PROGRESS", "COMPLETED", "FAILED", "UNCERTAIN", "RECOVERY_REQUIRED"]));
     const identity = `${item.intentId}\u0000${item.dispatchNumber}`;
     if (actionAttemptIdentity.has(identity)) throw new AutomationSchemaError(`actionAttempts[${index}] duplicates an existing intentId/dispatchNumber identity.`);
@@ -391,6 +397,13 @@ function validateCommonTables(document: Record<string, unknown>): void {
     externalRefs.forEach((ref, refIndex) => string(ref, `actionReceipts[${index}].externalRefs[${refIndex}]`, 256));
     timestamp(item.createdAt, `actionReceipts[${index}].createdAt`);
     enumValue(item.reconcileState, `actionReceipts[${index}].reconcileState`, new Set(["NOT_REQUIRED", "PENDING", "RECONCILED", "RECOVERY_REQUIRED"]));
+    optionalString(item.provider ?? null, `actionReceipts[${index}].provider`, 256);
+    optionalString(item.providerRequestRef ?? null, `actionReceipts[${index}].providerRequestRef`, 256);
+    optionalString(item.providerObservationRef ?? null, `actionReceipts[${index}].providerObservationRef`, 256);
+    const inferredCertainty = item.outcomeCertainty ?? (item.status === "SUCCEEDED" ? "TERMINAL_CONFIRMED" : item.status === "FAILED" ? "TERMINAL_FAILED" : "ABANDONED_WITH_UNKNOWN_OUTCOME");
+    enumValue(inferredCertainty, `actionReceipts[${index}].outcomeCertainty`, new Set(["NOT_DISPATCHED", "ACCEPTED_UNKNOWN_RESULT", "RESULT_OBSERVED", "TERMINAL_CONFIRMED", "TERMINAL_FAILED", "ABANDONED_WITH_UNKNOWN_OUTCOME"]));
+    const evidenceRefs = item.evidenceRefs === undefined ? [] : array(item.evidenceRefs, `actionReceipts[${index}].evidenceRefs`);
+    evidenceRefs.forEach((ref, refIndex) => string(ref, `actionReceipts[${index}].evidenceRefs[${refIndex}]`, 256));
     if (item.status === "UNKNOWN" && item.reconcileState !== "RECOVERY_REQUIRED") throw new AutomationSchemaError(`actionReceipts[${index}] UNKNOWN status requires RECOVERY_REQUIRED reconciliation.`);
   });
 
@@ -462,6 +475,8 @@ function validateCommonTables(document: Record<string, unknown>): void {
     optionalString(item.acquiredAt, `resourceClaims[${index}].acquiredAt`, 64);
     optionalString(item.releasedAt, `resourceClaims[${index}].releasedAt`, 64);
     optionalString(item.ownerAttemptId, `resourceClaims[${index}].ownerAttemptId`, 256);
+    optionalString(item.resourceLeaseRef ?? null, `resourceClaims[${index}].resourceLeaseRef`, 256);
+    if (item.leaseEpoch !== undefined && item.leaseEpoch !== null && (!Number.isSafeInteger(item.leaseEpoch) || (item.leaseEpoch as number) < 0)) throw new AutomationSchemaError(`resourceClaims[${index}].leaseEpoch must be a non-negative integer or null.`);
   });
 
   const snapshots = array(document.workspaceSnapshots, "workspaceSnapshots");
@@ -555,6 +570,31 @@ function validateReferences(document: Record<string, unknown>): void {
     if (item.projectId !== projectId) throw new AutomationSchemaError(`${field} references another project.`);
     return item;
   };
+  const requireSameAttemptProject = (idValue: unknown, projectId: string, field: string): Record<string, unknown> | null => {
+    if (idValue === null) return null;
+    const idText = string(idValue, field, 256);
+    const executionAttempt = attempts.get(idText);
+    if (executionAttempt) {
+      if (executionAttempt.projectId !== projectId) throw new AutomationSchemaError(`${field} references another project.`);
+      return executionAttempt;
+    }
+    const actionAttempt = actionAttempts.get(idText);
+    if (actionAttempt) {
+      const intent = intents.get(actionAttempt.intentId as string);
+      if (!intent) throw new AutomationSchemaError(`${field} references an action attempt with a missing intent.`);
+      if (intent.projectId !== projectId) throw new AutomationSchemaError(`${field} references another project.`);
+      return actionAttempt;
+    }
+    throw new AutomationSchemaError(`${field} references a missing entity.`);
+  };
+  const requireSameEvidenceProject = (idValue: unknown, projectId: string, field: string): Record<string, unknown> | null => {
+    if (idValue === null) return null;
+    const idText = string(idValue, field, 256);
+    const evidence = evidences.get(idText);
+    if (!evidence) throw new AutomationSchemaError(`${field} references a missing entity.`);
+    if (evidence.projectId !== projectId) throw new AutomationSchemaError(`${field} references another project.`);
+    return evidence;
+  };
   const projectForStage = (stageId: unknown, field: string): string | null => {
     if (stageId === null) return null;
     const stage = stages.get(string(stageId, field, 256));
@@ -635,10 +675,17 @@ function validateReferences(document: Record<string, unknown>): void {
     requireSameProject(attempts, item.attemptId, projectId, "actionIntents.attemptId");
   }
   for (const item of actionAttempts.values()) if (!intents.has(item.intentId as string)) throw new AutomationSchemaError("actionAttempts.intentId references a missing intent.");
-  for (const item of receipts.values()) if (!actionAttempts.has(item.actionAttemptId as string)) throw new AutomationSchemaError("actionReceipts.actionAttemptId references a missing attempt.");
+  for (const item of receipts.values()) {
+    const attempt = actionAttempts.get(item.actionAttemptId as string);
+    if (!attempt) throw new AutomationSchemaError("actionReceipts.actionAttemptId references a missing attempt.");
+    const intent = intents.get(attempt.intentId as string);
+    if (!intent) throw new AutomationSchemaError("actionReceipts.actionAttemptId references an attempt with a missing intent.");
+    for (const ref of item.externalRefs as string[]) requireSameProject(externals, ref, intent.projectId as string, "actionReceipts.externalRefs");
+    for (const ref of (item.evidenceRefs ?? []) as string[]) requireSameEvidenceProject(ref, intent.projectId as string, "actionReceipts.evidenceRefs");
+  }
   for (const item of claims.values()) {
     if (!projects.has(item.projectId as string)) throw new AutomationSchemaError("resourceClaims.projectId references a missing project.");
-    if (item.ownerAttemptId !== null) requireSameProject(attempts, item.ownerAttemptId, item.projectId as string, "resourceClaims.ownerAttemptId");
+    if (item.ownerAttemptId !== null) requireSameAttemptProject(item.ownerAttemptId, item.projectId as string, "resourceClaims.ownerAttemptId");
     if (item.state === "ACQUIRED" && (item.ownerAttemptId === null || item.acquiredAt === null)) throw new AutomationSchemaError("An acquired resource claim requires an owner attempt and acquiredAt.");
     if (item.state === "RELEASED" && item.releasedAt === null) throw new AutomationSchemaError("A released resource claim requires releasedAt.");
   }
@@ -646,7 +693,7 @@ function validateReferences(document: Record<string, unknown>): void {
   for (const item of evidences.values()) {
     if (!projects.has(item.projectId as string)) throw new AutomationSchemaError("evidences.projectId references a missing project.");
     requireSameProject(artifacts, item.artifactRefId, item.projectId as string, "evidences.artifactRefId");
-    requireSameProject(attempts, item.attemptId, item.projectId as string, "evidences.attemptId");
+    requireSameAttemptProject(item.attemptId, item.projectId as string, "evidences.attemptId");
   }
   for (const item of artifacts.values()) if (!projects.has(item.projectId as string)) throw new AutomationSchemaError("artifactRefs.projectId references a missing project.");
   for (const item of snapshots.values()) if (!projects.has(item.projectId as string)) throw new AutomationSchemaError("workspaceSnapshots.projectId references a missing project.");

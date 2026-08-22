@@ -11,3 +11,4 @@ export * from "./requirement-webgpt-adapter.ts";
 export * from "./planner-contract.ts";
 export * from "./planner-service.ts";
 export * from "./planner-webgpt-adapter.ts";
+export * from "./webgpt-external-action.ts";

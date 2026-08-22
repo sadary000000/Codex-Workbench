@@ -35,6 +35,7 @@ export interface WebGptOperationRequest {
 
 export interface WebGptOperationIdentity extends WebGptOperationRequest {
   operationId: string;
+  leaseEpoch: number;
   state: WebGptOperationState;
   createdAt: string;
   startedAt: string | null;
@@ -47,6 +48,7 @@ export interface WebGptBrowserResourceDiagnostics {
   activeOperationId: string | null;
   activeRequester: string | null;
   activeRequestId: string | null;
+  activeLeaseEpoch: number | null;
   activeOperationType: WebGptOperationType | null;
   queueDepth: number;
   queueLimit: number;
@@ -86,6 +88,7 @@ export class WebGptOperationArbiter {
   private activeReadCount = 0;
   private readonly idleWaiters: Array<() => void> = [];
   private readonly maxQueueSize: number;
+  private leaseEpochCounter = 0;
 
   constructor(options: WebGptOperationArbiterOptions = {}) {
     this.maxQueueSize = Number.isSafeInteger(options.maxQueueSize) && (options.maxQueueSize as number) > 0
@@ -233,6 +236,7 @@ export class WebGptOperationArbiter {
       activeOperationId: this.active?.operation.operationId ?? null,
       activeRequester: this.active?.operation.ownerKey ?? null,
       activeRequestId: this.active?.operation.requestId ?? null,
+      activeLeaseEpoch: this.active?.operation.leaseEpoch ?? null,
       activeOperationType: this.active?.operation.operationType ?? null,
       queueDepth: this.queue.length,
       queueLimit: this.maxQueueSize,
@@ -272,6 +276,7 @@ export class WebGptOperationArbiter {
       requestId: request.requestId ?? null,
       operationType: request.operationType,
       operationId: `wgpt-op-${randomUUID()}`,
+      leaseEpoch: 0,
       state: "QUEUED",
       createdAt: new Date().toISOString(),
       startedAt: null,
@@ -293,6 +298,7 @@ export class WebGptOperationArbiter {
 
   private grant(pending: PendingOperation): void {
     this.active = pending;
+    pending.operation.leaseEpoch = ++this.leaseEpochCounter;
     pending.operation.state = "ACTIVE";
     pending.operation.startedAt = new Date().toISOString();
     pending.resolve({

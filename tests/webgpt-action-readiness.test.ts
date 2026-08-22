@@ -46,6 +46,21 @@ test("scope-aware readiness ignores unrelated historical non-terminal work", () 
   assert.deepEqual(result.blockers, []);
 });
 
+test("scope-aware readiness ignores a larger unrelated historical journal", () => {
+  const unrelatedHistory = Array.from({ length: 15 }, (_, index) => record({
+    requestId: `historical-${index + 1}`,
+    idempotencyKey: `historical-key-${index + 1}`,
+    projectId: `other-project-${index + 1}`,
+    role: index % 2 === 0 ? "PLANNER" : "REVIEWER",
+    targetChatUrl: `https://chatgpt.com/c/historical-${index + 1}`,
+    chatUrl: `https://chatgpt.com/c/historical-${index + 1}`,
+  }));
+  const result = classifyWebGptActionReadiness({ action, records: unrelatedHistory, browserResource: freeResource });
+  assert.equal(result.ok, true);
+  assert.equal(result.dispositionCounts.HISTORICAL_NONTERMINAL_BUT_NOT_ACTIVE, 15);
+  assert.deepEqual(result.blockers, []);
+});
+
 test("same target unresolved work remains fail-closed", () => {
   const result = classifyWebGptActionReadiness({
     action,

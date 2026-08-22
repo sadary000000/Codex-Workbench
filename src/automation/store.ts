@@ -9,6 +9,7 @@ import {
 } from "./schema.ts";
 import {
   actionIntentStateMachine,
+  actionAttemptStateMachine,
   automationProjectStateMachine,
   executionAttemptStateMachine,
   StateMachine,
@@ -28,6 +29,7 @@ import {
 } from "./sqlite-persistence.ts";
 import type {
   ActionAttempt,
+  ActionOutcomeCertainty,
   ActionIntent,
   ActionReceipt,
   ActorType,
@@ -210,6 +212,9 @@ export interface ActionAttemptInput {
   actionAttemptId?: string;
   intentId: string;
   executorRef?: string | null;
+  providerRequestRef?: string | null;
+  providerObservationRef?: string | null;
+  providerSemanticSha256?: string | null;
 }
 
 export interface ActionReceiptInput {
@@ -221,6 +226,11 @@ export interface ActionReceiptInput {
   resultHash?: string | null;
   externalRefs?: string[];
   reconcileState?: "NOT_REQUIRED" | "PENDING" | "RECONCILED" | "RECOVERY_REQUIRED";
+  provider?: string | null;
+  providerRequestRef?: string | null;
+  providerObservationRef?: string | null;
+  outcomeCertainty?: ActionOutcomeCertainty;
+  evidenceRefs?: string[];
 }
 
 export interface CheckpointInput {
@@ -856,7 +866,19 @@ export class AutomationStore {
       const intent = tx.require("actionIntents", input.intentId);
       if (intent.state !== "DISPATCH_ELIGIBLE") throw new AutomationStoreError("AUTOMATION_CONFLICT", "ActionIntent must be persisted and dispatch-eligible before an attempt is recorded.");
       const previous = tx.table("actionAttempts").filter((attempt) => attempt.intentId === input.intentId);
-      const item: ActionAttempt = { actionAttemptId: id(input.actionAttemptId, "actionAttemptId"), intentId: input.intentId, dispatchNumber: previous.length + 1, state: "CREATED", startedAt: null, completedAt: null, executorRef: optionalText(input.executorRef, "actionAttempt.executorRef", 256), recoveryState: "KNOWN_NOT_STARTED" };
+      const item: ActionAttempt = {
+        actionAttemptId: id(input.actionAttemptId, "actionAttemptId"),
+        intentId: input.intentId,
+        dispatchNumber: previous.length + 1,
+        state: "CREATED",
+        startedAt: null,
+        completedAt: null,
+        executorRef: optionalText(input.executorRef, "actionAttempt.executorRef", 256),
+        recoveryState: "KNOWN_NOT_STARTED",
+        providerRequestRef: optionalText(input.providerRequestRef, "actionAttempt.providerRequestRef", 256),
+        providerObservationRef: optionalText(input.providerObservationRef, "actionAttempt.providerObservationRef", 256),
+        providerSemanticSha256: optionalText(input.providerSemanticSha256, "actionAttempt.providerSemanticSha256", 128),
+      };
       tx.insert("actionAttempts", item);
       tx.replace("actionIntents", { ...intent, state: "DISPATCHING" });
       tx.appendAudit({ projectId: intent.projectId, entityType: "ActionAttempt", entityId: item.actionAttemptId, eventType: "ACTION_ATTEMPT_RECORDED", actorType: "SYSTEM", actorRef: null, boundedPayload: { dispatchNumber: item.dispatchNumber }, correlationId: null, causationId: null });
@@ -876,7 +898,33 @@ export class AutomationStore {
         throw new AutomationStoreError("AUTOMATION_CONFLICT", "An UNKNOWN ActionReceipt must remain in RECOVERY_REQUIRED state.");
       }
       const reconcileState = status === "UNKNOWN" ? "RECOVERY_REQUIRED" : input.reconcileState ?? "NOT_REQUIRED";
-      const receipt: ActionReceipt = { receiptId: id(input.receiptId, "receiptId"), actionAttemptId: input.actionAttemptId, status, externalStatus: optionalText(input.externalStatus, "receipt.externalStatus", 256), exitCode: input.exitCode ?? null, resultHash: optionalText(input.resultHash, "receipt.resultHash", 128), externalRefs: list(input.externalRefs, "receipt.externalRefs"), createdAt: now(), reconcileState };
+      const defaultCertainty: ActionOutcomeCertainty = status === "SUCCEEDED"
+        ? "TERMINAL_CONFIRMED"
+        : status === "FAILED"
+          ? "TERMINAL_FAILED"
+          : "ABANDONED_WITH_UNKNOWN_OUTCOME";
+      const providerRequestRef = optionalText(input.providerRequestRef, "receipt.providerRequestRef", 256);
+      const providerObservationRef = optionalText(input.providerObservationRef, "receipt.providerObservationRef", 256);
+      if (providerRequestRef) tx.require("externalRefs", providerRequestRef);
+      if (providerObservationRef) tx.require("externalRefs", providerObservationRef);
+      const evidenceRefs = list(input.evidenceRefs, "receipt.evidenceRefs");
+      for (const evidenceRef of evidenceRefs) tx.require("evidences", evidenceRef);
+      const receipt: ActionReceipt = {
+        receiptId: id(input.receiptId, "receiptId"),
+        actionAttemptId: input.actionAttemptId,
+        status,
+        externalStatus: optionalText(input.externalStatus, "receipt.externalStatus", 256),
+        exitCode: input.exitCode ?? null,
+        resultHash: optionalText(input.resultHash, "receipt.resultHash", 128),
+        externalRefs: list(input.externalRefs, "receipt.externalRefs"),
+        createdAt: now(),
+        reconcileState,
+        provider: optionalText(input.provider, "receipt.provider", 256),
+        providerRequestRef,
+        providerObservationRef,
+        outcomeCertainty: input.outcomeCertainty ?? defaultCertainty,
+        evidenceRefs,
+      };
       tx.insert("actionReceipts", receipt);
       const nextAttemptState = status === "SUCCEEDED" ? "COMPLETED" : status === "FAILED" ? "FAILED" : "UNCERTAIN";
       const nextRecovery: RecoveryState = status === "UNKNOWN" ? "RECOVERY_REQUIRED" : status === "SUCCEEDED" ? "COMPLETED" : "FAILED";
@@ -885,6 +933,82 @@ export class AutomationStore {
       tx.replace("actionIntents", { ...intent, state: nextIntentState });
       tx.appendAudit({ projectId: intent.projectId, entityType: "ActionReceipt", entityId: receipt.receiptId, eventType: "ACTION_RECEIPT_RECORDED", actorType: "SYSTEM", actorRef: null, boundedPayload: { status: receipt.status, reconcileState: receipt.reconcileState }, correlationId: null, causationId: null });
       return clone(receipt);
+    });
+  }
+
+  async attachActionAttemptProvider(input: { actionAttemptId: string; providerRequestRef?: string | null; providerObservationRef?: string | null; providerSemanticSha256?: string | null }): Promise<ActionAttempt> {
+    return this.transaction((tx) => {
+      const attempt = tx.require("actionAttempts", input.actionAttemptId);
+      const intent = tx.require("actionIntents", attempt.intentId);
+      const providerRequestRef = optionalText(input.providerRequestRef, "actionAttempt.providerRequestRef", 256);
+      const providerObservationRef = optionalText(input.providerObservationRef, "actionAttempt.providerObservationRef", 256);
+      if (providerRequestRef) tx.require("externalRefs", providerRequestRef);
+      if (providerObservationRef) tx.require("externalRefs", providerObservationRef);
+      const updated: ActionAttempt = {
+        ...attempt,
+        providerRequestRef: providerRequestRef ?? attempt.providerRequestRef ?? null,
+        providerObservationRef: providerObservationRef ?? attempt.providerObservationRef ?? null,
+        providerSemanticSha256: optionalText(input.providerSemanticSha256, "actionAttempt.providerSemanticSha256", 128) ?? attempt.providerSemanticSha256 ?? null,
+      };
+      tx.replace("actionAttempts", updated);
+      tx.appendAudit({ projectId: intent.projectId, entityType: "ActionAttempt", entityId: attempt.actionAttemptId, eventType: "PROVIDER_CORRELATION_ATTACHED", actorType: "AUTOMATION", actorRef: null, boundedPayload: { providerRequestRef: updated.providerRequestRef ?? null, providerObservationRef: updated.providerObservationRef ?? null }, correlationId: intent.intentId, causationId: null });
+      return clone(updated);
+    });
+  }
+
+  async attachResourceClaimLease(input: { resourceClaimId: string; resourceLeaseRef: string; leaseEpoch?: number | null; state?: ResourceClaimState }): Promise<ResourceClaim> {
+    return this.transaction((tx) => {
+      const claim = tx.require("resourceClaims", input.resourceClaimId);
+      tx.require("externalRefs", input.resourceLeaseRef);
+      const updated: ResourceClaim = {
+        ...claim,
+        resourceLeaseRef: text(input.resourceLeaseRef, "resourceClaim.resourceLeaseRef", 256),
+        leaseEpoch: input.leaseEpoch ?? claim.leaseEpoch ?? null,
+        state: input.state ?? "ACQUIRED",
+        acquiredAt: input.state === "RELEASED" ? claim.acquiredAt : claim.acquiredAt ?? now(),
+        releasedAt: input.state === "RELEASED" ? now() : claim.releasedAt,
+      };
+      tx.replace("resourceClaims", updated);
+      tx.appendAudit({ projectId: claim.projectId, entityType: "ResourceClaim", entityId: claim.resourceClaimId, eventType: "RESOURCE_LEASE_MAPPED", actorType: "AUTOMATION", actorRef: claim.ownerAttemptId, boundedPayload: { resourceLeaseRef: updated.resourceLeaseRef, leaseEpoch: updated.leaseEpoch, state: updated.state }, correlationId: claim.ownerAttemptId, causationId: null });
+      return clone(updated);
+    });
+  }
+
+  async reconcileActionReceipt(input: ActionReceiptInput): Promise<ActionReceipt> {
+    return this.transaction((tx) => {
+      const existing = tx.table("actionReceipts").find((receipt) => receipt.actionAttemptId === input.actionAttemptId);
+      if (!existing) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "No existing ActionReceipt is available for reconciliation.");
+      if (existing.status !== "UNKNOWN") throw new AutomationStoreError("AUTOMATION_CONFLICT", "Only an UNKNOWN ActionReceipt may be reconciled.");
+      const attempt = tx.require("actionAttempts", input.actionAttemptId);
+      const intent = tx.require("actionIntents", attempt.intentId);
+      const status = input.status;
+      const providerRequestRef = optionalText(input.providerRequestRef ?? existing.providerRequestRef, "receipt.providerRequestRef", 256);
+      const providerObservationRef = optionalText(input.providerObservationRef, "receipt.providerObservationRef", 256);
+      if (providerRequestRef) tx.require("externalRefs", providerRequestRef);
+      if (providerObservationRef) tx.require("externalRefs", providerObservationRef);
+      const evidenceRefs = list([...(existing.evidenceRefs ?? []), ...(input.evidenceRefs ?? [])], "receipt.evidenceRefs");
+      for (const evidenceRef of evidenceRefs) tx.require("evidences", evidenceRef);
+      const next: ActionReceipt = {
+        ...existing,
+        status,
+        externalStatus: optionalText(input.externalStatus ?? existing.externalStatus, "receipt.externalStatus", 256),
+        exitCode: input.exitCode ?? existing.exitCode,
+        resultHash: optionalText(input.resultHash ?? existing.resultHash, "receipt.resultHash", 128),
+        externalRefs: list([...(existing.externalRefs ?? []), ...(input.externalRefs ?? [])], "receipt.externalRefs"),
+        reconcileState: status === "UNKNOWN" ? "RECOVERY_REQUIRED" : "RECONCILED",
+        provider: optionalText(input.provider ?? existing.provider, "receipt.provider", 256),
+        providerRequestRef,
+        providerObservationRef,
+        outcomeCertainty: input.outcomeCertainty ?? (status === "SUCCEEDED" ? "TERMINAL_CONFIRMED" : status === "FAILED" ? "TERMINAL_FAILED" : "ABANDONED_WITH_UNKNOWN_OUTCOME"),
+        evidenceRefs,
+      };
+      tx.replace("actionReceipts", next);
+      const nextAttemptState = status === "SUCCEEDED" ? "COMPLETED" : status === "FAILED" ? "FAILED" : "UNCERTAIN";
+      const nextRecovery: RecoveryState = status === "SUCCEEDED" ? "COMPLETED" : status === "FAILED" ? "FAILED" : "RECOVERY_REQUIRED";
+      tx.replace("actionAttempts", { ...attempt, state: nextAttemptState, completedAt: status === "UNKNOWN" ? attempt.completedAt : now(), recoveryState: nextRecovery, providerObservationRef: providerObservationRef ?? attempt.providerObservationRef ?? null });
+      tx.replace("actionIntents", { ...intent, state: status === "SUCCEEDED" ? "COMPLETED" : status === "FAILED" ? "FAILED" : "UNCERTAIN" });
+      tx.appendAudit({ projectId: intent.projectId, entityType: "ActionReceipt", entityId: existing.receiptId, eventType: "ACTION_RECEIPT_RECONCILED", actorType: "AUTOMATION", actorRef: null, boundedPayload: { status: next.status, outcomeCertainty: next.outcomeCertainty, reconcileState: next.reconcileState }, correlationId: intent.intentId, causationId: null });
+      return clone(next);
     });
   }
 
@@ -928,6 +1052,30 @@ export class AutomationStore {
 
   async transitionActionIntent(intentId: string, event: string, input: TransitionInput = {}): Promise<ActionIntent> {
     return this.transitionEntity("actionIntents", intentId, "state", actionIntentStateMachine, event, input) as Promise<ActionIntent>;
+  }
+
+  async transitionActionAttempt(actionAttemptId: string, event: string, input: TransitionInput = {}): Promise<ActionAttempt> {
+    return this.transaction((tx) => {
+      const attempt = tx.require("actionAttempts", actionAttemptId);
+      const intent = tx.require("actionIntents", attempt.intentId);
+      let next: ActionAttempt["state"];
+      try {
+        next = actionAttemptStateMachine.transition(attempt.state, event);
+      } catch (error) {
+        throw new AutomationStoreError("AUTOMATION_STATE_TRANSITION_INVALID", error instanceof Error ? error.message : "Illegal ActionAttempt transition.", error);
+      }
+      const terminal = next === "COMPLETED" || next === "FAILED" || next === "RECOVERY_REQUIRED";
+      const updated: ActionAttempt = {
+        ...attempt,
+        state: next,
+        startedAt: event === "START" ? now() : attempt.startedAt,
+        completedAt: terminal ? now() : attempt.completedAt,
+        recoveryState: event === "START" ? "IN_PROGRESS" : event === "COMPLETE" ? "COMPLETED" : event === "FAIL" ? "FAILED" : event === "RECOVERY_REQUIRED" ? "RECOVERY_REQUIRED" : event === "UNCERTAIN" ? "UNCERTAIN" : attempt.recoveryState,
+      };
+      tx.replace("actionAttempts", updated);
+      tx.appendAudit({ projectId: intent.projectId, entityType: "ActionAttempt", entityId: actionAttemptId, eventType: `STATE_${event}`, actorType: input.actorType ?? "AUTOMATION", actorRef: input.actorRef ?? null, boundedPayload: safeMetadata(input.boundedPayload, "transition.boundedPayload"), correlationId: input.correlationId ?? intent.intentId, causationId: input.causationId ?? null });
+      return clone(updated);
+    });
   }
 
   private async transitionEntity<K extends "automationProjects" | "stepSpecs" | "executionAttempts" | "actionIntents", S extends string>(name: K, entityIdValue: string, field: "lifecycle" | "specStatus" | "state", machine: StateMachine<S, string>, event: string, input: TransitionInput): Promise<unknown> {
@@ -1049,10 +1197,10 @@ export class AutomationStore {
     });
   }
 
-  async createResourceClaim(input: Omit<ResourceClaim, "resourceClaimId" | "requestedAt" | "acquiredAt" | "releasedAt"> & Partial<Pick<ResourceClaim, "resourceClaimId" | "requestedAt" | "acquiredAt" | "releasedAt">>): Promise<ResourceClaim> {
+  async createResourceClaim(input: Omit<ResourceClaim, "resourceClaimId" | "requestedAt" | "acquiredAt" | "releasedAt" | "resourceLeaseRef" | "leaseEpoch"> & Partial<Pick<ResourceClaim, "resourceClaimId" | "requestedAt" | "acquiredAt" | "releasedAt" | "resourceLeaseRef" | "leaseEpoch">>): Promise<ResourceClaim> {
     return this.transaction((tx) => {
       tx.require("automationProjects", input.projectId);
-      const item: ResourceClaim = { resourceClaimId: id(input.resourceClaimId, "resourceClaimId"), projectId: input.projectId, resourceType: input.resourceType, resourceKey: text(input.resourceKey, "resourceClaim.resourceKey", 512), mode: input.mode, state: input.state, requestedAt: input.requestedAt ?? now(), acquiredAt: input.acquiredAt ?? null, releasedAt: input.releasedAt ?? null, ownerAttemptId: input.ownerAttemptId ?? null };
+      const item: ResourceClaim = { resourceClaimId: id(input.resourceClaimId, "resourceClaimId"), projectId: input.projectId, resourceType: input.resourceType, resourceKey: text(input.resourceKey, "resourceClaim.resourceKey", 512), mode: input.mode, state: input.state, requestedAt: input.requestedAt ?? now(), acquiredAt: input.acquiredAt ?? null, releasedAt: input.releasedAt ?? null, ownerAttemptId: input.ownerAttemptId ?? null, resourceLeaseRef: optionalText(input.resourceLeaseRef, "resourceClaim.resourceLeaseRef", 256), leaseEpoch: input.leaseEpoch ?? null };
       tx.insert("resourceClaims", item);
       return clone(item);
     });

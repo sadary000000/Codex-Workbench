@@ -44,6 +44,13 @@ export type ActionIntentState = "PLANNED" | "DISPATCH_ELIGIBLE" | "DISPATCHING" 
 export type ActionAttemptState = "CREATED" | "RUNNING" | "COMPLETED" | "FAILED" | "UNCERTAIN" | "RECOVERY_REQUIRED";
 export type ReceiptStatus = "SUCCEEDED" | "FAILED" | "UNKNOWN";
 export type ReconcileState = "NOT_REQUIRED" | "PENDING" | "RECONCILED" | "RECOVERY_REQUIRED";
+export type ActionOutcomeCertainty =
+  | "NOT_DISPATCHED"
+  | "ACCEPTED_UNKNOWN_RESULT"
+  | "RESULT_OBSERVED"
+  | "TERMINAL_CONFIRMED"
+  | "TERMINAL_FAILED"
+  | "ABANDONED_WITH_UNKNOWN_OUTCOME";
 
 /**
  * Requirement alignment is deliberately a bounded protocol.  These values
@@ -365,6 +372,10 @@ export interface ActionAttempt {
   completedAt: IsoTimestamp | null;
   executorRef: string | null;
   recoveryState: RecoveryState;
+  /** Optional on legacy persisted ActionAttempts; new writes always set null/ref explicitly. */
+  providerRequestRef?: string | null;
+  providerObservationRef?: string | null;
+  providerSemanticSha256?: string | null;
 }
 
 export interface ActionReceipt {
@@ -377,6 +388,11 @@ export interface ActionReceipt {
   externalRefs: string[];
   createdAt: IsoTimestamp;
   reconcileState: ReconcileState;
+  provider: string | null;
+  providerRequestRef: string | null;
+  providerObservationRef: string | null;
+  outcomeCertainty: ActionOutcomeCertainty;
+  evidenceRefs: string[];
 }
 
 export interface AuditEvent {
@@ -424,6 +440,9 @@ export type ExternalRefKind =
   | "NATIVE_THREAD"
   | "NATIVE_TURN"
   | "WEBGPT_REQUEST"
+  | "WEBGPT_PROVIDER_REQUEST"
+  | "WEBGPT_PROVIDER_OBSERVATION"
+  | "WEBGPT_RESOURCE_LEASE"
   | "WEBGPT_ROLE_BINDING"
   | "WORKBENCH_PROJECT"
   | "GIT_COMMIT"
@@ -481,6 +500,8 @@ export interface ResourceClaim {
   acquiredAt: IsoTimestamp | null;
   releasedAt: IsoTimestamp | null;
   ownerAttemptId: string | null;
+  resourceLeaseRef: string | null;
+  leaseEpoch: number | null;
 }
 
 export interface WorkspaceSnapshot {
