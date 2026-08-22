@@ -325,6 +325,8 @@ export class ProjectMapManager {
     const project = await this.persistence.getProject(id);
     if (!project) throw new Error(`Project does not exist: ${id}`);
     await this.validateProjectDirectory(project.cwd);
+    const current = await this.status(id);
+    if (!current.enabled || !current.map) throw new MapValidationError("PROJECT_MAP_NOT_ENABLED", "Project Map is not enabled.");
     const runtime = await this.ensureRuntime(id, project.cwd);
     const view = await runtime.readThread();
     if (!runtime.nativeThreadId) throw new Error("Maintenance Thread ID is unavailable.");

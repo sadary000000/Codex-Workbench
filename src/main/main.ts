@@ -14,6 +14,7 @@ import type { JsonRpcMessage, NativeTurnCompletionEvent, RuntimeSnapshot, Thread
 import { ConversationMapCoordinator } from "./map-coordinator.ts";
 import { ProjectMapManager } from "./project-map-manager.ts";
 import { RuntimeRegistry } from "./runtime-registry.ts";
+import { isConversationMapSidecarEnabled } from "./map-activation.ts";
 import { markThreadUnavailable } from "./thread-availability.ts";
 import { isComposerTargetValid } from "../shared/thread-target.ts";
 import { buildNativeTurnOptions, parseComposerPreferences } from "../codex/composer-capabilities.ts";
@@ -1053,6 +1054,10 @@ function getWebGptRoleService(): WebGptRoleSessionService {
 interface RuntimeTarget {
   cwd: string;
   projectId?: string | null;
+  /** Enables bounded Map sidecar maintenance for this Runtime lifecycle. */
+  mapEnabled?: boolean;
+  /** Registers the model-facing Map tool; only valid on thread/start. */
+  mapToolEnabled?: boolean;
 }
 
 interface PendingNativeApproval {
@@ -1108,7 +1113,7 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
       logger.info("native_event", { method: event.method, threadId: event.threadId, turnId: event.turnId, itemId: event.itemId });
       send(IPC.event, event);
       if (event.method === "turn/completed" && event.threadId && event.turnId) {
-        void getConversationMaps().markTurnCompleted(event.threadId, event.turnId, event.params);
+        if (target.mapEnabled) void getConversationMaps().markTurnCompleted(event.threadId, event.turnId, event.params);
         void (async () => {
           const projection = await getPersistence().getThreadProjection(event.threadId!);
           if (projection?.projectId) {
@@ -1118,9 +1123,10 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
       }
       if (createdRuntime) send(IPC.state, createdRuntime.snapshot());
     },
-    dynamicTools: [MAP_DYNAMIC_TOOL_SPEC],
+    dynamicTools: target.mapToolEnabled ? [MAP_DYNAMIC_TOOL_SPEC] : [],
     onServerRequest: async (message: JsonRpcMessage) => {
       if (message.method === MAP_TOOL_CALL_METHOD) {
+        if (!target.mapToolEnabled) return failClosedServerRequest(message, createdRuntime?.nativeThreadId ?? messageThreadId(message));
         return getConversationMaps().handleServerRequest(message);
       }
       if (!message.method || (typeof message.id !== "string" && typeof message.id !== "number") || !isNativeApprovalMethod(message.method)) {
@@ -1345,11 +1351,16 @@ async function loadRuntimeForThread(nativeThreadId: string): Promise<NativeThrea
       logger.warn("stale_native_thread_runtime_close_failed", { nativeThreadId, error: errorInfo(error).message });
     });
   }
+  const mapStatus = await getConversationMaps().status(nativeThreadId);
+  const mapEnabled = isConversationMapSidecarEnabled(mapStatus);
   return runtimes.ensure(nativeThreadId, async () => {
-    const candidate = createRuntime({ cwd: projection.cwd, projectId: projection.projectId });
+    // thread/resume cannot register thread/start.dynamicTools in the current
+    // CLI ABI. Map-enabled resumed Threads therefore use sidecar maintenance,
+    // while ordinary model-facing capability remains OFF.
+    const candidate = createRuntime({ cwd: projection.cwd, projectId: projection.projectId, mapEnabled, mapToolEnabled: false });
     try {
       await candidate.resume(nativeThreadId);
-      getConversationMaps().markResumedThread(nativeThreadId, projection.cwd);
+      if (mapEnabled) getConversationMaps().markResumedThread(nativeThreadId, projection.cwd);
       return candidate;
     } catch (error) {
       await candidate.close().catch(() => undefined);
@@ -1408,7 +1419,7 @@ async function createNativeThread(projectId: string | null): Promise<ThreadNavig
     cwd = await validateProjectDirectory(project.cwd);
     targetProjectId = project.projectId;
   }
-  const candidate = createRuntime({ cwd, projectId: targetProjectId });
+  const candidate = createRuntime({ cwd, projectId: targetProjectId, mapEnabled: false, mapToolEnabled: false });
   let attachedNativeThreadId: string | null = null;
   try {
     const snapshot = await candidate.startNewThread(targetProjectId);
@@ -1421,6 +1432,47 @@ async function createNativeThread(projectId: string | null): Promise<ThreadNavig
     return { snapshot, projection };
   } catch (error) {
     if (attachedNativeThreadId) runtimes.detach(attachedNativeThreadId, candidate);
+    await candidate.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function enableConversationMap(nativeThreadId: string): Promise<Awaited<ReturnType<ConversationMapCoordinator["enable"]>>> {
+  const id = nativeThreadId.trim();
+  if (!id) throw new Error("Native Thread ID is required for Conversation Map enable.");
+  const projection = await getPersistence().getThreadProjection(id);
+  if (!projection) throw projectionNotFound(id);
+  const existing = runtimes.get(id);
+  const before = await getConversationMaps().status(id);
+  if (existing) {
+    const snapshot = existing.snapshot();
+    if (snapshot.activeTurnId || existing.state === "TURN_RUNNING" || existing.state === "WAITING_USER") {
+      const error = new Error("Conversation Map activation cannot replace a Runtime while its Native Turn is running.") as Error & { code: string };
+      error.code = "MAP_RUNTIME_BUSY";
+      throw error;
+    }
+  }
+  const enabled = await getConversationMaps().enable(id);
+  if (!existing || before.enabled) return enabled;
+
+  // The current thread/resume ABI cannot register dynamicTools. Reattach the
+  // same Native Thread with Map sidecar maintenance enabled instead of
+  // pretending the existing model-facing surface changed in place.
+  await existing.close();
+  runtimes.detach(id, existing);
+  const candidate = createRuntime({
+    cwd: projection.cwd,
+    projectId: projection.projectId,
+    mapEnabled: true,
+    mapToolEnabled: false,
+  });
+  try {
+    await candidate.resume(id);
+    getConversationMaps().markResumedThread(id, projection.cwd);
+    runtimes.attach(id, candidate);
+    if (currentNativeThreadId === id) send(IPC.state, candidate.snapshot());
+    return getConversationMaps().status(id);
+  } catch (error) {
     await candidate.close().catch(() => undefined);
     throw error;
   }
@@ -1446,7 +1498,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.mapEnable, async (_event, nativeThreadId: unknown) => {
     try {
       const id = typeof nativeThreadId === "string" ? nativeThreadId : currentNativeThreadId ?? "";
-      return ok(await getConversationMaps().enable(id));
+      return ok(await enableConversationMap(id));
     } catch (error) {
       return fail(error);
     }

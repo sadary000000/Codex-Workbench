@@ -23,6 +23,7 @@ interface FakeState {
   threadStartIndex: number;
   activeThreadId: string;
   threadStartParams?: Record<string, unknown>;
+  threadResumeParams?: Record<string, unknown>;
   turnStartParams?: Record<string, unknown>;
   threadStartNoRollout?: boolean;
   initializeParams?: Record<string, unknown>;
@@ -81,6 +82,7 @@ class FakeClient implements AppServerClientPort {
       return { thread: { id: nativeThreadId } };
     }
     if (method === "thread/resume") {
+      this.state.threadResumeParams = params;
       if (this.state.threadResumeWriterConflict) {
         throw new AppServerClientError(
           "APP_SERVER_PROTOCOL_REJECTED",
@@ -446,6 +448,45 @@ test("registers the Map dynamic tool only on Native Thread creation", async () =
   assert.match(String(params?.developerInstructions), /current delta/);
   assert.equal(state.initializeParams?.capabilities && (state.initializeParams.capabilities as Record<string, unknown>).experimentalApi, true);
   await runtime.close();
+});
+
+test("does not claim a Map dynamic tool on Native Thread resume", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-map-resume-"));
+  const state: FakeState = { turns: [], startCalls: 0, nextTurn: 0, requestMethods: [], threadStartIndex: 0, activeThreadId: "native-thread" };
+  const persistence = new V1PersistenceStore(join(root, "workbench-state.json"));
+  const first = new NativeThreadRuntime({
+    cwd: "C:/fake/project",
+    stateFile: join(root, "native-thread-binding.json"),
+    persistence,
+    clientFactory: (options) => new FakeClient(state, false, options.onProcessExit),
+    dynamicTools: [MAP_DYNAMIC_TOOL_SPEC],
+  });
+  await first.start();
+  await first.close();
+
+  const resumed = new NativeThreadRuntime({
+    cwd: "C:/fake/project",
+    stateFile: join(root, "native-thread-binding.json"),
+    persistence,
+    clientFactory: (options) => new FakeClient(state, false, options.onProcessExit),
+    dynamicTools: [MAP_DYNAMIC_TOOL_SPEC],
+  });
+  await resumed.start();
+  assert.equal(state.threadResumeParams?.dynamicTools, undefined);
+  assert.match(String(state.threadResumeParams?.developerInstructions), /current delta/);
+  assert.equal((state.initializeParams?.capabilities as Record<string, unknown>).experimentalApi, false);
+  assert.equal(resumed.dynamicToolsRegistered, false);
+  await resumed.close();
+});
+
+test("keeps Map model-facing additions off when no dynamic tools are registered", async () => {
+  const harness = await createRuntime();
+  await harness.runtime.start();
+  assert.equal(harness.state.threadStartParams?.dynamicTools, undefined);
+  assert.equal(harness.state.threadStartParams?.developerInstructions, undefined);
+  assert.equal((harness.state.initializeParams?.capabilities as Record<string, unknown>).experimentalApi, false);
+  assert.equal(harness.runtime.dynamicToolsRegistered, false);
+  await harness.runtime.close();
 });
 
 test("interrupts only the active Turn and preserves the Thread", async () => {

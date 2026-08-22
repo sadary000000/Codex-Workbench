@@ -327,9 +327,10 @@ export class NativeThreadRuntime {
           title: "Codex Workbench V1",
           version: "0.1.0",
         },
-        // Codex CLI requires this capability before accepting thread/start.dynamicTools.
-        // Keep the baseline handshake narrow when Map is not registered.
-        capabilities: { experimentalApi: this.dynamicTools.length > 0 },
+        // Codex CLI requires this capability before accepting
+        // thread/start.dynamicTools. A resumed Thread cannot register that
+        // field in the current ABI, so do not advertise it on resume.
+        capabilities: { experimentalApi: this.dynamicTools.length > 0 && !requestedId },
       }, this.timeoutMs));
       client.notify("initialized", {});
       this.initialized = true;
@@ -337,6 +338,9 @@ export class NativeThreadRuntime {
         this.nativeThreadIdValue = requestedId;
         const response = await client.request("thread/resume", {
           threadId: requestedId,
+          // The current Codex CLI resume contract accepts the bounded hint but
+          // does not accept thread/start.dynamicTools. Resumed Threads must
+          // therefore use the explicit compatibility-maintenance path.
           ...(this.dynamicTools.length ? { developerInstructions: MAP_THREAD_START_HINT } : {}),
         }, this.timeoutMs);
         this.assertThreadId(response, requestedId);

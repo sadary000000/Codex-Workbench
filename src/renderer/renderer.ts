@@ -1044,7 +1044,7 @@ function renderMapPanel(): void {
         : `${map.sync.status} · revision ${map.revision}${map.sync.dirty ? " · dirty" : ""}${map.sync.paused ? " · paused" : ""}${projectStatus.maintenanceRunning ? " · syncing" : ""}${projectStatus.maintenanceThreadId ? ` · maintenance ${projectStatus.maintenanceThreadId.slice(0, 10)}` : ""}`;
     } else {
       mapPanelStatusElement.textContent = !map
-        ? `未启用 · same-turn ${mapStatus!.sameTurn === "registered_for_new_threads" ? "已为新 Thread 注册" : "恢复 Thread 使用兼容维护"}`
+        ? "未启用 · 原生 Map 能力未注册"
         : `${map.sync.status} · revision ${map.revision}${map.sync.dirty ? " · dirty" : ""}${map.sync.paused ? " · paused" : ""} · same-turn ${mapStatus!.sameTurn === "registered_for_new_threads" ? "可用" : "兼容维护"}`;
     }
   }

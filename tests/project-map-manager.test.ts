@@ -15,6 +15,10 @@ test("keeps Project Map lifecycle independent from normal Thread projections", a
   const before = await manager.status("project-map-test");
   assert.equal(before.enabled, false);
   assert.equal(before.maintenanceThreadId, null);
+  await assert.rejects(
+    manager.maintenanceRead("project-map-test"),
+    (error: any) => error?.code === "PROJECT_MAP_NOT_ENABLED",
+  );
   const enabled = await manager.enable("project-map-test");
   assert.equal(enabled.enabled, true);
   assert.equal(enabled.map?.scope.kind, "project");
