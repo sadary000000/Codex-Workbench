@@ -285,6 +285,45 @@ test("starts one Native Thread, runs two Turns, reads it, and resumes without a 
   assert.equal((await first.persistence.getThreadProjection("native-thread"))?.lastKnownTurnId, secondTurn.turnId);
 });
 
+test("Native readThread is query-only and projection refresh is explicit", async () => {
+  const harness = await createRuntime();
+  await harness.runtime.start();
+  const turn = await harness.runtime.startTurn("query-only");
+  await harness.persistence.updateThreadProjection("native-thread", { lastKnownTurnId: null, lastKnownState: "unknown" });
+  const before = await harness.persistence.getThreadProjection("native-thread");
+
+  const read = await harness.runtime.readThread();
+  const afterRead = await harness.persistence.getThreadProjection("native-thread");
+  assert.equal(read.turns.length, 1);
+  assert.deepEqual(afterRead, before);
+
+  await harness.runtime.refreshProjectionFromRead(read);
+  const afterRefresh = await harness.persistence.getThreadProjection("native-thread");
+  assert.equal(afterRefresh?.lastKnownState, "ready");
+  assert.equal(afterRefresh?.lastKnownTurnId, turn.turnId);
+  await harness.runtime.close();
+});
+
+test("Native readThread error is fail-closed without rewriting the projection", async () => {
+  const harness = await createRuntime();
+  await harness.runtime.start();
+  await harness.runtime.close();
+  const resumed = new NativeThreadRuntime({
+    cwd: "C:/fake/project",
+    stateFile: harness.stateFile,
+    persistence: harness.persistence,
+    clientFactory: (_options) => new FakeClient(harness.state),
+  });
+  await resumed.start();
+  harness.state.threadReadNoRollout = true;
+  await harness.persistence.updateThreadProjection("native-thread", { lastKnownState: "ready", lastError: null });
+  const before = await harness.persistence.getThreadProjection("native-thread");
+  await assert.rejects(resumed.readThread(), /no rollout found/i);
+  assert.equal(resumed.state, "FAILED");
+  assert.deepEqual(await harness.persistence.getThreadProjection("native-thread"), before);
+  await resumed.close();
+});
+
 test("discovers Composer capabilities and forwards options without changing Native identity", async () => {
   const harness = await createRuntime();
   await harness.runtime.start();

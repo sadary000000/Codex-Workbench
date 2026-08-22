@@ -238,7 +238,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   }
   if (command === "webgpt.chat.latest" && typeof record.url !== "string") return controlError("CHAT_URL_REQUIRED", "chat latest 必须提供 Chat URL。", command, requestId);
   if (command === "webgpt.send" && ((record.projectId !== undefined) !== (role !== undefined))) return controlError("PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 projectId 和 role。", command, requestId);
-  if (command === "webgpt.request.status" && typeof record.targetRequestId !== "string") return controlError("REQUEST_ID_REQUIRED", "request status 必须提供 requestId。", command, requestId);
+  if ((command === "webgpt.request.status" || command === "webgpt.request.reconcile") && typeof record.targetRequestId !== "string") return controlError("REQUEST_ID_REQUIRED", `${command.endsWith("reconcile") ? "request reconcile" : "request status"} 必须提供 requestId。`, command, requestId);
   if (command === "webgpt.request.list" && record.active !== true) return controlError("REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。", command, requestId);
   if (["webgpt.project.inspect", "webgpt.project.open", "webgpt.project.create", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
   if (record.idempotencyKey !== undefined && command !== "webgpt.send") return controlError("CONTROL_IDEMPOTENCY_UNSUPPORTED", "idempotencyKey 只支持 send。", command, requestId);
@@ -269,6 +269,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.wait": ["targetRequestId", "timeoutMs"],
     "webgpt.result": ["targetRequestId", "out"],
     "webgpt.request.status": ["targetRequestId"],
+    "webgpt.request.reconcile": ["targetRequestId"],
     "webgpt.request.list": ["active"],
   };
   const allowedFields = new Set(["version", "protocolVersion", "requestId", "command", "clientInfo", "sessionId", ...(allowedByCommand[command] ?? [])]);

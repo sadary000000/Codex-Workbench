@@ -70,6 +70,10 @@ test("WebGPT WEB-3 CLI parser keeps request and prompt inputs explicit", () => {
     kind: "command",
     command: { name: "webgpt.result", json: true, targetRequestId: "wgpt-1", out: "result.txt" },
   });
+  assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "request", "reconcile", "--request-id", "wgpt-1", "--json"]), {
+    kind: "command",
+    command: { name: "webgpt.request.reconcile", json: true, targetRequestId: "wgpt-1" },
+  });
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "send", "--text", "x", "--file", "p.md"]).kind, "error");
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "project", "open", "--name", ""]).kind, "error");
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "project", "open", "--name", "workts", "--new-chat"]).kind, "error");

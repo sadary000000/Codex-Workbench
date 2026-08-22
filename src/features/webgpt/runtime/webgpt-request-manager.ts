@@ -317,7 +317,8 @@ export class WebGptRequestManager {
     return { ...this.clone(record), response };
   }
 
-  async requestStatus(requestId: string, reconcile = true): Promise<WebGptRequestRecord> {
+  /** Query-only request status. Recovery/navigation is explicit via reconcileRequest(). */
+  async requestStatus(requestId: string, reconcile = false): Promise<WebGptRequestRecord> {
     await this.ready();
     const record = this.requireRecord(requestId);
     if (reconcile && (record.state === "RECOVERY_REQUIRED" || record.state === "INDETERMINATE")) return this.reconcileRequest(record.requestId);

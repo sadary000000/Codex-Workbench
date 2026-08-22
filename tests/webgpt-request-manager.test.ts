@@ -285,10 +285,52 @@ test("WebGPT read-only restart classification does not rewrite a v2 Journal", as
   try {
     await writeFile(join(directory, "requests.json"), original, "utf8");
     const manager = new WebGptRequestManager({ workspace: new FakeWorkspace() as never, storageDirectory: directory });
-    const recovered = await manager.requestStatus("wgpt-readonly", false);
+    const recovered = await manager.requestStatus("wgpt-readonly");
     assert.equal(recovered.state, "RECOVERY_REQUIRED");
     assert.equal(recovered.error?.code, "WORKBENCH_RESTARTED");
     assert.equal(await readFile(join(directory, "requests.json"), "utf8"), original);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT reconciliation is explicit and status does not perform it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-explicit-reconcile-"));
+  const record = {
+    requestId: "wgpt-explicit-reconcile",
+    idempotencyKey: "explicit-reconcile-key",
+    semanticSha256: "semantic",
+    state: "RECOVERY_REQUIRED",
+    projectId: null,
+    role: null,
+    targetChatUrl: "https://chatgpt.com/c/target",
+    chatUrl: "https://chatgpt.com/c/target",
+    promptChars: 12,
+    promptSha256: "hash",
+    baselineUserCount: 1,
+    baselineAssistantCount: 0,
+    sendStartedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    submittedAt: new Date().toISOString(),
+    completedAt: null,
+    resultPath: null,
+    resultSha256: null,
+    resultBytes: null,
+    lastKnownPageState: null,
+    error: { code: "WEBGPT_RESPONSE_TIMEOUT", message: "recovery evidence" },
+  };
+  try {
+    await writeFile(join(directory, "requests.json"), JSON.stringify({ version: 2, requests: [record] }), "utf8");
+    const workspace = new FakeWorkspace();
+    workspace.mode = "AUTO_CONTROL";
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const queried = await manager.requestStatus(record.requestId);
+    assert.equal(queried.state, "RECOVERY_REQUIRED");
+    assert.equal(workspace.openChatCount, 0);
+    const reconciled = await manager.reconcileRequest(record.requestId);
+    assert.equal(reconciled.state, "RECOVERY_REQUIRED");
+    assert.notEqual(reconciled.error?.code, "WEBGPT_RESPONSE_TIMEOUT");
+    assert.equal(workspace.openChatCount, 1);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -345,7 +387,7 @@ test("WebGPT Request Manager never blindly replays an in-flight Request after re
     const workspace = new FakeWorkspace();
     workspace.mode = "AUTO_CONTROL";
     const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
-    const recovered = await manager.requestStatus("wgpt-inflight", false);
+    const recovered = await manager.requestStatus("wgpt-inflight");
     assert.equal(recovered.state, "RECOVERY_REQUIRED");
     assert.equal(workspace.submitCount, 0);
     assert.equal(workspace.openChatCount, 0);

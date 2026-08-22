@@ -835,7 +835,10 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
         : await getWebGptRequestManager().submit(request.text, {}, request.idempotencyKey));
     } else if (request.command === "webgpt.request.status") {
       if (!request.targetRequestId) response = controlFail(request.command, "REQUEST_ID_REQUIRED", "request status 必须提供目标 requestId。");
-      else response = controlOk(request.command, await getWebGptRequestManager().requestStatus(request.targetRequestId, true));
+      else response = controlOk(request.command, await getWebGptRequestManager().requestStatus(request.targetRequestId));
+    } else if (request.command === "webgpt.request.reconcile") {
+      if (!request.targetRequestId) response = controlFail(request.command, "REQUEST_ID_REQUIRED", "request reconcile 必须提供目标 requestId。");
+      else response = controlOk(request.command, await getWebGptRequestManager().reconcileRequest(request.targetRequestId));
     } else if (request.command === "webgpt.request.list") {
       if (request.active !== true) response = controlFail(request.command, "REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。");
       else response = controlOk(request.command, await getWebGptRequestManager().activeSummary());
@@ -1833,11 +1836,9 @@ function registerIpc(): void {
     }
   });
   ipcMain.handle(IPC.read, async () => {
-    const nativeThreadId = currentNativeThreadId;
     try {
       return ok(await getRuntime().readThread());
     } catch (error) {
-      if (nativeThreadId && isNoRolloutError(error)) return markUnavailableNativeThread(nativeThreadId, error).catch((unavailable) => fail(unavailable));
       return fail(error);
     }
   });

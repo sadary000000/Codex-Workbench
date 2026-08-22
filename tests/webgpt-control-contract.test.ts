@@ -163,6 +163,8 @@ test("WebGPT WEB-6.5 Control Plane allowlists targeted latest reads", () => {
   assert.equal("error" in missingUrl && missingUrl.error?.code, "CHAT_URL_REQUIRED");
   const wrongField = parseWebGptControlRequest({ version: 1, requestId: "latest-5", command: "webgpt.latest", url: "https://chatgpt.com/c/target" });
   assert.equal("error" in wrongField && wrongField.error?.code, "CONTROL_FIELD_UNSUPPORTED");
+  const reconcile = parseWebGptControlRequest({ version: 1, requestId: "reconcile-1", command: "webgpt.request.reconcile", targetRequestId: "wgpt-1" });
+  assert.deepEqual(reconcile, { version: 1, requestId: "reconcile-1", command: "webgpt.request.reconcile", targetRequestId: "wgpt-1" });
 });
 
 test("WebGPT Project navigation Control Plane requires a bounded project name", () => {

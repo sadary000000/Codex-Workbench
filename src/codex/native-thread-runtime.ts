@@ -456,28 +456,36 @@ export class NativeThreadRuntime {
       throw this.fail("THREAD_NOT_READY", "Native Thread is not ready.");
     }
     try {
-      const read = await this.readThreadInternal(this.nativeThreadIdValue);
-      await this.persistProjection({
-        lastKnownState: "ready",
-        lastKnownTurnId: read.turns.at(-1)?.id ?? null,
-        lastError: null,
-      });
-      return read;
+      return await this.readThreadInternal(this.nativeThreadIdValue);
     } catch (error) {
+      // Keep the live Runtime fail-closed for the caller, but do not write the
+      // durable projection from a query. Explicit lifecycle/reconcile paths own
+      // projection updates.
       const normalized = asError(error);
       const details = errorInfo(normalized);
       const processExitObserved = this.stateValue === "DISCONNECTED" || this.lastErrorValue?.code === "APP_SERVER_PROCESS_EXIT";
       this.lastErrorValue = details;
       const recoveryRequired = transportRecovery(normalized);
       if (!processExitObserved) this.stateValue = recoveryRequired ? "RECOVERY_REQUIRED" : "FAILED";
-      await this.safePersistProjection({
-        ...(isWriterConflictError(normalized) ? {} : {
-          lastKnownState: processExitObserved ? "disconnected" : recoveryRequired ? "recovery_required" : "failed",
-        }),
-        lastError: details,
-      });
       throw normalized;
     }
+  }
+
+  /**
+   * Explicitly refresh the non-authoritative local projection from a Native
+   * Thread read. Plain readThread() intentionally remains query-only.
+   */
+  async refreshProjectionFromRead(read?: ThreadReadView): Promise<ThreadReadView> {
+    if (!this.client || !this.nativeThreadIdValue || !this.initialized) {
+      throw this.fail("THREAD_NOT_READY", "Native Thread is not ready.");
+    }
+    const view = read ?? await this.readThreadInternal(this.nativeThreadIdValue);
+    await this.persistProjection({
+      lastKnownState: "ready",
+      lastKnownTurnId: view.turns.at(-1)?.id ?? null,
+      lastError: null,
+    });
+    return view;
   }
 
   /** Detach a live runtime from Workbench Project metadata without changing Native identity. */

@@ -21,7 +21,9 @@ import {
   type AutomationPersistenceDiagnostics,
   cleanupJsonMigrationTemps,
   inspectAutomationFile,
+  inspectExistingSqliteAutomationFile,
   migrateJsonSnapshotToSqlite,
+  recoverInterruptedMigration,
   SqliteAutomationPersistence,
 } from "./sqlite-persistence.ts";
 import type {
@@ -95,7 +97,7 @@ export class AutomationStoreError extends Error {
 }
 
 export interface AutomationInspection {
-  status: "missing" | "valid" | "invalid";
+  status: "missing" | "valid" | "needs_migration" | "invalid";
   document: AutomationDocument | null;
   code: AutomationStoreErrorCode | null;
   message: string | null;
@@ -372,16 +374,11 @@ async function acquireAutomationWriterLock(databasePath: string): Promise<Automa
   await mkdir(dirname(databasePath), { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      try {
-        const record: AutomationWriterLockRecord = { pid: process.pid, token, acquiredAt: now() };
-        await writeFile(filePath, JSON.stringify(record), { encoding: "utf8", flag: "wx" });
-        const state: AutomationWriterLockState = { databasePath, filePath, token, references: 1 };
-        localWriterLocks.set(databasePath, state);
-        return { state };
-      } catch (error) {
-        await rm(filePath, { force: true }).catch(() => undefined);
-        throw error;
-      }
+      const record: AutomationWriterLockRecord = { pid: process.pid, token, acquiredAt: now() };
+      await writeFile(filePath, JSON.stringify(record), { encoding: "utf8", flag: "wx" });
+      const state: AutomationWriterLockState = { databasePath, filePath, token, references: 1 };
+      localWriterLocks.set(databasePath, state);
+      return { state };
     } catch (error) {
       if ((error as { code?: unknown })?.code !== "EEXIST") {
         throw new AutomationStoreError("AUTOMATION_PERSISTENCE_UNAVAILABLE", "Automation writer authority could not be established.", error);
@@ -560,8 +557,14 @@ export class AutomationStore {
         return { status: "valid", document: clone(migrated.document), code: null, message: null, migratedFrom: migrated.migratedFrom };
       }
       if (file.kind !== "sqlite") throw new AutomationStoreError("AUTOMATION_DB_INVALID", "Automation persistence file format is not recognized.");
-      const persistence = await this.ensurePersistence();
-      return { status: "valid", document: clone(persistence.loadDocument()), code: null, message: null, migratedFrom: null };
+      const inspected = await inspectExistingSqliteAutomationFile(this.filePath);
+      return {
+        status: inspected.status,
+        document: clone(inspected.document),
+        code: inspected.code as AutomationStoreErrorCode | null,
+        message: inspected.message,
+        migratedFrom: inspected.migratedFrom,
+      };
     } catch (error) {
       const mapped = this.mapError(error);
       return { status: "invalid", document: null, code: mapped.code, message: mapped.message, migratedFrom: null };
@@ -573,9 +576,15 @@ export class AutomationStore {
     return clone(await this.readDocument());
   }
 
+  /** Explicit mutation boundary for creating/migrating the Automation store. */
+  async migrate(): Promise<void> {
+    await this.tail;
+    await this.ensurePersistence();
+  }
+
   async transaction<T>(work: (transaction: AutomationTransaction) => Promise<T> | T): Promise<T> {
     const operation = this.tail.then(async () => {
-      const previous = await this.readDocument();
+      const previous = await this.readDocumentForWrite();
       const draft = clone(previous);
       const transaction = new AutomationTransaction(draft);
       const result = await work(transaction);
@@ -1118,6 +1127,7 @@ export class AutomationStore {
   private async initializePersistence(): Promise<SqliteAutomationPersistence> {
     this.writerLock = await acquireAutomationWriterLock(this.filePath);
     try {
+      await recoverInterruptedMigration(this.filePath);
       const file = await inspectAutomationFile(this.filePath);
       if (file.kind === "missing" || file.kind === "sqlite") {
         await mkdir(dirname(this.filePath), { recursive: true });
@@ -1139,6 +1149,21 @@ export class AutomationStore {
     try {
       const file = await inspectAutomationFile(this.filePath);
       if (file.kind === "missing") return createEmptyAutomationDocument();
+      if (file.kind === "json") return migrateAutomationDocument(JSON.parse(file.raw ?? "") as unknown).document;
+      if (file.kind !== "sqlite") throw new AutomationStoreError("AUTOMATION_DB_INVALID", "Automation persistence file format is not recognized.");
+      if (this.persistence) return this.persistence.loadDocument();
+      const inspected = await inspectExistingSqliteAutomationFile(this.filePath);
+      if (inspected.status !== "valid" || !inspected.document) {
+        throw new AutomationStoreError(inspected.code as AutomationStoreErrorCode ?? "AUTOMATION_DB_INVALID", inspected.message ?? "Automation database could not be read.");
+      }
+      return inspected.document;
+    } catch (error) {
+      throw this.mapError(error);
+    }
+  }
+
+  private async readDocumentForWrite(): Promise<AutomationDocument> {
+    try {
       const persistence = await this.ensurePersistence();
       return persistence.loadDocument();
     } catch (error) {

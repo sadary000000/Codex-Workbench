@@ -62,6 +62,7 @@ export const WEBGPT_CONTROL_COMMANDS = [
   "webgpt.wait",
   "webgpt.result",
   "webgpt.request.status",
+  "webgpt.request.reconcile",
   "webgpt.request.list",
 ] as const;
 

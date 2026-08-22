@@ -126,6 +126,14 @@ export interface AutomationMigrationMetadata {
   migratedAt: string;
 }
 
+export interface AutomationReadOnlyInspection {
+  status: "valid" | "needs_migration" | "invalid";
+  document: AutomationDocument | null;
+  code: AutomationPersistenceErrorCode | null;
+  message: string | null;
+  migratedFrom: number | null;
+}
+
 function isTableName(value: string): value is AutomationTableName {
   return TABLES.includes(value as AutomationTableName);
 }
@@ -218,7 +226,7 @@ async function validateSqliteCandidate(filePath: string): Promise<void> {
   }
 }
 
-async function recoverInterruptedMigration(filePath: string): Promise<void> {
+export async function recoverInterruptedMigration(filePath: string): Promise<void> {
   if (await fileKind(filePath) !== "missing") return;
   const candidates = await migrationFiles(filePath);
   if (candidates.length) {
@@ -242,7 +250,6 @@ async function recoverInterruptedMigration(filePath: string): Promise<void> {
 }
 
 export async function inspectAutomationFile(filePath: string): Promise<{ kind: "missing" | "sqlite" | "json" | "unknown"; raw?: string }> {
-  await recoverInterruptedMigration(filePath);
   const kind = await fileKind(filePath);
   if (kind !== "json") return { kind };
   try {
@@ -250,6 +257,57 @@ export async function inspectAutomationFile(filePath: string): Promise<{ kind: "
   } catch (error) {
     throw new AutomationPersistenceError("AUTOMATION_DB_INVALID", "Automation JSON snapshot could not be read.", error);
   }
+}
+
+/**
+ * Inspect an existing SQLite file without opening the Automation writer path.
+ * query_only is connection-local; no schema, metadata, lock, migration, or
+ * backup writes are performed here.
+ */
+export async function inspectExistingSqliteAutomationFile(filePath: string): Promise<AutomationReadOnlyInspection> {
+  let database: DatabaseSync | null = null;
+  try {
+    database = new DatabaseSync(filePath);
+    database.exec("PRAGMA query_only = ON");
+    const meta = (key: string): string | null => {
+      const row = database!.prepare("SELECT meta_value FROM automation_meta WHERE meta_key = ?").get(key) as { meta_value?: string } | undefined;
+      return row?.meta_value ?? null;
+    };
+    const documentVersion = meta("document_schema_version");
+    const persistenceVersion = meta("persistence_schema_version");
+    const format = meta("format");
+    const writerAuthority = meta("writer_authority");
+    if (documentVersion !== null && /^\d+$/.test(documentVersion) && Number(documentVersion) < AUTOMATION_SCHEMA_VERSION) {
+      return { status: "needs_migration", document: null, code: "AUTOMATION_DB_VERSION_UNSUPPORTED", message: "NEEDS_MIGRATION: Automation SQLite document schema requires an explicit migration.", migratedFrom: Number(documentVersion) };
+    }
+    if (persistenceVersion !== String(AUTOMATION_PERSISTENCE_SCHEMA_VERSION) || format !== AUTOMATION_PERSISTENCE_FORMAT || documentVersion !== String(AUTOMATION_SCHEMA_VERSION) || writerAuthority !== AUTOMATION_WRITER_AUTHORITY) {
+      throw new AutomationPersistenceError("AUTOMATION_DB_VERSION_UNSUPPORTED", "Automation SQLite persistence schema is unsupported.");
+    }
+    return { status: "valid", document: readDocumentRows(database), code: null, message: null, migratedFrom: null };
+  } catch (error) {
+    const mapped = error instanceof AutomationPersistenceError ? error : mapSqliteError(error);
+    return { status: "invalid", document: null, code: mapped.code, message: mapped.message, migratedFrom: null };
+  } finally {
+    database?.close();
+  }
+}
+
+function readDocumentRows(database: DatabaseSync): AutomationDocument {
+  const document = createEmptyAutomationDocument();
+  const rows = database.prepare("SELECT table_name, entity_id, project_id, payload FROM automation_records ORDER BY table_name, entity_id").all() as unknown as SqliteRow[];
+  for (const row of rows) {
+    if (!isTableName(row.table_name)) throw new AutomationPersistenceError("AUTOMATION_DB_INVALID", `Unknown Automation table ${row.table_name}.`);
+    let item: unknown;
+    try {
+      item = JSON.parse(row.payload);
+    } catch (error) {
+      throw new AutomationPersistenceError("AUTOMATION_DB_INVALID", `Automation record ${row.table_name}/${row.entity_id} is not valid JSON.`, error);
+    }
+    assertPersistedBoundary(item, `${row.table_name}/${row.entity_id}`);
+    (document[row.table_name] as unknown as unknown[]).push(item);
+  }
+  document.auditEvents.sort((left, right) => left.sequence - right.sequence);
+  return validateAutomationDocument(document);
 }
 
 export class SqliteAutomationPersistence {

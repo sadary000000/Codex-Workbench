@@ -148,6 +148,7 @@ test("migrates v2 JSON beside a rollback backup and preserves hashes and audit c
     await value.store.close();
     await writeFile(value.path, raw, "utf8");
     const reopened = new AutomationStore(value.path);
+    await reopened.migrate();
     assert.deepEqual(await reopened.get("requirementVersions", requirement.requirementVersionId), requirement);
     assert.deepEqual(await reopened.get("actionIntents", intent.intentId), intent);
     const diagnostics = await reopened.persistenceDiagnostics();
@@ -178,6 +179,7 @@ test("migrates an existing v2 SQLite document in place without changing durable 
     database.close();
 
     reopened = new AutomationStore(value.path);
+    await reopened.migrate();
     const restoredProject = await reopened.get("automationProjects", project.projectId);
     assert.equal(restoredProject?.projectId, project.projectId);
     assert.equal(restoredProject?.name, project.name);
@@ -264,6 +266,39 @@ test("corruption and future persistence schema fail closed", async () => {
   }
 });
 
+test("Automation inspect/get/list are query-only and report legacy SQLite as NEEDS_MIGRATION", async () => {
+  const value = await fixture();
+  try {
+    await value.store.createAutomationProject({ projectId: "query-project", name: "query-purity" });
+    await value.store.close();
+    const queryStore = new AutomationStore(value.path);
+    const before = createHash("sha256").update(await readFile(value.path)).digest("hex");
+    const inspection = await queryStore.inspect();
+    assert.equal(inspection.status, "valid");
+    assert.equal((await queryStore.get("automationProjects", "query-project"))?.name, "query-purity");
+    assert.equal((await queryStore.list("automationProjects")).length, 1);
+    const after = createHash("sha256").update(await readFile(value.path)).digest("hex");
+    assert.equal(after, before);
+    assert.equal((await readdir(value.root)).includes("automation.db.writer-lock"), false);
+    await queryStore.close();
+
+    const legacy = new DatabaseSync(value.path);
+    legacy.prepare("UPDATE automation_meta SET meta_value = ? WHERE meta_key = 'document_schema_version'").run("2");
+    legacy.close();
+    const legacyBefore = createHash("sha256").update(await readFile(value.path)).digest("hex");
+    const legacyStore = new AutomationStore(value.path);
+    const legacyInspection = await legacyStore.inspect();
+    assert.equal(legacyInspection.status, "needs_migration");
+    assert.equal(legacyInspection.migratedFrom, 2);
+    assert.match(legacyInspection.message ?? "", /NEEDS_MIGRATION/);
+    assert.equal(createHash("sha256").update(await readFile(value.path)).digest("hex"), legacyBefore);
+    assert.equal((await readdir(value.root)).includes("automation.db.writer-lock"), false);
+    await legacyStore.close();
+  } finally {
+    await dispose(value);
+  }
+});
+
 test("interrupted side-by-side migration recovers the valid candidate without creating an empty store", async () => {
   const value = await fixture();
   try {
@@ -278,6 +313,7 @@ test("interrupted side-by-side migration recovers the valid candidate without cr
     const backup = `${value.path}.v2-backup-interrupted.json`;
     await rename(value.path, backup);
     const recovered = new AutomationStore(value.path);
+    await recovered.migrate();
     assert.equal((await recovered.get("automationProjects", "recover"))?.name, "AUT-1.5 recover");
     assert.equal((await readdir(value.root)).some((name) => name.includes("v2-backup-interrupted.json")), true);
     await recovered.close();
@@ -321,7 +357,7 @@ test("single writer authority rejects a second process instead of allowing stale
       }
     }
     const contender = new AutomationStore(value.path);
-    await assert.rejects(contender.snapshot(), (error: unknown) => error instanceof Error && (error as { code?: string }).code === "AUTOMATION_DB_LOCKED");
+    await assert.rejects(contender.createAutomationProject({ projectId: "contender", name: "contender" }), (error: unknown) => error instanceof Error && (error as { code?: string }).code === "AUTOMATION_DB_LOCKED");
     await contender.close();
     await writeFile(releasePath, "release", "utf8");
     const child = await childPromise;

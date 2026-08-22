@@ -30,6 +30,7 @@ export type WebGptCliCommandName =
   | "webgpt.wait"
   | "webgpt.result"
   | "webgpt.request.status"
+  | "webgpt.request.reconcile"
   | "webgpt.request.list";
 
 export interface WebGptCliCommand {
@@ -114,7 +115,7 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
   const parsed = parseJsonFlag(argv.slice(markerIndex + 1));
   const args = parsed.args;
   const [verb, ...rest] = args;
-  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、close、latest、chat latest、new-chat、open-chat、project inspect、project open、project create、project new-chat、role、send、wait、result、request、screenshot、control user、control auto。");
+  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、close、latest、chat latest、new-chat、open-chat、project inspect、project open、project create、project new-chat、role、send、wait、result、request status|reconcile|list、screenshot、control user、control auto。");
 
   if (verb === "status" && rest.length === 0) return { kind: "command", command: { name: "webgpt.status", json: parsed.json } };
   if (verb === "open" && rest.length === 0) return { kind: "command", command: { name: "webgpt.open", json: parsed.json } };
@@ -188,10 +189,10 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
 
   if (verb === "request") {
     const [requestVerb, ...requestArgs] = rest;
-    if (requestVerb === "status") {
+    if (requestVerb === "status" || requestVerb === "reconcile") {
       const targetRequestId = optionValue(requestArgs, "--request-id");
-      if (!targetRequestId || optionCount(requestArgs, "--request-id") !== 1 || !hasOnlyValueOptionsAndFlags(requestArgs, ["--request-id"])) return invalid(parsed.json, "request status 必须使用 --request-id <id>。");
-      return { kind: "command", command: { name: "webgpt.request.status", json: parsed.json, targetRequestId } };
+      if (!targetRequestId || optionCount(requestArgs, "--request-id") !== 1 || !hasOnlyValueOptionsAndFlags(requestArgs, ["--request-id"])) return invalid(parsed.json, `request ${requestVerb} 必须使用 --request-id <id>。`);
+      return { kind: "command", command: { name: requestVerb === "status" ? "webgpt.request.status" : "webgpt.request.reconcile", json: parsed.json, targetRequestId } };
     }
     if (requestVerb === "list") {
       if (!requestArgs.includes("--active") || requestArgs.length !== 1) return invalid(parsed.json, "request list 目前只支持 --active。");
