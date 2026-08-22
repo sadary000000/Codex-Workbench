@@ -10,7 +10,7 @@ required_fixes: NONE
 implementation_commit: 791a68d
 docs_provenance_commit: b1e25ef
 review_package: D:/办公/AI/Codex_Workbench_V1/dist/review/ARCH-V2-3-REVIEW-PACKAGE.zip
-review_package_sha256: BB761BA2AEBED22BA9CE0DA03BC75BD75E96937219233135E865962ED380763B
+review_package_sha256: recorded in final handoff; not embedded here to avoid a self-referential package hash
 real_webgpt_business_prompt_required_now: NO
 aut2_aut3: REMAIN_PAUSED
 aut4_plus: NOT_ALLOWED
