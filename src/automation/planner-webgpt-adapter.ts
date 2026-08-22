@@ -19,7 +19,15 @@ export interface PlannerRuntimeBinding {
 export interface PlannerRuntimePort {
   getPlannerBinding(projectId: string): Promise<PlannerRuntimeBinding>;
   submitPlanner(input: { projectId: string; prompt: string; idempotencyKey: string }): Promise<{ requestId: string; targetChatUrl: string; semanticSha256?: string | null }>;
-  waitRequest(requestId: string, timeoutMs: number): Promise<{ state: string; timedOut: boolean }>;
+  waitRequest(requestId: string, timeoutMs: number): Promise<{
+    state: string;
+    timedOut: boolean;
+    requestId?: string;
+    idempotencyKey?: string | null;
+    targetChatUrl?: string | null;
+    submittedAt?: string | null;
+    acceptedAt?: string | null;
+  }>;
   getResult(requestId: string): Promise<{ state: string; response: string | null }>;
 }
 
@@ -44,7 +52,15 @@ export class PlannerWebGptAdapter implements PlannerWebGptService {
     const accepted = await this.runtime.submitPlanner({ projectId: request.projectId, prompt: buildPlannerPrompt(request), idempotencyKey });
     if (!accepted.requestId || accepted.targetChatUrl !== binding.chatUrl) throw new PlannerServiceError("REQUEST_CONFLICT", "Planner runtime accepted a request without the exact bound PLANNER Chat.");
     const waited = await this.runtime.waitRequest(accepted.requestId, this.timeoutMs);
-    if (waited.timedOut || waited.state !== "COMPLETED") throw new PlannerServiceError("PLANNER_INVALID", `PLANNER request did not complete: ${waited.state}.`, { requestId: accepted.requestId, state: waited.state, timedOut: waited.timedOut });
+    if (waited.timedOut || waited.state !== "COMPLETED") throw new PlannerServiceError("PLANNER_INVALID", `PLANNER request did not complete: ${waited.state}.`, {
+      requestId: accepted.requestId,
+      idempotencyKey,
+      targetChatUrl: accepted.targetChatUrl,
+      state: waited.state,
+      timedOut: waited.timedOut,
+      submittedAt: waited.submittedAt ?? null,
+      acceptedAt: waited.acceptedAt ?? null,
+    });
     const result = await this.runtime.getResult(accepted.requestId);
     if (result.state !== "COMPLETED" || typeof result.response !== "string") throw new PlannerServiceError("PLANNER_INVALID", "Completed PLANNER result is unavailable.");
     let envelope: PlannerEnvelope;
@@ -81,7 +97,15 @@ export function createPlannerWebGptAdapter(dependencies: {
       },
       async waitRequest(requestId, timeoutMs) {
         const result = await dependencies.requestManager.waitForRequest(requestId, timeoutMs);
-        return { state: result.record.state, timedOut: result.timedOut };
+        return {
+          state: result.record.state,
+          timedOut: result.timedOut,
+          requestId: result.record.requestId,
+          idempotencyKey: result.record.idempotencyKey,
+          targetChatUrl: result.record.targetChatUrl,
+          submittedAt: result.record.submittedAt,
+          acceptedAt: result.record.createdAt,
+        };
       },
       async getResult(requestId) {
         const result = await dependencies.requestManager.getResult(requestId);

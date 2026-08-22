@@ -169,6 +169,7 @@ async function startAut2RealWebGptGate(): Promise<void> {
     setupContext,
     firstRoundOnly: process.env.AUT2_FIX8_FIRST_ROUND === "1",
     answersToDraftOnly: process.env.AUT2_ANSWERS_TO_DRAFT_ONLY === "1",
+    sameSessionE2E: process.env.AUT2_FIX10_SAME_SESSION === "1",
   });
   logger.info("aut2_real_webgpt_gate_finished", { result: evidence.result, attemptedRealRequests: evidence.attemptedRealRequests, realPromptCount: evidence.realPromptCount, outputPath });
   if (evidence.result !== "PASS_REAL") process.exitCode = 1;
@@ -190,9 +191,93 @@ async function startAut3RealPlannerGate(): Promise<void> {
     automationProjectId,
     outputPath,
     timeoutMs: Number(process.env.AUT3_REAL_PLANNER_TIMEOUT_MS ?? 240_000),
+    expectedRequirementVersionId: process.env.AUT3_EXPECTED_REQUIREMENT_VERSION_ID?.trim() || undefined,
+    expectedRequirementPayloadSha256: process.env.AUT3_EXPECTED_REQUIREMENT_PAYLOAD_SHA256?.trim() || undefined,
+    preflight: () => aut3PlannerPreflight(webgptProjectId, process.env.AUT3_RECOVERY_REQUEST_ID?.trim() || null),
   });
   logger.info("aut3_real_planner_gate_finished", { result: evidence.result, requestId: evidence.realPlanner.requestId ?? null, outputPath });
   if (evidence.result !== "PASS_REAL") process.exitCode = 1;
+  setTimeout(() => app.quit(), 50);
+}
+
+async function startAut2Fix10AndAut3RealGate(): Promise<void> {
+  if (process.env.AUT2_AUT3_FIX10_REAL_GATE !== "1") return;
+  if (!automationStore) throw new Error("AUT-2 Fix10/AUT-3 handoff Gate requires the Automation Store.");
+  const aut2OutputPath = process.env.AUT2_REAL_WEBGPT_GATE_OUTPUT?.trim() || join(app.getPath("userData"), "aut2-fix10-real-evidence.json");
+  const aut3OutputPath = process.env.AUT3_REAL_PLANNER_GATE_OUTPUT?.trim() || join(app.getPath("userData"), "aut3-fix10-real-evidence.json");
+  const handoffPath = process.env.AUT2_AUT3_HANDOFF_OUTPUT?.trim() || join(app.getPath("userData"), "aut2-aut3-handoff-evidence.json");
+  const webgptProjectId = process.env.AUT2_WEBGPT_PROJECT_ID?.trim() || process.env.AUT3_WEBGPT_PROJECT_ID?.trim() || "";
+  const automationProjectId = process.env.AUT2_AUTOMATION_PROJECT_ID?.trim() || process.env.AUT3_AUTOMATION_PROJECT_ID?.trim() || "";
+  if (!webgptProjectId || !automationProjectId) throw new Error("AUT-2 Fix10/AUT-3 handoff Gate requires WebGPT and Automation Project IDs.");
+  const setupContext = await waitForAut2SetupContext(process.env.AUT2_REAL_WEBGPT_GATE_SETUP_FILE?.trim() || "");
+  const aut2Evidence = await runAut2RealWebGptGate({
+    store: automationStore,
+    roleSession: getWebGptRoleService(),
+    requestManager: getWebGptRequestManager(),
+    openWorkspace: () => getWebGptRequestManager().openWorkspace(),
+    returnAutomationControl: () => getWebGptWorkspace().returnAutomationControl(),
+    automationControl: () => getWebGptRequestManager().automationControl(),
+    webgptProjectId,
+    automationProjectId,
+    timeoutMs: Number(process.env.AUT2_REAL_WEBGPT_TIMEOUT_MS ?? 240_000),
+    outputPath: aut2OutputPath,
+    setupContext,
+    sameSessionE2E: true,
+  });
+  const handoff = {
+    stage: "AUT-2-FIX10-TO-AUT-3",
+    result: aut2Evidence.result === "PASS_REAL" && aut2Evidence.sameSession.status === "PASS_REAL" ? "READY" : "BLOCKED",
+    automationProjectId,
+    webgptProjectId,
+    alignmentSessionId: aut2Evidence.sameSession.alignmentSessionId,
+    requirementVersionId: aut2Evidence.draft.requirementVersionId,
+    payloadSha256: aut2Evidence.draft.payloadSha256,
+    sameSessionStatus: aut2Evidence.sameSession.status,
+    sourceEvidencePath: aut2OutputPath,
+    createdAt: new Date().toISOString(),
+  };
+  await writeFile(handoffPath, `${JSON.stringify(handoff, null, 2)}\n`, "utf8");
+  if (handoff.result !== "READY" || !handoff.requirementVersionId || !handoff.payloadSha256) {
+    const blocked = {
+      stage: "AUT-3",
+      result: "BLOCKED",
+      startedAt: handoff.createdAt,
+      completedAt: new Date().toISOString(),
+      webgptProjectId,
+      automationProjectId,
+      requirement: { requirementVersionId: handoff.requirementVersionId, payloadSha256: handoff.payloadSha256 },
+      handoff,
+      plannerBinding: {},
+      roleProtection: {},
+      realPlanner: { promptBodyLogged: false, responseBodyLogged: false, repairCount: 0, repairPromptCount: 0, promptSent: false },
+      structuredPlan: {},
+      persistence: {},
+      idempotency: {},
+      preflight: { status: "NOT_RUN", reason: "AUT2_HANDOFF_NOT_READY" },
+      recovery: { status: "NOT_RUN", reason: "AUT2_HANDOFF_NOT_READY" },
+      safety: { nativeExecutorStarted: false, reviewerStarted: false, v1CoreChanged: false, webgptV1Changed: false },
+      error: { code: "AUT2_HANDOFF_NOT_READY", message: "AUT-3 did not run because AUT-2 Fix10 did not produce a verified same-session confirmed Requirement." },
+    };
+    await writeFile(aut3OutputPath, `${JSON.stringify(blocked, null, 2)}\n`, "utf8");
+    process.exitCode = 1;
+    setTimeout(() => app.quit(), 50);
+    return;
+  }
+  const aut3Evidence = await runAut3RealPlannerGate({
+    store: automationStore,
+    roleSession: getWebGptRoleService(),
+    requestManager: getWebGptRequestManager(),
+    webgptProjectId,
+    automationProjectId,
+    outputPath: aut3OutputPath,
+    timeoutMs: Number(process.env.AUT3_REAL_PLANNER_TIMEOUT_MS ?? 240_000),
+    expectedRequirementVersionId: handoff.requirementVersionId,
+    expectedRequirementPayloadSha256: handoff.payloadSha256,
+    handoffEvidence: handoff,
+    preflight: () => aut3PlannerPreflight(webgptProjectId, process.env.AUT3_RECOVERY_REQUEST_ID?.trim() || null),
+  });
+  logger.info("aut2_fix10_aut3_real_gate_finished", { aut2Result: aut2Evidence.result, aut3Result: aut3Evidence.result, handoffPath, aut2OutputPath, aut3OutputPath });
+  if (aut2Evidence.result !== "PASS_REAL" || aut3Evidence.result !== "PASS_REAL") process.exitCode = 1;
   setTimeout(() => app.quit(), 50);
 }
 
@@ -423,6 +508,79 @@ async function webGptStatusResult(): Promise<Record<string, unknown>> {
     networkWait: health.networkWait ?? null,
     browserResource: health.browserResource ?? webGptWorkspace.getOperationArbiter().getDiagnostics(),
     activeRequests: webGptRequestManager ? await webGptRequestManager.activeSummary() : [],
+  };
+}
+
+/**
+ * AUT-3 is allowed to send a Planner Prompt only from a clean production
+ * runtime. In particular, a stale/unknown request in the production Journal
+ * is a recovery blocker, never a reason to resend blindly.
+ */
+async function aut3PlannerPreflight(webgptProjectId: string, recoveryRequestId: string | null): Promise<Record<string, unknown>> {
+  const status = await webGptStatusResult();
+  const requestManager = getWebGptRequestManager();
+  const activeRequests = await requestManager.activeSummary();
+  const browserResource = status.browserResource && typeof status.browserResource === "object" && !Array.isArray(status.browserResource)
+    ? status.browserResource as Record<string, unknown>
+    : {};
+  const planner = await getWebGptRoleService().status(webgptProjectId, "PLANNER");
+  const requirement = await getWebGptRoleService().status(webgptProjectId, "REQUIREMENT");
+  const reviewer = await getWebGptRoleService().status(webgptProjectId, "REVIEWER");
+  let recovery: Record<string, unknown> = { status: "NOT_REQUESTED", requestId: recoveryRequestId };
+  if (recoveryRequestId) {
+    try {
+      const record = await requestManager.requestStatus(recoveryRequestId, false);
+      recovery = {
+        status: "FOUND",
+        requestId: record.requestId,
+        state: record.state,
+        targetChatUrl: record.targetChatUrl,
+        submittedAt: record.submittedAt,
+        acceptedAt: record.createdAt,
+        idempotencyKey: record.idempotencyKey,
+      };
+    } catch (error) {
+      const info = errorInfo(error);
+      recovery = { status: "NOT_FOUND", requestId: recoveryRequestId, errorCode: info.code, errorMessage: info.message.slice(0, 500) };
+    }
+  }
+  const journalClean = activeRequests.length === 0;
+  const browserFree = browserResource.activeOperationId === null && Number(browserResource.queueDepth ?? 0) === 0;
+  const runtimeReady = status.workbench === "READY"
+    && status.webgpt === "READY"
+    && status.controlOwner === "AUTO_CONTROL"
+    && status.pageHealthy === true;
+  const exactPlanner = planner.projectId === webgptProjectId && planner.role === "PLANNER" && planner.status === "BOUND" && Boolean(planner.chatUrl);
+  const rolesProtected = requirement.status === "BOUND" && reviewer.status === "BOUND";
+  let targetRead: Record<string, unknown> = { status: "NOT_RUN", chatUrl: planner.chatUrl || null };
+  if (runtimeReady && journalClean && browserFree && exactPlanner) {
+    try {
+      const latest = await requestManager.readLatestChat(planner.chatUrl, { projectId: webgptProjectId, role: "PLANNER", operationType: "CURRENT" });
+      targetRead = { status: "PASS", chatUrl: latest.chatUrl, assistantCount: latest.assistantCount, generating: latest.generating, textSha256: latest.textSha256 };
+    } catch (error) {
+      const info = errorInfo(error);
+      targetRead = { status: "FAIL", chatUrl: planner.chatUrl || null, errorCode: info.code, errorMessage: info.message.slice(0, 500) };
+    }
+  } else {
+    targetRead = { status: "NOT_RUN", chatUrl: planner.chatUrl || null, reason: "preflight_not_clean" };
+  }
+  const recoverySafe = recovery.status === "NOT_REQUESTED" || recovery.status === "FOUND" && !["QUEUED", "SUBMITTING", "SUBMITTED", "GENERATING", "INDETERMINATE", "RECOVERY_REQUIRED", "TIMEOUT"].includes(String(recovery.state));
+  return {
+    ok: runtimeReady && journalClean && browserFree && exactPlanner && rolesProtected && targetRead.status === "PASS" && recoverySafe,
+    runtime: { workbench: status.workbench, webgpt: status.webgpt, controlOwner: status.controlOwner, pageHealthy: status.pageHealthy, currentUrl: status.currentUrl },
+    activeRequestCount: activeRequests.length,
+    activeRequests,
+    browserResource: {
+      activeOperationId: browserResource.activeOperationId ?? null,
+      activeRequestId: browserResource.activeRequestId ?? null,
+      queueDepth: Number(browserResource.queueDepth ?? 0),
+      mode: browserResource.mode ?? null,
+    },
+    plannerBinding: { projectId: planner.projectId, role: planner.role, status: planner.status, chatUrl: planner.chatUrl },
+    requirementBinding: { projectId: requirement.projectId, role: requirement.role, status: requirement.status, chatUrl: requirement.chatUrl },
+    reviewerBinding: { projectId: reviewer.projectId, role: reviewer.role, status: reviewer.status, chatUrl: reviewer.chatUrl },
+    targetRead,
+    recovery,
   };
 }
 
@@ -1643,7 +1801,13 @@ if (officialCliMode) {
       return startAutomationPersistence().then(() => {
         if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE === "1") return;
         return startWebGptControlPlane().then(() => {
-          if (process.env.AUT2_REAL_WEBGPT_GATE === "1") {
+          if (process.env.AUT2_AUT3_FIX10_REAL_GATE === "1") {
+            void startAut2Fix10AndAut3RealGate().catch((error) => {
+              logError(logger, "aut2_fix10_aut3_real_gate_failed", error);
+              process.exitCode = 1;
+              setTimeout(() => app.quit(), 50);
+            });
+          } else if (process.env.AUT2_REAL_WEBGPT_GATE === "1") {
             void startAut2RealWebGptGate().catch((error) => {
               logError(logger, "aut2_real_webgpt_gate_failed", error);
               process.exitCode = 1;

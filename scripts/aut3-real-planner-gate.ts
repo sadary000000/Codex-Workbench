@@ -1,10 +1,7 @@
 import { execFile as execFileCallback, spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { promisify } from "node:util";
-import { AutomationStore } from "../src/automation/store.ts";
-import { canonicalize } from "../src/automation/canonical.ts";
 
 const execFile = promisify(execFileCallback);
 const root = process.cwd();
@@ -12,6 +9,12 @@ const guiExecutable = process.env.WEBGPT_GUI_EXECUTABLE?.trim() || join(root, "d
 const cliExecutable = process.env.WEBGPT_CLI_EXECUTABLE?.trim() || join(root, "dist", "package", "Codex Workbench CLI.exe");
 const webgptProjectId = process.env.AUT3_WEBGPT_PROJECT_ID?.trim() || "371c3fb8-30ac-4943-9584-1915045ea34d";
 const outputPath = process.env.AUT3_REAL_PLANNER_GATE_OUTPUT?.trim() || join(root, "docs", "AUT-3-REAL-PLANNER-EVIDENCE.json");
+const automationDb = process.env.AUT3_AUTOMATION_DB?.trim() || "";
+const automationProjectId = process.env.AUT3_AUTOMATION_PROJECT_ID?.trim() || "";
+const handoffPath = process.env.AUT3_HANDOFF_EVIDENCE?.trim() || "";
+// Historical request must be reconciled through the production Journal before
+// a new Planner Prompt is permitted; missing identity is fail-closed.
+const recoveryRequestId = process.env.AUT3_RECOVERY_REQUEST_ID?.trim() || "wgpt-f799139b-93f8-42dd-aa02-cadc08eebfd6";
 const startedAt = new Date().toISOString();
 
 interface Invocation {
@@ -79,21 +82,14 @@ async function waitForEvidence(path: string, child: ReturnType<typeof spawn>): P
   return null;
 }
 
-const tempRoot = await mkdtemp(join(tmpdir(), "codex-workbench-aut3-real-"));
-const automationDb = join(tempRoot, "automation.db");
-const automationProjectId = `aut3-real-planner-${Date.now()}`;
 let child: ReturnType<typeof spawn> | null = null;
 try {
-  const fixtureStore = new AutomationStore(automationDb);
-  await fixtureStore.createAutomationProject({ projectId: automationProjectId, name: "AUT-3 real Planner sanitized fixture" });
-  await fixtureStore.createRequirementVersion({
-    projectId: automationProjectId,
-    requirementVersionId: `aut3-confirmed-requirement-${Date.now()}`,
-    version: 1,
-    status: "CONFIRMED",
-    canonicalPayload: canonicalize({ goal: "Produce a bounded plan for a read-only validation task.", constraints: ["plan only", "no executor", "typed verification"] }, "aut3.fixture.requirement"),
-  });
-  await fixtureStore.close();
+  if (!automationDb || !automationProjectId) throw new Error("AUT3_HANDOFF_REQUIRED: provide the AUT-2 AutomationStore DB and AutomationProject ID; no seed fixture is created.");
+  let handoff: Record<string, unknown> | null = null;
+  if (handoffPath) {
+    const parsed = JSON.parse(await readFile(handoffPath, "utf8")) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) handoff = parsed as Record<string, unknown>;
+  }
 
   await invoke(["close"], 30_000);
   const environment = { ...process.env };
@@ -101,10 +97,13 @@ try {
   environment.AUT3_REAL_PLANNER_GATE = "1";
   environment.AUT3_REAL_PLANNER_GATE_OUTPUT = outputPath;
   environment.AUT3_AUTOMATION_DB = automationDb;
-  environment.AUT3_WEBGPT_REQUESTS_DIR = join(tempRoot, "webgpt-requests");
+  delete environment.AUT3_WEBGPT_REQUESTS_DIR;
   environment.AUT3_AUTOMATION_PROJECT_ID = automationProjectId;
   environment.AUT3_WEBGPT_PROJECT_ID = webgptProjectId;
+  if (typeof handoff?.requirementVersionId === "string") environment.AUT3_EXPECTED_REQUIREMENT_VERSION_ID = handoff.requirementVersionId;
+  if (typeof handoff?.payloadSha256 === "string") environment.AUT3_EXPECTED_REQUIREMENT_PAYLOAD_SHA256 = handoff.payloadSha256;
   environment.AUT3_REAL_PLANNER_TIMEOUT_MS = "240000";
+  environment.AUT3_RECOVERY_REQUEST_ID = recoveryRequestId;
   child = spawn(guiExecutable, [], { cwd: root, env: environment, windowsHide: false, stdio: "ignore" });
 
   const open = await invoke(["open"], 120_000);
@@ -118,5 +117,4 @@ try {
   if (evidence.result !== "PASS_REAL") process.exitCode = 1;
 } finally {
   if (child && child.exitCode === null) child.kill();
-  await rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
 }

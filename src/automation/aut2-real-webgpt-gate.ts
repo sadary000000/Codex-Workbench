@@ -28,6 +28,8 @@ export interface Aut2RealWebGptGateOptions {
   readonly firstRoundOnly?: boolean;
   /** AUT-2 closure mode: seed the already-answerable batch locally and send only Answers -> Draft. */
   readonly answersToDraftOnly?: boolean;
+  /** Fix10 mode: one persisted Project/Store/AlignmentSession from NEEDS_INPUT through USER confirmation. */
+  readonly sameSessionE2E?: boolean;
   readonly now?: () => string;
 }
 
@@ -75,6 +77,28 @@ export interface Aut2RealWebGptGateEvidence {
     readonly allQuestionsOwnRound: boolean;
     readonly roundQuestionIdsExact: boolean;
     readonly orphanQuestionCount: number;
+  };
+  readonly sameSession: {
+    readonly status: "PASS_REAL" | "FAIL" | "NOT_RUN";
+    readonly automationProjectId: string;
+    readonly alignmentSessionId: string | null;
+    readonly checkpoints: Record<string, {
+      readonly alignmentSessionId: string;
+      readonly projectId: string;
+      readonly roundId: string | null;
+      readonly sessionStatus: string;
+      readonly roundStatus: string | null;
+      readonly activeRequirementVersionId: string | null;
+    }>;
+    readonly persistedQuestionIds: readonly string[];
+    readonly answersQuestionIds: readonly string[];
+    readonly questionIdsSha256: string | null;
+    readonly answersQuestionIdsSha256: string | null;
+    readonly questionIdsExact: boolean;
+    readonly sameAutomationProject: boolean;
+    readonly sameAlignmentSession: boolean;
+    readonly sameAnswerRound: boolean;
+    readonly interaction: "NEXT_INTERACTION" | "NOT_RUN";
   };
   readonly draft: {
     readonly status: "PASS_REAL" | "FAIL";
@@ -150,6 +174,7 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
   const responseDiagnostics: RequirementResponseDiagnosticEvent[] = [];
   const firstRoundOnly = options.firstRoundOnly === true;
   const answersToDraftOnly = options.answersToDraftOnly === true;
+  const sameSessionE2E = options.sameSessionE2E === true;
   if (!Number.isSafeInteger(options.setupContext.remainingRealPrompts) || options.setupContext.remainingRealPrompts < 0 || !Number.isSafeInteger(options.setupContext.remainingRepairPrompts) || options.setupContext.remainingRepairPrompts < 0) {
     throw gateError("SETUP_CONTEXT_INVALID", "The setup context must carry bounded remaining real and repair prompt budgets.");
   }
@@ -186,6 +211,19 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
   let idempotentSameSemanticSha256 = false;
   let attemptedRealRequests = options.setupContext.setupPromptCount;
   let setupStatus: "PASS_REAL_SETUP" | "FAIL" = "FAIL";
+  const sameSessionCheckpoints: Record<string, {
+    alignmentSessionId: string;
+    projectId: string;
+    roundId: string | null;
+    sessionStatus: string;
+    roundStatus: string | null;
+    activeRequirementVersionId: string | null;
+  }> = {};
+  let persistedQuestionIds: string[] = [];
+  let answersQuestionIds: string[] = [];
+  let questionIdsSha256: string | null = null;
+  let answersQuestionIdsSha256: string | null = null;
+  let sameSessionAlignmentId: string | null = null;
 
   try {
     const reusedStableChat = options.setupContext.setupPromptCount === 0 && options.setupContext.newChatCount === 0;
@@ -242,6 +280,8 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
       requirementBinding: binding,
     });
     sessionId = session.alignmentSessionId;
+    sameSessionAlignmentId = session.alignmentSessionId;
+    if (sameSessionE2E) sameSessionCheckpoints.start = await alignmentCheckpoint(options.store, session.alignmentSessionId, session.currentRoundId);
 
     if (answersToDraftOnly) {
       const seededQuestions = await questionsForRound(options.store, session.currentRoundId!);
@@ -287,19 +327,24 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
     sessionCurrentRoundId = firstResult.session.currentRoundId;
     const persisted = await options.store.snapshot();
     const persistedRound = persisted.requirementAlignmentRounds.find((item) => item.alignmentRoundId === owningRoundId);
-    const persistedQuestionIds = new Set(persistedRound?.questionIds ?? []);
-    const persistedQuestions = persisted.requirementQuestions.filter((item) => persistedQuestionIds.has(item.questionId));
+    const persistedQuestionIdSet = new Set(persistedRound?.questionIds ?? []);
+    const persistedQuestions = persisted.requirementQuestions.filter((item) => persistedQuestionIdSet.has(item.questionId));
     allQuestionsOwnRound = Boolean(persistedRound)
       && persistedQuestions.length === firstQuestions.length
       && persistedQuestions.every((item) => item.alignmentRoundId === owningRoundId);
     roundQuestionIdsExact = Boolean(persistedRound)
       && persistedRound!.questionIds.length === firstQuestions.length
-      && firstQuestions.every((item) => persistedQuestionIds.has(item.questionId));
+      && firstQuestions.every((item) => persistedQuestionIdSet.has(item.questionId));
     const sessionRoundIds = new Set(persisted.requirementAlignmentRounds.filter((item) => item.alignmentSessionId === firstResult.session.alignmentSessionId).map((item) => item.alignmentRoundId));
     orphanQuestionCount = persisted.requirementQuestions.filter((item) => sessionRoundIds.has(item.alignmentRoundId)).filter((item) => {
       const owner = persisted.requirementAlignmentRounds.find((round) => round.alignmentRoundId === item.alignmentRoundId);
       return !owner?.questionIds.includes(item.questionId);
     }).length;
+    if (sameSessionE2E) {
+      persistedQuestionIds = [...(persistedRound?.questionIds ?? [])];
+      questionIdsSha256 = hashQuestionIds(persistedQuestionIds);
+      sameSessionCheckpoints.needsInput = await alignmentCheckpoint(options.store, firstResult.session.alignmentSessionId, firstResult.round.alignmentRoundId);
+    }
     if (!allQuestionsOwnRound || !roundQuestionIdsExact || sessionCurrentRoundId !== owningRoundId || orphanQuestionCount !== 0) {
       throw gateError("ROUND_PERSISTENCE_INVARIANT_FAILED", "Persisted Requirement questions do not form one owning round graph.");
     }
@@ -309,13 +354,24 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
     if (!firstRoundOnly) {
       let current = draftResult;
       if (!answersToDraftOnly) {
-        for (let attempt = 0; attempt < MAX_REAL_ALIGNMENT_REQUESTS - 1; attempt += 1) {
+        const additionalRequestLimit = sameSessionE2E ? 1 : MAX_REAL_ALIGNMENT_REQUESTS - 1;
+        for (let attempt = 0; attempt < additionalRequestLimit; attempt += 1) {
           const questions = await questionsForRound(options.store, current.round.alignmentRoundId);
           const answers: Record<string, string> = {};
           for (const question of questions) answers[question.questionId] = syntheticAnswer(question.question);
-          await service.answerQuestions({ sessionId, roundId: current.round.alignmentRoundId, answers });
+          if (sameSessionE2E) {
+            sameSessionCheckpoints.beforeAnswers = await alignmentCheckpoint(options.store, sessionId!, current.round.alignmentRoundId);
+            answersQuestionIds = Object.keys(answers);
+            answersQuestionIdsSha256 = hashQuestionIds(answersQuestionIds);
+            if (!sameQuestionIds(persistedQuestionIds, answersQuestionIds)) throw gateError("ANSWER_QUESTION_IDS_MISMATCH", "Answers must use the exact persisted questionIds from the NEEDS_INPUT round.");
+          }
+          const answeredSession = await service.answerQuestions({ sessionId, roundId: current.round.alignmentRoundId, answers });
+          if (sameSessionE2E) {
+            sameSessionCheckpoints.afterAnswers = await alignmentCheckpoint(options.store, answeredSession.alignmentSessionId, current.round.alignmentRoundId);
+          }
           current = await service.requestDraft({ sessionId, binding });
           recordRequest(current, requestIds, idempotencyKeys, semanticSha256);
+          if (sameSessionE2E) sameSessionCheckpoints.readyDraft = await alignmentCheckpoint(options.store, current.session.alignmentSessionId, current.round.alignmentRoundId);
           if (current.status === "DRAFT_READY") break;
           if (current.status !== "WAITING_FOR_USER" || current.envelope?.status !== "NEEDS_INPUT") throw gateError("REQUIREMENT_ROUND_BLOCKED", "The Requirement round became blocked before a draft was produced.");
           roundCount = current.round.roundNumber;
@@ -346,6 +402,16 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
       const activeAfterConfirmation = afterConfirmation?.activeRequirementVersionId ?? null;
       if (activeAfterConfirmation !== requirementVersionId || activeRequirementVersionAfterDraft !== null || !webgptRejected || !systemRejected) throw gateError("CONFIRMATION_GUARD_FAILED", "USER confirmation or non-USER confirmation guard did not converge as required.");
       activeRequirementVersionAfterDraft = activeAfterConfirmation;
+      if (sameSessionE2E) sameSessionCheckpoints.confirmation = await alignmentCheckpoint(options.store, sessionId!, draftResult.round.alignmentRoundId);
+    }
+    if (sameSessionE2E) {
+      const checkpoints = Object.values(sameSessionCheckpoints);
+      const sameProject = checkpoints.length > 0 && checkpoints.every((checkpoint) => checkpoint.projectId === automationProjectId);
+      const sameSession = checkpoints.length > 0 && checkpoints.every((checkpoint) => checkpoint.alignmentSessionId === sessionId);
+      const sameAnswerRound = Boolean(sameSessionCheckpoints.beforeAnswers?.roundId && sameSessionCheckpoints.afterAnswers?.roundId && sameSessionCheckpoints.beforeAnswers.roundId === sameSessionCheckpoints.afterAnswers.roundId && sameSessionCheckpoints.readyDraft?.roundId === sameSessionCheckpoints.beforeAnswers.roundId);
+      if (!sameProject || !sameSession || !sameAnswerRound || !sameQuestionIds(persistedQuestionIds, answersQuestionIds) || !questionIdsSha256 || !answersQuestionIdsSha256 || userConfirmation !== "PASS_REAL_RUNTIME") {
+        throw gateError("SAME_SESSION_INVARIANT_FAILED", "Fix10 same-session checkpoints did not remain on one Project/Store/AlignmentSession with exact persisted answer IDs.");
+      }
     }
   } catch (error) {
     const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "AUT2_REAL_GATE_FAILED";
@@ -401,6 +467,21 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
       allQuestionsOwnRound,
       roundQuestionIdsExact,
       orphanQuestionCount,
+    },
+    sameSession: {
+      status: !sameSessionE2E ? "NOT_RUN" : errors.length === 0 && sameSessionCheckpoints.confirmation ? "PASS_REAL" : "FAIL",
+      automationProjectId,
+      alignmentSessionId: sameSessionAlignmentId,
+      checkpoints: sameSessionCheckpoints,
+      persistedQuestionIds,
+      answersQuestionIds,
+      questionIdsSha256,
+      answersQuestionIdsSha256,
+      questionIdsExact: sameQuestionIds(persistedQuestionIds, answersQuestionIds),
+      sameAutomationProject: Object.values(sameSessionCheckpoints).length > 0 && Object.values(sameSessionCheckpoints).every((checkpoint) => checkpoint.projectId === automationProjectId),
+      sameAlignmentSession: Object.values(sameSessionCheckpoints).length > 0 && Object.values(sameSessionCheckpoints).every((checkpoint) => checkpoint.alignmentSessionId === sessionId),
+      sameAnswerRound: Boolean(sameSessionCheckpoints.beforeAnswers?.roundId && sameSessionCheckpoints.afterAnswers?.roundId && sameSessionCheckpoints.beforeAnswers.roundId === sameSessionCheckpoints.afterAnswers.roundId && sameSessionCheckpoints.readyDraft?.roundId === sameSessionCheckpoints.beforeAnswers.roundId),
+      interaction: sameSessionE2E ? "NEXT_INTERACTION" : "NOT_RUN",
     },
     draft: {
       status: draftResult?.status === "DRAFT_READY" && Boolean(requirementVersionId && payloadSha256) ? "PASS_REAL" : "FAIL",
@@ -486,6 +567,42 @@ function recordRuntimeRequest(requestId: string | null, idempotencyKey: string |
   requestIds.push(requestId);
   idempotencyKeys.push(idempotencyKey ?? "");
   semanticSha256.push(semantic ?? "");
+}
+
+async function alignmentCheckpoint(store: AutomationStore, sessionId: string, roundId: string | null): Promise<{
+  alignmentSessionId: string;
+  projectId: string;
+  roundId: string | null;
+  sessionStatus: string;
+  roundStatus: string | null;
+  activeRequirementVersionId: string | null;
+}> {
+  const snapshot = await store.snapshot();
+  const session = snapshot.requirementAlignmentSessions.find((item) => item.alignmentSessionId === sessionId);
+  if (!session) throw gateError("SESSION_NOT_FOUND", "The same-session evidence checkpoint could not find the AlignmentSession.");
+  const round = roundId ? snapshot.requirementAlignmentRounds.find((item) => item.alignmentRoundId === roundId) : null;
+  const project = snapshot.automationProjects.find((item) => item.projectId === session.projectId);
+  return {
+    alignmentSessionId: session.alignmentSessionId,
+    projectId: session.projectId,
+    roundId: round?.alignmentRoundId ?? session.currentRoundId,
+    sessionStatus: session.status,
+    roundStatus: round?.status ?? null,
+    activeRequirementVersionId: project?.activeRequirementVersionId ?? null,
+  };
+}
+
+function hashQuestionIds(questionIds: readonly string[]): string | null {
+  // Hash the canonical identity vector so evidence is independent of object
+  // insertion order while the raw persisted/answer vectors remain inspectable.
+  return questionIds.length ? sha256(JSON.stringify([...questionIds].sort())) : null;
+}
+
+function sameQuestionIds(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const canonicalLeft = [...left].sort();
+  const canonicalRight = [...right].sort();
+  return canonicalLeft.every((value, index) => value === canonicalRight[index]);
 }
 
 function classifyQuestion(value: string): string[] {

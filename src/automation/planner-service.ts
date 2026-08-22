@@ -45,7 +45,7 @@ export interface PlannerPlanResult {
 }
 
 export class PlannerServiceError extends Error {
-  readonly code: "PROJECT_NOT_FOUND" | "REQUIREMENT_NOT_CONFIRMED" | "PLANNER_NOT_AVAILABLE" | "REQUEST_CONFLICT" | "PLANNER_INVALID";
+  readonly code: "PROJECT_NOT_FOUND" | "REQUIREMENT_NOT_CONFIRMED" | "PLANNER_NOT_AVAILABLE" | "REQUEST_CONFLICT" | "PLANNER_INVALID" | "BLOCKED_PLANNER_RECOVERY";
   readonly details: Record<string, string | number | boolean | null>;
 
   constructor(code: PlannerServiceError["code"], message: string, details: Record<string, string | number | boolean | null> = {}) {

@@ -16,6 +16,12 @@ export interface Aut3RealPlannerGateInput {
   automationProjectId: string;
   outputPath: string;
   timeoutMs?: number;
+  /** Fix10 handoff: AUT-3 must consume the exact RequirementVersion produced by AUT-2. */
+  expectedRequirementVersionId?: string;
+  expectedRequirementPayloadSha256?: string;
+  handoffEvidence?: Record<string, unknown>;
+  /** Production preflight must be supplied by the packaged host before any Planner prompt. */
+  preflight?: () => Promise<Record<string, unknown>>;
 }
 
 export interface Aut3RealPlannerGateEvidence {
@@ -26,12 +32,15 @@ export interface Aut3RealPlannerGateEvidence {
   webgptProjectId: string;
   automationProjectId: string;
   requirement: Record<string, unknown>;
+  handoff: Record<string, unknown>;
   plannerBinding: Record<string, unknown>;
   roleProtection: Record<string, unknown>;
   realPlanner: Record<string, unknown>;
   structuredPlan: Record<string, unknown>;
   persistence: Record<string, unknown>;
   idempotency: Record<string, unknown>;
+  preflight: Record<string, unknown>;
+  recovery: Record<string, unknown>;
   safety: Record<string, unknown>;
   error: Record<string, unknown> | null;
 }
@@ -97,12 +106,15 @@ export async function runAut3RealPlannerGate(input: Aut3RealPlannerGateInput): P
     webgptProjectId: input.webgptProjectId,
     automationProjectId: input.automationProjectId,
     requirement: {},
+    handoff: {},
     plannerBinding: {},
     roleProtection: {},
     realPlanner: { promptBodyLogged: false, responseBodyLogged: false, repairCount: 0, repairPromptCount: 0 },
     structuredPlan: {},
     persistence: {},
     idempotency: {},
+    preflight: { status: "NOT_RUN" },
+    recovery: { status: "NOT_RUN" },
     safety: { nativeExecutorStarted: false, reviewerStarted: false, v1CoreChanged: false, webgptV1Changed: false },
     error: null,
   };
@@ -122,6 +134,20 @@ export async function runAut3RealPlannerGate(input: Aut3RealPlannerGateInput): P
       canonicalPayloadPresent: Boolean(requirement.canonicalPayload),
       projectActiveRequirementVersionId: project.activeRequirementVersionId,
     };
+    evidence.handoff = {
+      source: input.handoffEvidence ? "AUT-2-FIX10" : "PROJECT_ACTIVE_REQUIREMENT",
+      expectedRequirementVersionId: input.expectedRequirementVersionId ?? null,
+      expectedRequirementPayloadSha256: input.expectedRequirementPayloadSha256 ?? null,
+      handoffEvidencePresent: Boolean(input.handoffEvidence),
+      handoffAutomationProjectId: input.handoffEvidence?.automationProjectId ?? null,
+      handoffAlignmentSessionId: input.handoffEvidence?.alignmentSessionId ?? null,
+    };
+    if (input.expectedRequirementVersionId && requirement.requirementVersionId !== input.expectedRequirementVersionId) {
+      throw new PlannerServiceError("REQUEST_CONFLICT", "AUT-3 RequirementVersion does not match the actual AUT-2 Fix10 handoff.");
+    }
+    if (input.expectedRequirementPayloadSha256 && requirement.payloadSha256 !== input.expectedRequirementPayloadSha256) {
+      throw new PlannerServiceError("REQUEST_CONFLICT", "AUT-3 Requirement payload hash does not match the actual AUT-2 Fix10 handoff.");
+    }
     evidence.plannerBinding = bindingEvidence(plannerBefore);
     evidence.roleProtection = {
       requirementBefore: bindingEvidence(requirementBefore),
@@ -131,6 +157,12 @@ export async function runAut3RealPlannerGate(input: Aut3RealPlannerGateInput): P
       plannerBound: plannerBefore.status === "BOUND" && Boolean(plannerBefore.chatUrl),
     };
     if (plannerBefore.status !== "BOUND" || !plannerBefore.chatUrl) throw new PlannerServiceError("PLANNER_NOT_AVAILABLE", "Exact PLANNER Role is not bound to a usable Chat.");
+
+    const preflight = input.preflight ? await input.preflight() : { status: "NOT_RUN", ok: true, reason: "host did not provide a production preflight callback" };
+    evidence.preflight = preflight;
+    if (input.preflight && preflight.ok !== true) {
+      throw new PlannerServiceError("BLOCKED_PLANNER_RECOVERY", "AUT-3 Planner Prompt was blocked by production recovery preflight; no new Planner Prompt was sent.");
+    }
 
     const adapter = createPlannerWebGptAdapter({ roleSession: input.roleSession, requestManager: input.requestManager, timeoutMs: input.timeoutMs });
     const service = new PlannerAutomationService({ store: input.store, webgpt: adapter });
@@ -182,7 +214,28 @@ export async function runAut3RealPlannerGate(input: Aut3RealPlannerGateInput): P
     evidence.result = "PASS_REAL";
   } catch (error) {
     evidence.error = errorEvidence(error);
-    evidence.result = error instanceof PlannerServiceError && ["PROJECT_NOT_FOUND", "REQUIREMENT_NOT_CONFIRMED", "PLANNER_NOT_AVAILABLE"].includes(error.code) ? "BLOCKED" : "FIX_REQUIRED";
+    const details = evidence.error.details && typeof evidence.error.details === "object" && !Array.isArray(evidence.error.details)
+      ? evidence.error.details as Record<string, unknown>
+      : null;
+    if (details?.requestId && typeof details.requestId === "string") {
+      evidence.realPlanner = {
+        ...evidence.realPlanner,
+        requestId: details.requestId,
+        idempotencyKey: typeof details.idempotencyKey === "string" ? details.idempotencyKey : null,
+        targetChatUrl: typeof details.targetChatUrl === "string" ? details.targetChatUrl : null,
+        journalState: typeof details.state === "string" ? details.state : null,
+        submittedAt: typeof details.submittedAt === "string" ? details.submittedAt : null,
+        acceptedAt: typeof details.acceptedAt === "string" ? details.acceptedAt : null,
+      };
+      if (input.preflight) {
+        try {
+          evidence.recovery = { status: "CAPTURED_AFTER_FAILURE", requestId: details.requestId, preflight: await input.preflight() };
+        } catch (preflightError) {
+          evidence.recovery = { status: "PREFLIGHT_FAILED", requestId: details.requestId, error: errorEvidence(preflightError) };
+        }
+      }
+    }
+    evidence.result = error instanceof PlannerServiceError && ["PROJECT_NOT_FOUND", "REQUIREMENT_NOT_CONFIRMED", "PLANNER_NOT_AVAILABLE", "BLOCKED_PLANNER_RECOVERY"].includes(error.code) ? "BLOCKED" : "FIX_REQUIRED";
   } finally {
     evidence.completedAt = new Date().toISOString();
     await persistEvidence(input.outputPath, evidence);

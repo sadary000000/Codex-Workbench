@@ -11,6 +11,7 @@ import {
   validatePlannerEnvelope,
 } from "../src/automation/index.ts";
 import type { PlannerReadyPayload } from "../src/automation/index.ts";
+import { runAut3RealPlannerGate } from "../src/automation/aut3-real-planner-gate.ts";
 
 function validPayload(): PlannerReadyPayload {
   return {
@@ -119,6 +120,41 @@ test("planner contract enforces JIT shape, typed verifiers, and bounded status u
   forgedId.payload.currentStage.steps[0].stepSpecId = "forged";
   assert.throws(() => validatePlannerEnvelope(forgedId), (error: unknown) => error instanceof PlannerContractError && error.code === "SCHEMA_INVALID");
   assert.throws(() => validatePlannerRequest({ canonicalRequirementPayload: "{bad", requirementPayloadSha256: "0".repeat(64), planningMode: "JIT", projectId: "p", requirementVersionId: "r", currentPlanVersion: null, currentProjectState: { lifecycle: "REQUIREMENT_CONFIRMED", revision: 1 }, knownIssues: [], evidenceSummary: [], availableResourceCapabilities: [] }), (error: unknown) => error instanceof PlannerContractError && error.code === "SCHEMA_INVALID");
+});
+
+test("AUT-3 production preflight blocks recovery uncertainty before any Planner prompt", async () => {
+  const value = await fixture();
+  const outputPath = join(value.root, "aut3-preflight-blocked.json");
+  let submitCalls = 0;
+  try {
+    const result = await runAut3RealPlannerGate({
+      store: value.store,
+      roleSession: {
+        async status(projectId, role) {
+          return { projectId, role, status: "BOUND", chatUrl: `https://chatgpt.com/c/${role.toLowerCase()}` };
+        },
+        async submit() {
+          submitCalls += 1;
+          throw new Error("must not submit when preflight is blocked");
+        },
+      },
+      requestManager: {
+        async waitForRequest() { throw new Error("must not wait when preflight is blocked"); },
+        async getResult() { throw new Error("must not read when preflight is blocked"); },
+      },
+      webgptProjectId: "webgpt-project",
+      automationProjectId: value.projectId,
+      outputPath,
+      preflight: async () => ({ ok: false, reason: "production journal contains RECOVERY_REQUIRED" }),
+    });
+    assert.equal(result.result, "BLOCKED");
+    assert.equal(result.error?.code, "BLOCKED_PLANNER_RECOVERY");
+    assert.equal(result.preflight.ok, false);
+    assert.equal(submitCalls, 0);
+  } finally {
+    await value.store.close();
+    await rm(value.root, { recursive: true, force: true });
+  }
 });
 
 test("planner persists one immutable version, stage summaries, and current-stage steps atomically", async () => {

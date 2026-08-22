@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile as execFileCallback, spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -11,16 +11,22 @@ const guiExecutable = process.env.WEBGPT_GUI_EXECUTABLE?.trim() || join(root, "d
 const cliExecutable = process.env.WEBGPT_CLI_EXECUTABLE?.trim() || join(root, "dist", "package", "Codex Workbench CLI.exe");
 const webgptProjectId = process.env.AUT2_WEBGPT_PROJECT_ID?.trim() || "";
 const webgptProjectName = process.env.AUT2_WEBGPT_PROJECT_NAME?.trim() || "workts";
-const permanentEvidencePath = process.env.AUT2_GATE4_EVIDENCE_PATH?.trim() || join(root, "docs", "AUT-2-GATE-FIX-4-RUNTIME.json");
+// Historical AUT-3 request from the prior isolated gate. The packaged host
+// checks this through the production Journal; absence is a recovery blocker.
+const plannerRecoveryRequestId = process.env.AUT3_RECOVERY_REQUEST_ID?.trim() || "wgpt-f799139b-93f8-42dd-aa02-cadc08eebfd6";
+const fix10SameSession = process.env.AUT2_FIX10_SAME_SESSION === "1";
+const combinedFix10 = process.env.AUT2_AUT3_FIX10_REAL_GATE === "1";
+const permanentEvidencePath = process.env.AUT2_GATE4_EVIDENCE_PATH?.trim() || (fix10SameSession ? join(root, "docs", "AUT-2-FIX10-STAGE-REVIEW-RUNTIME.json") : join(root, "docs", "AUT-2-GATE-FIX-4-RUNTIME.json"));
 const reusableEvidencePath = process.env.AUT2_REUSE_SETUP_EVIDENCE?.trim() || join(root, "docs", "AUT-2-GATE-FIX-3-RUNTIME.json");
 const budgetPath = process.env.AUT2_REAL_PROMPT_BUDGET_PATH?.trim() || join(root, "docs", "AUT-2-REAL-PROMPT-BUDGET.json");
-const MAX_CUMULATIVE_REAL_PROMPTS = 12;
+const MAX_CUMULATIVE_REAL_PROMPTS = fix10SameSession ? 14 : 12;
 const MAX_CUMULATIVE_REPAIR_PROMPTS = 3;
 const MAX_CUMULATIVE_NEW_CHATS = 3;
 const MAX_CUMULATIVE_SETUP_PROMPTS = 2;
 const fix8FirstRound = process.env.AUT2_FIX8_FIRST_ROUND === "1";
 const answersToDraftOnly = process.env.AUT2_ANSWERS_TO_DRAFT_ONLY === "1";
 const onePromptMode = fix8FirstRound || answersToDraftOnly;
+const strictNoRepairOrSetup = onePromptMode || fix10SameSession;
 const setupPrompt = "This chat is being initialized for a bounded automated requirement-alignment smoke test. Reply exactly: ROLE_READY. Do not infer or store any project requirements from this setup message.";
 const startedAt = new Date().toISOString();
 
@@ -236,17 +242,22 @@ if (budgetBefore.realPromptCount > MAX_CUMULATIVE_REAL_PROMPTS
 }
 const remainingRealPrompts = MAX_CUMULATIVE_REAL_PROMPTS - budgetBefore.realPromptCount;
 const remainingRepairPrompts = MAX_CUMULATIVE_REPAIR_PROMPTS - budgetBefore.repairPromptCount;
-if (remainingRealPrompts <= 0 || (!onePromptMode && remainingRepairPrompts <= 0)) {
+if (remainingRealPrompts <= 0 || (!strictNoRepairOrSetup && remainingRepairPrompts <= 0)) {
   throw new Error("AUT2_BUDGET_EXHAUSTED: no bounded real/repair prompt remains; no WebGPT action was attempted.");
 }
-if (onePromptMode && !process.env.AUT2_REUSE_CHAT_URL?.trim()) {
-  throw new Error("AUT2_REUSE_REQUIRED: this bounded one-prompt gate must use the existing canonical REQUIREMENT Chat and cannot create a new Chat.");
+if (strictNoRepairOrSetup && !process.env.AUT2_REUSE_CHAT_URL?.trim()) {
+  throw new Error("AUT2_REUSE_REQUIRED: this bounded gate must use the existing canonical REQUIREMENT Chat and cannot create a new Chat or setup Prompt.");
 }
 
 const tempRoot = await mkdtemp(join(tmpdir(), "codex-workbench-aut2-real-"));
 const evidencePath = join(tempRoot, "evidence.json");
 const setupPath = join(tempRoot, "setup-context.json");
-const automationDb = join(tempRoot, "automation.db");
+const aut3EvidencePath = join(tempRoot, "aut3-evidence.json");
+const handoffPath = join(tempRoot, "handoff.json");
+const automationDb = fix10SameSession
+  ? join(root, "user-data", "automation", `aut2-fix10-aut3-${Date.now()}.db`)
+  : join(tempRoot, "automation.db");
+if (fix10SameSession) await mkdir(join(root, "user-data", "automation"), { recursive: true });
 const setupKey = `aut2:setup:${Date.now()}:${randomUUID()}`;
 const closeBefore = await invoke(["close"], 120_000);
 const environment = { ...process.env };
@@ -258,9 +269,19 @@ environment.AUT2_REAL_WEBGPT_SETUP_TIMEOUT_MS = "420000";
 environment.AUT2_AUTOMATION_DB = automationDb;
 environment.AUT2_WEBGPT_PROJECT_ID = webgptProjectId;
 environment.AUT2_WEBGPT_PROJECT_NAME = webgptProjectName;
-environment.AUT2_AUTOMATION_PROJECT_ID = "aut2-real-webgpt-gate-2";
+environment.AUT2_AUTOMATION_PROJECT_ID = process.env.AUT2_AUTOMATION_PROJECT_ID?.trim() || "aut2-real-webgpt-gate-2";
 environment.AUT2_REAL_WEBGPT_TIMEOUT_MS = "240000";
 environment.AUT2_FIX8_FIRST_ROUND = fix8FirstRound ? "1" : "0";
+environment.AUT2_FIX10_SAME_SESSION = fix10SameSession ? "1" : "0";
+if (combinedFix10) {
+  environment.AUT2_AUT3_FIX10_REAL_GATE = "1";
+  environment.AUT3_WEBGPT_PROJECT_ID = webgptProjectId;
+  environment.AUT3_AUTOMATION_PROJECT_ID = environment.AUT2_AUTOMATION_PROJECT_ID;
+  environment.AUT3_REAL_PLANNER_GATE_OUTPUT = aut3EvidencePath;
+  environment.AUT2_AUT3_HANDOFF_OUTPUT = handoffPath;
+  environment.AUT3_REAL_PLANNER_TIMEOUT_MS = "240000";
+  environment.AUT3_RECOVERY_REQUEST_ID = plannerRecoveryRequestId;
+}
 const child = spawn(guiExecutable, [], { cwd: root, env: environment, windowsHide: false, stdio: "ignore" });
 let statusDuring: Invocation | null = null;
 let setupInvocations: Record<string, Invocation> = {};
@@ -333,7 +354,7 @@ try {
     }
   }
   if (!reused) {
-    if (onePromptMode) throw new Error("AUT2_REUSE_FAILED: existing canonical REQUIREMENT Chat could not be read and no fallback Chat may be created.");
+    if (strictNoRepairOrSetup) throw new Error("AUT2_REUSE_FAILED: existing canonical REQUIREMENT Chat could not be read and no fallback Chat may be created.");
     if (budgetBefore.setupPromptCount >= MAX_CUMULATIVE_SETUP_PROMPTS || budgetBefore.newChatCount >= MAX_CUMULATIVE_NEW_CHATS) {
       throw new Error("AUT2_SETUP_BUDGET_EXHAUSTED: stable Chat reuse failed and creating another setup Chat/Prompt is forbidden by the cumulative budget.");
     }
@@ -397,15 +418,33 @@ try {
 }
 
 const gateEvidence = await waitForEvidence(evidencePath, child);
+const aut3Evidence = combinedFix10 ? await waitForEvidence(aut3EvidencePath, child) : null;
+let handoffEvidence: Record<string, unknown> | null = null;
+if (combinedFix10) {
+  try {
+    const parsed = JSON.parse(await readFile(handoffPath, "utf8")) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) handoffEvidence = parsed as Record<string, unknown>;
+  } catch { /* The combined gate will report a missing handoff below. */ }
+}
 const finalRoleStatus = child.exitCode === null ? await invoke(["role", "status", "--project", webgptProjectId, "--role", "requirement"]) : null;
 const closeAfter = child.exitCode === null ? await invoke(["close"]) : null;
 if (child.exitCode === null) {
   child.kill();
   await new Promise((resolve) => setTimeout(resolve, 2_000));
 }
+const aut2Fix10EvidencePath = join(root, "docs", "AUT-2-FIX10-TRUE-SAME-SESSION-E2E.json");
+const aut3HandoffEvidencePath = join(root, "docs", "AUT-3-AUT2-HANDOFF-EVIDENCE.json");
+const aut3EvidencePermanentPath = join(root, "docs", "AUT-3-REAL-PLANNER-EVIDENCE-FIX10.json");
+if (combinedFix10) {
+  if (gateEvidence) await writeFile(aut2Fix10EvidencePath, `${JSON.stringify(gateEvidence, null, 2)}\n`, "utf8");
+  if (handoffEvidence) await writeFile(aut3HandoffEvidencePath, `${JSON.stringify(handoffEvidence, null, 2)}\n`, "utf8");
+  if (aut3Evidence) await writeFile(aut3EvidencePermanentPath, `${JSON.stringify(aut3Evidence, null, 2)}\n`, "utf8");
+}
 await rm(tempRoot, { recursive: true, force: true });
 
-const result = gateEvidence?.result === "PASS_REAL" ? "PASS_REAL" : gateEvidence ? "FAIL" : "BLOCKED";
+const result = combinedFix10
+  ? gateEvidence?.result === "PASS_REAL" && aut3Evidence?.result === "PASS_REAL" ? "PASS_REAL" : gateEvidence || aut3Evidence ? "FIX_REQUIRED" : "BLOCKED"
+  : gateEvidence?.result === "PASS_REAL" ? "PASS_REAL" : gateEvidence ? "FAIL" : "BLOCKED";
 const gateAttemptedRealRequests = typeof gateEvidence?.attemptedRealRequests === "number" ? gateEvidence.attemptedRealRequests : 0;
 const gateRealPromptCount = typeof gateEvidence?.realPromptCount === "number" ? gateEvidence.realPromptCount : 0;
 const gateDispatchedRealPromptCount = typeof gateEvidence?.dispatchedRealPromptCount === "number" ? gateEvidence.dispatchedRealPromptCount : Math.max(0, gateRealPromptCount - (setupContext ? Number(setupContext.setupPromptCount ?? 0) : 0));
@@ -414,7 +453,7 @@ const accountedRealPromptCount = gateEvidence ? gateDispatchedRealPromptCount : 
 const gateRepairBudget = gateEvidence?.repairPromptBudget && typeof gateEvidence.repairPromptBudget === "object" && !Array.isArray(gateEvidence.repairPromptBudget) ? gateEvidence.repairPromptBudget as Record<string, unknown> : null;
 const gateDispatchedRepairPromptCount = typeof gateRepairBudget?.used === "number" ? gateRepairBudget.used : (typeof gateEvidence?.repairCount === "number" ? gateEvidence.repairCount : 0);
 const wrapperEvidence = {
-  stage: "AUT-2 Gate Fix 4",
+  stage: combinedFix10 ? "AUT-2 Fix10 + AUT-3 Real Handoff Gate" : "AUT-2 Gate Fix 4",
   result,
   startedAt,
   officialCli: {
@@ -456,8 +495,18 @@ const wrapperEvidence = {
     hardMaxNewChats: MAX_CUMULATIVE_NEW_CHATS,
     source: "gate_evidence_request_diagnostics_and_setup_context",
   },
+  fix10: combinedFix10 ? {
+    sameSessionEvidencePath: aut2Fix10EvidencePath,
+    handoffEvidencePath: aut3HandoffEvidencePath,
+    aut3EvidencePath: aut3EvidencePermanentPath,
+    automationDbPath: automationDb,
+    productionRequestJournalOverride: false,
+    aut2Evidence: gateEvidence?.sameSession ?? null,
+    handoffEvidence,
+    aut3Evidence,
+  } : null,
   gateEvidence,
-  temporaryEvidence: "cleaned-after-run",
+  temporaryEvidence: combinedFix10 ? "evidence-promoted; AutomationStore retained at automationDbPath" : "cleaned-after-run",
 };
 await writeFile(permanentEvidencePath, `${JSON.stringify(wrapperEvidence, null, 2)}\n`, "utf8");
 console.log(JSON.stringify(wrapperEvidence, null, 2));
