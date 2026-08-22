@@ -5,6 +5,7 @@
 ```yaml
 stage_name: ARCH-V2-2 Shared CodexHost / Generated Protocol / Runtime Dedup
 base_commit: 55a2aec
+implementation_commit: 283f5d9
 goal: one initialized App Server host for ordinary Main Native Threads, generated protocol/version evidence, and explicit spawn topology
 in_scope:
   - ordinary Main Native Thread shared Host/ThreadHandle transport

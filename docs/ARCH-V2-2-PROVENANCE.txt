@@ -1,3 +1,7 @@
+ARCH-V2-2 implementation commit: 283f5d9 (feat: implement arch-v2-2 shared codex host).
 ARCH-V2-2 package provenance is finalized after the implementation commit and review-package generation.
 The packaged application is built from the staged ARCH-V2-2 source and verified with the source/test commands in ARCH-V2-2-TEST-SUMMARY.md.
+Package path: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe.
+Outer EXE SHA256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC.
+Review package will contain only ARCH-V2-2 evidence and scoped source/test files.
 No cookies, tokens, browser profiles, passwords, or private chat content are included.
