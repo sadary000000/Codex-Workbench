@@ -12,6 +12,7 @@ import {
 import {
   REQUIREMENT_ROLE,
   createReadyForDraftEnvelope,
+  createNeedsInputEnvelope,
   requirementContextFromRequest,
   type IWebGPTRequirementRequest,
   type IWebGPTRequirementService,
@@ -31,11 +32,20 @@ interface Fixture {
 
 class FakeRequirementWebGPT implements IWebGPTRequirementService {
   readonly requests: IWebGPTRequirementRequest[] = [];
-  mode: "READY" | "THROW" = "READY";
+  mode: "READY" | "NEEDS_INPUT" | "THROW" = "READY";
 
   async submit(request: IWebGPTRequirementRequest): Promise<RequirementEnvelope> {
     this.requests.push(request);
     if (this.mode === "THROW") throw new Error("bounded provider response was malformed");
+    if (this.mode === "NEEDS_INPUT") {
+      return createNeedsInputEnvelope(requirementContextFromRequest(request), {
+        questions: [
+          { category: "LANGUAGE", question: "Which language is required?", whyNeeded: "The implementation language changes the acceptance surface.", blocking: true, resolutionMode: "USER_REQUIRED", options: ["Python", "TypeScript"] },
+          { category: "OUTPUT", question: "What output format is required?", whyNeeded: "The output contract must be testable.", blocking: true, resolutionMode: "USER_REQUIRED", options: ["SUM=<integer>"] },
+          { category: "TESTS", question: "Are automated tests required?", whyNeeded: "The verification boundary must be explicit.", blocking: false, resolutionMode: "ASSUMPTION_ALLOWED" },
+        ],
+      });
+    }
     return createReadyForDraftEnvelope(requirementContextFromRequest(request), {
       draft: {
         goal: "Deliver the confirmed AUT-2 requirement baseline.",
@@ -65,14 +75,14 @@ async function dispose(value: Fixture): Promise<void> {
   }
 }
 
-function service(store: AutomationStore, webgpt?: FakeRequirementWebGPT, evidenceProvider?: RequirementEvidenceProvider): RequirementAutomationService {
+function service(store: AutomationStore, webgpt?: FakeRequirementWebGPT, evidenceProvider?: RequirementEvidenceProvider, makeId?: (prefix: string) => string): RequirementAutomationService {
   let sequence = 0;
   return new RequirementAutomationService({
     store,
     webgpt,
     evidenceProvider,
     now: () => TEST_NOW,
-    id: (prefix) => `${prefix}-aut2-${++sequence}`,
+    id: makeId ?? ((prefix) => `${prefix}-aut2-${++sequence}`),
   });
 }
 
@@ -155,6 +165,95 @@ test("aligns a batch, resolves context, calls explicit REQUIREMENT WebGPT, and r
     assert.equal(second.draft?.requirementVersionId, first.draft?.requirementVersionId);
     assert.equal(second.request?.requestId, first.request?.requestId);
     assert.equal(webgpt.requests.length, 1);
+  } finally {
+    await dispose(value);
+  }
+});
+
+test("persists NEEDS_INPUT questions in one next-interaction round, rejects cross-round answers, and idempotently reconciles after reopen", async () => {
+  const value = await fixture();
+  const webgpt = new FakeRequirementWebGPT();
+  let reopened: AutomationStore | null = null;
+  try {
+    webgpt.mode = "NEEDS_INPUT";
+    const worker = service(value.store, webgpt);
+    const session = await worker.startAlignment({
+      projectId: value.projectId,
+      goal: "Build a bounded command-line calculator.",
+      webgptProjectId: "webgpt-project",
+      requirementBinding: binding(),
+      questions: [],
+    });
+    const requestRoundId = session.currentRoundId;
+    assert.ok(requestRoundId);
+    const first = await worker.requestDraft({ sessionId: session.alignmentSessionId, binding: binding() });
+    assert.equal(first.status, "WAITING_FOR_USER");
+    assert.ok(first.request && first.envelope);
+    assert.notEqual(first.round.alignmentRoundId, requestRoundId);
+
+    const persisted = await value.store.snapshot();
+    const persistedSession = persisted.requirementAlignmentSessions.find((item) => item.alignmentSessionId === session.alignmentSessionId);
+    assert.equal(persistedSession?.status, "WAITING_FOR_USER");
+    assert.equal(persistedSession?.currentRoundId, first.round.alignmentRoundId);
+    const persistedRound = persisted.requirementAlignmentRounds.find((item) => item.alignmentRoundId === first.round.alignmentRoundId);
+    assert.ok(persistedRound);
+    const persistedQuestions = persisted.requirementQuestions.filter((item) => persistedRound.questionIds.includes(item.questionId));
+    assert.equal(persistedQuestions.length, 3);
+    assert.equal(new Set(persistedRound.questionIds).size, persistedRound.questionIds.length);
+    assert.ok(persistedQuestions.every((item) => item.alignmentRoundId === persistedRound.alignmentRoundId));
+    assert.equal(persistedQuestions.some((item) => item.alignmentRoundId === requestRoundId), false);
+
+    const crossRoundQuestion = persistedQuestions[0];
+    assert.ok(crossRoundQuestion);
+    await assert.rejects(
+      worker.answerQuestions({ sessionId: session.alignmentSessionId, roundId: requestRoundId, answers: { [crossRoundQuestion.questionId]: "Python" } }),
+      expectServiceError("QUESTION_NOT_FOUND"),
+    );
+    const afterRejectedAnswer = await value.store.snapshot();
+    assert.equal(afterRejectedAnswer.requirementQuestions.find((item) => item.questionId === crossRoundQuestion.questionId)?.status, "OPEN");
+
+    await value.store.close();
+    reopened = new AutomationStore(join(value.root, "automation.db"));
+    const reopenedWorker = service(reopened, webgpt);
+    const replay = await reopenedWorker.reconcileRequirementEnvelope({
+      sessionId: session.alignmentSessionId,
+      roundId: requestRoundId,
+      request: first.request,
+      envelope: first.envelope,
+    });
+    assert.equal(replay.status, "WAITING_FOR_USER");
+    assert.equal(replay.round.alignmentRoundId, first.round.alignmentRoundId);
+    assert.equal(webgpt.requests.length, 1);
+    const afterReplay = await reopened.snapshot();
+    assert.equal(afterReplay.requirementAlignmentRounds.length, 2);
+    assert.equal(afterReplay.requirementQuestions.length, 3);
+
+    const conflictingEnvelope = createNeedsInputEnvelope(requirementContextFromRequest(first.request), {
+      questions: [{ category: "LANGUAGE", question: "A different language is required?", whyNeeded: "The semantic result is intentionally different.", blocking: true, resolutionMode: "USER_REQUIRED" }],
+    });
+    await assert.rejects(
+      reopenedWorker.reconcileRequirementEnvelope({ sessionId: session.alignmentSessionId, roundId: requestRoundId, request: first.request, envelope: conflictingEnvelope }),
+      expectServiceError("REQUEST_CONFLICT"),
+    );
+  } finally {
+    await reopened?.close();
+    await dispose(value);
+  }
+});
+
+test("rolls back a failed NEEDS_INPUT persistence transaction without orphan Questions or a partial Round", async () => {
+  const value = await fixture();
+  const webgpt = new FakeRequirementWebGPT();
+  let sequence = 0;
+  const worker = service(value.store, webgpt, undefined, (prefix) => prefix === "question" ? "question-fixed" : `${prefix}-rollback-${++sequence}`);
+  try {
+    webgpt.mode = "NEEDS_INPUT";
+    const session = await worker.startAlignment({ projectId: value.projectId, goal: "Exercise transaction rollback.", webgptProjectId: "webgpt-project", requirementBinding: binding(), questions: [] });
+    await assert.rejects(worker.requestDraft({ sessionId: session.alignmentSessionId, binding: binding() }), /already exists/i);
+    const afterFailure = await value.store.snapshot();
+    assert.equal(afterFailure.requirementQuestions.length, 0);
+    assert.equal(afterFailure.requirementAlignmentRounds.length, 1);
+    assert.equal(afterFailure.requirementAlignmentSessions[0]?.currentRoundId, session.currentRoundId);
   } finally {
     await dispose(value);
   }

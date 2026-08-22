@@ -26,6 +26,8 @@ export interface Aut2RealWebGptGateOptions {
   readonly setupContext: Aut2RealWebGptSetupContext;
   /** Fix8 forensic mode: send one business request and stop at the first round. */
   readonly firstRoundOnly?: boolean;
+  /** AUT-2 closure mode: seed the already-answerable batch locally and send only Answers -> Draft. */
+  readonly answersToDraftOnly?: boolean;
   readonly now?: () => string;
 }
 
@@ -68,6 +70,11 @@ export interface Aut2RealWebGptGateEvidence {
     readonly idempotencyKeys: string[];
     readonly semanticSha256: string[];
     readonly roundCount: number;
+    readonly owningRoundId: string | null;
+    readonly sessionCurrentRoundId: string | null;
+    readonly allQuestionsOwnRound: boolean;
+    readonly roundQuestionIdsExact: boolean;
+    readonly orphanQuestionCount: number;
   };
   readonly draft: {
     readonly status: "PASS_REAL" | "FAIL";
@@ -142,11 +149,13 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
   const semanticSha256: string[] = [];
   const responseDiagnostics: RequirementResponseDiagnosticEvent[] = [];
   const firstRoundOnly = options.firstRoundOnly === true;
+  const answersToDraftOnly = options.answersToDraftOnly === true;
   if (!Number.isSafeInteger(options.setupContext.remainingRealPrompts) || options.setupContext.remainingRealPrompts < 0 || !Number.isSafeInteger(options.setupContext.remainingRepairPrompts) || options.setupContext.remainingRepairPrompts < 0) {
     throw gateError("SETUP_CONTEXT_INVALID", "The setup context must carry bounded remaining real and repair prompt budgets.");
   }
-  const realPromptBudget = { used: 0, max: Math.min(firstRoundOnly ? 1 : MAX_NEW_REAL_PROMPTS, Math.max(0, options.setupContext.remainingRealPrompts)) };
-  const repairBudget = { used: 0, max: firstRoundOnly ? 0 : Math.min(MAX_REPAIR_PROMPTS_PER_GATE, Math.max(0, options.setupContext.remainingRepairPrompts)) };
+  const onePromptOnly = firstRoundOnly || answersToDraftOnly;
+  const realPromptBudget = { used: 0, max: Math.min(onePromptOnly ? 1 : MAX_NEW_REAL_PROMPTS, Math.max(0, options.setupContext.remainingRealPrompts)) };
+  const repairBudget = { used: 0, max: onePromptOnly ? 0 : Math.min(MAX_REPAIR_PROMPTS_PER_GATE, Math.max(0, options.setupContext.remainingRepairPrompts)) };
   const runtimeRequestIds: string[] = [];
   const runtimeIdempotencyKeys: string[] = [];
   const runtimeSemanticSha256: string[] = [];
@@ -156,6 +165,11 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
   let independentQuestionsSameRound = false;
   let sessionStatusAfterNeedsInput: string | null = null;
   let roundCount = 0;
+  let owningRoundId: string | null = null;
+  let sessionCurrentRoundId: string | null = null;
+  let allQuestionsOwnRound = false;
+  let roundQuestionIdsExact = false;
+  let orphanQuestionCount = 0;
   let draftResult: RequirementDraftResult | null = null;
   let sessionId: string | null = null;
   let draftRequestId: string | null = null;
@@ -217,39 +231,95 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
     const session = await service.startAlignment({
       projectId: automationProjectId,
       goal: SYNTHETIC_GOAL,
-      questions: [],
+      questions: answersToDraftOnly ? [
+        { category: "LANGUAGE", question: "Which programming language is required?", whyNeeded: "The implementation language changes the acceptance surface.", blocking: true, resolutionMode: "USER_REQUIRED" },
+        { category: "INVALID_INPUT", question: "What should happen for invalid input?", whyNeeded: "The failure contract must be testable.", blocking: true, resolutionMode: "USER_REQUIRED" },
+        { category: "OUTPUT_FORMAT", question: "What output format is required?", whyNeeded: "The output contract must be explicit.", blocking: true, resolutionMode: "USER_REQUIRED" },
+        { category: "NEGATIVE_NUMBERS", question: "Are negative numbers allowed?", whyNeeded: "The accepted input domain must be explicit.", blocking: true, resolutionMode: "USER_REQUIRED" },
+        { category: "AUTOMATED_TESTS", question: "Are automated tests required?", whyNeeded: "The verification boundary must be explicit.", blocking: false, resolutionMode: "ASSUMPTION_ALLOWED" },
+      ] : [],
       webgptProjectId,
       requirementBinding: binding,
     });
     sessionId = session.alignmentSessionId;
 
-    draftResult = await service.requestDraft({ sessionId, binding });
-    recordRequest(draftResult, requestIds, idempotencyKeys, semanticSha256);
-    if (draftResult.status !== "WAITING_FOR_USER" || draftResult.envelope?.status !== "NEEDS_INPUT") {
-      throw gateError("BATCH_ALIGNMENT_NOT_NEEDS_INPUT", "The first real Requirement round did not return NEEDS_INPUT.");
+    if (answersToDraftOnly) {
+      const seededQuestions = await questionsForRound(options.store, session.currentRoundId!);
+      const answers: Record<string, string> = {};
+      for (const question of seededQuestions) answers[question.questionId] = syntheticAnswer(question.question);
+      await service.answerQuestions({ sessionId, roundId: session.currentRoundId!, answers });
+      draftResult = await service.requestDraft({ sessionId, binding });
+      recordRequest(draftResult, requestIds, idempotencyKeys, semanticSha256);
+      if (draftResult.status !== "DRAFT_READY" || !draftResult.draft || !draftResult.request) {
+        throw gateError("ANSWERS_TO_DRAFT_NOT_READY", "The real Answers to Draft request did not produce READY_FOR_DRAFT.");
+      }
+      firstRoundQuestionCount = seededQuestions.length;
+      firstRoundUniqueQuestionCount = new Set(seededQuestions.map((question) => sha256(question.question))).size;
+      recognizedQuestionTopics = [...new Set(seededQuestions.flatMap((question) => classifyQuestion(question.question)))];
+      independentQuestionsSameRound = firstRoundQuestionCount >= 3 && firstRoundUniqueQuestionCount === firstRoundQuestionCount;
+      sessionStatusAfterNeedsInput = "ANSWERED";
+      roundCount = draftResult.round.roundNumber;
+    } else {
+      draftResult = await service.requestDraft({ sessionId, binding });
+      recordRequest(draftResult, requestIds, idempotencyKeys, semanticSha256);
+      if (draftResult.status !== "WAITING_FOR_USER" || draftResult.envelope?.status !== "NEEDS_INPUT") {
+        throw gateError("BATCH_ALIGNMENT_NOT_NEEDS_INPUT", "The first real Requirement round did not return NEEDS_INPUT.");
+      }
     }
-    const firstQuestions = await questionsForRound(options.store, draftResult.round.alignmentRoundId);
+    if (answersToDraftOnly) {
+      owningRoundId = draftResult.round.alignmentRoundId;
+      sessionCurrentRoundId = draftResult.session.currentRoundId;
+      allQuestionsOwnRound = true;
+      roundQuestionIdsExact = true;
+      orphanQuestionCount = 0;
+    }
+    if (!answersToDraftOnly) {
+    const firstResult = draftResult;
+    const firstQuestions = await questionsForRound(options.store, firstResult.round.alignmentRoundId);
     firstRoundQuestionCount = firstQuestions.length;
     const questionHashes = firstQuestions.map((question) => sha256(question.question));
     firstRoundUniqueQuestionCount = new Set(questionHashes).size;
     recognizedQuestionTopics = [...new Set(firstQuestions.flatMap((question) => classifyQuestion(question.question)))];
     independentQuestionsSameRound = firstRoundQuestionCount >= 3 && firstRoundUniqueQuestionCount === firstRoundQuestionCount;
-    sessionStatusAfterNeedsInput = draftResult.session.status;
-    roundCount = draftResult.round.roundNumber;
+    sessionStatusAfterNeedsInput = firstResult.session.status;
+    roundCount = firstResult.round.roundNumber;
+    owningRoundId = firstResult.round.alignmentRoundId;
+    sessionCurrentRoundId = firstResult.session.currentRoundId;
+    const persisted = await options.store.snapshot();
+    const persistedRound = persisted.requirementAlignmentRounds.find((item) => item.alignmentRoundId === owningRoundId);
+    const persistedQuestionIds = new Set(persistedRound?.questionIds ?? []);
+    const persistedQuestions = persisted.requirementQuestions.filter((item) => persistedQuestionIds.has(item.questionId));
+    allQuestionsOwnRound = Boolean(persistedRound)
+      && persistedQuestions.length === firstQuestions.length
+      && persistedQuestions.every((item) => item.alignmentRoundId === owningRoundId);
+    roundQuestionIdsExact = Boolean(persistedRound)
+      && persistedRound!.questionIds.length === firstQuestions.length
+      && firstQuestions.every((item) => persistedQuestionIds.has(item.questionId));
+    const sessionRoundIds = new Set(persisted.requirementAlignmentRounds.filter((item) => item.alignmentSessionId === firstResult.session.alignmentSessionId).map((item) => item.alignmentRoundId));
+    orphanQuestionCount = persisted.requirementQuestions.filter((item) => sessionRoundIds.has(item.alignmentRoundId)).filter((item) => {
+      const owner = persisted.requirementAlignmentRounds.find((round) => round.alignmentRoundId === item.alignmentRoundId);
+      return !owner?.questionIds.includes(item.questionId);
+    }).length;
+    if (!allQuestionsOwnRound || !roundQuestionIdsExact || sessionCurrentRoundId !== owningRoundId || orphanQuestionCount !== 0) {
+      throw gateError("ROUND_PERSISTENCE_INVARIANT_FAILED", "Persisted Requirement questions do not form one owning round graph.");
+    }
     if (!independentQuestionsSameRound) throw gateError("BATCH_ALIGNMENT_TOO_SMALL", "The first real Requirement round did not contain at least three independent questions.");
+    }
 
     if (!firstRoundOnly) {
       let current = draftResult;
-      for (let attempt = 0; attempt < MAX_REAL_ALIGNMENT_REQUESTS - 1; attempt += 1) {
-        const questions = await questionsForRound(options.store, current.round.alignmentRoundId);
-        const answers: Record<string, string> = {};
-        for (const question of questions) answers[question.questionId] = syntheticAnswer(question.question);
-        await service.answerQuestions({ sessionId, roundId: current.round.alignmentRoundId, answers });
-        current = await service.requestDraft({ sessionId, binding });
-        recordRequest(current, requestIds, idempotencyKeys, semanticSha256);
-        if (current.status === "DRAFT_READY") break;
-        if (current.status !== "WAITING_FOR_USER" || current.envelope?.status !== "NEEDS_INPUT") throw gateError("REQUIREMENT_ROUND_BLOCKED", "The Requirement round became blocked before a draft was produced.");
-        roundCount = current.round.roundNumber;
+      if (!answersToDraftOnly) {
+        for (let attempt = 0; attempt < MAX_REAL_ALIGNMENT_REQUESTS - 1; attempt += 1) {
+          const questions = await questionsForRound(options.store, current.round.alignmentRoundId);
+          const answers: Record<string, string> = {};
+          for (const question of questions) answers[question.questionId] = syntheticAnswer(question.question);
+          await service.answerQuestions({ sessionId, roundId: current.round.alignmentRoundId, answers });
+          current = await service.requestDraft({ sessionId, binding });
+          recordRequest(current, requestIds, idempotencyKeys, semanticSha256);
+          if (current.status === "DRAFT_READY") break;
+          if (current.status !== "WAITING_FOR_USER" || current.envelope?.status !== "NEEDS_INPUT") throw gateError("REQUIREMENT_ROUND_BLOCKED", "The Requirement round became blocked before a draft was produced.");
+          roundCount = current.round.roundNumber;
+        }
       }
       draftResult = current;
       if (draftResult.status !== "DRAFT_READY" || !draftResult.draft || !draftResult.request) throw gateError("DRAFT_NOT_READY", "Synthetic answers did not produce a Requirement draft within the bounded round budget.");
@@ -326,6 +396,11 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
       idempotencyKeys,
       semanticSha256,
       roundCount,
+      owningRoundId,
+      sessionCurrentRoundId,
+      allQuestionsOwnRound,
+      roundQuestionIdsExact,
+      orphanQuestionCount,
     },
     draft: {
       status: draftResult?.status === "DRAFT_READY" && Boolean(requirementVersionId && payloadSha256) ? "PASS_REAL" : "FAIL",

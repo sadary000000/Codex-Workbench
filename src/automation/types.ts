@@ -27,6 +27,7 @@ export type StepTerminalResult = "COMPLETED" | "FAILED" | "BLOCKED" | "CANCELLED
 export type StepKind = "PLANNER_STEP" | "SYSTEM_STEP";
 export type RiskClass = "LOW" | "MEDIUM" | "HIGH";
 export type SideEffectClass = "PURE" | "IDEMPOTENT" | "RECONCILABLE" | "NON_REPEATABLE";
+export type PlannerVerificationClass = "BUILD" | "TEST" | "GIT_DIFF" | "GIT_STATUS" | "FILE_EXISTS" | "HASH_MATCH" | "JSON_SCHEMA" | "CLI_SMOKE" | "HARDWARE_SMOKE" | "CUSTOM_APPROVED";
 
 export type ExecutionAttemptLifecycle =
   | "CREATED"
@@ -272,6 +273,15 @@ export interface PlanVersion {
   requirementVersionId: string;
   version: number;
   status: PlanVersionStatus;
+  /** Optional AUT-3 structured plan payload; older AUT-1.5 records omit it. */
+  canonicalPayload?: string;
+  /** SHA-256 of the canonical structured plan payload. */
+  payloadSha256?: string;
+  /** Requirement hash bound when this structured plan was produced. */
+  requirementPayloadSha256?: string;
+  planningMode?: "JIT";
+  plannerRole?: "PLANNER";
+  plannerChatRef?: string | null;
   createdAt: IsoTimestamp;
   supersedes: string | null;
 }

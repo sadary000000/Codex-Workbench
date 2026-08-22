@@ -19,6 +19,8 @@ const MAX_CUMULATIVE_REPAIR_PROMPTS = 3;
 const MAX_CUMULATIVE_NEW_CHATS = 3;
 const MAX_CUMULATIVE_SETUP_PROMPTS = 2;
 const fix8FirstRound = process.env.AUT2_FIX8_FIRST_ROUND === "1";
+const answersToDraftOnly = process.env.AUT2_ANSWERS_TO_DRAFT_ONLY === "1";
+const onePromptMode = fix8FirstRound || answersToDraftOnly;
 const setupPrompt = "This chat is being initialized for a bounded automated requirement-alignment smoke test. Reply exactly: ROLE_READY. Do not infer or store any project requirements from this setup message.";
 const startedAt = new Date().toISOString();
 
@@ -234,11 +236,11 @@ if (budgetBefore.realPromptCount > MAX_CUMULATIVE_REAL_PROMPTS
 }
 const remainingRealPrompts = MAX_CUMULATIVE_REAL_PROMPTS - budgetBefore.realPromptCount;
 const remainingRepairPrompts = MAX_CUMULATIVE_REPAIR_PROMPTS - budgetBefore.repairPromptCount;
-if (remainingRealPrompts <= 0 || (!fix8FirstRound && remainingRepairPrompts <= 0)) {
+if (remainingRealPrompts <= 0 || (!onePromptMode && remainingRepairPrompts <= 0)) {
   throw new Error("AUT2_BUDGET_EXHAUSTED: no bounded real/repair prompt remains; no WebGPT action was attempted.");
 }
-if (fix8FirstRound && !process.env.AUT2_REUSE_CHAT_URL?.trim()) {
-  throw new Error("AUT2_FIX8_REUSE_REQUIRED: Fix8 must use the existing canonical REQUIREMENT Chat and cannot create a new Chat.");
+if (onePromptMode && !process.env.AUT2_REUSE_CHAT_URL?.trim()) {
+  throw new Error("AUT2_REUSE_REQUIRED: this bounded one-prompt gate must use the existing canonical REQUIREMENT Chat and cannot create a new Chat.");
 }
 
 const tempRoot = await mkdtemp(join(tmpdir(), "codex-workbench-aut2-real-"));
@@ -331,7 +333,7 @@ try {
     }
   }
   if (!reused) {
-    if (fix8FirstRound) throw new Error("AUT2_FIX8_REUSE_FAILED: existing canonical REQUIREMENT Chat could not be read and no fallback Chat may be created.");
+    if (onePromptMode) throw new Error("AUT2_REUSE_FAILED: existing canonical REQUIREMENT Chat could not be read and no fallback Chat may be created.");
     if (budgetBefore.setupPromptCount >= MAX_CUMULATIVE_SETUP_PROMPTS || budgetBefore.newChatCount >= MAX_CUMULATIVE_NEW_CHATS) {
       throw new Error("AUT2_SETUP_BUDGET_EXHAUSTED: stable Chat reuse failed and creating another setup Chat/Prompt is forbidden by the cumulative budget.");
     }

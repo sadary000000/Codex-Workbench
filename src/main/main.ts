@@ -32,6 +32,7 @@ import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 import { AutomationStore } from "../automation/store.ts";
 import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../automation/aut2-real-webgpt-gate.ts";
+import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -123,7 +124,7 @@ let automationStore: AutomationStore | null = null;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
 
 function automationDatabasePath(): string {
-  const override = process.env.AUT2_AUTOMATION_DB?.trim();
+  const override = process.env.AUT3_AUTOMATION_DB?.trim() || process.env.AUT2_AUTOMATION_DB?.trim();
   return override || join(app.getPath("userData"), "automation", "automation.db");
 }
 
@@ -167,8 +168,30 @@ async function startAut2RealWebGptGate(): Promise<void> {
     outputPath,
     setupContext,
     firstRoundOnly: process.env.AUT2_FIX8_FIRST_ROUND === "1",
+    answersToDraftOnly: process.env.AUT2_ANSWERS_TO_DRAFT_ONLY === "1",
   });
   logger.info("aut2_real_webgpt_gate_finished", { result: evidence.result, attemptedRealRequests: evidence.attemptedRealRequests, realPromptCount: evidence.realPromptCount, outputPath });
+  if (evidence.result !== "PASS_REAL") process.exitCode = 1;
+  setTimeout(() => app.quit(), 50);
+}
+
+async function startAut3RealPlannerGate(): Promise<void> {
+  if (process.env.AUT3_REAL_PLANNER_GATE !== "1") return;
+  if (!automationStore) throw new Error("AUT-3 real Planner Gate requires the Automation Store.");
+  const outputPath = process.env.AUT3_REAL_PLANNER_GATE_OUTPUT?.trim() || join(app.getPath("userData"), "aut3-real-planner-evidence.json");
+  const webgptProjectId = process.env.AUT3_WEBGPT_PROJECT_ID?.trim() || "";
+  const automationProjectId = process.env.AUT3_AUTOMATION_PROJECT_ID?.trim() || "";
+  if (!webgptProjectId || !automationProjectId) throw new Error("AUT3_WEBGPT_PROJECT_ID and AUT3_AUTOMATION_PROJECT_ID are required for the real Gate.");
+  const evidence = await runAut3RealPlannerGate({
+    store: automationStore,
+    roleSession: getWebGptRoleService(),
+    requestManager: getWebGptRequestManager(),
+    webgptProjectId,
+    automationProjectId,
+    outputPath,
+    timeoutMs: Number(process.env.AUT3_REAL_PLANNER_TIMEOUT_MS ?? 240_000),
+  });
+  logger.info("aut3_real_planner_gate_finished", { result: evidence.result, requestId: evidence.realPlanner.requestId ?? null, outputPath });
   if (evidence.result !== "PASS_REAL") process.exitCode = 1;
   setTimeout(() => app.quit(), 50);
 }
@@ -665,9 +688,12 @@ function getWebGptWorkspace(): WebGptWorkspace {
 function getWebGptRequestManager(): WebGptRequestManager {
   if (webGptRequestManager) return webGptRequestManager;
   const workspace = getWebGptWorkspace();
+  const requestStorageDirectory = process.env.AUT3_WEBGPT_REQUESTS_DIR?.trim()
+    || process.env.AUT2_WEBGPT_REQUESTS_DIR?.trim()
+    || join(app.getPath("userData"), "webgpt", "requests");
   webGptRequestManager = new WebGptRequestManager({
     workspace,
-    storageDirectory: join(app.getPath("userData"), "webgpt", "requests"),
+    storageDirectory: requestStorageDirectory,
     projectRegistry: getWebGptProjectRegistry(),
     onState: (state) => send(IPC.webGptRequestState, state),
     onTerminal: (record) => webGptRoleService?.handleTerminal(record),
@@ -1620,6 +1646,12 @@ if (officialCliMode) {
           if (process.env.AUT2_REAL_WEBGPT_GATE === "1") {
             void startAut2RealWebGptGate().catch((error) => {
               logError(logger, "aut2_real_webgpt_gate_failed", error);
+              process.exitCode = 1;
+              setTimeout(() => app.quit(), 50);
+            });
+          } else if (process.env.AUT3_REAL_PLANNER_GATE === "1") {
+            void startAut3RealPlannerGate().catch((error) => {
+              logError(logger, "aut3_real_planner_gate_failed", error);
               process.exitCode = 1;
               setTimeout(() => app.quit(), 50);
             });

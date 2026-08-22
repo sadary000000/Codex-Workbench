@@ -179,6 +179,22 @@ function validateVersions(document: Record<string, unknown>): void {
     string(item.requirementVersionId, `planVersions[${index}].requirementVersionId`, 256);
     integer(item.version, `planVersions[${index}].version`, 1);
     enumValue(item.status, `planVersions[${index}].status`, new Set(["DRAFT", "ACTIVE", "SUPERSEDED"]));
+    if (item.canonicalPayload !== undefined) {
+      let canonicalPayload: string;
+      try {
+        canonicalPayload = canonicalizeJson(string(item.canonicalPayload, `planVersions[${index}].canonicalPayload`, 32 * 1024), `planVersions[${index}].canonicalPayload`);
+      } catch (error) {
+        throw new AutomationSchemaError(error instanceof Error ? error.message : "Plan canonical payload is invalid.");
+      }
+      const payloadSha256 = string(item.payloadSha256, `planVersions[${index}].payloadSha256`, 128);
+      if (payloadSha256 !== sha256Hex(canonicalPayload)) throw new AutomationSchemaError(`planVersions[${index}].payloadSha256 does not match canonicalPayload.`);
+    } else if (item.payloadSha256 !== undefined) {
+      throw new AutomationSchemaError(`planVersions[${index}].payloadSha256 requires canonicalPayload.`);
+    }
+    if (item.requirementPayloadSha256 !== undefined && item.requirementPayloadSha256 !== null) string(item.requirementPayloadSha256, `planVersions[${index}].requirementPayloadSha256`, 128);
+    if (item.planningMode !== undefined && item.planningMode !== "JIT") throw new AutomationSchemaError(`planVersions[${index}].planningMode is unsupported.`);
+    if (item.plannerRole !== undefined && item.plannerRole !== "PLANNER") throw new AutomationSchemaError(`planVersions[${index}].plannerRole is unsupported.`);
+    if (item.plannerChatRef !== undefined && item.plannerChatRef !== null) string(item.plannerChatRef, `planVersions[${index}].plannerChatRef`, 2_000);
     timestamp(item.createdAt, `planVersions[${index}].createdAt`);
     optionalString(item.supersedes, `planVersions[${index}].supersedes`, 256);
   });

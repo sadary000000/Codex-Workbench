@@ -67,6 +67,7 @@ import type {
   VersionedSpecStatus,
   WorkspaceSnapshot,
 } from "./types.ts";
+import type { PlannerReadyPayload } from "./planner-contract.ts";
 
 export type AutomationStoreErrorCode =
   | "AUTOMATION_DB_CORRUPT"
@@ -127,6 +128,31 @@ export interface PlanVersionInput {
   version: number;
   status?: PlanVersionStatus;
   supersedes?: string | null;
+  canonicalPayload?: string;
+  payloadSha256?: string;
+  requirementPayloadSha256?: string;
+  planningMode?: "JIT";
+  plannerRole?: "PLANNER";
+  plannerChatRef?: string | null;
+}
+
+export interface PersistPlannerPlanInput {
+  projectId: string;
+  requirementVersionId: string;
+  requirementPayloadSha256: string;
+  payload: PlannerReadyPayload;
+  canonicalPayload: string;
+  payloadSha256: string;
+  plannerChatRef: string;
+  requestId: string;
+  idempotencyKey: string;
+  planVersionId?: string;
+}
+
+export interface PersistPlannerPlanResult {
+  planVersion: PlanVersion;
+  stageSpecs: StageSpec[];
+  stepSpecs: StepSpec[];
 }
 
 export interface StageSpecInput {
@@ -448,6 +474,11 @@ export class AutomationTransaction {
         if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "RequirementVersion immutable payload cannot be replaced.");
       }
     }
+    if (name === "planVersions") {
+      for (const key of ["planVersionId", "projectId", "requirementVersionId", "version", "canonicalPayload", "payloadSha256", "requirementPayloadSha256", "planningMode", "plannerRole", "plannerChatRef", "createdAt", "supersedes"]) {
+        if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "PlanVersion immutable definition cannot be replaced.");
+      }
+    }
     if (name === "stepSpecs") {
       for (const key of ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "goal", "riskClass", "sideEffectClass", "createdAt", "supersedes"]) {
         if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StepSpec immutable definition cannot be replaced.");
@@ -630,10 +661,95 @@ export class AutomationStore {
         tx.replace("planVersions", { ...old, status: "SUPERSEDED" });
       }
       const item: PlanVersion = { planVersionId: id(input.planVersionId, "planVersionId"), projectId: input.projectId, requirementVersionId: input.requirementVersionId, version: input.version, status: input.status ?? (supersedes ? "ACTIVE" : "DRAFT"), createdAt: now(), supersedes };
+      if (input.canonicalPayload !== undefined) {
+        const canonicalPayload = canonicalizeJson(input.canonicalPayload, "plan.canonicalPayload");
+        const payloadSha256 = sha256Hex(canonicalPayload);
+        if (input.payloadSha256 !== undefined && input.payloadSha256 !== payloadSha256) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Plan payload SHA-256 does not match canonicalPayload.");
+        item.canonicalPayload = canonicalPayload;
+        item.payloadSha256 = payloadSha256;
+      }
+      if (input.requirementPayloadSha256 !== undefined) item.requirementPayloadSha256 = text(input.requirementPayloadSha256, "plan.requirementPayloadSha256", 128);
+      if (input.planningMode !== undefined) item.planningMode = input.planningMode;
+      if (input.plannerRole !== undefined) item.plannerRole = input.plannerRole;
+      if (input.plannerChatRef !== undefined) item.plannerChatRef = input.plannerChatRef === null ? null : text(input.plannerChatRef, "plan.plannerChatRef", 2_000);
       tx.insert("planVersions", item);
       if (item.status === "ACTIVE") tx.replace("automationProjects", { ...project, activePlanVersionId: item.planVersionId, updatedAt: now(), revision: project.revision + 1 });
       tx.appendAudit({ projectId: project.projectId, entityType: "PlanVersion", entityId: item.planVersionId, eventType: "PLAN_VERSION_CREATED", actorType: "SYSTEM", actorRef: null, boundedPayload: { version: item.version }, correlationId: null, causationId: null });
       return clone(item);
+    });
+  }
+
+  async persistPlannerPlan(input: PersistPlannerPlanInput): Promise<PersistPlannerPlanResult> {
+    return this.transaction((tx) => {
+      const project = tx.require("automationProjects", input.projectId);
+      const requirement = tx.require("requirementVersions", input.requirementVersionId);
+      if (requirement.projectId !== project.projectId || project.activeRequirementVersionId !== requirement.requirementVersionId || !["CONFIRMED", "ACTIVE"].includes(requirement.status)) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner plan must bind the exact confirmed active RequirementVersion.");
+      }
+      if (requirement.payloadSha256 !== input.requirementPayloadSha256) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner requirement payload hash does not match the active RequirementVersion.");
+      const canonicalPayload = canonicalizeJson(input.canonicalPayload, "planner.canonicalPayload");
+      const payloadSha256 = sha256Hex(canonicalPayload);
+      if (payloadSha256 !== input.payloadSha256) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner payload SHA-256 does not match canonicalPayload.");
+      const previous = project.activePlanVersionId ? tx.require("planVersions", project.activePlanVersionId) : null;
+      if (previous) tx.replace("planVersions", { ...previous, status: "SUPERSEDED" });
+      const timestamp = now();
+      const planVersion: PlanVersion = {
+        planVersionId: id(input.planVersionId, "planVersionId"),
+        projectId: project.projectId,
+        requirementVersionId: requirement.requirementVersionId,
+        version: Math.max(0, ...tx.table("planVersions").filter((item) => item.projectId === project.projectId).map((item) => item.version)) + 1,
+        status: "ACTIVE",
+        canonicalPayload,
+        payloadSha256,
+        requirementPayloadSha256: input.requirementPayloadSha256,
+        planningMode: "JIT",
+        plannerRole: "PLANNER",
+        plannerChatRef: text(input.plannerChatRef, "plan.plannerChatRef", 2_000),
+        createdAt: timestamp,
+        supersedes: previous?.planVersionId ?? null,
+      };
+      tx.insert("planVersions", planVersion);
+      const stageSpecs: StageSpec[] = [];
+      const stepSpecs: StepSpec[] = [];
+      for (const stage of input.payload.stages) {
+        const stageSpec: StageSpec = {
+          stageSpecId: id(undefined, "stageSpecId"),
+          planVersionId: planVersion.planVersionId,
+          stageKey: text(stage.stageKey, "stage.stageKey", 256),
+          specVersion: 1,
+          status: "ACTIVE",
+          ordinal: stage.ordinal,
+          goal: text(stage.goal, "stage.goal", 8_192),
+          createdAt: timestamp,
+          supersedes: null,
+        };
+        tx.insert("stageSpecs", stageSpec);
+        stageSpecs.push(stageSpec);
+        if (stage.stageKey !== input.payload.currentStage.stageKey) continue;
+        for (const step of input.payload.currentStage.steps) {
+          const stepSpec: StepSpec = {
+            stepSpecId: id(undefined, "stepSpecId"),
+            stageSpecId: stageSpec.stageSpecId,
+            stepKey: text(step.stepKey, "step.stepKey", 256),
+            specVersion: 1,
+            kind: "PLANNER_STEP",
+            goal: text(step.goal, "step.goal", 8_192),
+            riskClass: step.riskClass,
+            sideEffectClass: step.sideEffectClass,
+            specStatus: "ACTIVE",
+            createdAt: timestamp,
+            supersedes: null,
+          };
+          tx.insert("stepSpecs", stepSpec);
+          const runtime: StepRuntime = { stepRuntimeId: `runtime:${stepSpec.stepSpecId}`, stepSpecId: stepSpec.stepSpecId, lifecycle: "NOT_STARTED", terminalResult: null, waitReason: "NONE", currentAttemptId: null, revision: 0, createdAt: timestamp, updatedAt: timestamp };
+          tx.insert("stepRuntimes", runtime);
+          stepSpecs.push(stepSpec);
+        }
+      }
+      tx.replace("automationProjects", { ...project, lifecycle: "PLANNING", activePlanVersionId: planVersion.planVersionId, updatedAt: timestamp, revision: project.revision + 1 });
+      tx.appendAudit({ projectId: project.projectId, entityType: "PlanVersion", entityId: planVersion.planVersionId, eventType: "PLANNER_PLAN_ACCEPTED", actorType: "WEBGPT_RUNTIME", actorRef: null, boundedPayload: { version: planVersion.version, payloadSha256: planVersion.payloadSha256 ?? null, requirementPayloadSha256: planVersion.requirementPayloadSha256 ?? null, stageCount: stageSpecs.length, stepCount: stepSpecs.length, currentStageKey: input.payload.currentStage.stageKey }, correlationId: planVersion.planVersionId, causationId: null });
+      tx.appendAudit({ projectId: project.projectId, entityType: "PlanVersion", entityId: planVersion.planVersionId, eventType: "PLANNER_PLAN_IDEMPOTENCY_BOUND", actorType: "AUTOMATION", actorRef: null, boundedPayload: { payloadSha256: planVersion.payloadSha256 ?? null, requirementPayloadSha256: planVersion.requirementPayloadSha256 ?? null }, correlationId: input.requestId, causationId: input.idempotencyKey });
+      return { planVersion: clone(planVersion), stageSpecs: clone(stageSpecs), stepSpecs: clone(stepSpecs) };
     });
   }
 

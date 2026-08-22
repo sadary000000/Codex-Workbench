@@ -11,8 +11,10 @@ import {
   REQUIREMENT_ROLE,
   REQUIREMENT_MODEL_RESPONSE_INSTRUCTIONS,
   validateRequirementEnvelope,
+  validateRequirementRequest,
 } from "./requirement-webgpt-contract.ts";
 import { RequirementEgressPolicy, type ContextItem } from "./requirement-egress-policy.ts";
+import { canonicalize } from "./canonical.ts";
 import {
   analyzeImpact as analyzeChangeImpact,
   canonicalizeChangeValue,
@@ -139,6 +141,18 @@ export interface RequestDraftInput {
   binding: RequirementChatBinding;
   contextItems?: readonly ContextItem[];
   repairEnvelope?: RequirementEnvelope;
+}
+
+/**
+ * Reconcile a response that was already accepted by the explicit WebGPT
+ * request path.  The request and envelope are validated again at this
+ * boundary; no synthetic request journal entry or provider call is created.
+ */
+export interface ReconcileRequirementEnvelopeInput {
+  sessionId: string;
+  roundId: string;
+  request: unknown;
+  envelope: unknown;
 }
 
 export interface RequirementDraftResult {
@@ -482,6 +496,12 @@ export class RequirementAutomationService {
     });
   }
 
+  async reconcileRequirementEnvelope(input: ReconcileRequirementEnvelopeInput): Promise<RequirementDraftResult> {
+    const request = validateRequirementRequest(input.request);
+    const envelope = validateRequirementEnvelope(input.envelope, requirementContextFromRequest(request));
+    return this.applyEnvelope({ sessionId: input.sessionId, roundId: input.roundId, request, envelope });
+  }
+
   async requestDraft(input: RequestDraftInput): Promise<RequirementDraftResult> {
     const snapshot = await this.store.snapshot();
     const session = snapshot.requirementAlignmentSessions.find((item) => item.alignmentSessionId === input.sessionId);
@@ -546,6 +566,19 @@ export class RequirementAutomationService {
       idempotencyKey,
       prompt,
     });
+    const existingNeedsInputAudit = snapshot.auditEvents.find((event) =>
+      event.entityType === "RequirementAlignmentSession"
+      && event.entityId === session.alignmentSessionId
+      && event.eventType === "REQUIREMENT_WEBGPT_NEEDS_INPUT"
+      && event.causationId === request.requestId,
+    );
+    if (existingNeedsInputAudit) {
+      const auditRoundId = existingNeedsInputAudit.boundedPayload.roundId;
+      if (typeof auditRoundId !== "string") throw new RequirementServiceError("REQUEST_CONFLICT", "The persisted NEEDS_INPUT result has no owning round identity.");
+      const persistedRound = snapshot.requirementAlignmentRounds.find((item) => item.alignmentRoundId === auditRoundId);
+      if (!persistedRound) throw new RequirementServiceError("REQUEST_CONFLICT", "The persisted NEEDS_INPUT result references a missing owning round.");
+      return { status: "WAITING_FOR_USER", session, round: persistedRound, draft: null, request, envelope: null };
+    }
     if (session.latestDraftVersionId && session.latestRequestRef && session.latestSemanticSha256 === request.semanticSha256) {
       const existingDraft = snapshot.requirementVersions.find((item) => item.requirementVersionId === session.latestDraftVersionId);
       if (existingDraft?.status === "DRAFT") {
@@ -585,14 +618,39 @@ export class RequirementAutomationService {
     if (!currentSession || !currentRound) throw new RequirementServiceError("SESSION_NOT_FOUND", "The alignment state disappeared before response reconciliation.");
     if (input.envelope.status === "NEEDS_INPUT") {
       const needsInput = input.envelope as Extract<RequirementEnvelope, { status: "NEEDS_INPUT" }>;
+      const responseSemanticHash = sha256Hex(canonicalize(input.envelope, "requirementEnvelope"));
       const next = await this.store.transaction((tx) => {
         const { session, round } = getRound(tx, input.sessionId, input.roundId);
+        const requestRef = round.webgptRequestRef
+          ? tx.table("externalRefs").find((item) => item.externalRefId === round.webgptRequestRef)
+          : null;
+        if (!requestRef || requestRef.opaqueId !== input.request.requestId || session.latestSemanticSha256 !== input.request.semanticSha256) {
+          throw new RequirementServiceError("REQUEST_CONFLICT", "The Requirement response does not match the persisted request identity for this round.");
+        }
+        const existingAudit = tx.table("auditEvents").find((event) =>
+          event.entityType === "RequirementAlignmentSession"
+          && event.entityId === session.alignmentSessionId
+          && event.eventType === "REQUIREMENT_WEBGPT_NEEDS_INPUT"
+          && event.causationId === input.request.requestId,
+        );
+        if (existingAudit) {
+          const storedResultSemanticHash = existingAudit.boundedPayload.resultSemanticHash;
+          if (storedResultSemanticHash !== responseSemanticHash) {
+            throw new RequirementServiceError("REQUEST_CONFLICT", "The same Requirement request identity was replayed with different semantic content.");
+          }
+          const existingRoundId = existingAudit.boundedPayload.roundId;
+          if (typeof existingRoundId !== "string") throw new RequirementServiceError("REQUEST_CONFLICT", "The persisted NEEDS_INPUT result has no owning round identity.");
+          const existingRound = tx.require("requirementAlignmentRounds", existingRoundId);
+          const existingSession = tx.require("requirementAlignmentSessions", session.alignmentSessionId);
+          return { session: clone(existingSession), round: clone(existingRound), idempotent: true };
+        }
         const timestamp = this.clock();
         const questionIds: string[] = [];
+        const nextRoundId = this.makeId("round");
         for (const [ordinal, raw] of needsInput.payload.questions.entries()) {
           const question: RequirementQuestion = {
             questionId: this.makeId("question"),
-            alignmentRoundId: round.alignmentRoundId,
+            alignmentRoundId: nextRoundId,
             ordinal,
             category: boundedText(raw.category, `questions[${ordinal}].category`),
             question: boundedText(raw.question, `questions[${ordinal}].question`),
@@ -615,7 +673,6 @@ export class RequirementAutomationService {
           questionIds.push(question.questionId);
         }
         const assumptionIds: string[] = [];
-        const nextRoundId = this.makeId("round");
         for (const raw of needsInput.payload.assumptions ?? []) {
           const assumption: RequirementAssumption = {
             assumptionId: this.makeId("assumption"),
@@ -640,8 +697,8 @@ export class RequirementAutomationService {
         tx.insert("requirementAlignmentRounds", newRound);
         const nextSession: RequirementAlignmentSession = { ...session, currentRoundId: newRound.alignmentRoundId, status: "WAITING_FOR_USER", updatedAt: timestamp, revision: (session.revision ?? 0) + 1 };
         tx.replace("requirementAlignmentSessions", nextSession);
-        tx.appendAudit({ projectId: session.projectId, entityType: "RequirementAlignmentSession", entityId: session.alignmentSessionId, eventType: "REQUIREMENT_WEBGPT_NEEDS_INPUT", actorType: "WEBGPT_RUNTIME", actorRef: null, boundedPayload: { questionCount: questionIds.length, assumptionCount: assumptionIds.length }, correlationId: session.alignmentSessionId, causationId: input.request.requestId });
-        return { session: clone(nextSession), round: clone(newRound) };
+        tx.appendAudit({ projectId: session.projectId, entityType: "RequirementAlignmentSession", entityId: session.alignmentSessionId, eventType: "REQUIREMENT_WEBGPT_NEEDS_INPUT", actorType: "WEBGPT_RUNTIME", actorRef: null, boundedPayload: { roundId: newRound.alignmentRoundId, questionCount: questionIds.length, assumptionCount: assumptionIds.length, resultSemanticHash: responseSemanticHash }, correlationId: session.alignmentSessionId, causationId: input.request.requestId });
+        return { session: clone(nextSession), round: clone(newRound), idempotent: false };
       });
       return { status: "WAITING_FOR_USER", session: next.session, round: next.round, draft: null, request: input.request, envelope: input.envelope };
     }
