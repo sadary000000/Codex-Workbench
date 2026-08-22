@@ -1,0 +1,53 @@
+{
+  "stage": "AUT-2 Final Requirement Closure",
+  "result": "PASS_CANDIDATE",
+  "project": "workts",
+  "projectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+  "role": "REQUIREMENT",
+  "roundPersistence": {
+    "result": "PASS_REAL_RUNTIME",
+    "questionCount": 5,
+    "sessionStatusAfterNeedsInput": "ANSWERED",
+    "roundCount": 1,
+    "allQuestionsOwnRound": true,
+    "roundQuestionIdsExact": true,
+    "orphanQuestionCount": 0
+  },
+  "answersToDraft": {
+    "result": "PASS_REAL",
+    "requestId": "aut2-webgpt-d47d6a739fae6e431f482ed7958ba46e2faf3d32012b9102",
+    "idempotencyKey": "aut2:alignment:6a7602f1-41a0-4229-a9df-2a2a1dff2333:round:c16b5d8a-ed9c-494b-97d6-3b826cfa423c:7dbc9bec859ba8fd8f5c12277b70dd93",
+    "alignmentStatus": "READY_FOR_DRAFT",
+    "requirementVersionId": "requirement:6b69c9b7-568e-436f-ba36-463ccfe88f8f",
+    "payloadSha256": "3b92cbc83427152818da74964b03fe417efbb10a08f291ea66cd2de932368def",
+    "gptSelfConfirmation": "NOT_REQUESTED"
+  },
+  "userConfirmation": {
+    "result": "PASS_REAL_RUNTIME",
+    "actor": "USER",
+    "from": "DRAFT",
+    "to": "CONFIRMED",
+    "webgptRejected": true,
+    "systemRejected": true
+  },
+  "binding": {
+    "originalRestored": true,
+    "plannerUnchanged": true,
+    "reviewerUnchanged": true
+  },
+  "accounting": {
+    "cumulativeRealPromptCount": 12,
+    "hardMaxRealPromptCount": 12,
+    "cumulativeRepairPromptCount": 3,
+    "hardMaxRepairPromptCount": 3,
+    "cumulativeNewChatCount": 2,
+    "hardMaxNewChatCount": 3,
+    "newPromptsAfterHardMax": 0,
+    "newChatsInClosure": 0
+  },
+  "sourceEvidence": "docs/AUT-2-FIX9-ANSWERS-DRAFT-REAL-EVIDENCE.json",
+  "promptBodiesLogged": false,
+  "responseBodiesLogged": false,
+  "cookiesRead": false,
+  "tokensRead": false
+}

@@ -1,4 +1,32 @@
-# AUT-2 Stage Review — Gate Fix 5
+# AUT-2 Final Stage Review — Fix9 Round Identity + Final Requirement Closure
+
+## Latest Gate Result
+
+```yaml
+stage: AUT-2 Fix9 + Final Requirement Closure
+result: PASS_CANDIDATE
+latest_real_gate: PASS_REAL
+round_persistence: PASS_REAL_RUNTIME
+answers_to_draft: PASS_REAL
+explicit_user_confirmation: PASS_REAL_RUNTIME
+aut3_started: CONDITIONAL_AUT3_ATTEMPTED
+v1_core_changed: NO
+webgpt_v1_changed: NO
+```
+
+Fix9 选择 `NEXT_INTERACTION`，修复了 `round.questionIds` 与 `Question.roundId` 跨 Round 的真实持久化缺陷。真实 `NEEDS_INPUT` 响应包含 5 个问题，Round ownership、Session currentRound、事务回滚和幂等重放均通过。随后正式 answer API 完成 Answers → `READY_FOR_DRAFT`，`actor=USER` 完成 `DRAFT → CONFIRMED`。
+
+最新机器证据： [AUT-2-FINAL-REAL-REQUIREMENT-EVIDENCE.json](D:/办公/AI/Codex_Workbench_V1/docs/AUT-2-FINAL-REAL-REQUIREMENT-EVIDENCE.json)
+
+Fix9 Round 机器证据： [AUT-2-FIX9-ROUND-PERSISTENCE-EVIDENCE.json](D:/办公/AI/Codex_Workbench_V1/docs/AUT-2-FIX9-ROUND-PERSISTENCE-EVIDENCE.json)
+
+预算：累计真实 Prompt `12/12` hard maximum；repair `3/3`；新 Chat `2/3`。原 REQUIREMENT binding 已恢复，PLANNER/REVIEWER 未修改。
+
+AUT-3 条件阶段随后启动了 Planner 自动化基础，但最新真实 Planner request 进入 `RECOVERY_REQUIRED`，所以 AUT-3 单独标记 `FIX_REQUIRED`，不能反向改变 AUT-2 的通过结论。
+
+---
+
+# AUT-2 Historical Stage Review — Gate Fix 5
 
 ## Executive Summary
 
@@ -180,3 +208,33 @@ next_action: USER_SUBMIT_AUT2_REVIEW_PACKAGE_TO_GPT
 ```
 
 阻塞点是现有 REQUIREMENT 测试 Chat 的真实 exact read 仍返回 `TARGET_CHAT_MISMATCH`。不得用新 Chat、额外 Prompt、静默 rebind 或 WebGPT V1 改动绕过。
+
+## Follow-up visible read retry
+
+用户随后要求让 Workbench 显示实际操作并再次尝试读取。跟进证据见：
+
+- [AUT-2-VISIBLE-READ-RETRY-EVIDENCE.md](D:/办公/AI/Codex_Workbench_V1/docs/AUT-2-VISIBLE-READ-RETRY-EVIDENCE.md)
+- [AUT-2-VISIBLE-READ-RETRY-EVIDENCE.json](D:/办公/AI/Codex_Workbench_V1/docs/AUT-2-VISIBLE-READ-RETRY-EVIDENCE.json)
+
+本轮新增 3 次只读读取，结果全部为 `TARGET_CHAT_MISMATCH`；其中两次先执行了可见 `open-chat`，两次均报告目标 URL 匹配、已登录、处于 Chat 页面且 Composer 存在。Fix5 原有 4 次加本轮 3 次，累计 exact read 失败 7 次。
+
+本轮没有发送 Prompt、创建 Chat、替换 REQUIREMENT binding 或读取 Cookie/Token。该结果进一步确认：页面导航成功不等于读取结果身份校验成功，AUT-2 仍为 `FIX_REQUIRED / BLOCKED`。
+
+## AUT-2 Fix9 + Final Closure (2026-08-22)
+
+Fix9 选定并实现 `NEXT_INTERACTION` round 语义。真实 `NEEDS_INPUT` 响应包含 5 个问题，落库后 `roundCount=2`，`session.currentRoundId` 与 owning round 一致，所有问题同轮、`round.questionIds` 精确匹配、孤儿问题为 0；跨轮引用、跨轮回答、语义冲突和事务中途失败均自动化 fail-closed。机器证据：
+
+- `docs/AUT-2-FIX9-REAL-EVIDENCE.json`
+- `docs/AUT-2-FIX9-ROUND-PERSISTENCE-EVIDENCE.json`
+
+在同一确认为可用的 REQUIREMENT Chat 上，正式 answer API 使用已持久化问题完成 Answers → `READY_FOR_DRAFT`，生成 DRAFT canonical payload 和 `payloadSha256`，再使用 `actor=USER` 完成 `DRAFT → CONFIRMED`。WEBGPT/SYSTEM 自确认均被拒绝，原 REQUIREMENT binding 恢复，PLANNER/REVIEWER 未改变。AUT-2 最终状态：`PASS_CANDIDATE`。
+
+累计网页 Prompt 账本更新为 `12/12` hard maximum，repair `3/3`，新 Chat `2/3`；达到上限后没有继续发送 AUT-2 Prompt。
+
+实现与测试提交：`2eb3018`。本提交同时包含 AUT-3 Planner 的自动化基础，但 AUT-3 真实 Gate 未通过，因此不能将 AUT-3 记为 PASS。
+
+### AUT-3 条件结果
+
+自动化 Planner contract/store tests：`3/3 PASS`；真实精确 PLANNER binding、Requirement binding 和角色保护检查均通过，但真实 Planner Request 进入 `RECOVERY_REQUIRED`，没有形成结构化计划。证据：`docs/AUT-3-REAL-PLANNER-EVIDENCE-ISOLATED.json`。因此 AUT-3 = `FIX_REQUIRED`，Executor/Reviewer 均未启动。
+
+`running_subagents_at_gate: 0`

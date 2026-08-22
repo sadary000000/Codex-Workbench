@@ -1,0 +1,62 @@
+{
+  "stage": "AUT-3",
+  "result": "FIX_REQUIRED",
+  "startedAt": "2026-08-22T06:23:56.548Z",
+  "completedAt": "2026-08-22T06:24:10.592Z",
+  "webgptProjectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+  "automationProjectId": "aut3-real-planner-1787379835984",
+  "requirement": {
+    "requirementVersionId": "aut3-confirmed-requirement-1787379836043",
+    "status": "CONFIRMED",
+    "payloadSha256": "c2572c9be9bf852f81999745d5b12aea96957accdb76d881554ea08e51487638",
+    "canonicalPayloadPresent": true,
+    "projectActiveRequirementVersionId": "aut3-confirmed-requirement-1787379836043"
+  },
+  "plannerBinding": {
+    "projectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+    "role": "PLANNER",
+    "status": "BOUND",
+    "chatUrl": "https://chatgpt.com/c/6a865d2c-69fc-83ee-9845-1c236f19d7b9"
+  },
+  "roleProtection": {
+    "requirementBefore": {
+      "projectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+      "role": "REQUIREMENT",
+      "status": "BOUND",
+      "chatUrl": "https://chatgpt.com/c/6a865d21-8de8-83e9-a1d3-f17c726f91bc"
+    },
+    "reviewerBefore": {
+      "projectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+      "role": "REVIEWER",
+      "status": "BOUND",
+      "chatUrl": "https://chatgpt.com/c/6a865d36-a53c-83ee-aa28-d4cbd50c85b3"
+    },
+    "exactPlannerRole": true,
+    "exactPlannerProject": true,
+    "plannerBound": true
+  },
+  "realPlanner": {
+    "promptBodyLogged": false,
+    "responseBodyLogged": false,
+    "repairCount": 0,
+    "repairPromptCount": 0
+  },
+  "structuredPlan": {},
+  "persistence": {},
+  "idempotency": {},
+  "safety": {
+    "nativeExecutorStarted": false,
+    "reviewerStarted": false,
+    "v1CoreChanged": false,
+    "webgptV1Changed": false
+  },
+  "error": {
+    "code": "PLANNER_INVALID",
+    "message": "PLANNER request did not complete: RECOVERY_REQUIRED.",
+    "details": {
+      "requestId": "wgpt-f799139b-93f8-42dd-aa02-cadc08eebfd6",
+      "state": "RECOVERY_REQUIRED",
+      "timedOut": false
+    }
+  }
+}
