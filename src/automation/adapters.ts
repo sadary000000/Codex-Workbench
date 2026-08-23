@@ -156,10 +156,18 @@ export function assertProviderExecutionAuthorization(input: {
   if (authorization.operation !== input.operation) throw new Error("PROVIDER_AUTHORIZATION_OPERATION_MISMATCH");
   if (!authorization.policyVersionId) throw new Error("PROVIDER_POLICY_PIN_REQUIRED");
   if (!authorization.effectivePolicy) throw new Error("PROVIDER_EFFECTIVE_POLICY_REQUIRED");
-  if (!authorization.effectivePolicy.effectivePolicy.policyVersionId || authorization.effectivePolicy.effectivePolicy.policyVersionId !== authorization.policyVersionId) {
+  const effectivePolicy = authorization.effectivePolicy.effectivePolicy;
+  if (!effectivePolicy.policyVersionId || effectivePolicy.policyVersionId !== authorization.policyVersionId) {
     throw new Error("PROVIDER_POLICY_PIN_MISMATCH");
   }
   if (authorization.policyVersionId !== input.correlation.policyVersionId) throw new Error("PROVIDER_POLICY_CORRELATION_MISMATCH");
+  const correlationId = input.correlation.idempotencyRef ?? input.correlation.actionAttemptId ?? input.correlation.actionIntentId;
+  if (effectivePolicy.pin.policyVersionId !== authorization.policyVersionId || effectivePolicy.pin.correlationId !== correlationId) {
+    throw new Error("PROVIDER_POLICY_PIN_CORRELATION_MISMATCH");
+  }
+  if (effectivePolicy.runtimeCapabilityVersion !== authorization.runtimeCapability.capabilityVersion || effectivePolicy.runtimeId !== authorization.runtimeCapability.runtimeId) {
+    throw new Error("PROVIDER_CAPABILITY_PROOF_MISMATCH");
+  }
   if (authorization.effectivePolicy.decision !== "ALLOW") throw new Error("PROVIDER_POLICY_DENIED");
   if (!authorization.runtimeCapability.capabilityVersion || !authorization.runtimeCapability.runtimeId || authorization.runtimeCapability.status !== "READY") {
     throw new Error("PROVIDER_CAPABILITY_MISSING");
