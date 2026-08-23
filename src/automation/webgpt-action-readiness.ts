@@ -1,6 +1,28 @@
-import type { WebGptBrowserResourceDiagnostics } from "../features/webgpt/runtime/webgpt-operation-arbiter.ts";
-import type { WebGptRequestRecord, WebGptRequestState, WebGptRole } from "../features/webgpt/types.ts";
-import { normalizeRoleChatUrl } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
+/** Structural provider views supplied by the composition root. */
+export interface WebGptRequestRecordView {
+  readonly requestId: string;
+  readonly state: string;
+  readonly projectId: string | null;
+  readonly role: string | null;
+  readonly targetChatUrl: string | null;
+  /** Legacy provider view alias; normalized only by the provider composition. */
+  readonly chatUrl?: string | null;
+  readonly idempotencyKey: string | null;
+  readonly semanticSha256: string | null;
+  readonly policyVersionId?: string | null;
+  readonly resultSha256?: string | null;
+  readonly resultPath?: string | null;
+  readonly sendStartedAt?: string | null;
+  readonly submittedAt?: string | null;
+  readonly lastKnownPageState?: { readonly generating?: boolean } | null;
+}
+
+export interface WebGptBrowserResourceDiagnosticsView {
+  readonly mode?: string;
+  readonly activeOperationId?: string | null;
+  readonly activeRequestId?: string | null;
+  readonly queueDepth?: number;
+}
 
 /**
  * A scope used only to derive whether a new automation action is safe to
@@ -9,7 +31,7 @@ import { normalizeRoleChatUrl } from "../features/webgpt/runtime/webgpt-role-ses
  */
 export interface WebGptActionScope {
   readonly projectId: string;
-  readonly role: WebGptRole;
+  readonly role: string;
   readonly targetChatUrl: string;
   readonly idempotencyKey?: string | null;
   readonly semanticSha256?: string | null;
@@ -24,9 +46,9 @@ export type WebGptReconciliationDisposition =
 
 export interface WebGptActionReadinessRecord {
   readonly requestId: string;
-  readonly state: WebGptRequestState | "UNAVAILABLE";
+  readonly state: string | "UNAVAILABLE";
   readonly projectId: string | null;
-  readonly role: WebGptRole | null;
+  readonly role: string | null;
   readonly targetChatUrl: string | null;
   readonly idempotencyKey: string | null;
   readonly disposition: WebGptReconciliationDisposition;
@@ -36,9 +58,11 @@ export interface WebGptActionReadinessRecord {
 
 export interface WebGptActionReadinessInput {
   readonly action: WebGptActionScope;
-  readonly records: readonly WebGptRequestRecord[];
+  readonly records: readonly WebGptRequestRecordView[];
   readonly unavailableRequestIds?: readonly string[];
-  readonly browserResource: Partial<WebGptBrowserResourceDiagnostics> | null | undefined;
+  readonly browserResource: Partial<WebGptBrowserResourceDiagnosticsView> | null | undefined;
+  /** Provider adapter supplies canonicalization; default is opaque trim-only. */
+  readonly targetNormalizer?: (value: string) => string;
 }
 
 export interface WebGptActionReadiness {
@@ -53,22 +77,22 @@ export interface WebGptActionReadiness {
   readonly dispositionCounts: Readonly<Record<WebGptReconciliationDisposition, number>>;
 }
 
-const TERMINAL_STATES = new Set<WebGptRequestState>(["COMPLETED", "FAILED", "CANCELED"]);
+const TERMINAL_STATES = new Set(["COMPLETED", "FAILED", "CANCELED"]);
 
-function canonicalChatUrl(value: string | null | undefined): string | null {
+function canonicalChatUrl(value: string | null | undefined, targetNormalizer?: (value: string) => string): string | null {
   if (!value?.trim()) return null;
   try {
-    return normalizeRoleChatUrl(value);
+    return (targetNormalizer ? targetNormalizer(value) : value.trim()) || null;
   } catch {
     return null;
   }
 }
 
-function hasExternalSideEffectEvidence(record: WebGptRequestRecord): boolean {
+function hasExternalSideEffectEvidence(record: WebGptRequestRecordView): boolean {
   return Boolean(record.sendStartedAt || record.submittedAt || record.lastKnownPageState?.generating === true);
 }
 
-function isSafePreSubmitRecord(record: WebGptRequestRecord): boolean {
+function isSafePreSubmitRecord(record: WebGptRequestRecordView): boolean {
   return (record.state === "QUEUED" || record.state === "PAUSED_FOR_USER")
     && !hasExternalSideEffectEvidence(record);
 }
@@ -84,12 +108,13 @@ function emptyCounts(): Record<WebGptReconciliationDisposition, number> {
 }
 
 function recordDisposition(
-  record: WebGptRequestRecord,
+  record: WebGptRequestRecordView,
   action: WebGptActionScope,
   activeRequestId: string | null,
+  targetNormalizer?: (value: string) => string,
 ): WebGptActionReadinessRecord {
-  const actionTarget = canonicalChatUrl(action.targetChatUrl);
-  const recordTarget = canonicalChatUrl(record.targetChatUrl);
+  const actionTarget = canonicalChatUrl(action.targetChatUrl, targetNormalizer);
+  const recordTarget = canonicalChatUrl(record.targetChatUrl, targetNormalizer);
   const externalSideEffectEvidence = hasExternalSideEffectEvidence(record);
   const common = {
     requestId: record.requestId,
@@ -139,7 +164,7 @@ export function classifyWebGptActionReadiness(input: WebGptActionReadinessInput)
   const globalResourceBusy = Boolean(resource?.activeOperationId || activeRequestId || Number(resource?.queueDepth ?? 0) > 0);
   const dispositions = input.records
     .filter((record) => !TERMINAL_STATES.has(record.state))
-    .map((record) => recordDisposition(record, input.action, activeRequestId));
+    .map((record) => recordDisposition(record, input.action, activeRequestId, input.targetNormalizer));
   const unavailable = (input.unavailableRequestIds ?? []).map((requestId): WebGptActionReadinessRecord => ({
     requestId,
     state: "UNAVAILABLE",

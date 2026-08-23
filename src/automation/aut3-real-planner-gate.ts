@@ -1,17 +1,14 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { PlannerAutomationService, PlannerServiceError } from "./planner-service.ts";
-import { createPlannerWebGptAdapter } from "./planner-webgpt-adapter.ts";
+import { createPlannerWebGptAdapter, type PlannerRoleBindingPort, type PlannerRequestObservationPort } from "./planner-webgpt-adapter.ts";
 import { PLANNER_ROLE, type PlannerEnvelope } from "./planner-contract.ts";
 import type { AutomationStore } from "./store.ts";
-import type { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
-import type { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
-import type { WebGptRole } from "../features/webgpt/types.ts";
 
 export interface Aut3RealPlannerGateInput {
   store: AutomationStore;
-  roleSession: Pick<WebGptRoleSessionService, "status"> & Pick<WebGptRoleSessionService, "submit">;
-  requestManager: Pick<WebGptRequestManager, "waitForRequest" | "getResult">;
+  roleSession: PlannerRoleBindingPort;
+  requestManager: PlannerRequestObservationPort;
   webgptProjectId: string;
   automationProjectId: string;
   outputPath: string;
@@ -49,7 +46,7 @@ function safeText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 2_000) : null;
 }
 
-function bindingEvidence(binding: { projectId: string; role: WebGptRole; status: string; chatUrl: string }): Record<string, unknown> {
+function bindingEvidence(binding: { projectId: string; role: string; status: string; chatUrl: string }): Record<string, unknown> {
   return { projectId: binding.projectId, role: binding.role, status: binding.status, chatUrl: safeText(binding.chatUrl) };
 }
 

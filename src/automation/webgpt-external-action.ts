@@ -1,21 +1,19 @@
-import type { WebGptRequestRecord, WebGptRequestState, WebGptRole } from "../features/webgpt/types.ts";
-import type { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
-import type { WebGptBrowserResourceDiagnostics, WebGptLiveLeaseSnapshot } from "../features/webgpt/runtime/webgpt-operation-arbiter.ts";
-import { normalizeRoleChatUrl } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
 import {
   AutomationStore,
   type ActionReceiptInput,
   type TransitionInput,
 } from "./store.ts";
-import { classifyWebGptActionReadiness, type WebGptActionScope } from "./webgpt-action-readiness.ts";
+import { classifyWebGptActionReadiness, type WebGptActionScope, type WebGptBrowserResourceDiagnosticsView, type WebGptRequestRecordView } from "./webgpt-action-readiness.ts";
 import type {
   ActionOutcomeCertainty,
   ActionReceipt,
   ActionIntent,
   ActionAttempt,
   BoundedMetadata,
+  EvidenceCorrelation,
   ResourceClaim,
 } from "./types.ts";
+import { createEvidenceCorrelation } from "./evidence-correlation.ts";
 
 const WEBGPT_PROVIDER = "WEBGPT" as const;
 
@@ -47,9 +45,9 @@ export interface WebGptDispatchFacts {
   policyPreconditionSatisfied: boolean;
   targetIdentityValid: boolean;
   action: WebGptActionScope;
-  records: readonly WebGptRequestRecord[];
+  records: readonly WebGptRequestRecordView[];
   unavailableRequestIds?: readonly string[];
-  browserResource: Partial<WebGptBrowserResourceDiagnostics> | null | undefined;
+  browserResource: Partial<WebGptBrowserResourceDiagnosticsView> | null | undefined;
 }
 
 export function buildWebGptDispatchContext(facts: WebGptDispatchFacts): WebGptActionDispatchContext {
@@ -125,7 +123,7 @@ export interface WebGptExternalActionAdapter {
   submit(input: {
     prompt: string;
     projectId: string;
-    role: WebGptRole | null;
+  role: string | null;
     targetChatUrl: string | null;
     providerIdempotencyKey: string | null;
     actionIntentId: string;
@@ -140,7 +138,7 @@ export interface WebGptExternalActionInput {
   actionType: string;
   targetRef?: string | null;
   targetChatUrl: string | null;
-  role?: WebGptRole | null;
+  role?: string | null;
   prompt: string;
   sideEffectClass: "PURE" | "IDEMPOTENT" | "RECONCILABLE" | "NON_REPEATABLE";
   payloadRef?: string | null;
@@ -255,7 +253,7 @@ export class WebGptExternalActionBridge {
         providerState: providerRequest.state,
         providerSemanticSha256: providerRequest.semanticSha256,
         targetChatUrl: providerRequest.targetChatUrl,
-      });
+      }, { requestId: providerRequest.providerRequestId, resourceLeaseId: providerRequest.resourceLease?.leaseRef ?? null });
       attempt = await this.store.attachActionAttemptProvider({ actionAttemptId: attempt.actionAttemptId, providerRequestRef, providerSemanticSha256: providerRequest.semanticSha256 });
       await this.store.transitionActionIntent(intent.intentId, "DISPATCHED", input.transition);
       if (providerRequest.resourceLease) {
@@ -294,7 +292,7 @@ export class WebGptExternalActionBridge {
    * before createActionAttempt/provider.submit: a safe same-semantic retry
    * can only reconcile the existing provider operation.
    */
-  private async reattachExisting(input: WebGptExternalActionInput, intent: ActionIntent, requestId: string, records: readonly WebGptRequestRecord[]): Promise<WebGptExternalActionResult> {
+  private async reattachExisting(input: WebGptExternalActionInput, intent: ActionIntent, requestId: string, records: readonly WebGptRequestRecordView[]): Promise<WebGptExternalActionResult> {
     const dispatchFacts = input.dispatchFacts;
     if (!dispatchFacts || dispatchFacts.action.idempotencyKey !== input.idempotencyRef) {
       throw new WebGptExternalActionError("REATTACH_IDENTITY_MISMATCH", "The reattach request idempotency identity does not match the ActionIntent.", { requestId, intentId: intent.intentId });
@@ -344,7 +342,7 @@ export class WebGptExternalActionBridge {
         providerState: providerRequest.state,
         providerSemanticSha256: providerRequest.semanticSha256,
         targetChatUrl: providerRequest.targetChatUrl,
-      });
+      }, { requestId: providerRequest.providerRequestId });
     return this.recordObservation(input, intent, attempt, resourceClaim, providerRequest, providerRef.externalRefId, requestEvidence, observation, true);
   }
 
@@ -375,7 +373,7 @@ export class WebGptExternalActionBridge {
     const resourceClaim = snapshot.resourceClaims.find((value) => value.ownerAttemptId === attempt.actionAttemptId)
       ?? await this.store.createResourceClaim({ projectId: intent.projectId, resourceType: "WEBGPT_BROWSER", resourceKey: "webgpt:browser:singleton", mode: "EXCLUSIVE", state: "RELEASED", ownerAttemptId: attempt.actionAttemptId });
     const requestEvidence = requestEvidenceRecord?.evidenceId
-      ?? (await this.createEvidence({ projectId: input.projectId, targetChatUrl: intent.targetRef, role: null, prompt: "", actionType: "RECONCILE", sideEffectClass: "RECONCILABLE", dispatchContext: { runtimeReady: true, policyPreconditionSatisfied: true, targetIdentityValid: true, liveResourceAvailable: true, noConflictingActiveAction: true, noUnknownOutcomeForSameSideEffect: true, idempotencySafe: true } }, attempt, "WEBGPT_PROVIDER_REQUEST", { providerRequestId: providerRequest.providerRequestId, providerState: providerRequest.state }));
+      ?? (await this.createEvidence({ projectId: input.projectId, targetChatUrl: intent.targetRef, role: null, prompt: "", actionType: "RECONCILE", sideEffectClass: "RECONCILABLE", dispatchContext: { runtimeReady: true, policyPreconditionSatisfied: true, targetIdentityValid: true, liveResourceAvailable: true, noConflictingActiveAction: true, noUnknownOutcomeForSameSideEffect: true, idempotencySafe: true } }, attempt, "WEBGPT_PROVIDER_REQUEST", { providerRequestId: providerRequest.providerRequestId, providerState: providerRequest.state }, { requestId: providerRequest.providerRequestId }));
     const reconcileContext: WebGptExternalActionInput = {
       projectId: input.projectId,
       targetChatUrl: providerRequest.targetChatUrl,
@@ -397,7 +395,7 @@ export class WebGptExternalActionBridge {
       outcomeCertainty: observation.outcomeCertainty,
       targetChatUrl: observation.targetChatUrl,
       ...(observation.evidence ?? {}),
-    });
+    }, { requestId: observation.providerRequestId, resourceLeaseId: providerRequest.resourceLease?.leaseRef ?? null, evidenceRefs: [requestEvidence] });
     attempt = await this.store.attachActionAttemptProvider({ actionAttemptId: attempt.actionAttemptId, providerRequestRef, providerObservationRef: observationRef });
     const terminalSuccess = observation.outcomeCertainty === "RESULT_OBSERVED" || observation.outcomeCertainty === "TERMINAL_CONFIRMED";
     const terminalFailure = observation.outcomeCertainty === "TERMINAL_FAILED";
@@ -482,7 +480,7 @@ export class WebGptExternalActionBridge {
       providerSemanticSha256: providerRequest.semanticSha256,
       targetChatUrl: providerRequest.targetChatUrl,
       localPersistenceError: errorCode(persistenceError),
-    });
+    }, { requestId: providerRequest.providerRequestId, resourceLeaseId: providerRequest.resourceLease?.leaseRef ?? null });
     attempt = await this.store.attachActionAttemptProvider({ actionAttemptId: attempt.actionAttemptId, providerRequestRef, providerSemanticSha256: providerRequest.semanticSha256 });
     if (providerRequest.resourceLease) {
       const leaseRef = await this.ensureExternalRef(input.projectId, "WEBGPT_RESOURCE_LEASE", providerRequest.resourceLease.leaseRef);
@@ -511,14 +509,15 @@ export class WebGptExternalActionBridge {
     return existing?.externalRefId ?? this.createExternalRef(projectId, kind, opaqueId);
   }
 
-  private async createEvidence(input: WebGptExternalActionInput, attempt: ActionAttempt, type: string, metadata: BoundedMetadata): Promise<string> {
-    const evidence = await this.store.createEvidence({ projectId: input.projectId, stageSpecId: null, stepSpecId: null, attemptId: attempt.actionAttemptId, type, source: "WebGPT Provider Observation", producer: WEBGPT_PROVIDER, exitCode: null, sha256: null, artifactRefId: null, metadata });
+  private async createEvidence(input: WebGptExternalActionInput, attempt: ActionAttempt, type: string, metadata: BoundedMetadata, correlationInput: Partial<EvidenceCorrelation> = {}): Promise<string> {
+    const correlation = createEvidenceCorrelation({ workflowActionId: attempt.intentId, ...correlationInput });
+    const evidence = await this.store.createEvidence({ projectId: input.projectId, stageSpecId: null, stepSpecId: null, attemptId: attempt.actionAttemptId, type, source: "WebGPT Provider Observation", producer: WEBGPT_PROVIDER, exitCode: null, sha256: null, artifactRefId: null, metadata, correlation });
     return evidence.evidenceId;
   }
 
-  private async ensureEvidence(input: WebGptExternalActionInput, attempt: ActionAttempt, type: string, metadata: BoundedMetadata): Promise<string> {
+  private async ensureEvidence(input: WebGptExternalActionInput, attempt: ActionAttempt, type: string, metadata: BoundedMetadata, correlationInput: Partial<EvidenceCorrelation> = {}): Promise<string> {
     const existing = (await this.store.snapshot()).evidences.find((evidence) => evidence.attemptId === attempt.actionAttemptId && evidence.type === type);
-    return existing?.evidenceId ?? this.createEvidence(input, attempt, type, metadata);
+    return existing?.evidenceId ?? this.createEvidence(input, attempt, type, metadata, correlationInput);
   }
 }
 
@@ -528,37 +527,48 @@ function isProviderObservationCorrelationError(error: unknown): error is WebGptE
 
 function canonicalTarget(value: string | null | undefined): string | null {
   if (!value?.trim()) return null;
-  try {
-    return normalizeRoleChatUrl(value);
-  } catch {
-    return null;
-  }
+  return value.trim();
 }
 
-/** Adapter over the existing RequestManager; it never sends during observe/reconcile. */
-export function createWebGptRequestManagerActionAdapter(requestManager: Pick<WebGptRequestManager, "submit" | "requestStatus" | "reconcileRequest"> & Partial<Pick<WebGptRequestManager, "waitForActiveOperationLease">>): WebGptExternalActionAdapter {
+/**
+ * Structural composition port over the provider runtime. It deliberately
+ * avoids importing a concrete RequestManager into Automation.
+ */
+export interface WebGptExternalActionRuntimePort {
+  submit: (...args: never[]) => Promise<WebGptRequestRecordView>;
+  requestStatus: (...args: never[]) => Promise<WebGptRequestRecordView>;
+  reconcileRequest: (...args: never[]) => Promise<WebGptRequestRecordView>;
+  waitForActiveOperationLease?: (...args: never[]) => Promise<WebGptProviderLeaseSnapshot | null>;
+}
+
+/** Adapter over the injected provider runtime; observe/reconcile never submit. */
+export function createWebGptRequestManagerActionAdapter(requestManager: WebGptExternalActionRuntimePort): WebGptExternalActionAdapter {
+  const submit = requestManager.submit as unknown as (this: WebGptExternalActionRuntimePort, prompt: string, target: { projectId: string; role?: string; targetChatUrl?: string | null }, idempotencyKey?: string) => Promise<WebGptRequestRecordView>;
+  const requestStatus = requestManager.requestStatus as unknown as (this: WebGptExternalActionRuntimePort, requestId: string) => Promise<WebGptRequestRecordView>;
+  const reconcileRequest = requestManager.reconcileRequest as unknown as (this: WebGptExternalActionRuntimePort, requestId: string) => Promise<WebGptRequestRecordView>;
+  const waitForActiveOperationLease = requestManager.waitForActiveOperationLease as unknown as ((this: WebGptExternalActionRuntimePort, requestId: string) => Promise<WebGptProviderLeaseSnapshot | null>) | undefined;
   return {
     async submit(input) {
-      const record = await requestManager.submit(input.prompt, { projectId: input.projectId, role: input.role ?? undefined, targetChatUrl: input.targetChatUrl }, input.providerIdempotencyKey ?? undefined);
-      const lease = typeof requestManager.waitForActiveOperationLease === "function"
-        ? await requestManager.waitForActiveOperationLease(record.requestId)
+      const record = await submit.call(requestManager, input.prompt, { projectId: input.projectId, role: input.role ?? undefined, targetChatUrl: input.targetChatUrl }, input.providerIdempotencyKey ?? undefined);
+      const lease = typeof waitForActiveOperationLease === "function"
+        ? await waitForActiveOperationLease.call(requestManager, record.requestId)
         : null;
       return providerRequestFromRecord(record, lease);
     },
     async observe(request) {
-      return observationFromRecord(await requestManager.requestStatus(request.providerRequestId));
+      return observationFromRecord(await requestStatus.call(requestManager, request.providerRequestId));
     },
     async reconcile(input) {
-      return observationFromRecord(await requestManager.reconcileRequest(input.providerRequestId));
+      return observationFromRecord(await reconcileRequest.call(requestManager, input.providerRequestId));
     },
   };
 }
 
-function providerRequestFromRecord(record: WebGptRequestRecord, lease: WebGptLiveLeaseSnapshot | null = null): WebGptProviderRequest {
+function providerRequestFromRecord(record: WebGptRequestRecordView, lease: WebGptProviderLeaseSnapshot | null = null): WebGptProviderRequest {
   return { provider: WEBGPT_PROVIDER, providerRequestId: record.requestId, idempotencyKey: record.idempotencyKey, policyVersionId: record.policyVersionId ?? null, semanticSha256: record.semanticSha256, targetChatUrl: record.targetChatUrl, state: mapRequestState(record.state), resourceLease: lease ? { operationId: lease.operationId, leaseRef: lease.leaseRef, ownerKey: lease.ownerKey, leaseEpoch: lease.leaseEpoch } : null };
 }
 
-function observationFromRecord(record: WebGptRequestRecord): WebGptProviderObservation {
+function observationFromRecord(record: WebGptRequestRecordView): WebGptProviderObservation {
   const terminalSuccess = record.state === "COMPLETED";
   const terminalFailure = record.state === "FAILED" || record.state === "CANCELED";
   return {
@@ -567,13 +577,15 @@ function observationFromRecord(record: WebGptRequestRecord): WebGptProviderObser
     providerState: mapRequestState(record.state),
     outcomeCertainty: terminalSuccess ? "TERMINAL_CONFIRMED" : terminalFailure ? "TERMINAL_FAILED" : "ACCEPTED_UNKNOWN_RESULT",
     targetChatUrl: record.targetChatUrl,
-    resultHash: record.resultSha256,
+    resultHash: record.resultSha256 ?? null,
     evidence: { requestState: record.state, targetChatUrl: record.targetChatUrl, policyVersionId: record.policyVersionId ?? null, resultAvailable: Boolean(record.resultPath) },
   };
 }
 
-function mapRequestState(state: WebGptRequestState): WebGptProviderRequestState {
-  return state === "TIMEOUT" || state === "INDETERMINATE" || state === "PAUSED_FOR_USER" ? "RECOVERY_REQUIRED" : state;
+function mapRequestState(state: string): WebGptProviderRequestState {
+  if (state === "TIMEOUT" || state === "INDETERMINATE" || state === "PAUSED_FOR_USER") return "RECOVERY_REQUIRED";
+  if (state === "QUEUED" || state === "SUBMITTING" || state === "SUBMITTED" || state === "GENERATING" || state === "COMPLETED" || state === "FAILED" || state === "CANCELED" || state === "RECOVERY_REQUIRED" || state === "UNKNOWN") return state;
+  return "UNKNOWN";
 }
 
 function unknownObservation(request: WebGptProviderRequest, error: unknown): WebGptProviderObservation {

@@ -1,0 +1,10 @@
+stage=ARCH-V2-6
+base_commit=b94ea6a6b21c2420f644e145c02f9ee2cf8f912d
+v1_frozen_core_changed=NO
+isolated_build_root=dist-stage-arch-v2-6-build
+isolated_gui_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+isolated_cli_exe_sha256=0B67D1CE19A91E82D62841AF8C971A46987C77027F3E370FBD8CA9517374FE61
+review_package=dist/review/ARCH-V2-6-REVIEW-PACKAGE.zip
+review_package_sha256=see dist/review/ARCH-V2-6-REVIEW-PACKAGE.sha256
+real_business_prompts=0
+aut2_aut3_activated=NO

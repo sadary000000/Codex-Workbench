@@ -79,6 +79,7 @@ import {
   type PolicyPin,
   type PolicyVersionView,
 } from "./effective-policy.ts";
+import { createEvidenceCorrelation, matchesEvidenceCorrelation, type EvidenceCorrelationSelector } from "./evidence-correlation.ts";
 
 export type AutomationStoreErrorCode =
   | "AUTOMATION_DB_CORRUPT"
@@ -1208,7 +1209,7 @@ export class AutomationStore {
   async createEvidence(input: Omit<Evidence, "evidenceId" | "timestamp"> & Partial<Pick<Evidence, "evidenceId" | "timestamp">>): Promise<Evidence> {
     return this.transaction((tx) => {
       tx.require("automationProjects", input.projectId);
-      const item: Evidence = { evidenceId: id(input.evidenceId, "evidenceId"), projectId: input.projectId, stageSpecId: input.stageSpecId ?? null, stepSpecId: input.stepSpecId ?? null, attemptId: input.attemptId ?? null, type: text(input.type, "evidence.type", 256), source: text(input.source, "evidence.source", 256), producer: text(input.producer, "evidence.producer", 256), timestamp: input.timestamp ?? now(), exitCode: input.exitCode ?? null, sha256: optionalText(input.sha256, "evidence.sha256", 128), artifactRefId: input.artifactRefId ?? null, metadata: safeMetadata(input.metadata, "evidence.metadata") };
+      const item: Evidence = { evidenceId: id(input.evidenceId, "evidenceId"), projectId: input.projectId, stageSpecId: input.stageSpecId ?? null, stepSpecId: input.stepSpecId ?? null, attemptId: input.attemptId ?? null, type: text(input.type, "evidence.type", 256), source: text(input.source, "evidence.source", 256), producer: text(input.producer, "evidence.producer", 256), timestamp: input.timestamp ?? now(), exitCode: input.exitCode ?? null, sha256: optionalText(input.sha256, "evidence.sha256", 128), artifactRefId: input.artifactRefId ?? null, metadata: safeMetadata(input.metadata, "evidence.metadata"), correlation: input.correlation === undefined || input.correlation === null ? null : createEvidenceCorrelation(input.correlation) };
       tx.insert("evidences", item);
       return clone(item);
     });
@@ -1306,6 +1307,12 @@ export class AutomationStore {
   async list<K extends AutomationTableName>(table: K): Promise<AutomationTables[K][]> {
     const document = await this.snapshot();
     return clone(document[table] as unknown as AutomationTables[K][]);
+  }
+
+  /** Pure read: correlation lookup never navigates, reconciles, or mutates persistence. */
+  async listEvidenceByCorrelation(selector: EvidenceCorrelationSelector): Promise<Evidence[]> {
+    const document = await this.snapshot();
+    return clone(document.evidences.filter((evidence) => matchesEvidenceCorrelation(evidence.correlation, selector)));
   }
 
   async getDispatchEligibility(intentId: string): Promise<boolean> {

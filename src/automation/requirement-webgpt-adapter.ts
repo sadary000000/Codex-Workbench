@@ -15,8 +15,6 @@ import {
   type RequirementResponseDiagnostics,
   type RequirementResponseFailureCategory,
 } from "./requirement-webgpt-contract.ts";
-import type { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
-import type { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
 import type { PolicyBudgetAuthority } from "./effective-policy.ts";
 
 export const MAX_REQUIREMENT_REPAIR_PROMPTS = 3 as const;
@@ -41,6 +39,21 @@ export interface RequirementWebGptRuntimePort {
   /** Optional so non-real/unit ports remain compatible; real wiring supplies it. */
   submitRequirementRepair?(input: { projectId: string; prompt: string; idempotencyKey: string }): Promise<RequirementWebGptAcceptedRequest>;
   waitRequest(requestId: string, timeoutMs: number): Promise<{ state: string; timedOut: boolean }>;
+  getResult(requestId: string): Promise<{ state: string; response: string | null }>;
+}
+
+/**
+ * Composition-root-only structural ports.  Keeping these shapes here lets
+ * the Requirement consumer depend on a provider-neutral contract while the
+ * WebGPT runtime remains the injected implementation.
+ */
+export interface RequirementRoleBindingPort {
+  status(projectId: string, role: string): Promise<RequirementWebGptRuntimeBinding>;
+  submit(projectId: string, role: string, prompt: string, idempotencyKey: string): Promise<RequirementWebGptAcceptedRequest & { targetChatUrl: string | null }>;
+}
+
+export interface RequirementRequestObservationPort {
+  waitForRequest(requestId: string, timeoutMs: number): Promise<{ record: { state: string }; timedOut: boolean }>;
   getResult(requestId: string): Promise<{ state: string; response: string | null }>;
 }
 
@@ -287,8 +300,8 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
 
 /** Adapts the existing RoleSessionService + RequestManager without changing either runtime. */
 export function createRequirementWebGptAdapter(dependencies: {
-  roleSession: Pick<WebGptRoleSessionService, "status" | "submit">;
-  requestManager: Pick<WebGptRequestManager, "waitForRequest" | "getResult">;
+  roleSession: RequirementRoleBindingPort;
+  requestManager: RequirementRequestObservationPort;
   timeoutMs?: number;
   repairBudget?: RequirementRepairBudget;
   repairBudgetAuthority?: Pick<PolicyBudgetAuthority, "reserve">;

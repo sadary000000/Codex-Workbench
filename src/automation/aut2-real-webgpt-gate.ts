@@ -1,11 +1,9 @@
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
-import { createRequirementWebGptAdapter, type RequirementResponseDiagnosticEvent } from "./requirement-webgpt-adapter.ts";
+import { createRequirementWebGptAdapter, type RequirementResponseDiagnosticEvent, type RequirementRoleBindingPort, type RequirementRequestObservationPort } from "./requirement-webgpt-adapter.ts";
 import { RequirementAutomationService, type RequirementDraftResult } from "./requirement-service.ts";
 import { REQUIREMENT_ROLE, type RequirementChatBinding } from "./requirement-webgpt-contract.ts";
 import type { AutomationStore } from "./store.ts";
-import type { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
-import type { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
 
 const SYNTHETIC_GOAL = "创建一个本地小型命令行示例程序，输入两个整数并输出它们的和。";
 const MAX_REAL_ALIGNMENT_REQUESTS = 3;
@@ -14,8 +12,8 @@ const MAX_REPAIR_PROMPTS_PER_GATE = 1;
 
 export interface Aut2RealWebGptGateOptions {
   readonly store: AutomationStore;
-  readonly roleSession: Pick<WebGptRoleSessionService, "status" | "open" | "bind" | "submit">;
-  readonly requestManager: Pick<WebGptRequestManager, "waitForRequest" | "getResult">;
+  readonly roleSession: RequirementRoleBindingPort & { open(projectId: string, role: string): Promise<unknown>; bind(projectId: string, role: string, chatRef: string, force?: boolean): Promise<unknown> };
+  readonly requestManager: RequirementRequestObservationPort;
   readonly openWorkspace: () => Promise<unknown>;
   readonly returnAutomationControl: () => Promise<unknown>;
   readonly automationControl: () => Promise<void>;

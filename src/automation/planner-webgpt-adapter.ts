@@ -5,8 +5,6 @@ import {
   PlannerContractError,
   validatePlannerEnvelope,
 } from "./planner-contract.ts";
-import type { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
-import type { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
 import { PlannerServiceError, type PlannerSubmission, type PlannerWebGptService } from "./planner-service.ts";
 
 export interface PlannerRuntimeBinding {
@@ -27,6 +25,20 @@ export interface PlannerRuntimePort {
     targetChatUrl?: string | null;
     submittedAt?: string | null;
     acceptedAt?: string | null;
+  }>;
+  getResult(requestId: string): Promise<{ state: string; response: string | null }>;
+}
+
+/** Structural composition ports; no provider runtime type crosses the domain boundary. */
+export interface PlannerRoleBindingPort {
+  status(projectId: string, role: string): Promise<PlannerRuntimeBinding>;
+  submit(projectId: string, role: string, prompt: string, idempotencyKey: string): Promise<{ requestId: string; targetChatUrl: string | null; semanticSha256?: string | null }>;
+}
+
+export interface PlannerRequestObservationPort {
+  waitForRequest(requestId: string, timeoutMs: number): Promise<{
+    record: { requestId: string; idempotencyKey: string | null; targetChatUrl: string | null; state: string; submittedAt?: string | null; createdAt?: string | null };
+    timedOut: boolean;
   }>;
   getResult(requestId: string): Promise<{ state: string; response: string | null }>;
 }
@@ -79,8 +91,8 @@ export class PlannerWebGptAdapter implements PlannerWebGptService {
 }
 
 export function createPlannerWebGptAdapter(dependencies: {
-  roleSession: Pick<WebGptRoleSessionService, "status" | "submit">;
-  requestManager: Pick<WebGptRequestManager, "waitForRequest" | "getResult">;
+  roleSession: PlannerRoleBindingPort;
+  requestManager: PlannerRequestObservationPort;
   timeoutMs?: number;
 }): PlannerWebGptAdapter {
   return new PlannerWebGptAdapter({

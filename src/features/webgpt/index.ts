@@ -1,4 +1,6 @@
 export { WebGptWorkspace } from "./runtime/webgpt-workspace.ts";
+export { createWebGptRoleTargetRef, WebGptAutomationProviderPort } from "./automation/webgpt-provider-port.ts";
+export type { WebGptProviderPortOptions } from "./automation/webgpt-provider-port.ts";
 export type {
   WebGptBounds,
   WebGptDeferredResult,

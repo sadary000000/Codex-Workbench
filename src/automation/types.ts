@@ -4,6 +4,21 @@ export type AutomationSchemaVersion = typeof AUTOMATION_SCHEMA_VERSION;
 export type IsoTimestamp = string;
 export type BoundedMetadata = Record<string, string | number | boolean | null>;
 
+/**
+ * Opaque cross-domain references used to correlate evidence without copying
+ * prompts, responses, transcripts, browser state, or Native runtime data.
+ * Native IDs remain owned by Codex; provider IDs remain owned by the provider.
+ */
+export interface EvidenceCorrelation {
+  workflowActionId: string | null;
+  requestId: string | null;
+  nativeThreadId: string | null;
+  nativeTurnId: string | null;
+  resourceLeaseId: string | null;
+  artifactRefs: readonly string[];
+  evidenceRefs: readonly string[];
+}
+
 export type AutomationProjectLifecycle =
   | "DRAFT"
   | "ALIGNING_REQUIREMENTS"
@@ -479,6 +494,8 @@ export interface Evidence {
   sha256: string | null;
   artifactRefId: string | null;
   metadata: BoundedMetadata;
+  /** Optional for legacy evidence; new provider evidence records set it. */
+  correlation?: EvidenceCorrelation | null;
 }
 
 export interface ArtifactRef {

@@ -13,6 +13,7 @@ import {
 } from "./types.ts";
 import { canonicalizeJson, computeActionSemanticSha256, sha256Hex } from "./canonical.ts";
 import { RequirementDomainError, validateRequirementDomain } from "./requirement-domain.ts";
+import { createEvidenceCorrelation } from "./evidence-correlation.ts";
 
 const PROJECT_LIFECYCLES = new Set<AutomationProjectLifecycle>([
   "DRAFT",
@@ -451,6 +452,13 @@ function validateCommonTables(document: Record<string, unknown>): void {
     optionalString(item.sha256, `evidences[${index}].sha256`, 128);
     optionalString(item.artifactRefId, `evidences[${index}].artifactRefId`, 256);
     metadata(item.metadata, `evidences[${index}].metadata`);
+    if (item.correlation !== undefined && item.correlation !== null) {
+      try {
+        createEvidenceCorrelation(item.correlation as Record<string, unknown>);
+      } catch (error) {
+        throw new AutomationSchemaError(error instanceof Error ? `evidences[${index}].correlation: ${error.message}` : `evidences[${index}].correlation is invalid.`);
+      }
+    }
   });
 
   const artifacts = array(document.artifactRefs, "artifactRefs");
@@ -711,6 +719,12 @@ function validateReferences(document: Record<string, unknown>): void {
     if (!projects.has(item.projectId as string)) throw new AutomationSchemaError("evidences.projectId references a missing project.");
     requireSameProject(artifacts, item.artifactRefId, item.projectId as string, "evidences.artifactRefId");
     requireSameAttemptProject(item.attemptId, item.projectId as string, "evidences.attemptId");
+    const correlation = item.correlation as { workflowActionId?: string | null; artifactRefs?: string[]; evidenceRefs?: string[] } | null | undefined;
+    if (correlation) {
+      requireSameProject(intents, correlation.workflowActionId ?? null, item.projectId as string, "evidences.correlation.workflowActionId");
+      for (const ref of correlation.artifactRefs ?? []) requireSameProject(artifacts, ref, item.projectId as string, "evidences.correlation.artifactRefs");
+      for (const ref of correlation.evidenceRefs ?? []) requireSameEvidenceProject(ref, item.projectId as string, "evidences.correlation.evidenceRefs");
+    }
   }
   for (const item of artifacts.values()) if (!projects.has(item.projectId as string)) throw new AutomationSchemaError("artifactRefs.projectId references a missing project.");
   for (const item of snapshots.values()) if (!projects.has(item.projectId as string)) throw new AutomationSchemaError("workspaceSnapshots.projectId references a missing project.");
