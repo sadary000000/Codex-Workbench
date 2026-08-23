@@ -1,0 +1,51 @@
+{
+  "stage": "ARCH-V2-8 FIX ROUND 3",
+  "result": "FIX_REQUIRED",
+  "baseCommit": "e9d9e1b0cc4ff16de92b35b6c2375f860b110c3e",
+  "implementationCommits": ["f259a65", "2e799ab"],
+  "finalFrozen": false,
+  "automation": {"AUT-2": "PAUSED", "AUT-3": "PAUSED"},
+  "counts": {"p0": 0, "p1Remaining": 2, "p2": 3, "realBusinessPrompts": 0, "newBusinessChats": 0},
+  "fixes": {
+    "FIX-01": "FAIL_WITH_EVIDENCE",
+    "FIX-02": "FAIL_WITH_EVIDENCE",
+    "FIX-03": "PASS",
+    "FIX-04": "PASS",
+    "FIX-05": "PASS"
+  },
+  "realInitializeProbe": {
+    "userAgent": "Codex Desktop/0.147.0",
+    "responseKeys": ["codexHome", "platformFamily", "platformOs", "userAgent"],
+    "protocolVersion": null,
+    "capabilityKeys": null,
+    "strictResult": "VERSION_MISMATCH",
+    "threadStarted": false,
+    "turnStarted": false,
+    "promptSent": false
+  },
+  "tests": {
+    "npmRunCheck": "PASS",
+    "npmTest": {"passed": 392, "failed": 0},
+    "round3Targeted": {"passed": 6, "failed": 0},
+    "archV2SelectedRegression": {"passed": 67, "failed": 0},
+    "archV2_2ProtocolGeneration": "PASS",
+    "npmAuditOmitDev": {"status": "PASS", "vulnerabilities": 0},
+    "gitDiffCheck": "PASS_WITH_NORMAL_LF_CRLF_WARNINGS",
+    "scopedSecretScan": "PASS",
+    "isolatedBuild": "PASS",
+    "isolatedPackage": "PASS",
+    "standardPackage": "LOCKED_WITH_EVIDENCE"
+  },
+  "isolatedPackage": {
+    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-stage-arch-v2-8-fix-round-3\\package",
+    "outerExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "cliExeSha256": "83E587125CC5EF609E1A8B52B414EAAC22E8362EB973BC01F226DF0EC3E46BC7",
+    "mainJsSha256": "3EB53C61973D82863A92D1FFBF035EDE7BA2C2E25CC61D019849BAD71416FF93",
+    "rendererJsSha256": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
+    "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F",
+    "controlPlaneSchemaSha256": "0E13F0B1D6A1A9AF37DFEEE13FEFEBE70F532BB5C6F75C29AD7860C2B7A72E59"
+  },
+  "subagents": {"started": 6, "completed": 6, "runningAtGate": 0},
+  "privacy": {"cookiesRead": false, "tokensRead": false, "privateChatRead": false, "productionJournalIncluded": false},
+  "legacyProject": {"donor": "PRESERVED_DIRTY_BASELINE", "autoAgent": "READ_ONLY"}
+}
