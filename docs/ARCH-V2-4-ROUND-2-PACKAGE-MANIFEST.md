@@ -7,6 +7,7 @@ repository: D:\办公\AI\Codex_Workbench_V1
 branch: master
 base_commit: d387c999456abce16746db7d8d28b9d2670b2be4
 prior_round_commit: a2cdcf1
+implementation_commit: 66dbc89
 legacy_project: D:\办公\AI\Codex_Workbench (read-only)
 forbidden_donor: D:\办公\AI\Auto_Agent (not modified)
 running_subagents_at_gate: 0
@@ -36,6 +37,5 @@ The companion SHA256 file is outside the ZIP.
 
 ~~~yaml
 path: D:\办公\AI\Codex_Workbench_V1\dist\review\ARCH-V2-4-REVIEW-PACKAGE.zip
-sha256_before_manifest_refresh: 79CDE43346F0099CE934E6908E0ADB358B335611F5D57A7B5AC1D5305A59A891
-note: package is regenerated after this manifest update; final SHA is recorded in the companion .sha256 file and final stage report
+note: final SHA is recorded in the companion .sha256 file
 ~~~

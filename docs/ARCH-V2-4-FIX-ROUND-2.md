@@ -7,6 +7,7 @@ stage: ARCH-V2-4 External Action / Resource / Reconciliation Integration
 round: FIX ROUND 2
 base_commit: d387c999456abce16746db7d8d28b9d2670b2be4
 prior_round_commit: a2cdcf1
+implementation_commit: 66dbc89
 authorized_fixes:
   - FIX-01 Bridge same-semantic reattach
   - FIX-02 provider observation identity
@@ -15,6 +16,8 @@ v1_core_changed: NO
 webgpt_business_prompts: 0
 scope_expanded: NO
 gate_posture: REVIEW_READY_WITH_DISCLOSED_REAL_SMOKE_LIMITATION
+review_package: D:\办公\AI\Codex_Workbench_V1\dist\review\ARCH-V2-4-REVIEW-PACKAGE.zip
+package_sha256: recorded in ARCH-V2-4-REVIEW-PACKAGE.sha256
 ~~~
 
 本轮严格按 GPT Gate 的 FIX-01～FIX-03 执行。没有进入 ARCH-V2-5、AUT-2/AUT-3、Planner、Workflow、Scheduler 或 WebGPT 业务 Prompt；没有修改旧 donor、Auto_Agent、V1 Frozen Core 或生产 Journal 历史内容。
