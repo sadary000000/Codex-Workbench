@@ -6,6 +6,7 @@
 stage: ARCH-V2-4 External Action / Resource / Reconciliation Integration
 round: FIX ROUND 3
 base_commit: 4568bcc2c3b112fd863711d043fc1e3b6f8629e9
+implementation_commit: 282979a
 prior_gate: FIX_REQUIRED (P0=0, P1=2, P2=1, BLOCKER=0)
 authorized_fixes:
   - P1-01: make WEB-6.4 Arbiter smoke isolated, owned, and deterministic
