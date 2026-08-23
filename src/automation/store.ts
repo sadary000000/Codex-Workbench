@@ -72,6 +72,13 @@ import type {
   WorkspaceSnapshot,
 } from "./types.ts";
 import type { PlannerReadyPayload } from "./planner-contract.ts";
+import {
+  assertPolicyPin,
+  pinProjectPolicy,
+  policyVersionViewFromRecord,
+  type PolicyPin,
+  type PolicyVersionView,
+} from "./effective-policy.ts";
 
 export type AutomationStoreErrorCode =
   | "AUTOMATION_DB_CORRUPT"
@@ -206,6 +213,7 @@ export interface ActionIntentInput {
   semanticSha256?: string;
   idempotencyRef?: string | null;
   expectedOutcomeRef?: string | null;
+  policyVersionId?: string | null;
 }
 
 export interface ActionAttemptInput {
@@ -248,6 +256,7 @@ export interface CheckpointInput {
   externalRefs?: string[];
   evidenceRefs?: string[];
   issueRefs?: string[];
+  policyVersionId?: string | null;
 }
 
 export interface TransitionInput {
@@ -315,10 +324,11 @@ function list(value: string[] | undefined, field: string): string[] {
 function safeMetadata(value: BoundedMetadata | undefined, field: string): BoundedMetadata {
   if (!value) return {};
   const sensitive = /(?:prompt|response|transcript|cookie|token|authorization|password|credential|secret|stdout|stderr|raw.?body)/i;
+  const typedPolicyKeys = new Set(["maxPromptDispatches", "maxRepairDispatches", "maxRetryDispatches", "maxNewChatDispatches"]);
   const entries = Object.entries(value);
   if (entries.length > 32) throw new AutomationStoreError("AUTOMATION_PRIVACY_BOUNDARY", `${field} has too many entries.`);
   for (const [key, item] of entries) {
-    if (sensitive.test(key) || key.length > 128) throw new AutomationStoreError("AUTOMATION_PRIVACY_BOUNDARY", `${field} contains a sensitive key.`);
+    if ((sensitive.test(key) && !(field === "policy.payload" && typedPolicyKeys.has(key))) || key.length > 128) throw new AutomationStoreError("AUTOMATION_PRIVACY_BOUNDARY", `${field} contains a sensitive key.`);
     if (typeof item === "string" && item.length > 1_024) throw new AutomationStoreError("AUTOMATION_PRIVACY_BOUNDARY", `${field}.${key} is too long.`);
     if (typeof item !== "string" && typeof item !== "number" && typeof item !== "boolean" && item !== null) {
       throw new AutomationStoreError("AUTOMATION_INVALID", `${field}.${key} must be scalar.`);
@@ -489,6 +499,11 @@ export class AutomationTransaction {
     if (name === "stepSpecs") {
       for (const key of ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "goal", "riskClass", "sideEffectClass", "createdAt", "supersedes"]) {
         if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StepSpec immutable definition cannot be replaced.");
+      }
+    }
+    if (name === "policyVersions") {
+      for (const key of ["policyVersionId", "projectId", "version", "preset", "payload", "createdAt", "supersedes"]) {
+        if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "PolicyVersion is immutable; create a superseding version instead.");
       }
     }
     collection[index] = value;
@@ -854,9 +869,14 @@ export class AutomationStore {
       if (input.stageSpecId) tx.require("stageSpecs", input.stageSpecId);
       if (input.stepSpecId) tx.require("stepSpecs", input.stepSpecId);
       if (input.attemptId) tx.require("executionAttempts", input.attemptId);
-      const item: ActionIntent = { intentId: id(input.intentId, "intentId"), projectId: project.projectId, stageSpecId: input.stageSpecId ?? null, stepSpecId: input.stepSpecId ?? null, attemptId: input.attemptId ?? null, actionType, targetRef, sideEffectClass: input.sideEffectClass, payloadRef, payloadHash, executionOptions, semanticSha256, idempotencyRef, expectedOutcomeRef, state: "PLANNED", createdAt: now() };
+      const policyVersionId = optionalText(input.policyVersionId ?? project.policyVersionId, "intent.policyVersionId", 256);
+      if (policyVersionId) {
+        const policy = tx.require("policyVersions", policyVersionId);
+        if (policy.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "ActionIntent PolicyVersion belongs to another project.");
+      }
+      const item: ActionIntent = { intentId: id(input.intentId, "intentId"), projectId: project.projectId, stageSpecId: input.stageSpecId ?? null, stepSpecId: input.stepSpecId ?? null, attemptId: input.attemptId ?? null, actionType, targetRef, sideEffectClass: input.sideEffectClass, payloadRef, payloadHash, executionOptions, semanticSha256, idempotencyRef, expectedOutcomeRef, policyVersionId, state: "PLANNED", createdAt: now() };
       tx.insert("actionIntents", item);
-      tx.appendAudit({ projectId: project.projectId, entityType: "ActionIntent", entityId: item.intentId, eventType: "ACTION_INTENT_PERSISTED", actorType: "SYSTEM", actorRef: null, boundedPayload: { actionType: item.actionType, sideEffectClass: item.sideEffectClass }, correlationId: null, causationId: null });
+      tx.appendAudit({ projectId: project.projectId, entityType: "ActionIntent", entityId: item.intentId, eventType: "ACTION_INTENT_PERSISTED", actorType: "SYSTEM", actorRef: null, boundedPayload: { actionType: item.actionType, sideEffectClass: item.sideEffectClass, policyVersionId: item.policyVersionId ?? null }, correlationId: null, causationId: null });
       return clone(item);
     });
   }
@@ -875,6 +895,7 @@ export class AutomationStore {
         completedAt: null,
         executorRef: optionalText(input.executorRef, "actionAttempt.executorRef", 256),
         recoveryState: "KNOWN_NOT_STARTED",
+        policyVersionId: intent.policyVersionId ?? null,
         providerRequestRef: optionalText(input.providerRequestRef, "actionAttempt.providerRequestRef", 256),
         providerObservationRef: optionalText(input.providerObservationRef, "actionAttempt.providerObservationRef", 256),
         providerSemanticSha256: optionalText(input.providerSemanticSha256, "actionAttempt.providerSemanticSha256", 128),
@@ -1142,6 +1163,11 @@ export class AutomationStore {
         lastActionReceiptId: input.lastActionReceiptId ?? null,
         workspaceSnapshotRef: input.workspaceSnapshotRef ?? null,
       };
+      const policyVersionId = optionalText(input.policyVersionId ?? project.policyVersionId, "checkpoint.policyVersionId", 256);
+      if (policyVersionId) {
+        const policy = tx.require("policyVersions", policyVersionId);
+        if (policy.projectId !== projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Checkpoint PolicyVersion belongs to another project.");
+      }
       if (refs.currentStepRuntimeId) {
         const runtime = tx.require("stepRuntimes", refs.currentStepRuntimeId);
         if (refs.currentStepSpecId && runtime.stepSpecId !== refs.currentStepSpecId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Checkpoint StepRuntime does not belong to current StepSpec.");
@@ -1163,7 +1189,7 @@ export class AutomationStore {
         ["workspaceSnapshots", refs.workspaceSnapshotRef],
       ];
       for (const [table, reference] of referenceChecks) if (reference) tx.require(table, reference);
-      const item: Checkpoint = { checkpointId: id(input.checkpointId, "checkpointId"), projectId, projectRevision: project.revision, requirementVersionId: refs.requirementVersionId, planVersionId: refs.planVersionId, currentStageSpecId: refs.currentStageSpecId, currentStepSpecId: refs.currentStepSpecId, currentStepRuntimeId: refs.currentStepRuntimeId, currentAttemptId: refs.currentAttemptId, lastActionIntentId: refs.lastActionIntentId, lastActionReceiptId: refs.lastActionReceiptId, workspaceSnapshotRef: refs.workspaceSnapshotRef, resourceClaimRefs: list(input.resourceClaimRefs, "checkpoint.resourceClaimRefs"), externalRefs: list(input.externalRefs, "checkpoint.externalRefs"), evidenceRefs: list(input.evidenceRefs, "checkpoint.evidenceRefs"), issueRefs: list(input.issueRefs, "checkpoint.issueRefs"), createdAt: now() };
+      const item: Checkpoint = { checkpointId: id(input.checkpointId, "checkpointId"), projectId, projectRevision: project.revision, requirementVersionId: refs.requirementVersionId, planVersionId: refs.planVersionId, currentStageSpecId: refs.currentStageSpecId, currentStepSpecId: refs.currentStepSpecId, currentStepRuntimeId: refs.currentStepRuntimeId, currentAttemptId: refs.currentAttemptId, lastActionIntentId: refs.lastActionIntentId, lastActionReceiptId: refs.lastActionReceiptId, workspaceSnapshotRef: refs.workspaceSnapshotRef, resourceClaimRefs: list(input.resourceClaimRefs, "checkpoint.resourceClaimRefs"), externalRefs: list(input.externalRefs, "checkpoint.externalRefs"), evidenceRefs: list(input.evidenceRefs, "checkpoint.evidenceRefs"), issueRefs: list(input.issueRefs, "checkpoint.issueRefs"), policyVersionId, createdAt: now() };
       tx.insert("checkpoints", item);
       tx.appendAudit({ projectId, entityType: "Checkpoint", entityId: item.checkpointId, eventType: "CHECKPOINT_CREATED", actorType: "SYSTEM", actorRef: null, boundedPayload: { projectRevision: item.projectRevision }, correlationId: null, causationId: null });
       return clone(item);
@@ -1218,12 +1244,57 @@ export class AutomationStore {
   async createPolicyVersion(input: Omit<PolicyVersion, "policyVersionId" | "createdAt"> & Partial<Pick<PolicyVersion, "policyVersionId" | "createdAt">>): Promise<PolicyVersion> {
     return this.transaction((tx) => {
       const project = tx.require("automationProjects", input.projectId);
+      if (tx.table("policyVersions").some((item) => item.projectId === project.projectId && item.version === input.version)) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", `Policy version ${input.version} already exists.`);
+      }
       const supersedes = input.supersedes ?? null;
+      if (input.version > 1 && !supersedes) throw new AutomationStoreError("AUTOMATION_INVALID", "A PolicyVersion after version 1 must explicitly supersede the previous version.");
+      if (supersedes) {
+        const previous = tx.require("policyVersions", supersedes);
+        if (previous.projectId !== project.projectId || previous.version >= input.version) throw new AutomationStoreError("AUTOMATION_CONFLICT", "PolicyVersion supersedes must reference an older version in the same project.");
+      }
       const item: PolicyVersion = { policyVersionId: id(input.policyVersionId, "policyVersionId"), projectId: input.projectId, version: input.version, preset: optionalText(input.preset, "policy.preset", 256), payload: safeMetadata(input.payload, "policy.payload"), createdAt: input.createdAt ?? now(), supersedes };
+      try {
+        policyVersionViewFromRecord(item);
+      } catch (error) {
+        throw new AutomationStoreError("AUTOMATION_INVALID", error instanceof Error ? error.message : "PolicyVersion payload is not a typed ARCH-V2-5 policy.", error);
+      }
       tx.insert("policyVersions", item);
       tx.replace("automationProjects", { ...project, policyVersionId: item.policyVersionId, updatedAt: now(), revision: project.revision + 1 });
+      tx.appendAudit({ projectId: project.projectId, entityType: "PolicyVersion", entityId: item.policyVersionId, eventType: "POLICY_VERSION_CREATED", actorType: "SYSTEM", actorRef: null, boundedPayload: { version: item.version, supersedes: item.supersedes, policySchemaVersion: item.payload.policySchemaVersion ?? null }, correlationId: null, causationId: null });
       return clone(item);
     });
+  }
+
+  async resolveCurrentPolicy(projectId: string): Promise<PolicyVersionView> {
+    const document = await this.snapshot();
+    const project = document.automationProjects.find((item) => item.projectId === projectId);
+    if (!project) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", `automationProjects ${projectId} was not found.`);
+    if (!project.policyVersionId) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", `Project ${projectId} has no current PolicyVersion.`);
+    const policy = document.policyVersions.find((item) => item.policyVersionId === project.policyVersionId);
+    if (!policy) throw new AutomationStoreError("AUTOMATION_INVALID", `Project ${projectId} points to a missing PolicyVersion.`);
+    try {
+      return policyVersionViewFromRecord(policy);
+    } catch (error) {
+      throw new AutomationStoreError("AUTOMATION_INVALID", error instanceof Error ? error.message : "Current PolicyVersion is not valid.", error);
+    }
+  }
+
+  async pinCurrentPolicy(projectId: string, correlationId: string, pinnedAt?: string): Promise<PolicyPin> {
+    const document = await this.snapshot();
+    const project = document.automationProjects.find((item) => item.projectId === projectId);
+    if (!project) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", `automationProjects ${projectId} was not found.`);
+    const policy = await this.resolveCurrentPolicy(projectId);
+    return pinProjectPolicy(project, policy, correlationId, pinnedAt);
+  }
+
+  async assertPolicyPin(pin: PolicyPin): Promise<void> {
+    const current = await this.resolveCurrentPolicy(pin.projectId);
+    try {
+      assertPolicyPin(pin, current);
+    } catch (error) {
+      throw new AutomationStoreError("AUTOMATION_CONFLICT", error instanceof Error ? error.message : "PolicyVersion pin no longer matches the project current policy.", error);
+    }
   }
 
   async get<K extends AutomationTableName>(table: K, entityIdValue: string): Promise<AutomationTables[K] | null> {

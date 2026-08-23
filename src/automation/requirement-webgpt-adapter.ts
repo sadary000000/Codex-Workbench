@@ -17,6 +17,7 @@ import {
 } from "./requirement-webgpt-contract.ts";
 import type { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
 import type { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
+import type { PolicyBudgetAuthority } from "./effective-policy.ts";
 
 export const MAX_REQUIREMENT_REPAIR_PROMPTS = 3 as const;
 
@@ -71,6 +72,8 @@ export interface RequirementWebGptAdapterOptions {
   readonly runtime: RequirementWebGptRuntimePort;
   readonly timeoutMs?: number;
   readonly repairBudget?: RequirementRepairBudget;
+  /** ARCH-V2-5 authority; when supplied it is the only repair budget counter. */
+  readonly repairBudgetAuthority?: Pick<PolicyBudgetAuthority, "reserve">;
   /** Called immediately before a real WebGPT dispatch; exceptions fail closed. */
   readonly onRequestDispatched?: (request: { kind: "original" | "repair"; idempotencyKey: string; targetChatUrl: string }) => void;
   readonly onRequestAccepted?: (request: { kind: "original" | "repair"; requestId: string; idempotencyKey: string; semanticSha256: string | null; targetChatUrl: string }) => void;
@@ -89,6 +92,7 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
   private readonly runtime: RequirementWebGptRuntimePort;
   private readonly timeoutMs: number;
   private readonly repairBudget: RequirementRepairBudget;
+  private readonly repairBudgetAuthority?: Pick<PolicyBudgetAuthority, "reserve">;
   private readonly onRequestDispatched?: RequirementWebGptAdapterOptions["onRequestDispatched"];
   private readonly onRequestAccepted?: RequirementWebGptAdapterOptions["onRequestAccepted"];
   private readonly onResponseDiagnostics?: (event: RequirementResponseDiagnosticEvent) => void;
@@ -97,6 +101,7 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
     this.runtime = options.runtime;
     this.timeoutMs = Math.max(1, Math.min(Math.round(options.timeoutMs ?? 120_000), 300_000));
     this.repairBudget = options.repairBudget ?? { used: 0, max: MAX_REQUIREMENT_REPAIR_PROMPTS };
+    this.repairBudgetAuthority = options.repairBudgetAuthority;
     if (!Number.isSafeInteger(this.repairBudget.max) || this.repairBudget.max < 0 || this.repairBudget.max > MAX_REQUIREMENT_REPAIR_PROMPTS || !Number.isSafeInteger(this.repairBudget.used) || this.repairBudget.used < 0 || this.repairBudget.used > this.repairBudget.max) {
       throw new Error("REPAIR_BUDGET_INVALID: repair budget must be a bounded mutable counter.");
     }
@@ -141,9 +146,9 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
     } catch (caught) {
       const originalError = asContractError(caught, "original response could not satisfy the requirement contract.");
       const originalDiagnostics = diagnoseRequirementResponse(result.response, originalError);
-      if (!isRepairableError(originalError.code) || !this.runtime.submitRequirementRepair || this.repairBudget.used >= this.repairBudget.max) {
+      if (!isRepairableError(originalError.code) || !this.runtime.submitRequirementRepair || (!this.repairBudgetAuthority && this.repairBudget.used >= this.repairBudget.max)) {
         this.emitDiagnostics(failedDiagnostics({ originalRequestId: accepted.requestId, originalIdempotencyKey: request.idempotencyKey, originalSemanticSha256: request.semanticSha256, originalResultSha256, original: originalDiagnostics, parseFailureCategory: originalDiagnostics.category }));
-        if (isRepairableError(originalError.code) && this.repairBudget.used >= this.repairBudget.max) {
+        if (isRepairableError(originalError.code) && !this.repairBudgetAuthority && this.repairBudget.used >= this.repairBudget.max) {
           throw new RequirementContractError("REPAIR_BUDGET_EXHAUSTED", "the bounded Requirement repair prompt budget is exhausted.", "repairBudget");
         }
         throw caught;
@@ -157,20 +162,27 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
       // identities are intentionally distinct and both are recorded in the
       // evidence stream.
       const repairIdempotencyKey = `aut2:repair:${accepted.requestId}:1`;
+      const repairReservation = this.repairBudgetAuthority?.reserve("REPAIR", repairIdempotencyKey);
+      if (repairReservation && !repairReservation.allowed) {
+        this.emitDiagnostics(failedDiagnostics({ originalRequestId: accepted.requestId, originalIdempotencyKey: request.idempotencyKey, originalSemanticSha256: request.semanticSha256, originalResultSha256, original: originalDiagnostics, parseFailureCategory: originalDiagnostics.category }));
+        throw new RequirementContractError("REPAIR_BUDGET_EXHAUSTED", `the PolicyVersion repair budget denied the repair (${repairReservation.reason}).`, "policyBudget");
+      }
       let repairAccepted: RequirementWebGptAcceptedRequest;
       try {
-        this.repairBudget.used += 1;
+        if (!repairReservation) this.repairBudget.used += 1;
         try {
           this.emitRequestDispatched({ kind: "repair", idempotencyKey: repairIdempotencyKey, targetChatUrl: request.binding.chatRef });
         } catch (dispatchReservationError) {
           // The dispatch hook is the last local reservation boundary before
           // the runtime call. If it rejects the action, no repair request was
-          // sent and the mutable repair counter must not overstate usage.
-          this.repairBudget.used -= 1;
+          // sent and the budget reservation must be released.
+          if (repairReservation) repairReservation.release();
+          else this.repairBudget.used -= 1;
           throw dispatchReservationError;
         }
         repairAccepted = await this.runtime.submitRequirementRepair({ projectId: request.projectId, prompt: repairPrompt, idempotencyKey: repairIdempotencyKey });
         assertAcceptedTarget(repairAccepted, request.binding.chatRef);
+        repairReservation?.commit();
         this.emitRequestAccepted({ kind: "repair", requestId: repairAccepted.requestId, idempotencyKey: repairIdempotencyKey, semanticSha256: repairAccepted.semanticSha256 ?? null, targetChatUrl: request.binding.chatRef });
       } catch (repairSubmissionError) {
         this.emitDiagnostics(failedDiagnostics({ originalRequestId: accepted.requestId, originalIdempotencyKey: request.idempotencyKey, originalSemanticSha256: request.semanticSha256, originalResultSha256, original: originalDiagnostics, parseFailureCategory: originalDiagnostics.category }));
@@ -270,6 +282,7 @@ export function createRequirementWebGptAdapter(dependencies: {
   requestManager: Pick<WebGptRequestManager, "waitForRequest" | "getResult">;
   timeoutMs?: number;
   repairBudget?: RequirementRepairBudget;
+  repairBudgetAuthority?: Pick<PolicyBudgetAuthority, "reserve">;
   onRequestDispatched?: RequirementWebGptAdapterOptions["onRequestDispatched"];
   onRequestAccepted?: RequirementWebGptAdapterOptions["onRequestAccepted"];
   onResponseDiagnostics?: (event: RequirementResponseDiagnosticEvent) => void;
@@ -281,6 +294,7 @@ export function createRequirementWebGptAdapter(dependencies: {
   return new RequirementWebGptAdapter({
     timeoutMs: dependencies.timeoutMs,
     repairBudget: dependencies.repairBudget,
+    repairBudgetAuthority: dependencies.repairBudgetAuthority,
     onRequestDispatched: dependencies.onRequestDispatched,
     onRequestAccepted: dependencies.onRequestAccepted,
     onResponseDiagnostics: dependencies.onResponseDiagnostics,

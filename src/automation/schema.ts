@@ -112,8 +112,9 @@ function metadata(value: unknown, field: string): BoundedMetadata {
   const entries = Object.entries(value as Record<string, unknown>);
   if (entries.length > MAX_METADATA) throw new AutomationSchemaError(`${field} has too many entries.`);
   const output: BoundedMetadata = {};
+  const typedPolicyKeys = new Set(["maxPromptDispatches", "maxRepairDispatches", "maxRetryDispatches", "maxNewChatDispatches"]);
   for (const [key, item] of entries) {
-    if (!key || key.length > 128 || SENSITIVE_KEY.test(key)) throw new AutomationSchemaError(`${field} contains a sensitive or invalid key.`);
+    if (!key || key.length > 128 || (SENSITIVE_KEY.test(key) && !(field.startsWith("policyVersions[") && typedPolicyKeys.has(key)))) throw new AutomationSchemaError(`${field} contains a sensitive or invalid key.`);
     if (typeof item !== "string" && typeof item !== "number" && typeof item !== "boolean" && item !== null) {
       throw new AutomationSchemaError(`${field}.${key} must be scalar metadata.`);
     }
@@ -302,6 +303,7 @@ function validateCommonTables(document: Record<string, unknown>): void {
     const expectedSemanticSha256 = computeActionSemanticSha256({ actionType: item.actionType as string, targetRef: (item.targetRef ?? null) as string | null, sideEffectClass: item.sideEffectClass as string, payloadRef: (item.payloadRef ?? null) as string | null, payloadHash: (item.payloadHash ?? null) as string | null, executionOptions, expectedOutcomeRef: (item.expectedOutcomeRef ?? null) as string | null });
     if (semanticSha256 !== expectedSemanticSha256) throw new AutomationSchemaError(`actionIntents[${index}].semanticSha256 does not match the canonical action descriptor.`);
     optionalString(item.idempotencyRef, `actionIntents[${index}].idempotencyRef`, 256);
+    optionalString(item.policyVersionId ?? null, `actionIntents[${index}].policyVersionId`, 256);
     if (item.idempotencyRef !== null) {
       const key = `${item.projectId}\u0000${item.idempotencyRef}`;
       if (idempotencyKeys.has(key)) throw new AutomationSchemaError(`actionIntents[${index}].idempotencyRef is duplicated within a project.`);
@@ -375,6 +377,7 @@ function validateCommonTables(document: Record<string, unknown>): void {
     optionalString(item.providerRequestRef ?? null, `actionAttempts[${index}].providerRequestRef`, 256);
     optionalString(item.providerObservationRef ?? null, `actionAttempts[${index}].providerObservationRef`, 256);
     optionalString(item.providerSemanticSha256 ?? null, `actionAttempts[${index}].providerSemanticSha256`, 128);
+    optionalString(item.policyVersionId ?? null, `actionAttempts[${index}].policyVersionId`, 256);
     enumValue(item.recoveryState, `actionAttempts[${index}].recoveryState`, new Set(["KNOWN_NOT_STARTED", "IN_PROGRESS", "COMPLETED", "FAILED", "UNCERTAIN", "RECOVERY_REQUIRED"]));
     const identity = `${item.intentId}\u0000${item.dispatchNumber}`;
     if (actionAttemptIdentity.has(identity)) throw new AutomationSchemaError(`actionAttempts[${index}] duplicates an existing intentId/dispatchNumber identity.`);
@@ -413,7 +416,7 @@ function validateCommonTables(document: Record<string, unknown>): void {
     string(item.checkpointId, `checkpoints[${index}].checkpointId`, 256);
     string(item.projectId, `checkpoints[${index}].projectId`, 256);
     integer(item.projectRevision, `checkpoints[${index}].projectRevision`);
-    for (const key of ["requirementVersionId", "planVersionId", "currentStageSpecId", "currentStepSpecId", "currentStepRuntimeId", "currentAttemptId", "lastActionIntentId", "lastActionReceiptId", "workspaceSnapshotRef"]) optionalString(item[key], `checkpoints[${index}].${key}`, 256);
+    for (const key of ["requirementVersionId", "planVersionId", "currentStageSpecId", "currentStepSpecId", "currentStepRuntimeId", "currentAttemptId", "lastActionIntentId", "lastActionReceiptId", "workspaceSnapshotRef", "policyVersionId"]) optionalString(item[key], `checkpoints[${index}].${key}`, 256);
     for (const key of ["resourceClaimRefs", "externalRefs", "evidenceRefs", "issueRefs"]) {
       const refs = array(item[key], `checkpoints[${index}].${key}`);
       refs.forEach((ref, refIndex) => string(ref, `checkpoints[${index}].${key}[${refIndex}]`, 256));
@@ -493,11 +496,15 @@ function validateCommonTables(document: Record<string, unknown>): void {
   });
 
   const policies = array(document.policyVersions, "policyVersions");
+  const policyVersionsByProject = new Set<string>();
   policies.forEach((value, index) => {
     const item = record(value);
     string(item.policyVersionId, `policyVersions[${index}].policyVersionId`, 256);
     string(item.projectId, `policyVersions[${index}].projectId`, 256);
     integer(item.version, `policyVersions[${index}].version`, 1);
+    const projectVersion = `${item.projectId}\u0000${item.version}`;
+    if (policyVersionsByProject.has(projectVersion)) throw new AutomationSchemaError(`policyVersions[${index}] duplicates a project policy version.`);
+    policyVersionsByProject.add(projectVersion);
     optionalString(item.preset, `policyVersions[${index}].preset`, 256);
     metadata(item.payload, `policyVersions[${index}].payload`);
     timestamp(item.createdAt, `policyVersions[${index}].createdAt`);
@@ -628,6 +635,10 @@ function validateReferences(document: Record<string, unknown>): void {
     if (requirement && requirement.status === "SUPERSEDED") throw new AutomationSchemaError(`${projectId}.activeRequirementVersionId cannot point to a superseded version.`);
     if (plan && plan.status === "SUPERSEDED") throw new AutomationSchemaError(`${projectId}.activePlanVersionId cannot point to a superseded version.`);
   }
+  for (const item of policies.values()) {
+    const superseded = requireSameProject(policies, item.supersedes, item.projectId as string, "policyVersions.supersedes");
+    if (superseded && Number(superseded.version) >= Number(item.version)) throw new AutomationSchemaError("policyVersions.supersedes must reference an older version in the same project.");
+  }
   for (const item of requirements.values()) {
     requireSameProject(projects, item.projectId, item.projectId as string, "requirementVersions.projectId");
     requireSameProject(requirements, item.supersedes, item.projectId as string, "requirementVersions.supersedes");
@@ -673,8 +684,14 @@ function validateReferences(document: Record<string, unknown>): void {
     if (projectForStage(item.stageSpecId, "actionIntents.stageSpecId") !== null && projectForStage(item.stageSpecId, "actionIntents.stageSpecId") !== projectId) throw new AutomationSchemaError("actionIntents.stageSpecId crosses a project boundary.");
     if (projectForStep(item.stepSpecId, "actionIntents.stepSpecId") !== null && projectForStep(item.stepSpecId, "actionIntents.stepSpecId") !== projectId) throw new AutomationSchemaError("actionIntents.stepSpecId crosses a project boundary.");
     requireSameProject(attempts, item.attemptId, projectId, "actionIntents.attemptId");
+    requireSameProject(policies, item.policyVersionId ?? null, projectId, "actionIntents.policyVersionId");
   }
-  for (const item of actionAttempts.values()) if (!intents.has(item.intentId as string)) throw new AutomationSchemaError("actionAttempts.intentId references a missing intent.");
+  for (const item of actionAttempts.values()) {
+    const intent = intents.get(item.intentId as string);
+    if (!intent) throw new AutomationSchemaError("actionAttempts.intentId references a missing intent.");
+    requireSameProject(policies, item.policyVersionId ?? null, intent.projectId as string, "actionAttempts.policyVersionId");
+    if (item.policyVersionId !== undefined && item.policyVersionId !== null && item.policyVersionId !== intent.policyVersionId) throw new AutomationSchemaError("actionAttempts.policyVersionId must match its parent ActionIntent.");
+  }
   for (const item of receipts.values()) {
     const attempt = actionAttempts.get(item.actionAttemptId as string);
     if (!attempt) throw new AutomationSchemaError("actionReceipts.actionAttemptId references a missing attempt.");
@@ -712,6 +729,7 @@ function validateReferences(document: Record<string, unknown>): void {
     }
     requireSameProject(attempts, item.currentAttemptId, projectId, "checkpoints.currentAttemptId");
     requireSameProject(intents, item.lastActionIntentId, projectId, "checkpoints.lastActionIntentId");
+    requireSameProject(policies, item.policyVersionId ?? null, projectId, "checkpoints.policyVersionId");
     if (projectForReceipt(item.lastActionReceiptId, "checkpoints.lastActionReceiptId") !== null && projectForReceipt(item.lastActionReceiptId, "checkpoints.lastActionReceiptId") !== projectId) throw new AutomationSchemaError("checkpoints.lastActionReceiptId crosses a project boundary.");
     requireSameProject(snapshots, item.workspaceSnapshotRef, projectId, "checkpoints.workspaceSnapshotRef");
     for (const ref of item.resourceClaimRefs as string[]) requireSameProject(claims, ref, projectId, "checkpoints.resourceClaimRefs");

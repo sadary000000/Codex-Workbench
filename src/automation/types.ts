@@ -359,6 +359,8 @@ export interface ActionIntent {
   semanticSha256: string;
   idempotencyRef: string | null;
   expectedOutcomeRef: string | null;
+  /** Immutable PolicyVersion identity selected when this intent was created; legacy records may omit it. */
+  policyVersionId?: string | null;
   state: ActionIntentState;
   createdAt: IsoTimestamp;
 }
@@ -372,6 +374,8 @@ export interface ActionAttempt {
   completedAt: IsoTimestamp | null;
   executorRef: string | null;
   recoveryState: RecoveryState;
+  /** Copied from the parent ActionIntent; legacy records may omit it. */
+  policyVersionId?: string | null;
   /** Optional on legacy persisted ActionAttempts; new writes always set null/ref explicitly. */
   providerRequestRef?: string | null;
   providerObservationRef?: string | null;
@@ -433,6 +437,8 @@ export interface Checkpoint {
   externalRefs: string[];
   evidenceRefs: string[];
   issueRefs: string[];
+  /** Project policy snapshot associated with this checkpoint; legacy records may omit it. */
+  policyVersionId?: string | null;
   createdAt: IsoTimestamp;
 }
 

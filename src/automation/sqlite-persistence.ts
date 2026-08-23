@@ -70,6 +70,7 @@ const ID_FIELDS: Record<AutomationTableName, string> = {
 
 const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "ascii");
 const SENSITIVE_PERSISTED_KEY = /(?:prompt|response|transcript|cookie|token|authorization|password|credential|secret|stdout|stderr|raw.?body)/i;
+const TYPED_POLICY_KEYS = new Set(["maxPromptDispatches", "maxRepairDispatches", "maxRetryDispatches", "maxNewChatDispatches"]);
 
 type SqliteRow = {
   table_name: string;
@@ -175,7 +176,7 @@ function assertPersistedBoundary(value: unknown, path: string, depth = 0): void 
   }
   if (!value || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if (SENSITIVE_PERSISTED_KEY.test(key)) throw new AutomationPersistenceError("AUTOMATION_DB_INVALID", `${path}.${key} violates the Automation persistence boundary.`);
+    if (SENSITIVE_PERSISTED_KEY.test(key) && !((path.startsWith("policyVersions[") || path.startsWith("policyVersions/")) && TYPED_POLICY_KEYS.has(key))) throw new AutomationPersistenceError("AUTOMATION_DB_INVALID", `${path}.${key} violates the Automation persistence boundary.`);
     assertPersistedBoundary(child, `${path}.${key}`, depth + 1);
   }
 }
