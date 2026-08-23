@@ -74,5 +74,17 @@
     "runningAtGate": 0,
     "allReadOnly": true
   },
+  "finalFreezeArtifacts": {
+    "status": "COMPLETE",
+    "baseline": "docs/ARCHITECTURE-BASELINE-V2-FINAL.md",
+    "manifest": "docs/ARCH-V2-8-FINAL-FREEZE-MANIFEST.json",
+    "capabilityMatrix": "docs/ARCH-V2-8-CAPABILITY-MATRIX.md",
+    "frozenContractCheck": "docs/ARCH-V2-8-FROZEN-CONTRACT-CHECK.md",
+    "compatibilityRegression": "docs/ARCH-V2-8-COMPATIBILITY-REGRESSION.md",
+    "deferredDebt": "docs/ARCH-V2-8-DEFERRED-DEBT.md",
+    "manifestSha256Sidecar": "ARCH-V2-8-FINAL-FREEZE-MANIFEST.sha256",
+    "reviewPackageSha256Sidecar": "ARCH-V2-8-REVIEW-PACKAGE.zip.sha256",
+    "consistency": "PASS"
+  },
   "requestedGate": "PASS"
 }

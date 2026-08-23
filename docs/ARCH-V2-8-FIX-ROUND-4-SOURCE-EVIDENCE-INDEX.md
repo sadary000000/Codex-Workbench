@@ -38,6 +38,12 @@ ARCH-V2-8-FIX-ROUND-4-SOURCE-EVIDENCE-INDEX.md
 ARCH-V2-8-FIX-ROUND-4-GPT-REVIEW-PROMPT.md
 ARCH-V2-8-FIX-ROUND-4-SUBAGENTS.md
 PACKAGE-MANIFEST.txt
+ARCHITECTURE-BASELINE-V2-FINAL.md
+ARCH-V2-8-FINAL-FREEZE-MANIFEST.json
+ARCH-V2-8-CAPABILITY-MATRIX.md
+ARCH-V2-8-FROZEN-CONTRACT-CHECK.md
+ARCH-V2-8-COMPATIBILITY-REGRESSION.md
+ARCH-V2-8-DEFERRED-DEBT.md
 ```
 
 The package deliberately excludes cookies, tokens, browser profiles, private chats, raw business prompts, production databases, and complete production journals.

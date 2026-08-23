@@ -36,3 +36,21 @@ The actual resolver and bootstrap path completed initialize with exit code 0. Th
 ## Regression boundary
 
 Round 3's P1 caused by nonexistent response-field requirements is closed. Operation capability registry, unsupported-operation fail-closed behavior, binary provenance, schema provenance, and Native identity boundaries remain covered.
+
+## Final artifact reconciliation
+
+The final baseline, manifest, capability matrix, frozen contract check, compatibility regression, deferred debt, stage review, and test summary all agree on:
+
+```yaml
+implementation_commit: fe30b94e090ea2bfd2b2ef78b700bf81d72e5db3
+P0: 0
+P1: 0
+P2: 3
+technicalGate: READY_FOR_FINAL_HUMAN_FREEZE
+finalFrozen: false
+AUT-2/AUT-3: PAUSED
+real_business_prompts: 0
+new_business_chats: 0
+```
+
+The exact final-manifest and review-package digests are recorded in their adjacent sidecars after artifact creation to avoid a circular package hash.

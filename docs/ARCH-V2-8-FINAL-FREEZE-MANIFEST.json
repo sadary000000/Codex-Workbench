@@ -1,97 +1,61 @@
 {
-  "stage": "ARCH-V2-8",
-  "stageName": "Capability / Frozen Confirmation / Compatibility Regression / Final Architecture Freeze",
-  "technicalGate": "FAIL_WITH_EVIDENCE",
-  "status": "GPT_REVIEW_REQUIRED_WITH_BLOCKERS",
+  "manifestVersion": "arch-v2-8-final-freeze-v1",
+  "stage": "ARCH-V2-8 FIX ROUND 4",
+  "status": "READY_FOR_FINAL_HUMAN_FREEZE",
+  "implementationCommit": "fe30b94e090ea2bfd2b2ef78b700bf81d72e5db3",
+  "technicalGate": "READY_FOR_FINAL_HUMAN_FREEZE",
   "finalFrozen": false,
-  "repository": "D:\\办公\\AI\\Codex_Workbench_V1",
-  "implementationHead": "926440739ef3ca4a35a41f9d8b6537b31ac66d25",
-  "repositoryHeadAtRound2Start": "41467ceff78f7e59365233f4472c3e72d1355596",
-  "implementationCommits": [
-    "86e5569",
-    "3637c47",
-    "5eab521",
-    "9264407"
-  ],
-  "round1ReviewCommit": "41467ceff78f7e59365233f4472c3e72d1355596",
-  "round2ProductCodeChanged": false,
-  "v1FrozenCoreChanged": false,
-  "realBusinessPrompts": 0,
-  "newBusinessChats": 0,
   "automation": {
     "AUT-2": "PAUSED",
     "AUT-3": "PAUSED"
   },
-  "provenance": {
-    "codexCliVersion": "codex-cli 0.147.0",
-    "resolverBinarySha256": "935A1911ED5564FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D",
-    "observedDesktopUserAgent": "Codex Desktop/0.148.0-alpha.9",
-    "observedDesktopCompatibility": "UNSUPPORTED",
-    "appServerGeneratedJsonSchemaTreeSha256": "0D2DDF85138073D0EA0A6828804349B65F18BF88F8B2FF7AEF62C9262B39390F",
-    "controlPlaneSchemaSha256": "0E13F0B1D6A1A9AF37DFEEE13FEFEBE70F532BB5C6F75C29AD7860C2B7A72E59"
-  },
-  "package": {
-    "standardPackageStatus": "LOCKED_WITH_EVIDENCE",
-    "isolatedPackage": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-stage-arch-v2-8-fix-round-1\\package",
-    "isolatedOuterExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
-    "isolatedMainJsSha256": "E9388F0C46E4FB81C175EB2FAA98FA373E97649CFB51BD49926B5268D0936F82",
-    "isolatedRendererJsSha256": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
-    "isolatedPackageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F",
-    "reviewPackageSha256Sidecar": "dist/review/ARCH-V2-8-REVIEW-PACKAGE.sha256",
-    "manifestSha256Sidecar": "docs/ARCH-V2-8-PROVENANCE.txt"
-  },
-  "capabilityStates": {
-    "appServerProvenanceInitializeCapabilityGate": "SUPPORTED_WITH_COMPATIBILITY_PATH",
-    "strictProtocolCapabilityEnforcement": "UNSUPPORTED",
-    "allProductionAppServerPaths": "UNSUPPORTED",
-    "controlPlaneCapabilityGate": "SUPPORTED_WITH_COMPATIBILITY_PATH",
-    "webgptStatus": "SUPPORTED",
-    "threadAndTurnBusinessFlow": "TEST_ONLY",
-    "observedDesktop01480Alpha9": "UNSUPPORTED",
-    "recoveryProductionSideEffectPath": "UNSUPPORTED",
-    "migrationIdentityProductionAssertion": "UNSUPPORTED",
-    "businessPromptAndNewChat": "PAUSED_NOT_EXECUTABLE"
-  },
-  "currentFindings": {
+  "gateCounts": {
     "P0": 0,
-    "P1": 5,
-    "P2": 3,
-    "p1Items": [
-      { "id": "P1-01", "severity": "P1", "blocking": true, "title": "Strict protocolVersion and requested experimentalApi enforcement incomplete" },
-      { "id": "P1-02", "severity": "P1", "blocking": true, "title": "Production map/project-map App Server paths bypass shared initialize validator" },
-      { "id": "P1-03", "severity": "P1", "blocking": true, "title": "Legacy Control Plane path bypasses per-command capability enforcement" },
-      { "id": "P1-04", "severity": "P1", "blocking": true, "title": "Recovery Provider Port production side-effect bridge/recover wiring missing" },
-      { "id": "P1-05", "severity": "P1", "blocking": true, "title": "Production migration identity coverage/assertion incomplete" }
-    ],
-    "p2Items": [
-      { "id": "P2-01", "severity": "P2", "blocking": false, "frozen_contract_impact": "NONE", "title": "No complete user-facing production projection rebuild command" },
-      { "id": "P2-02", "severity": "P2", "blocking": false, "frozen_contract_impact": "NONE", "title": "No user-facing migration command" },
-      { "id": "P2-03", "severity": "P2", "blocking": false, "frozen_contract_impact": "NONE", "title": "Legacy URL-shaped seam is TEST_ONLY / LEGACY_READ_ONLY" }
-    ],
-    "historicalResolved": "HISTORICAL_RESOLVED"
+    "P1": 0,
+    "P2": 3
   },
-  "tests": {
-    "check": "PASS",
-    "npmTest": "389/389 PASS",
-    "build": "LOCKED_WITH_EVIDENCE",
+  "verification": {
+    "npmTest": "400/400 PASS",
+    "targetedRound4": "11/11 PASS",
+    "protocolGeneration": "PASS; TypeScript 642, JSON schema 285",
+    "audit": "PASS; 0 vulnerabilities",
+    "isolatedBuild": "PASS",
     "isolatedPackage": "PASS",
-    "standardPackage": "LOCKED_WITH_EVIDENCE",
-    "audit": "PASS: 0 vulnerabilities",
-    "diffCheck": "PASS",
-    "secretScan": "PASS"
+    "realInitializeProbe": "PASS; initialize-only"
   },
-  "smokes": {
-    "WEB-6.6 protocol": "PASS",
-    "WEB-6.4 arbiter": "PASS",
-    "realBusinessPromptCount": 0,
-    "newBusinessChatCount": 0
+  "sideEffects": {
+    "realBusinessPrompts": 0,
+    "newBusinessChats": 0,
+    "threadStarted": false,
+    "turnStarted": false,
+    "promptSent": false
   },
-  "subagents": {
-    "A": "completed",
-    "B": "completed",
-    "C": "completed",
-    "D": "completed",
-    "E": "completed",
-    "running": 0
+  "frozenContract": {
+    "nativeThreadOnlyConversationIdentity": true,
+    "nativeTurnItemOnlyMessageRuntimeFacts": true,
+    "codexAppServerRuntimeMainPath": true,
+    "secondConversationTruth": false,
+    "secondTranscriptTruth": false,
+    "hiddenReplacementThread": false,
+    "execHistoryReconstruction": false
+  },
+  "historicalBlockers": {
+    "round3StrictResponseFieldAssumption": "HISTORICAL_RESOLVED"
+  },
+  "deferredDebt": ["P2-01", "P2-02", "P2-03"],
+  "reviewArtifacts": [
+    "ARCHITECTURE-BASELINE-V2-FINAL.md",
+    "ARCH-V2-8-FINAL-FREEZE-MANIFEST.json",
+    "ARCH-V2-8-CAPABILITY-MATRIX.md",
+    "ARCH-V2-8-FROZEN-CONTRACT-CHECK.md",
+    "ARCH-V2-8-COMPATIBILITY-REGRESSION.md",
+    "ARCH-V2-8-DEFERRED-DEBT.md",
+    "ARCH-V2-8-FIX-ROUND-4-STAGE-REVIEW.md",
+    "ARCH-V2-8-FIX-ROUND-4-TEST-SUMMARY.md"
+  ],
+  "integrity": {
+    "finalManifestSha256": "stored in adjacent ARCH-V2-8-FINAL-FREEZE-MANIFEST.sha256 sidecar after file creation",
+    "reviewPackageSha256": "stored in adjacent ARCH-V2-8-REVIEW-PACKAGE.zip.sha256 sidecar after ZIP creation",
+    "antiCircularRule": "The manifest digest is recorded externally; the package digest is recorded externally because the package contains the manifest."
   }
 }

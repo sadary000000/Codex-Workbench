@@ -23,6 +23,8 @@ requested_gate: PASS
 
 本轮只闭环 ABI-native compatibility gate。没有进入最终冻结，没有恢复 AUT-2/AUT-3，没有创建业务 Chat，也没有发送真实业务 Prompt。
 
+GPT 对 Round 4 技术实现的复审结论为 PASS；随后提出的唯一 P1 是最终冻结前的可审计文档/Manifest 产物不完整。本次补充仅生成最终 Baseline、Capability Matrix、Frozen Contract Check、Compatibility Regression、Deferred Debt 和 Final Freeze Manifest，不修改产品代码。
+
 ## Executive summary
 
 Round 3 的两个 P1 阻塞来自对 `initialize` 响应 ABI 的错误假设：实际 Codex App Server 0.147.0 的 `InitializeResponse` 只有 `codexHome`、`platformFamily`、`platformOs`、`userAgent` 四个 verified fields；`protocolVersion` 和响应侧 `capabilities` 不属于当前 verified response schema。`experimentalApi` 属于 Workbench 发出的 initialize request capability，而不是必须从 response 回读的字段。
@@ -287,6 +289,24 @@ review_package: D:\办公\AI\Codex_Workbench_V1\dist\review\ARCH-V2-8-REVIEW-PAC
 review_package_sha256: adjacent .sha256 sidecar generated after packaging
 ```
 
+## Final freeze artifacts reconciliation
+
+```yaml
+final_baseline: docs/ARCHITECTURE-BASELINE-V2-FINAL.md
+final_manifest: docs/ARCH-V2-8-FINAL-FREEZE-MANIFEST.json
+capability_matrix: docs/ARCH-V2-8-CAPABILITY-MATRIX.md
+frozen_contract_check: docs/ARCH-V2-8-FROZEN-CONTRACT-CHECK.md
+compatibility_regression: docs/ARCH-V2-8-COMPATIBILITY-REGRESSION.md
+deferred_debt: docs/ARCH-V2-8-DEFERRED-DEBT.md
+final_manifest_sha256: adjacent ARCH-V2-8-FINAL-FREEZE-MANIFEST.sha256 sidecar
+review_package_sha256: adjacent ARCH-V2-8-REVIEW-PACKAGE.zip.sha256 sidecar
+consistency_check: PASS
+product_code_changed: NO
+finalFrozen: false
+```
+
+The final artifacts use the same implementation commit, test counts, gate counts, capability status, side-effect counts, and paused automation state. `HISTORICAL_RESOLVED` is used only for the Round 3 obsolete response-field assumption.
+
 ## Privacy and protected repositories
 
 - No Cookie, Token, Password, browser profile, private chat, production database, or complete production journal is in the review package.
@@ -322,4 +342,3 @@ requested_gate: PASS
 ```
 
 Per the stage instruction, this is a candidate for final human freeze review only. Round 4 does not perform the freeze itself.
-

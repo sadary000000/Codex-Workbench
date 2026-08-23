@@ -7,6 +7,8 @@ InitializeRequest  = clientInfo + capabilities.experimentalApi
 InitializeResponse = codexHome + platformFamily + platformOs + userAgent
 ```
 
+Round 4 技术实现已通过上一轮审查；本次只补齐最终冻结前的可审计文档/Manifest 产物。请重点检查 ZIP 中的 Final Baseline、Final Freeze Manifest、Capability Matrix、Frozen Contract Check、Compatibility Regression、Deferred Debt 是否与 Stage Review/Test Summary 使用同一 `implementation_commit`、400/400、11/11、P0=0/P1=0/P2=3、`READY_FOR_FINAL_HUMAN_FREEZE`、`finalFrozen=false`、AUT-2/AUT-3 paused 和零业务副作用。
+
 请重点核对：
 
 1. response 校验是否严格但只针对 verified generated schema；
@@ -24,4 +26,3 @@ requested_gate: PASS | FIX_REQUIRED | BLOCKED
 ```
 
 本轮状态：`finalFrozen=false`，`AUT-2/AUT-3=PAUSED`，真实业务 Prompt=0，真实业务 Chat=0。
-
