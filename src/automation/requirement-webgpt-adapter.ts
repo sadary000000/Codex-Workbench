@@ -168,6 +168,8 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
         throw new RequirementContractError("REPAIR_BUDGET_EXHAUSTED", `the PolicyVersion repair budget denied the repair (${repairReservation.reason}).`, "policyBudget");
       }
       let repairAccepted: RequirementWebGptAcceptedRequest;
+      let repairCommitted = false;
+      let legacyRepairReleased = false;
       try {
         if (!repairReservation) this.repairBudget.used += 1;
         try {
@@ -178,13 +180,20 @@ export class RequirementWebGptAdapter implements IWebGPTRequirementService {
           // sent and the budget reservation must be released.
           if (repairReservation) repairReservation.release();
           else this.repairBudget.used -= 1;
+          legacyRepairReleased = !repairReservation;
           throw dispatchReservationError;
         }
+        // The transport call is the irreversible boundary. Commit immediately
+        // before it so an unknown provider outcome cannot be refunded and
+        // replayed as a second repair Prompt.
+        repairReservation?.commit();
+        repairCommitted = true;
         repairAccepted = await this.runtime.submitRequirementRepair({ projectId: request.projectId, prompt: repairPrompt, idempotencyKey: repairIdempotencyKey });
         assertAcceptedTarget(repairAccepted, request.binding.chatRef);
-        repairReservation?.commit();
         this.emitRequestAccepted({ kind: "repair", requestId: repairAccepted.requestId, idempotencyKey: repairIdempotencyKey, semanticSha256: repairAccepted.semanticSha256 ?? null, targetChatUrl: request.binding.chatRef });
       } catch (repairSubmissionError) {
+        if (repairReservation && !repairCommitted) repairReservation.release();
+        if (!repairReservation && !repairCommitted && !legacyRepairReleased) this.repairBudget.used = Math.max(0, this.repairBudget.used - 1);
         this.emitDiagnostics(failedDiagnostics({ originalRequestId: accepted.requestId, originalIdempotencyKey: request.idempotencyKey, originalSemanticSha256: request.semanticSha256, originalResultSha256, original: originalDiagnostics, parseFailureCategory: originalDiagnostics.category }));
         throw repairSubmissionError;
       }

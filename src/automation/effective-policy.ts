@@ -332,9 +332,12 @@ export function pinPolicyVersion(policyVersion: PolicyVersionView, correlationId
   });
 }
 
-export function assertPolicyPin(pin: PolicyPin, current: PolicyVersionView): void {
+export function assertPolicyPin(pin: PolicyPin, current: PolicyVersionView, correlationId?: string): void {
   if (pin.policyVersionId !== current.policyVersionId || pin.projectId !== current.projectId || pin.version !== current.version) {
     throw new PolicyContractError("POLICY_PIN_MISMATCH", "The in-flight operation is bound to a different PolicyVersion.", "policyPin");
+  }
+  if (correlationId !== undefined && pin.correlationId !== correlationId) {
+    throw new PolicyContractError("POLICY_PIN_MISMATCH", "The PolicyVersion pin correlation does not match the operation correlation.", "policyPin.correlationId");
   }
 }
 
@@ -348,7 +351,7 @@ export function pinProjectPolicy(project: Pick<AutomationProject, "projectId" | 
 export function resolveEffectivePolicy(input: ResolveEffectivePolicyInput): EffectivePolicyDecision {
   const correlationId = boundedText(input.correlationId, "decision.correlationId", 256);
   const actionId = input.actionId === undefined || input.actionId === null ? null : boundedText(input.actionId, "decision.actionId", 256);
-  if (input.pin) assertPolicyPin(input.pin, input.policyVersion);
+  if (input.pin) assertPolicyPin(input.pin, input.policyVersion, correlationId);
 
   const policy = input.policyVersion;
   const hard = input.hardConstraints;
@@ -432,6 +435,7 @@ export function resolveEffectivePolicy(input: ResolveEffectivePolicyInput): Effe
 
 /** Resolver entry point for in-flight work; a missing or mismatched pin is a contract error. */
 export function resolvePinnedEffectivePolicy(input: ResolveEffectivePolicyInput & { readonly pin: PolicyPin }): EffectivePolicyDecision {
+  if (!input.pin) throw new PolicyContractError("POLICY_INPUT_INVALID", "A pinned resolver call requires an explicit PolicyPin.", "policyPin");
   return resolveEffectivePolicy(input);
 }
 

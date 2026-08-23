@@ -9,6 +9,7 @@ import type { WebGptWorkspace } from "./webgpt-workspace.ts";
 import type { WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
 import type { WebGptLiveLeaseSnapshot, WebGptOperationArbiter, WebGptOperationLease, WebGptOperationRequest, WebGptOperationType } from "./webgpt-operation-arbiter.ts";
 import { normalizeWebGptProjectUrl, WebGptProjectRegistry } from "./webgpt-project-registry.ts";
+import { webGptRuntimeCapability, type WebGptPolicyAdmission, type WebGptPolicyAuthorizer } from "../../../automation/webgpt-policy-authority.ts";
 
 const REQUEST_FILE = "requests.json";
 const RESULT_DIRECTORY = "results";
@@ -31,6 +32,10 @@ export interface WebGptRequestManagerOptions {
   onTerminal?: (record: WebGptRequestRecord) => Promise<void> | void;
   validateTarget?: (record: WebGptRequestRecord) => Promise<void> | void;
   projectRegistry?: WebGptProjectRegistry;
+  /** Production hosts inject the single persisted PolicyVersion authority. */
+  policyAuthority?: WebGptPolicyAuthorizer;
+  /** Missing authority is allowed only for isolated unit/test fixtures. */
+  requirePolicyAuthority?: boolean;
 }
 
 export interface WebGptRequestMetadata {
@@ -53,6 +58,8 @@ export class WebGptRequestManager {
   private readonly onTerminal: (record: WebGptRequestRecord) => Promise<void> | void;
   private readonly validateTarget?: (record: WebGptRequestRecord) => Promise<void> | void;
   private readonly projectRegistry?: WebGptProjectRegistry;
+  private readonly policyAuthority?: WebGptPolicyAuthorizer;
+  private readonly requirePolicyAuthority: boolean;
   private readonly records = new Map<string, WebGptRequestRecord>();
   private readonly prompts = new Map<string, string>();
   private persistQueue: Promise<void> = Promise.resolve();
@@ -68,6 +75,8 @@ export class WebGptRequestManager {
     this.onTerminal = options.onTerminal ?? (() => undefined);
     this.validateTarget = options.validateTarget;
     this.projectRegistry = options.projectRegistry;
+    this.policyAuthority = options.policyAuthority;
+    this.requirePolicyAuthority = options.requirePolicyAuthority === true;
     this.loadPromise = this.load();
   }
 
@@ -87,8 +96,10 @@ export class WebGptRequestManager {
     await this.ready();
     await this.ensureAutomationControl();
     const result = await this.withBrowserLease({ source: "CLI", ownerKey: operationMetadata.role ? `${operationMetadata.projectId ?? "project"}:${operationMetadata.role}` : "control-plane", projectId: operationMetadata.projectId, role: operationMetadata.role, operationType: operationMetadata.operationType ?? "OPEN_CHAT" }, async () => {
-      const state = await this.workspace.createChat();
-      return { chatUrl: state.url, page: state.page, mode: state.mode };
+      const correlationId = `webgpt:new-chat:${randomUUID()}`;
+      const admission = await this.admitPolicy("NEW_CHAT", correlationId, null, true);
+      const state = await this.dispatchWithPolicy(admission, () => this.workspace.createChat());
+      return { chatUrl: state.url, page: state.page, mode: state.mode, policyVersionId: admission?.policyVersionId ?? null, policyCorrelationId: admission?.pin.correlationId ?? correlationId };
     });
     return { ...result, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
   }
@@ -183,7 +194,12 @@ export class WebGptRequestManager {
   async createChatInProject(projectName: string): Promise<Record<string, unknown>> {
     await this.ready();
     await this.ensureAutomationControl();
-    const result = await this.withBrowserLease({ source: "CLI", ownerKey: "control-plane", operationType: "PROJECT_NEW_CHAT" }, () => this.workspace.createChatInProjectForAutomation(projectName));
+    const result = await this.withBrowserLease({ source: "CLI", ownerKey: "control-plane", operationType: "PROJECT_NEW_CHAT" }, async () => {
+      const correlationId = `webgpt:project-new-chat:${randomUUID()}`;
+      const admission = await this.admitPolicy("NEW_CHAT", correlationId, null, true);
+      const created = await this.dispatchWithPolicy(admission, () => this.workspace.createChatInProjectForAutomation(projectName));
+      return { ...created, policyVersionId: admission?.policyVersionId ?? null, policyCorrelationId: admission?.pin.correlationId ?? correlationId };
+    });
     return { ...result, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
   }
 
@@ -240,9 +256,11 @@ export class WebGptRequestManager {
     }
     const requestId = `wgpt-${randomUUID()}`;
     const now = new Date().toISOString();
+    const policyVersionId = this.policyAuthority ? await this.policyAuthority.currentPolicyVersionId() : null;
     const record: WebGptRequestRecord = {
       requestId,
       idempotencyKey: key,
+      policyVersionId,
       semanticSha256,
       state: this.workspace.getControlMode() === "USER_CONTROL" ? "PAUSED_FOR_USER" : "QUEUED",
       projectId: metadata.projectId ?? null,
@@ -475,7 +493,13 @@ export class WebGptRequestManager {
       return;
     }
     let lease: WebGptOperationLease | undefined;
+    let promptAdmission: WebGptPolicyAdmission | null = null;
+    let promptCommitted = false;
+    let newChatAdmission: WebGptPolicyAdmission | null = null;
+    let newChatCommitted = false;
     try {
+      promptAdmission = await this.admitPolicy("PROMPT", `webgpt:prompt:${record.requestId}`, record.policyVersionId);
+      await this.attachPolicy(record, promptAdmission);
       lease = await this.getOperationArbiter()?.acquire({
         source: "INTERNAL",
         ownerKey: record.projectId && record.role ? `${record.projectId}:${record.role}` : "request-manager",
@@ -500,6 +524,10 @@ export class WebGptRequestManager {
         if (confirmedChatUrl !== record.targetChatUrl) throw this.codedError("ROLE_CHAT_MISMATCH", "当前页面不是请求指定的 Role Chat，已禁止发送。 ");
         if (!probe.page.onChatPage || !probe.page.composerFound) throw this.codedError("PAGE_ADAPTER_UNHEALTHY", "Role Chat Composer 尚未就绪，已禁止切换到替代 Chat。 ");
       } else if (!probe.page.onChatPage || !probe.page.composerFound) {
+        newChatAdmission = await this.admitPolicy("NEW_CHAT", `webgpt:new-chat:${record.requestId}`, record.policyVersionId);
+        await this.attachPolicy(record, newChatAdmission);
+        newChatAdmission?.reservation.commit();
+        newChatCommitted = newChatAdmission !== null;
         await this.workspace.createChat();
         probe = await this.workspace.getPageProbe();
       }
@@ -526,6 +554,8 @@ export class WebGptRequestManager {
         // Network observation is an acceleration layer. Any debugger or
         // observer failure must leave the legacy Page Probe path available.
       }
+      promptAdmission?.reservation.commit();
+      promptCommitted = promptAdmission !== null;
       const submitted = await this.workspace.submitPrompt(prompt, record.targetChatUrl ?? undefined);
       record.chatUrl = safeChatUrl(submitted.chatUrl) || submitted.chatUrl;
       const submittedAt = new Date().toISOString();
@@ -584,6 +614,8 @@ export class WebGptRequestManager {
         await this.fail(record, code, message);
       }
     } finally {
+      if (promptAdmission && !promptCommitted) promptAdmission.reservation.release();
+      if (newChatAdmission && !newChatCommitted) newChatAdmission.reservation.release();
       lease?.release(record.state);
     }
   }
@@ -679,6 +711,40 @@ export class WebGptRequestManager {
     if (mode === "PAUSED") throw this.codedError("WEBGPT_AUTOMATION_PAUSED", "自动化当前已暂停，请先显式交还 AUTO_CONTROL。");
   }
 
+  private async admitPolicy(operation: "PROMPT" | "RETRY" | "NEW_CHAT", correlationId: string, policyVersionId: string | null = null, allowCurrentPolicy = false): Promise<WebGptPolicyAdmission | null> {
+    if (!this.policyAuthority) {
+      if (this.requirePolicyAuthority) throw this.codedError("POLICY_AUTHORITY_REQUIRED", "生产 WebGPT Host 未注入统一 Policy authority；已拒绝副作用。");
+      return null;
+    }
+    if (!policyVersionId && this.requirePolicyAuthority && !allowCurrentPolicy) {
+      throw this.codedError("POLICY_PIN_REQUIRED", "生产 WebGPT Request 缺少显式 PolicyVersion pin；未回退到当前版本，已拒绝副作用。 ");
+    }
+    const capability = webGptRuntimeCapability(this.workspace.getControlMode());
+    return policyVersionId
+      ? this.policyAuthority.authorizePinned(operation, correlationId, policyVersionId, capability)
+      : this.policyAuthority.authorize(operation, correlationId, capability);
+  }
+
+  private async attachPolicy(record: WebGptRequestRecord, admission: WebGptPolicyAdmission | null): Promise<void> {
+    if (!admission) return;
+    if (record.policyVersionId && record.policyVersionId !== admission.policyVersionId) {
+      throw this.codedError("POLICY_PIN_MISMATCH", "请求已绑定其它 PolicyVersion，已拒绝使用当前版本或静默替换。");
+    }
+    if (!record.policyVersionId) {
+      record.policyVersionId = admission.policyVersionId;
+      await this.persist();
+      this.emit(record);
+    }
+  }
+
+  private async dispatchWithPolicy<T>(admission: WebGptPolicyAdmission | null, dispatch: () => Promise<T>): Promise<T> {
+    // Commit is deliberately the last local step before the provider/browser
+    // call. If dispatch throws after this point, the outcome is unknown and the
+    // reservation must remain committed rather than being refunded and replayed.
+    admission?.reservation.commit();
+    return dispatch();
+  }
+
   private getOperationArbiter(): WebGptOperationArbiter | undefined {
     const candidate = this.workspace as WebGptWorkspace & { getOperationArbiter?: () => WebGptOperationArbiter };
     return typeof candidate.getOperationArbiter === "function" ? candidate.getOperationArbiter() : undefined;
@@ -752,6 +818,7 @@ export class WebGptRequestManager {
     return {
       requestId,
       idempotencyKey: normalizeIdempotencyKey(value.idempotencyKey ?? undefined),
+      policyVersionId: typeof value.policyVersionId === "string" && value.policyVersionId.trim() ? value.policyVersionId.trim().slice(0, 256) : null,
       semanticSha256: typeof value.semanticSha256 === "string" && value.semanticSha256 ? value.semanticSha256.slice(0, 128) : semanticHashFromParts(promptSha256, promptChars, projectId, role, targetChatUrl),
       state: value.state,
       projectId,

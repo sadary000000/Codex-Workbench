@@ -13,3 +13,4 @@ export * from "./planner-service.ts";
 export * from "./planner-webgpt-adapter.ts";
 export * from "./webgpt-external-action.ts";
 export * from "./effective-policy.ts";
+export * from "./webgpt-policy-authority.ts";

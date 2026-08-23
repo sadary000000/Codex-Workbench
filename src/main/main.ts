@@ -34,6 +34,7 @@ import { createWebGptCliArgumentError, createWebGptCliFailure, presentWebGptCliO
 import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 import { AutomationStore } from "../automation/store.ts";
+import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority } from "../automation/webgpt-policy-authority.ts";
 import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../automation/aut2-real-webgpt-gate.ts";
 import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
 import { classifyWebGptActionReadiness, type WebGptActionScope } from "../automation/webgpt-action-readiness.ts";
@@ -126,6 +127,7 @@ let webGptProjectRegistry: WebGptProjectRegistry | null = null;
 let webGptControlRevision = 0;
 let webGptControlQueue: Promise<void> = Promise.resolve();
 let automationStore: AutomationStore | null = null;
+let webGptPolicyAuthority: WebGptPolicyAuthority | null = null;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
 
 function automationDatabasePath(): string {
@@ -137,7 +139,8 @@ async function startAutomationPersistence(): Promise<void> {
   const store = new AutomationStore(automationDatabasePath());
   await store.persistenceDiagnostics();
   automationStore = store;
-  if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE !== "1") return;
+  if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE === "1") return;
+  webGptPolicyAuthority = await ensureWebGptRuntimePolicy(store);
 
   const projectId = "aut2-normal-gui-project";
   const existing = await store.get("automationProjects", projectId);
@@ -1035,6 +1038,8 @@ function getWebGptRequestManager(): WebGptRequestManager {
     workspace,
     storageDirectory: requestStorageDirectory,
     projectRegistry: getWebGptProjectRegistry(),
+    policyAuthority: webGptPolicyAuthority ?? undefined,
+    requirePolicyAuthority: true,
     onState: (state) => send(IPC.webGptRequestState, state),
     onTerminal: (record) => webGptRoleService?.handleTerminal(record),
     validateTarget: async (record) => {
@@ -2086,6 +2091,7 @@ if (officialCliMode) {
           if (webGptControlDescriptorFile) await removeControlDescriptor(webGptControlDescriptorFile);
           if (automationStore) await automationStore.close();
           automationStore = null;
+          webGptPolicyAuthority = null;
           await runtimes.closeAll();
           if (nativeAppServerHost) await nativeAppServerHost.close();
           if (projectMaps) await projectMaps.close();

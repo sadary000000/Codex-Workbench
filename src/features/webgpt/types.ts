@@ -105,6 +105,8 @@ export type WebGptRequestState =
 export interface WebGptRequestRecord {
   requestId: string;
   idempotencyKey: string | null;
+  /** Immutable PolicyVersion selected at production admission; old journals may omit it. */
+  policyVersionId?: string | null;
   semanticSha256: string;
   state: WebGptRequestState;
   projectId: string | null;

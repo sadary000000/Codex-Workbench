@@ -102,6 +102,8 @@ export interface WebGptProviderRequest {
   provider: typeof WEBGPT_PROVIDER;
   providerRequestId: string;
   idempotencyKey: string | null;
+  /** Propagated from the Request Journal production admission. */
+  policyVersionId?: string | null;
   semanticSha256: string | null;
   targetChatUrl: string | null;
   state: WebGptProviderRequestState;
@@ -553,7 +555,7 @@ export function createWebGptRequestManagerActionAdapter(requestManager: Pick<Web
 }
 
 function providerRequestFromRecord(record: WebGptRequestRecord, lease: WebGptLiveLeaseSnapshot | null = null): WebGptProviderRequest {
-  return { provider: WEBGPT_PROVIDER, providerRequestId: record.requestId, idempotencyKey: record.idempotencyKey, semanticSha256: record.semanticSha256, targetChatUrl: record.targetChatUrl, state: mapRequestState(record.state), resourceLease: lease ? { operationId: lease.operationId, leaseRef: lease.leaseRef, ownerKey: lease.ownerKey, leaseEpoch: lease.leaseEpoch } : null };
+  return { provider: WEBGPT_PROVIDER, providerRequestId: record.requestId, idempotencyKey: record.idempotencyKey, policyVersionId: record.policyVersionId ?? null, semanticSha256: record.semanticSha256, targetChatUrl: record.targetChatUrl, state: mapRequestState(record.state), resourceLease: lease ? { operationId: lease.operationId, leaseRef: lease.leaseRef, ownerKey: lease.ownerKey, leaseEpoch: lease.leaseEpoch } : null };
 }
 
 function observationFromRecord(record: WebGptRequestRecord): WebGptProviderObservation {
@@ -566,7 +568,7 @@ function observationFromRecord(record: WebGptRequestRecord): WebGptProviderObser
     outcomeCertainty: terminalSuccess ? "TERMINAL_CONFIRMED" : terminalFailure ? "TERMINAL_FAILED" : "ACCEPTED_UNKNOWN_RESULT",
     targetChatUrl: record.targetChatUrl,
     resultHash: record.resultSha256,
-    evidence: { requestState: record.state, targetChatUrl: record.targetChatUrl, resultAvailable: Boolean(record.resultPath) },
+    evidence: { requestState: record.state, targetChatUrl: record.targetChatUrl, policyVersionId: record.policyVersionId ?? null, resultAvailable: Boolean(record.resultPath) },
   };
 }
 
