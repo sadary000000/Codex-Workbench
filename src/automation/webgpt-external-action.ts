@@ -261,6 +261,7 @@ export class WebGptExternalActionBridge {
       const finalized = await this.recordObservation(input, intent, attempt, resourceClaim, providerRequest, providerRequestRef, requestEvidence, observation, false);
       return finalized;
     } catch (error) {
+      if (isProviderObservationCorrelationError(error)) throw error;
       if (providerAccepted && providerRequest) {
         return this.recordAcceptedUnknown(input, intent, attempt, resourceClaim, providerRequest, error);
       }
@@ -289,19 +290,21 @@ export class WebGptExternalActionBridge {
     if (!existingProviderRequestRef) throw new WebGptExternalActionError("PROVIDER_REQUEST_REF_MISSING", "The ActionAttempt has no ProviderRequest external reference; blind recovery is forbidden.");
     const providerRef = snapshot.externalRefs.find((value) => value.externalRefId === existingProviderRequestRef);
     if (!providerRef || providerRef.kind !== "WEBGPT_PROVIDER_REQUEST") throw new WebGptExternalActionError("PROVIDER_REQUEST_REF_INVALID", "The ActionAttempt ProviderRequest reference is invalid.");
+    const requestEvidenceRecord = snapshot.evidences.find((value) => value.attemptId === attempt.actionAttemptId && value.type === "WEBGPT_PROVIDER_REQUEST");
+    const recordedTargetChatUrl = requestEvidenceRecord?.metadata.targetChatUrl;
     const providerRequest: WebGptProviderRequest = {
       provider: WEBGPT_PROVIDER,
       providerRequestId: providerRef.opaqueId,
       idempotencyKey: null,
       semanticSha256: attempt.providerSemanticSha256 ?? null,
-      targetChatUrl: intent.targetRef,
+      targetChatUrl: typeof recordedTargetChatUrl === "string" ? recordedTargetChatUrl : intent.targetRef,
       state: "UNKNOWN",
       resourceLease: null,
     };
     const observation = await this.provider.reconcile({ providerRequestId: providerRequest.providerRequestId, actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId });
     const resourceClaim = snapshot.resourceClaims.find((value) => value.ownerAttemptId === attempt.actionAttemptId)
       ?? await this.store.createResourceClaim({ projectId: intent.projectId, resourceType: "WEBGPT_BROWSER", resourceKey: "webgpt:browser:singleton", mode: "EXCLUSIVE", state: "RELEASED", ownerAttemptId: attempt.actionAttemptId });
-    const requestEvidence = snapshot.evidences.find((value) => value.attemptId === attempt.actionAttemptId && value.type === "WEBGPT_PROVIDER_REQUEST")?.evidenceId
+    const requestEvidence = requestEvidenceRecord?.evidenceId
       ?? (await this.createEvidence({ projectId: input.projectId, targetChatUrl: intent.targetRef, role: null, prompt: "", actionType: "RECONCILE", sideEffectClass: "RECONCILABLE", dispatchContext: { runtimeReady: true, policyPreconditionSatisfied: true, targetIdentityValid: true, liveResourceAvailable: true, noConflictingActiveAction: true, noUnknownOutcomeForSameSideEffect: true, idempotencySafe: true } }, attempt, "WEBGPT_PROVIDER_REQUEST", { providerRequestId: providerRequest.providerRequestId, providerState: providerRequest.state }));
     const reconcileContext: WebGptExternalActionInput = {
       projectId: input.projectId,
@@ -316,6 +319,7 @@ export class WebGptExternalActionBridge {
   }
 
   private async recordObservation(input: WebGptExternalActionInput, intent: ActionIntent, attempt: ActionAttempt, resourceClaim: ResourceClaim, providerRequest: WebGptProviderRequest, providerRequestRef: string, requestEvidence: string, observation: WebGptProviderObservation, explicitReconcile: boolean): Promise<WebGptExternalActionResult> {
+    await this.validateObservationCorrelation(intent, attempt, providerRequest, providerRequestRef, observation);
     const observationRef = await this.createExternalRef(intent.projectId, "WEBGPT_PROVIDER_OBSERVATION", observation.providerRequestId);
     const observationEvidence = await this.createEvidence(input, attempt, "WEBGPT_PROVIDER_OBSERVATION", {
       providerRequestId: observation.providerRequestId,
@@ -347,6 +351,42 @@ export class WebGptExternalActionBridge {
       ? await this.store.reconcileActionReceipt(receiptInput)
       : await this.store.createActionReceipt(receiptInput);
     return { intent: (await this.store.get("actionIntents", intent.intentId))!, attempt: (await this.store.get("actionAttempts", attempt.actionAttemptId))!, resourceClaim: (await this.store.get("resourceClaims", resourceClaim.resourceClaimId))!, providerRequest, observation, receipt };
+  }
+
+  /**
+   * Provider observations are untrusted until all identity edges point to the
+   * same operation. This check runs before observation refs, evidence, attempt
+   * links, or receipts are written. A mismatch is deliberately not converted
+   * into the accepted/local-persistence UNKNOWN path: that path is reserved
+   * for a provider acceptance followed by a local write failure.
+   */
+  private async validateObservationCorrelation(intent: ActionIntent, attempt: ActionAttempt, providerRequest: WebGptProviderRequest, providerRequestRef: string, observation: WebGptProviderObservation): Promise<void> {
+    const snapshot = await this.store.snapshot();
+    const persistedAttempt = snapshot.actionAttempts.find((value) => value.actionAttemptId === attempt.actionAttemptId);
+    const providerRef = snapshot.externalRefs.find((ref) => ref.externalRefId === providerRequestRef);
+    const attemptProviderRef = persistedAttempt?.providerRequestRef
+      ? snapshot.externalRefs.find((ref) => ref.externalRefId === persistedAttempt.providerRequestRef)
+      : null;
+    const mismatches: string[] = [];
+    if (observation.providerRequestId !== providerRequest.providerRequestId) mismatches.push("providerRequestId");
+    if (observation.provider !== providerRequest.provider || observation.provider !== WEBGPT_PROVIDER) mismatches.push("providerIdentity");
+    if (observation.targetChatUrl !== providerRequest.targetChatUrl) mismatches.push("targetIdentity");
+    if (!persistedAttempt || persistedAttempt.intentId !== intent.intentId || persistedAttempt.providerRequestRef !== providerRequestRef) mismatches.push("attemptExternalRef");
+    if (!providerRef || providerRef.kind !== "WEBGPT_PROVIDER_REQUEST" || providerRef.provider !== providerRequest.provider || providerRef.opaqueId !== providerRequest.providerRequestId) mismatches.push("externalRefCorrelation");
+    if (!attemptProviderRef || attemptProviderRef.kind !== "WEBGPT_PROVIDER_REQUEST" || attemptProviderRef.provider !== providerRequest.provider || attemptProviderRef.opaqueId !== providerRequest.providerRequestId) mismatches.push("externalRefCorrelation");
+    if (mismatches.length > 0) {
+      throw new WebGptExternalActionError(
+        "PROVIDER_OBSERVATION_CORRELATION_MISMATCH",
+        "Provider observation identity does not correlate to the dispatched ActionAttempt and ProviderRequest.",
+        {
+          actionIntentId: intent.intentId,
+          actionAttemptId: attempt.actionAttemptId,
+          providerRequestId: providerRequest.providerRequestId,
+          providerRequestRef,
+          mismatches,
+        },
+      );
+    }
   }
 
   /**
@@ -405,6 +445,10 @@ export class WebGptExternalActionBridge {
     const existing = (await this.store.snapshot()).evidences.find((evidence) => evidence.attemptId === attempt.actionAttemptId && evidence.type === type);
     return existing?.evidenceId ?? this.createEvidence(input, attempt, type, metadata);
   }
+}
+
+function isProviderObservationCorrelationError(error: unknown): error is WebGptExternalActionError {
+  return error instanceof WebGptExternalActionError && error.code === "PROVIDER_OBSERVATION_CORRELATION_MISMATCH";
 }
 
 /** Adapter over the existing RequestManager; it never sends during observe/reconcile. */

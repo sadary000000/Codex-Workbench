@@ -162,6 +162,154 @@ test("ActionIntent -> Attempt -> ProviderRequest -> Observation -> Receipt maps 
   }
 });
 
+test("FIX-02 provider observation identity mismatches fail closed before Receipt mutation", async () => {
+  const variants: Array<{ name: string; mutate: (value: WebGptProviderObservation) => WebGptProviderObservation; mismatch: string }> = [
+    { name: "request-id", mutate: (value) => ({ ...value, providerRequestId: "provider-wrong-request" }), mismatch: "providerRequestId" },
+    { name: "provider", mutate: (value) => ({ ...value, provider: "OTHER_PROVIDER" as unknown as WebGptProviderObservation["provider"] }), mismatch: "providerIdentity" },
+    { name: "target", mutate: (value) => ({ ...value, targetChatUrl: "https://chatgpt.com/c/wrong-target" }), mismatch: "targetIdentity" },
+  ];
+
+  for (const variant of variants) {
+    const value = await storeFixture();
+    let submitCount = 0;
+    const providerRequestId = `provider-identity-${variant.name}`;
+    const adapter: WebGptExternalActionAdapter = {
+      async submit(input) {
+        submitCount += 1;
+        return request(providerRequestId, false);
+      },
+      async observe(providerRequest) {
+        return variant.mutate(observation(providerRequest.providerRequestId, "TERMINAL_CONFIRMED"));
+      },
+      async reconcile(input) {
+        return observation(input.providerRequestId, "TERMINAL_CONFIRMED");
+      },
+    };
+    try {
+      const bridge = new WebGptExternalActionBridge(value.store, adapter);
+      await assert.rejects(
+        () => bridge.dispatch({
+          projectId: value.project.projectId,
+          actionType: `WEBGPT_OBSERVATION_IDENTITY_${variant.name}`,
+          targetRef: "target",
+          targetChatUrl: "https://chatgpt.com/c/target",
+          role: "PLANNER",
+          prompt: "identity fixture",
+          sideEffectClass: "RECONCILABLE",
+          idempotencyRef: `observation-identity-${variant.name}`,
+          dispatchContext: ready,
+        }),
+        (error: unknown) => error instanceof Error
+          && (error as { code?: string }).code === "PROVIDER_OBSERVATION_CORRELATION_MISMATCH"
+          && (error as { details?: { mismatches?: string[] } }).details?.mismatches?.includes(variant.mismatch) === true,
+      );
+      const snapshot = await value.store.snapshot();
+      assert.equal(submitCount, 1, `${variant.name} must not redispatch`);
+      assert.equal(snapshot.actionReceipts.length, 0, `${variant.name} must not write a terminal Receipt`);
+      assert.equal(snapshot.actionAttempts.length, 1);
+      assert.equal(snapshot.externalRefs.filter((ref) => ref.kind === "WEBGPT_PROVIDER_OBSERVATION").length, 0);
+    } finally {
+      await value.store.close();
+      await rm(value.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("FIX-02 wrong reconcile observation cannot terminalize an UNKNOWN Receipt", async () => {
+  const value = await storeFixture();
+  let submitCount = 0;
+  let reconcileCount = 0;
+  const adapter: WebGptExternalActionAdapter = {
+    async submit(input) {
+      submitCount += 1;
+      return request("provider-reconcile-identity", false);
+    },
+    async observe(providerRequest) {
+      return observation(providerRequest.providerRequestId, "ACCEPTED_UNKNOWN_RESULT");
+    },
+    async reconcile(input) {
+      reconcileCount += 1;
+      return { ...observation(input.providerRequestId, "TERMINAL_CONFIRMED"), targetChatUrl: "https://chatgpt.com/c/wrong-target" };
+    },
+  };
+  try {
+    const bridge = new WebGptExternalActionBridge(value.store, adapter);
+    const first = await bridge.dispatch({
+      projectId: value.project.projectId,
+      actionType: "WEBGPT_RECONCILE_OBSERVATION_IDENTITY",
+      targetRef: "target",
+      targetChatUrl: "https://chatgpt.com/c/target",
+      role: "PLANNER",
+      prompt: "reconcile identity fixture",
+      sideEffectClass: "RECONCILABLE",
+      idempotencyRef: "reconcile-observation-identity",
+      dispatchContext: ready,
+    });
+    assert.equal(first.receipt.status, "UNKNOWN");
+    await assert.rejects(
+      () => bridge.reconcile({ projectId: value.project.projectId, actionAttemptId: first.attempt.actionAttemptId }),
+      { code: "PROVIDER_OBSERVATION_CORRELATION_MISMATCH" },
+    );
+    const snapshot = await value.store.snapshot();
+    assert.equal(submitCount, 1);
+    assert.equal(reconcileCount, 1);
+    assert.equal(snapshot.actionReceipts.length, 1);
+    assert.equal(snapshot.actionReceipts[0]?.status, "UNKNOWN");
+    assert.equal(snapshot.actionReceipts[0]?.reconcileState, "RECOVERY_REQUIRED");
+  } finally {
+    await value.store.close();
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
+test("FIX-02 Attempt/ExternalRef correlation mismatch is rejected before Receipt write", async () => {
+  const value = await storeFixture();
+  let submitCount = 0;
+  let submittedAttemptId: string | null = null;
+  const adapter: WebGptExternalActionAdapter = {
+    async submit(input) {
+      submitCount += 1;
+      submittedAttemptId = input.actionAttemptId;
+      return request("provider-attempt-ref-mismatch", false);
+    },
+    async observe(providerRequest) {
+      assert.ok(submittedAttemptId);
+      const wrongRef = await value.store.createExternalRef({ projectId: value.project.projectId, kind: "WEBGPT_PROVIDER_REQUEST", provider: "WEBGPT", opaqueId: "provider-not-the-submitted-request" });
+      await value.store.attachActionAttemptProvider({ actionAttemptId: submittedAttemptId, providerRequestRef: wrongRef.externalRefId });
+      return observation(providerRequest.providerRequestId, "TERMINAL_CONFIRMED");
+    },
+    async reconcile(input) {
+      return observation(input.providerRequestId, "TERMINAL_CONFIRMED");
+    },
+  };
+  try {
+    const bridge = new WebGptExternalActionBridge(value.store, adapter);
+    await assert.rejects(
+      () => bridge.dispatch({
+        projectId: value.project.projectId,
+        actionType: "WEBGPT_ATTEMPT_EXTERNAL_REF_MISMATCH",
+        targetRef: "target",
+        targetChatUrl: "https://chatgpt.com/c/target",
+        role: "PLANNER",
+        prompt: "attempt correlation fixture",
+        sideEffectClass: "RECONCILABLE",
+        idempotencyRef: "attempt-external-ref-mismatch",
+        dispatchContext: ready,
+      }),
+      (error: unknown) => error instanceof Error
+        && (error as { code?: string }).code === "PROVIDER_OBSERVATION_CORRELATION_MISMATCH"
+        && (error as { details?: { mismatches?: string[] } }).details?.mismatches?.includes("attemptExternalRef") === true
+        && (error as { details?: { mismatches?: string[] } }).details?.mismatches?.includes("externalRefCorrelation") === true,
+    );
+    const snapshot = await value.store.snapshot();
+    assert.equal(submitCount, 1);
+    assert.equal(snapshot.actionReceipts.length, 0);
+  } finally {
+    await value.store.close();
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
 test("FIX-03 production RequestManager adapter maps the live Arbiter lease into ResourceClaim correlation", async () => {
   const value = await storeFixture();
   const requestDirectory = await mkdtemp(join(tmpdir(), "codex-workbench-v1-arch-v2-4-production-adapter-"));
