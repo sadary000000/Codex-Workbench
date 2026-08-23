@@ -1,0 +1,68 @@
+{
+  "stage": "ARCH-V2-8 FIX ROUND 1",
+  "result": "READY_FOR_GPT_REVIEW",
+  "baseCommit": "99c0dcc151095c976a02144e6dc14ca3d2774ffd",
+  "implementationCommits": [
+    "86e5569",
+    "3637c47",
+    "5eab521",
+    "9264407"
+  ],
+  "finalHead": "926440739ef3ca4a35a41f9d8b6537b31ac66d25",
+  "promptsSent": 0,
+  "newChatsCreated": 0,
+  "cookiesRead": false,
+  "tokensRead": false,
+  "v1FrozenCoreChanged": false,
+  "fixes": {
+    "FIX-01": "PASS",
+    "FIX-02": "PASS",
+    "FIX-03": "PASS",
+    "FIX-04": "PASS",
+    "FIX-05": "PASS",
+    "FIX-06": "PASS",
+    "FIX-07": "PASS"
+  },
+  "automated": {
+    "check": "PASS",
+    "tests": { "result": "PASS", "passed": 389, "failed": 0 },
+    "auditOmitDev": { "result": "PASS", "vulnerabilities": 0 },
+    "gitDiffCheck": "PASS",
+    "secretScan": "PASS"
+  },
+  "realSmokes": {
+    "web6_6Protocol": {
+      "result": "PASS",
+      "newRealPrompts": 0,
+      "status": "PASS",
+      "freshUnauthenticatedWebGpt": "UNAVAILABLE",
+      "versionMismatch": "VERSION_MISMATCH",
+      "unsupportedCapability": "CAPABILITY_NOT_SUPPORTED",
+      "authTokenWrittenToEvidence": false
+    },
+    "web6_4Arbiter": {
+      "result": "PASS",
+      "maxRealPrompts": 0,
+      "realPromptCount": 0,
+      "concurrentCliCount": 2,
+      "userControlBlockedAuto": true,
+      "userControlErrorCode": "USER_CONTROL"
+    },
+    "promptCreatingRealSmokes": "NOT_RUN_BY_SCOPE"
+  },
+  "package": {
+    "isolatedPath": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-stage-arch-v2-8-fix-round-1\\package",
+    "guiSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "cliSha256": "A54AE217DA191E36A1230B93A79091FE9C5E0EDFA425A03F8863409746A891E7",
+    "standardPath": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package",
+    "standardUpdate": "BLOCKED_BY_RUNNING_USER_PROCESS"
+  },
+  "subagents": {
+    "completed": 5,
+    "runningAtGate": 0
+  },
+  "legacyProject": {
+    "donor": "PRESERVED_DIRTY_BASELINE",
+    "autoAgent": "CLEAN"
+  }
+}
