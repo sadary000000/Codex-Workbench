@@ -5,7 +5,7 @@
  */
 export const CODEX_APP_SERVER_PROTOCOL_CONTRACT = Object.freeze({
   codexVersion: "codex-cli 0.147.0",
-  binarySha256: "935A1911ED5564FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D",
+  binarySha256: "935A1911ED2556E4FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D",
   generationMode: "stable",
   generationCommands: Object.freeze([
     "codex app-server generate-ts --out <dir>",

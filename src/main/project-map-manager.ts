@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { AppServerProcessClient } from "../codex/app-server-client.ts";
+import { startAndInitializeAppServerClient } from "../codex/app-server-bootstrap.ts";
 import { MAP_CONTEXT_REQUEST_LIMITS, MAP_CONTEXT_REQUEST_TOOL_SPEC, MAP_DYNAMIC_TOOL_SPEC, contextRequestResponse, dynamicToolResponse, isMapContextRequestCall, isMapToolCall } from "../codex/map-tool.ts";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
 import { resolveCodexCommand } from "../codex/codex-command.ts";
@@ -440,12 +441,11 @@ export class ProjectMapManager {
   private async readNativeThread(projection: ThreadProjection): Promise<ThreadReadView> {
     const client = new AppServerProcessClient({ command: this.command, cwd: projection.cwd, args: ["app-server", "--stdio"], verifyBinaryProvenance: true });
     try {
-      await client.start();
-      await client.request("initialize", {
+      await startAndInitializeAppServerClient(client, {
         clientInfo: { name: "codex-workbench-v1-context-reader", title: "Codex Workbench Context Reader", version: "0.1.0" },
-        capabilities: { experimentalApi: false },
-      }, 120_000);
-      client.notify("initialized", {});
+        experimentalApi: false,
+        timeoutMs: 120_000,
+      });
       await client.request("thread/resume", { threadId: projection.nativeThreadId }, 120_000);
       const response = await client.request("thread/read", { threadId: projection.nativeThreadId, includeTurns: true }, 120_000);
       const model = parseThreadReadResponse(response);
@@ -474,12 +474,11 @@ export class ProjectMapManager {
     const client = new AppServerProcessClient({ command: this.command, cwd, args: ["app-server", "--stdio"], verifyBinaryProvenance: true, onServerRequest: (message) => this.handleServerRequest(projectId, message) });
     let fallbackThreadId: string | null = null;
     try {
-      await client.start();
-      await client.request("initialize", {
+      await startAndInitializeAppServerClient(client, {
         clientInfo: { name: "codex-workbench-v1-project-map-fallback", title: "Codex Workbench Project Map Compatibility Fallback", version: "0.1.0" },
-        capabilities: { experimentalApi: true },
-      }, 120_000);
-      client.notify("initialized", {});
+        experimentalApi: true,
+        timeoutMs: 120_000,
+      });
       const started = record(await client.request("thread/start", { cwd, approvalPolicy: "never", sandbox: "read-only", ephemeral: true, dynamicTools: [MAP_DYNAMIC_TOOL_SPEC, MAP_CONTEXT_REQUEST_TOOL_SPEC], developerInstructions: "This is a Project Map compatibility maintenance Thread after resume. Call the supplied Workbench tools only with the bounded Project scope and keep the normal answer out of this side channel." }, 120_000));
       fallbackThreadId = typeof record(started?.thread)?.id === "string" ? record(started?.thread)?.id as string : typeof started?.threadId === "string" ? started.threadId : null;
       if (!fallbackThreadId) throw new Error("Project Map compatibility maintenance Thread ID is missing.");

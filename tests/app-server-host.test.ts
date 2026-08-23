@@ -35,7 +35,7 @@ class FakeTransport implements AppServerClientPort {
     if (this.closedValue) throw new Error("fake transport closed");
     if (method === "initialize") {
       FakeTransport.initialized += 1;
-      return { userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex" };
+      return { userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex", protocolVersion: "1.0", capabilities: { experimentalApi: false } };
     }
     if (method === "thread/start") {
       const id = `native-${this.threads.size + 1}`;

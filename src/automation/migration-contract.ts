@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { inspectAutomationFile } from "./sqlite-persistence.ts";
 import { migrateAutomationDocument, AutomationSchemaError } from "./schema.ts";
 import { AutomationStore, type AutomationInspection } from "./store.ts";
-import { assertStableIdentityPreserved, stableIdentitySnapshot } from "./stable-identity.ts";
 import type { AutomationDocument } from "./types.ts";
+export { AUTOMATION_ID_FIELDS, assertMigrationIdentityPreserved, migrationIdentityFingerprint } from "./migration-identity.ts";
+import { assertMigrationIdentityPreserved } from "./migration-identity.ts";
 
 export type PersistenceCompatibilityStatus = "READ_COMPATIBLE" | "MIGRATION_REQUIRED" | "MIGRATED" | "UNSUPPORTED" | "CORRUPT";
 
@@ -22,27 +22,6 @@ export interface MigrationResult {
   readonly after: MigrationInspection;
   readonly identityPreserved: boolean;
 }
-
-const ID_FIELDS: Readonly<Record<string, string>> = {
-  automationProjects: "projectId",
-  requirementVersions: "requirementVersionId",
-  planVersions: "planVersionId",
-  stageSpecs: "stageSpecId",
-  stepSpecs: "stepSpecId",
-  stepRuntimes: "stepRuntimeId",
-  executionAttempts: "attemptId",
-  actionIntents: "intentId",
-  actionAttempts: "actionAttemptId",
-  actionReceipts: "receiptId",
-  auditEvents: "eventId",
-  checkpoints: "checkpointId",
-  externalRefs: "externalRefId",
-  evidences: "evidenceId",
-  artifactRefs: "artifactRefId",
-  resourceClaims: "resourceClaimId",
-  workspaceSnapshots: "workspaceSnapshotId",
-  policyVersions: "policyVersionId",
-};
 
 function sourceVersion(value: unknown): number | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -73,47 +52,6 @@ export function inspectAutomationMigration(value: unknown, sourceFormat: Migrati
     const status = error instanceof AutomationSchemaError && error.code === "AUTOMATION_SCHEMA_VERSION_UNSUPPORTED" ? "UNSUPPORTED" : "CORRUPT";
     return invalidInspection(status, sourceFormat, version, message);
   }
-}
-
-/**
- * Verify stable identity/correlation fields across a migration.  This helper
- * is intentionally independent of the writer so it can be used before commit
- * and by fault-injection tests.
- */
-export function assertMigrationIdentityPreserved(before: AutomationDocument, after: AutomationDocument): void {
-  for (const [table, idField] of Object.entries(ID_FIELDS)) {
-    const beforeItems = (before as unknown as Record<string, unknown[]>)[table] ?? [];
-    const afterItems = (after as unknown as Record<string, unknown[]>)[table] ?? [];
-    const afterById = new Map(afterItems.map((item) => [String((item as Record<string, unknown>)[idField]), item as Record<string, unknown>]));
-    for (const value of beforeItems) {
-      const item = value as Record<string, unknown>;
-      const identity = item[idField];
-      if (typeof identity !== "string" || !identity) continue;
-      const migrated = afterById.get(identity);
-      if (!migrated) throw new Error(`MIGRATION_IDENTITY_CHANGED:${table}.${idField}:${identity}`);
-      try {
-        assertStableIdentityPreserved(item, migrated, `${table}.${identity}`);
-      } catch (error) {
-        if (error instanceof Error && /:changed from /.test(error.message)) throw new Error(`MIGRATION_CORRELATION_CHANGED:${table}.${identity}:${error.message}`, { cause: error });
-        throw error;
-      }
-    }
-  }
-}
-
-export function migrationIdentityFingerprint(document: AutomationDocument): string {
-  const identityRows: unknown[] = [];
-  for (const [table, idField] of Object.entries(ID_FIELDS)) {
-    const items = (document as unknown as Record<string, unknown[]>)[table] ?? [];
-    for (const value of items) {
-      const item = value as Record<string, unknown>;
-      const row: Record<string, unknown> = { table, id: item[idField] };
-      row.identity = stableIdentitySnapshot(item);
-      identityRows.push(row);
-    }
-  }
-  identityRows.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-  return createHash("sha256").update(JSON.stringify(identityRows), "utf8").digest("hex");
 }
 
 /** Explicit migration boundary for the canonical Automation SQLite writer. */

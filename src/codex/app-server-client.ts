@@ -25,6 +25,12 @@ export interface ClientSnapshot {
   parseErrors: string[];
 }
 
+export interface AppServerInitializationAttestation {
+  readonly protocolVersion: string;
+  readonly experimentalApi: boolean;
+  readonly binaryProvenanceVerified: boolean;
+}
+
 export interface AppServerClientPort {
   start(): Promise<void>;
   request(method: string, params: unknown, timeoutMs: number): Promise<unknown>;
@@ -40,6 +46,8 @@ export interface AppServerClientPort {
   readonly snapshot: ClientSnapshot;
   /** True only for a client whose owning host completed initialize. */
   readonly initialized?: boolean;
+  /** Host-owned evidence required by production skipInitialize callers. */
+  readonly initializationAttestation?: AppServerInitializationAttestation | null;
 }
 
 export class AppServerClientError extends Error {

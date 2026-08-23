@@ -9,22 +9,32 @@ test("fails closed for an unknown App Server userAgent format", () => {
   );
 });
 
-test("accepts the Workbench client userAgent emitted by the real App Server", () => {
+test("accepts the strict App Server initialize contract", () => {
   const result = validateInitializeResult({
-    userAgent: "codex-workbench-v1/0.147.0 (Windows 10.0.19045; x86_64) vscode/1.133.0",
+    userAgent: "codex-cli 0.147.0",
     codexHome: "C:/fake/.codex",
+    protocolVersion: "1.0",
+    capabilities: { experimentalApi: false },
   });
-  assert.equal(result.protocolVersion, null);
-  assert.equal(result.capabilities, null);
+  assert.equal(result.protocolVersion, "1.0");
+  assert.deepEqual(result.capabilities, { experimentalApi: false });
 });
 
-test("fails closed for malformed protocol and unsupported requested capability", () => {
+test("fails closed for missing, malformed, or mismatched protocol and capability", () => {
   assert.throws(
-    () => validateInitializeResult({ userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex", protocolVersion: 1 }),
-    (error: unknown) => (error as { code?: string }).code === "APP_SERVER_PROTOCOL_INVALID",
+    () => validateInitializeResult({ userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex" }),
+    (error: unknown) => (error as { code?: string }).code === "VERSION_MISMATCH",
   );
   assert.throws(
-    () => validateInitializeResult({ userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex", capabilities: { experimentalApi: false } }, { experimentalApi: true }),
-    (error: unknown) => (error as { code?: string }).code === "APP_SERVER_CAPABILITY_UNSUPPORTED",
+    () => validateInitializeResult({ userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex", protocolVersion: 1, capabilities: { experimentalApi: false } }),
+    (error: unknown) => (error as { code?: string }).code === "VERSION_MISMATCH",
+  );
+  assert.throws(
+    () => validateInitializeResult({ userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex", protocolVersion: "1.0", capabilities: {} }, { experimentalApi: true }),
+    (error: unknown) => (error as { code?: string }).code === "CAPABILITY_NOT_SUPPORTED",
+  );
+  assert.throws(
+    () => validateInitializeResult({ userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex", protocolVersion: "1.0", capabilities: { experimentalApi: false } }, { experimentalApi: true }),
+    (error: unknown) => (error as { code?: string }).code === "CAPABILITY_NOT_SUPPORTED",
   );
 });

@@ -64,7 +64,7 @@ class FakeClient implements AppServerClientPort {
     this.state.requestMethods.push(method);
     if (method === "initialize") {
       this.state.initializeParams = params;
-      return { userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex" };
+      return { userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex", protocolVersion: "1.0", capabilities: { experimentalApi: this.state.initializeParams?.capabilities && (this.state.initializeParams.capabilities as Record<string, unknown>).experimentalApi === true } };
     }
     if (method === "thread/start") {
       this.state.threadStartParams = params;

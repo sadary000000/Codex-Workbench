@@ -105,13 +105,13 @@ test("WEB-6.6 initialize gates modern requests and negotiates versions/capabilit
       command: "webgpt.initialize",
       sessionId: "modern-session-1234",
       clientInfo: clientInfo(),
-      requestedCapabilities: ["webgpt.status"],
+      requestedCapabilities: ["webgpt.control.v1", "webgpt.status"],
       ...auth,
     });
     assert.equal(init.ok, true);
     assert.equal(init.protocolVersion, "1.0");
     assert.equal((init.serverInfo as Record<string, unknown>).workbenchVersion, "0.1.0");
-    assert.deepEqual((init.capabilities as Array<Record<string, unknown>>).map((capability) => capability.name), ["webgpt.status"]);
+    assert.deepEqual((init.capabilities as Array<Record<string, unknown>>).map((capability) => capability.name), ["webgpt.control.v1", "webgpt.status"]);
 
     const ready = await sendRawControlRequest(descriptor.endpoint, { ...modern, sessionId: "modern-session-1234", requestId: "modern-status-1", ...auth });
     assert.equal(ready.ok, true);
@@ -124,7 +124,7 @@ test("WEB-6.6 initialize gates modern requests and negotiates versions/capabilit
       command: "webgpt.initialize",
       sessionId: "compatible-session-1234",
       clientInfo: clientInfo(),
-      requestedCapabilities: ["webgpt.status"],
+      requestedCapabilities: ["webgpt.control.v1", "webgpt.status"],
       ...auth,
     });
     assert.equal(compatible.ok, true);
@@ -168,6 +168,22 @@ test("WEB-6.6 initialize gates modern requests and negotiates versions/capabilit
     assert.equal(legacy.ok, true);
     assert.equal((legacy.diagnostics as Record<string, unknown>).compatibilityMode, "LEGACY");
     assert.deepEqual(handlerCommands, ["webgpt.status", "webgpt.status"]);
+
+    const legacyExperimental = await sendRawControlRequest(descriptor.endpoint, { version: 1, requestId: "legacy-screenshot-1", command: "webgpt.screenshot", ...auth });
+    assert.equal(errorCode(legacyExperimental), "CAPABILITY_NOT_SUPPORTED");
+    assert.deepEqual(handlerCommands, ["webgpt.status", "webgpt.status"]);
+
+    const missingControlCapability = await sendRawControlRequest(descriptor.endpoint, {
+      version: 1,
+      protocolVersion: "1.0",
+      requestId: "missing-control-capability-1",
+      command: "webgpt.initialize",
+      sessionId: "missing-control-capability-session-1234",
+      clientInfo: clientInfo(),
+      requestedCapabilities: ["webgpt.status"],
+      ...auth,
+    });
+    assert.equal(errorCode(missingControlCapability), "CAPABILITY_NOT_SUPPORTED");
   } finally {
     await server.close();
     await removeControlDescriptor(descriptorFile);

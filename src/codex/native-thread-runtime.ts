@@ -6,7 +6,8 @@ import {
   type AppServerClientOptions,
   type AppServerClientPort,
 } from "./app-server-client.ts";
-import { validateInitializeResult } from "./app-server-capabilities.ts";
+import { startAndInitializeAppServerClient } from "./app-server-bootstrap.ts";
+import { VERIFIED_APP_SERVER_PROTOCOL_VERSION } from "./app-server-capabilities.ts";
 import { asError, errorInfo, isWriterConflictError } from "../shared/error-info.ts";
 import { V1PersistenceStore, type PromptRecoveryPatch, type ThreadProjectionPatch } from "../shared/persistence-store.ts";
 import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
@@ -327,11 +328,14 @@ export class NativeThreadRuntime {
       });
       this.client = client;
       this.unsubscribe = client.onMessage((message) => this.emitMessage(message));
-      await client.start();
-      if (this.skipInitialize && client.initialized !== true) throw new AppServerClientError("APP_SERVER_PREINITIALIZED_CLIENT_REQUIRED", "skipInitialize requires a client owned by an initialized App Server Host.");
-      let initialized: unknown = null;
-      if (!this.skipInitialize) {
-        initialized = validateInitializeResult(await client.request("initialize", {
+      if (this.skipInitialize) {
+        await client.start();
+        const attestation = client.initializationAttestation;
+        if (client.initialized !== true || !attestation || !attestation.binaryProvenanceVerified || attestation.protocolVersion !== VERIFIED_APP_SERVER_PROTOCOL_VERSION || attestation.experimentalApi !== false) {
+          throw new AppServerClientError("APP_SERVER_PREINITIALIZED_CLIENT_REQUIRED", "skipInitialize requires a Host-owned client with verified provenance and strict initialize attestation.");
+        }
+      } else {
+        await startAndInitializeAppServerClient(client, {
           clientInfo: {
             name: "codex-workbench-v1",
             title: "Codex Workbench V1",
@@ -340,9 +344,9 @@ export class NativeThreadRuntime {
           // Codex CLI requires this capability before accepting
           // thread/start.dynamicTools. A resumed Thread cannot register that
           // field in the current ABI, so do not advertise it on resume.
-          capabilities: { experimentalApi: this.dynamicTools.length > 0 && !requestedId },
-        }, this.timeoutMs), { experimentalApi: this.dynamicTools.length > 0 && !requestedId });
-        client.notify("initialized", {});
+          experimentalApi: this.dynamicTools.length > 0 && !requestedId,
+          timeoutMs: this.timeoutMs,
+        });
       }
       this.initialized = true;
       if (requestedId) {
@@ -412,7 +416,6 @@ export class NativeThreadRuntime {
         await this.persistProjection({ lastKnownState: "ready", lastError: null });
         this.stateValue = "READY";
       }
-      void initialized;
       return this.snapshot();
     } catch (error) {
       const normalized = asError(error);

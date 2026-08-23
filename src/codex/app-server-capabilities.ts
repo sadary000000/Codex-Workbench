@@ -1,6 +1,7 @@
 import type { JsonRpcMessage } from "../shared/runtime-types.ts";
 
 export const VERIFIED_CODEX_VERSION = "0.147.0";
+export const VERIFIED_APP_SERVER_PROTOCOL_VERSION = "1.0";
 export const REQUIRED_METHODS = Object.freeze([
   "initialize",
   "thread/start",
@@ -28,6 +29,7 @@ export interface InitializeResult {
 
 export interface InitializeValidationOptions {
   experimentalApi?: boolean;
+  expectedProtocolVersion?: string;
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -64,21 +66,22 @@ export function validateInitializeResult(value: unknown, options: InitializeVali
     error.code = "APP_SERVER_VERSION_UNSUPPORTED";
     throw error;
   }
-  const protocolVersion = result?.protocolVersion === undefined ? null : text(result.protocolVersion);
-  if (result?.protocolVersion !== undefined && !protocolVersion) {
-    const error = new Error("App Server initialize response has an invalid protocolVersion.") as Error & { code?: string };
-    error.code = "APP_SERVER_PROTOCOL_INVALID";
+  const protocolVersion = text(result?.protocolVersion);
+  const expectedProtocolVersion = text(options.expectedProtocolVersion) ?? VERIFIED_APP_SERVER_PROTOCOL_VERSION;
+  if (!protocolVersion || protocolVersion !== expectedProtocolVersion) {
+    const error = new Error(`App Server initialize response protocolVersion must be exactly ${expectedProtocolVersion}.`) as Error & { code?: string };
+    error.code = "VERSION_MISMATCH";
     throw error;
   }
-  const capabilities = result?.capabilities === undefined ? null : object(result.capabilities);
-  if (result?.capabilities !== undefined && !capabilities) {
-    const error = new Error("App Server initialize response has invalid capabilities.") as Error & { code?: string };
-    error.code = "APP_SERVER_CAPABILITY_INVALID";
+  const capabilities = object(result?.capabilities);
+  if (!capabilities || typeof capabilities.experimentalApi !== "boolean") {
+    const error = new Error("App Server initialize response is missing the negotiated experimentalApi capability.") as Error & { code?: string };
+    error.code = "CAPABILITY_NOT_SUPPORTED";
     throw error;
   }
-  if (options.experimentalApi === true && capabilities && capabilities.experimentalApi !== true) {
-    const error = new Error("App Server initialize response does not support the requested experimentalApi capability.") as Error & { code?: string };
-    error.code = "APP_SERVER_CAPABILITY_UNSUPPORTED";
+  if (capabilities.experimentalApi !== (options.experimentalApi === true)) {
+    const error = new Error(`App Server initialize response does not match requested experimentalApi=${options.experimentalApi === true}.`) as Error & { code?: string };
+    error.code = "CAPABILITY_NOT_SUPPORTED";
     throw error;
   }
   return {

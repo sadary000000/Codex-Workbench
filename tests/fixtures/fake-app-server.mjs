@@ -45,6 +45,8 @@ input.on("line", (line) => {
     send({ jsonrpc: "2.0", id: message.id, result: {
       userAgent: "codex-cli 0.147.0",
       codexHome: "C:/fake/.codex",
+      protocolVersion: "1.0",
+      capabilities: { experimentalApi: message.params?.capabilities?.experimentalApi === true },
       platformFamily: "windows",
       platformOs: "windows",
     } });

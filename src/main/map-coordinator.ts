@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { AppServerProcessClient } from "../codex/app-server-client.ts";
+import { startAndInitializeAppServerClient } from "../codex/app-server-bootstrap.ts";
 import { resolveCodexCommand } from "../codex/codex-command.ts";
 import type { JsonRpcMessage } from "../shared/runtime-types.ts";
 import {
@@ -254,12 +255,11 @@ export class ConversationMapCoordinator {
         verifyBinaryProvenance: true,
         onServerRequest: async (message) => this.handleServerRequest(message),
       });
-      await client.start();
-      await client.request("initialize", {
+      await startAndInitializeAppServerClient(client, {
         clientInfo: { name: "codex-workbench-v1-map-fallback", title: "Codex Workbench Map Compatibility Fallback", version: "0.1.0" },
-        capabilities: { experimentalApi: true },
-      }, 120_000);
-      client.notify("initialized", {});
+        experimentalApi: true,
+        timeoutMs: 120_000,
+      });
       const started = await client.request("thread/start", {
         cwd,
         approvalPolicy: "never",

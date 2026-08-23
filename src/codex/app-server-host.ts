@@ -3,12 +3,13 @@ import {
   AppServerProcessClient,
   type AppServerClientOptions,
   type AppServerClientPort,
+  type AppServerInitializationAttestation,
   type ServerRequestHandler,
 } from "./app-server-client.ts";
 import type { JsonRpcMessage } from "../shared/runtime-types.ts";
 import { isSharedHostCoreMethod } from "./app-server-protocol-contract.ts";
 import { inspectCodexCommand, type CodexBinaryProvenance } from "./codex-command.ts";
-import { validateInitializeResult } from "./app-server-capabilities.ts";
+import { startAndInitializeAppServerClient } from "./app-server-bootstrap.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_MESSAGES = 512;
@@ -89,6 +90,7 @@ export class AppServerHost {
   private unsubscribe = (): void => undefined;
   private startPromise: Promise<void> | null = null;
   private initialized = false;
+  private initializationAttestationValue: AppServerInitializationAttestation | null = null;
   private closed = false;
   private suppressProcessExit = false;
   private lastSnapshot = {
@@ -124,6 +126,7 @@ export class AppServerHost {
   }
 
   get isInitialized(): boolean { return this.initialized; }
+  get initializationAttestation(): AppServerInitializationAttestation | null { return this.initializationAttestationValue ? { ...this.initializationAttestationValue } : null; }
   get codexBinaryProvenance(): CodexBinaryProvenance { return { ...this.binaryProvenance }; }
 
   createThreadClient(options: AppServerThreadClientOptions = {}): AppServerThreadClient {
@@ -192,13 +195,16 @@ export class AppServerHost {
     this.transport = transport;
     this.unsubscribe = transport.onMessage((message) => this.routeMessage(message));
     try {
-      await transport.start();
-      const initializeResult = validateInitializeResult(await transport.request("initialize", {
+      const initialized = await startAndInitializeAppServerClient(transport, {
         clientInfo: this.clientInfo,
-        capabilities: { experimentalApi: this.experimentalApi },
-      }, DEFAULT_TIMEOUT_MS), { experimentalApi: this.experimentalApi });
-      void initializeResult;
-      transport.notify("initialized", {});
+        experimentalApi: this.experimentalApi,
+        timeoutMs: DEFAULT_TIMEOUT_MS,
+      });
+      this.initializationAttestationValue = {
+        protocolVersion: initialized.protocolVersion ?? "",
+        experimentalApi: initialized.capabilities?.experimentalApi === true,
+        binaryProvenanceVerified: this.verifyBinaryProvenance && this.binaryProvenance.verified,
+      };
       this.initialized = true;
     } catch (error) {
       this.unsubscribe();
@@ -206,6 +212,7 @@ export class AppServerHost {
       await transport.close().catch(() => undefined);
       this.transport = null;
       this.initialized = false;
+      this.initializationAttestationValue = null;
       throw error;
     }
   }
@@ -214,6 +221,7 @@ export class AppServerHost {
     const transport = this.transport;
     this.suppressProcessExit = true;
     this.initialized = false;
+    this.initializationAttestationValue = null;
     this.unsubscribe();
     this.unsubscribe = (): void => undefined;
     this.transport = null;
@@ -230,6 +238,7 @@ export class AppServerHost {
     if (this.transport) this.lastSnapshot = this.transport.snapshot;
     this.lastSnapshot = { ...this.lastSnapshot, processExited: true, exitCode, stderr };
     this.initialized = false;
+    this.initializationAttestationValue = null;
     this.unsubscribe();
     this.unsubscribe = (): void => undefined;
     this.transport = null;
@@ -304,6 +313,7 @@ export class AppServerThreadClient implements AppServerClientPort {
 
   get isClosed(): boolean { return this.closed; }
   get initialized(): boolean { return this.host.isInitialized; }
+  get initializationAttestation(): AppServerInitializationAttestation | null { return this.host.initializationAttestation; }
   get threadId(): string | null { return this.threadIdValue; }
   get snapshot() { return this.host.snapshot; }
 

@@ -34,6 +34,7 @@ export const CONTROL_PLANE_CAPABILITIES = [
 
 export type ControlPlaneCapability = typeof CONTROL_PLANE_CAPABILITIES[number];
 export type ControlPlaneCapabilityStatus = ControlPlaneCapability["status"];
+export type ControlPlaneCapabilityName = ControlPlaneCapability["name"];
 
 export const WEBGPT_CONTROL_COMMANDS = [
   "webgpt.initialize",
@@ -66,7 +67,9 @@ export const WEBGPT_CONTROL_COMMANDS = [
   "webgpt.request.list",
 ] as const;
 
-const COMMAND_REQUIRED_CAPABILITY: Readonly<Record<string, string>> = Object.freeze({
+export type ControlPlaneCommandName = typeof WEBGPT_CONTROL_COMMANDS[number];
+
+const COMMAND_REQUIRED_CAPABILITY: Readonly<Record<ControlPlaneCommandName, ControlPlaneCapabilityName>> = Object.freeze({
   "webgpt.initialize": "webgpt.control.v1",
   "webgpt.status": "webgpt.status",
   "webgpt.open": "webgpt.control.v1",
@@ -97,8 +100,22 @@ const COMMAND_REQUIRED_CAPABILITY: Readonly<Record<string, string>> = Object.fre
   "webgpt.request.list": "webgpt.request-lifecycle",
 });
 
-export function requiredControlPlaneCapability(command: string): string | null {
-  return COMMAND_REQUIRED_CAPABILITY[command] ?? null;
+export function requiredControlPlaneCapability(command: string): ControlPlaneCapabilityName | null {
+  if (!WEBGPT_CONTROL_COMMANDS.includes(command as ControlPlaneCommandName)) return null;
+  return COMMAND_REQUIRED_CAPABILITY[command as ControlPlaneCommandName] ?? null;
+}
+
+/** Derive legacy compatibility grants from the same capability registry. */
+export function stableControlPlaneCapabilities(): ReadonlySet<ControlPlaneCapabilityName> {
+  return new Set(CONTROL_PLANE_CAPABILITIES.filter((capability) => capability.status === "STABLE").map((capability) => capability.name));
+}
+
+/** Resolve a command through the single command-to-capability registry. */
+export function authorizeControlPlaneCommand(command: string, granted: ReadonlySet<string> | readonly string[]): { requiredCapability: ControlPlaneCapabilityName | null; allowed: boolean } {
+  const requiredCapability = requiredControlPlaneCapability(command);
+  if (!requiredCapability) return { requiredCapability, allowed: false };
+  const grantedSet = granted instanceof Set ? granted : new Set(granted);
+  return { requiredCapability, allowed: grantedSet.has(requiredCapability) };
 }
 
 export function protocolCompatibility(value: unknown): ControlPlaneCompatibility {

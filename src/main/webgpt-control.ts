@@ -16,12 +16,13 @@ import {
   CONTROL_PLANE_PROTOCOL_VERSION,
   CONTROL_PLANE_WIRE_VERSION,
   WEBGPT_CONTROL_COMMANDS,
+  authorizeControlPlaneCommand,
   protocolCompatibility,
+  stableControlPlaneCapabilities,
   type ControlPlaneCapability,
   type ControlPlaneClientInfo,
   type ControlPlaneCompatibility,
 } from "../shared/webgpt-control-plane-contract.ts";
-import { requiredControlPlaneCapability } from "../shared/webgpt-control-plane-contract.ts";
 import { normalizeControlPlaneError, sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 
 export const WEBGPT_CONTROL_PROTOCOL_VERSION = CONTROL_PLANE_WIRE_VERSION;
@@ -520,6 +521,13 @@ export class WebGptControlServer {
           response: controlError("CONTROL_LEGACY_UNSUPPORTED", "Legacy Control Plane 兼容窗口已结束，请迁移到 initialize。", request.command, request.requestId, false, { compatibilityUntil: CONTROL_PLANE_LEGACY_COMPATIBILITY_UNTIL }),
         };
       }
+      const legacyAuthorization = authorizeControlPlaneCommand(request.command, stableControlPlaneCapabilities());
+      if (!legacyAuthorization.allowed) {
+        return {
+          mode: "LEGACY",
+          response: controlError("CAPABILITY_NOT_SUPPORTED", `Legacy Control Plane 不支持当前 command 所需 capability：${legacyAuthorization.requiredCapability ?? "unknown"}`, request.command, request.requestId, false, { capability: legacyAuthorization.requiredCapability, requiredCommand: "webgpt.initialize" }),
+        };
+      }
       return { mode: "LEGACY" };
     }
     if (!request.protocolVersion || !request.clientInfo || !request.sessionId) {
@@ -542,8 +550,9 @@ export class WebGptControlServer {
         response: controlError("CONTROL_SESSION_CLIENT_MISMATCH", "Control session 与 clientInfo 不一致。", request.command, request.requestId),
       };
     }
-    const requiredCapability = requiredControlPlaneCapability(request.command);
-    if (requiredCapability && !session.capabilities.has(requiredCapability)) {
+    const authorization = authorizeControlPlaneCommand(request.command, session.capabilities);
+    if (!authorization.allowed) {
+      const requiredCapability = authorization.requiredCapability;
       return { mode: "MODERN", response: controlError("CAPABILITY_NOT_SUPPORTED", `当前 session 未协商 Control Plane capability：${requiredCapability}`, request.command, request.requestId, false, { capability: requiredCapability, requiredCommand: "webgpt.initialize" }) };
     }
     session.expiresAt = Date.now() + CONTROL_PLANE_SESSION_TTL_MS;
@@ -563,6 +572,9 @@ export class WebGptControlServer {
     const unsupported = requested.find((capability) => !supported.has(capability));
     if (unsupported) {
       return controlError("CAPABILITY_NOT_SUPPORTED", `不支持的 Control Plane capability：${unsupported}`, request.command, request.requestId, false, { capability: unsupported });
+    }
+    if (!requested.includes("webgpt.control.v1")) {
+      return controlError("CAPABILITY_NOT_SUPPORTED", "initialize 必须协商 webgpt.control.v1。", request.command, request.requestId, false, { capability: "webgpt.control.v1" });
     }
     const capabilities = CONTROL_PLANE_CAPABILITIES.filter((capability) => requested.includes(capability.name));
     if (!request.sessionId || !request.clientInfo || !request.protocolVersion) {

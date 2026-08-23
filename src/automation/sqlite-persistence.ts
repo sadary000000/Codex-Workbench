@@ -11,6 +11,7 @@ import {
   type AuditEvent,
 } from "./types.ts";
 import { AutomationSchemaError, createEmptyAutomationDocument, migrateAutomationDocument, validateAutomationDocument } from "./schema.ts";
+import { assertMigrationIdentityPreserved } from "./migration-identity.ts";
 
 export const AUTOMATION_PERSISTENCE_SCHEMA_VERSION = 1 as const;
 export const AUTOMATION_PERSISTENCE_FORMAT = "sqlite-record-v1" as const;
@@ -227,14 +228,60 @@ async function migrationFiles(filePath: string): Promise<string[]> {
   }
 }
 
+async function migrationBackupFiles(filePath: string): Promise<string[]> {
+  const directory = dirname(filePath);
+  const prefix = `${basename(filePath)}.v2-backup-`;
+  try {
+    const names = (await readdir(directory)).filter((name) => name.startsWith(prefix) && name.endsWith(".json"));
+    const ordered = await Promise.all(names.map(async (name) => {
+      const path = join(directory, name);
+      try {
+        const details = await stat(path);
+        return { path, name, mtimeMs: details.mtimeMs };
+      } catch {
+        return { path, name, mtimeMs: Number.NEGATIVE_INFINITY };
+      }
+    }));
+    return ordered.sort((left, right) => right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name)).map((candidate) => candidate.path);
+  } catch (error) {
+    if ((error as { code?: unknown })?.code === "ENOENT") return [];
+    throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Automation migration backup directory could not be read.", error);
+  }
+}
+
+async function readCanonicalMigrationBackup(filePaths: string[]): Promise<{ path: string; document: AutomationDocument } | null> {
+  for (const path of filePaths) {
+    try {
+      const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+      const migrated = migrateAutomationDocument(parsed);
+      return { path, document: migrated.document };
+    } catch {
+      // Continue to an older backup; promotion still fails closed if none is valid.
+    }
+  }
+  return null;
+}
+
 export async function recoverInterruptedMigration(filePath: string): Promise<void> {
   if (await fileKind(filePath) !== "missing") return;
   const candidates = await migrationFiles(filePath);
+  const backupFiles = await migrationBackupFiles(filePath);
+  const sourceBackup = await readCanonicalMigrationBackup(backupFiles);
   if (candidates.length) {
     let firstFailure: { code: AutomationPersistenceErrorCode; message: string } | null = null;
     for (const candidate of candidates) {
       const inspection = await inspectExistingSqliteAutomationFile(candidate);
       if (inspection.status === "valid") {
+        if (!sourceBackup || !inspection.document) {
+          firstFailure ??= { code: "AUTOMATION_MIGRATION_FAILED", message: "VALID_CANDIDATE_WITHOUT_COMPARABLE_SOURCE: refusing to promote an interrupted migration without a valid JSON source backup." };
+          continue;
+        }
+        try {
+          assertMigrationIdentityPreserved(sourceBackup.document, inspection.document);
+        } catch (error) {
+          firstFailure ??= { code: "AUTOMATION_MIGRATION_FAILED", message: `MIGRATION_IDENTITY_CHANGED: ${error instanceof Error ? error.message : String(error)}` };
+          continue;
+        }
         await rename(candidate, filePath);
         return;
       }
@@ -247,38 +294,11 @@ export async function recoverInterruptedMigration(filePath: string): Promise<voi
     }
     throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", `Interrupted Automation migration has no valid candidate; refusing recovery. ${firstFailure?.message ?? "CORRUPT"}`);
   }
-  const directory = dirname(filePath);
-  const prefix = `${basename(filePath)}.v2-backup-`;
-  try {
-    const names = (await readdir(directory)).filter((name) => name.startsWith(prefix) && name.endsWith(".json"));
-    const backups = await Promise.all(names.map(async (name) => {
-      const path = join(directory, name);
-      try {
-        const details = await stat(path);
-        return { path, name, mtimeMs: details.mtimeMs };
-      } catch {
-        return { path, name, mtimeMs: Number.NEGATIVE_INFINITY };
-      }
-    }));
-    backups.sort((left, right) => right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name));
-    let firstFailure: unknown = null;
-    for (const backup of backups) {
-      try {
-        const raw = await readFile(backup.path, "utf8");
-        const parsed = JSON.parse(raw) as unknown;
-        migrateAutomationDocument(parsed);
-        await rename(backup.path, filePath);
-        return;
-      } catch (error) {
-        firstFailure ??= error;
-      }
+  if (backupFiles.length) {
+    if (sourceBackup) {
+      throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration has a valid source backup but no comparable target candidate; refusing recovery without an identity assertion.");
     }
-    if (backups.length && firstFailure) throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration found no valid JSON backup (invalid JSON backup); refusing to promote CORRUPT/MIGRATION_REQUIRED/UNSUPPORTED state.", firstFailure);
-  } catch (error) {
-    if ((error as { code?: unknown })?.code !== "ENOENT") {
-      if (error instanceof AutomationPersistenceError) throw error;
-      throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration could not be recovered.", error);
-    }
+    throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration found no valid JSON backup (invalid JSON backup); refusing to promote CORRUPT/MIGRATION_REQUIRED/UNSUPPORTED state.");
   }
 }
 
@@ -592,6 +612,8 @@ export async function migrateJsonSnapshotToSqlite(filePath: string, raw: string)
       migratedAt: now(),
     });
     persistence.replaceDocument(createEmptyAutomationDocument(), migrated.document);
+    const written = persistence.loadDocument();
+    assertMigrationIdentityPreserved(migrated.document, written);
     persistence.close();
     persistence = null;
     await rename(filePath, backup);

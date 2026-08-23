@@ -35,6 +35,7 @@ import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 import { AutomationStore } from "../automation/store.ts";
 import { createProductionAutomationComposition, type AutomationComposition } from "../automation/composition-root.ts";
+import { WebGptExternalActionBridge, createWebGptRequestManagerActionAdapter } from "../automation/webgpt-external-action.ts";
 import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority, createWebGptProviderPolicyAuthority, webGptRuntimeCapability } from "../automation/webgpt-policy-authority.ts";
 import { assertProviderSeamExecutable } from "../automation/provider-seam-classification.ts";
 import { WebGptAutomationProviderPort } from "../features/webgpt/automation/webgpt-provider-port.ts";
@@ -144,6 +145,7 @@ let automationStore: AutomationStore | null = null;
 let automationComposition: AutomationComposition | null = null;
 let webGptPolicyAuthority: WebGptPolicyAuthority | null = null;
 let webGptProviderPort: WebGptAutomationProviderPort | null = null;
+let webGptExternalActionBridge: WebGptExternalActionBridge | null = null;
 let automationPersistenceStart: Promise<void> | null = null;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
 
@@ -1141,6 +1143,7 @@ function getWebGptProviderPort(): WebGptAutomationProviderPort {
   if (!webGptPolicyAuthority) throw new Error("WEBGPT_POLICY_AUTHORITY_REQUIRED");
   if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");
   const store = automationStore;
+  getWebGptExternalActionBridge();
   webGptProviderPort = new WebGptAutomationProviderPort({
     roleSession: getWebGptRoleService(),
     requestManager: getWebGptRequestManager(),
@@ -1155,6 +1158,21 @@ function getWebGptProviderPort(): WebGptAutomationProviderPort {
     },
   });
   return webGptProviderPort;
+}
+
+/**
+ * Production composition owns the only bridge instance. It is materialized
+ * for the provider boundary, but remains idle until a future Automation stage
+ * supplies an opaque inputRef and explicit dispatch facts.
+ */
+function getWebGptExternalActionBridge(): WebGptExternalActionBridge {
+  if (webGptExternalActionBridge) return webGptExternalActionBridge;
+  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");
+  webGptExternalActionBridge = new WebGptExternalActionBridge(
+    automationStore,
+    createWebGptRequestManagerActionAdapter(getWebGptRequestManager()),
+  );
+  return webGptExternalActionBridge;
 }
 
 interface RuntimeTarget {
@@ -2198,6 +2216,7 @@ if (officialCliMode) {
           automationStore = null;
           webGptPolicyAuthority = null;
           webGptProviderPort = null;
+          webGptExternalActionBridge = null;
           await runtimes.closeAll();
           if (nativeAppServerHost) await nativeAppServerHost.close();
           if (projectMaps) await projectMaps.close();
