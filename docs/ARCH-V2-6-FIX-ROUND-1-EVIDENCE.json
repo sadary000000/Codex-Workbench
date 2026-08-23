@@ -1,0 +1,47 @@
+{
+  "stage": "ARCH-V2-6 FIX ROUND 1",
+  "result": "PASS_CANDIDATE",
+  "baseCommit": "c0bda93",
+  "implementationCommit": "b8591db",
+  "realBusinessPromptSent": false,
+  "providerSeamClassification": {
+    "activeProduction": ["webgpt-provider-port.ts"],
+    "pausedNotExecutable": [
+      "aut2-real-webgpt-gate.ts",
+      "aut3-real-planner-gate.ts",
+      "requirement-service.ts",
+      "requirement-webgpt-adapter.ts",
+      "planner-service.ts",
+      "planner-webgpt-adapter.ts"
+    ],
+    "testOnly": ["webgpt-external-action.ts"],
+    "legacyReadOnly": ["webgpt-action-readiness.ts"]
+  },
+  "providerAuthorization": {
+    "required": ["policyVersionId", "EffectivePolicy", "RuntimeCapability", "ActionAttempt correlation"],
+    "missingPolicyPin": {"result": "FAIL_CLOSED", "providerSubmitCount": 0},
+    "deniedPolicy": {"result": "FAIL_CLOSED", "providerSubmitCount": 0},
+    "missingCapability": {"result": "FAIL_CLOSED", "providerSubmitCount": 0},
+    "validPinnedPolicyAndCapability": {"result": "ISOLATED_FIXTURE_REACHED", "providerSubmitCount": 1}
+  },
+  "tests": {
+    "archV2_6TargetAndCorrelation": {"passed": 9, "failed": 0},
+    "archV2_3_4_5Regression": {"passed": 27, "failed": 0},
+    "fullSuite": {"passed": 345, "failed": 0},
+    "check": "PASS",
+    "npmAuditOmitDev": "PASS_0_VULNERABILITIES",
+    "secretScan": "PASS",
+    "gitDiffCheck": "PASS"
+  },
+  "subagentD": {
+    "execution": "main_read_only_audit_because_multi_agent_tool_unavailable",
+    "temporaryOutput": "C:\\Users\\sadar\\AppData\\Local\\Temp\\arch-v2-6-subagent-d-audit-20260823",
+    "realPromptSent": false
+  },
+  "package": {
+    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-stage-arch-v2-6-fix-round-1\\package\\Codex Workbench V1.exe",
+    "sha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "standardPackageUpdated": false,
+    "standardPackageBlocker": "running EXE locks dist/package/d3dcompiler_47.dll"
+  }
+}
