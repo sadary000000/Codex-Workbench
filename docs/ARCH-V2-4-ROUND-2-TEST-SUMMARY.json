@@ -1,0 +1,31 @@
+{
+  "stage": "ARCH-V2-4 FIX ROUND 2",
+  "repository": "D:\\办公\\AI\\Codex_Workbench_V1",
+  "baseCommit": "d387c999456abce16746db7d8d28b9d2670b2be4",
+  "priorRoundCommit": "a2cdcf1",
+  "tests": {
+    "npm run check": "PASS",
+    "npm test": {"result": "PASS", "passed": 322, "failed": 0},
+    "npm audit --omit=dev": {"result": "PASS", "vulnerabilities": 0},
+    "git diff --check": "PASS",
+    "scopedSecretScan": "PASS",
+    "npm run test:protocol:arch-v2-2": "PASS"
+  },
+  "package": {
+    "standardBuild": "FAIL_WITH_EVIDENCE",
+    "standardBuildError": "EPERM unlink dist/package/d3dcompiler_47.dll",
+    "isolatedBuild": "PASS",
+    "isolatedPackage": "PASS",
+    "isolatedDirectory": "dist-stage-arch-v2-4-round-2"
+  },
+  "realSmoke": {
+    "newBusinessPrompts": 0,
+    "web6_6Protocol": "PASS_WITH_EVIDENCE",
+    "web6_6Status": "TIMEOUT",
+    "web6_6VersionMismatchFixture": "PASS",
+    "web6_6UnsupportedCapabilityFixture": "PASS",
+    "web6_4Arbiter": "FAIL_WITH_EVIDENCE",
+    "web6_4ArbiterFailure": "OPEN_FAILED/USER_CONTROL"
+  },
+  "regressionPolicy": "Prompt-sending ARCH-V2-1/3 real smokes were not rerun in this zero-business-prompt round; prior PASS evidence and current full suite are retained."
+}

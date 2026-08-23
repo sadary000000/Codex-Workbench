@@ -1,5 +1,7 @@
 # ARCH-V2-4 Source Evidence Index — FIX ROUND 1
 
+> **Current authoritative addendum:** The Round 2 evidence index is `ARCH-V2-4-FIX-ROUND-2.md` and its companion FIX-01/02/03 evidence files. The Round 1 entries below remain historical.
+
 ## Implementation
 
 - `src/automation/webgpt-external-action.ts` — dispatch facts/context, provider bridge, accepted-local-failure recovery, reconcile state, production adapter.

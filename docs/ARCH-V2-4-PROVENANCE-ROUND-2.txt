@@ -1,0 +1,9 @@
+repository: D:\办公\AI\Codex_Workbench_V1
+branch: master
+base_commit: d387c999456abce16746db7d8d28b9d2670b2be4
+prior_round_commit: a2cdcf1
+round: ARCH-V2-4 FIX ROUND 2
+running_subagents_at_gate: 0
+standard_package: blocked by running Workbench EXE lock
+isolated_package: D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-4-round-2\package
+real_business_prompts: 0

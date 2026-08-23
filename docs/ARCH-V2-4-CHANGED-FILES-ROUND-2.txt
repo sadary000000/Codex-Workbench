@@ -1,0 +1,8 @@
+ARCH-V2-4 FIX ROUND 2 changed source/test scope
+src/automation/webgpt-external-action.ts
+tests/arch-v2-4-external-action.test.ts
+
+Adopted prior-round commit already on branch
+a2cdcf1 fix: fail closed on webgpt observation identity mismatch
+
+No V1 Frozen Core, Native Thread/Turn/Item, Map, Renderer, donor or Auto_Agent changes were authorized in this round.

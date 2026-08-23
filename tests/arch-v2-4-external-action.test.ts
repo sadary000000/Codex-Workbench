@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   AutomationStore,
   WebGptExternalActionBridge,
+  buildWebGptDispatchContext,
   canDispatch,
   createWebGptRequestManagerActionAdapter,
   type WebGptExternalActionAdapter,
@@ -14,7 +15,7 @@ import {
 } from "../src/automation/index.ts";
 import { WebGptOperationArbiter } from "../src/features/webgpt/runtime/webgpt-operation-arbiter.ts";
 import { WebGptRequestManager } from "../src/features/webgpt/runtime/webgpt-request-manager.ts";
-import type { WebGptPageProbe, WebGptState } from "../src/features/webgpt/types.ts";
+import type { WebGptPageProbe, WebGptRequestRecord, WebGptState } from "../src/features/webgpt/types.ts";
 
 const ready = {
   runtimeReady: true,
@@ -215,6 +216,49 @@ test("FIX-02 provider observation identity mismatches fail closed before Receipt
   }
 });
 
+test("FIX-02 provider request target mismatch fails closed before Receipt mutation", async () => {
+  const value = await storeFixture();
+  let submitCount = 0;
+  const adapter: WebGptExternalActionAdapter = {
+    async submit() {
+      submitCount += 1;
+      return { ...request("provider-wrong-request-target", false), targetChatUrl: "https://chatgpt.com/c/other-target" };
+    },
+    async observe(providerRequest) {
+      return observation(providerRequest.providerRequestId, "TERMINAL_CONFIRMED");
+    },
+    async reconcile(input) {
+      return observation(input.providerRequestId, "TERMINAL_CONFIRMED");
+    },
+  };
+  try {
+    const bridge = new WebGptExternalActionBridge(value.store, adapter);
+    await assert.rejects(
+      () => bridge.dispatch({
+        projectId: value.project.projectId,
+        actionType: "WEBGPT_PROVIDER_REQUEST_TARGET_IDENTITY",
+        targetRef: "target",
+        targetChatUrl: "https://chatgpt.com/c/target",
+        role: "PLANNER",
+        prompt: "provider request target fixture",
+        sideEffectClass: "RECONCILABLE",
+        idempotencyRef: "provider-request-target-identity",
+        dispatchContext: ready,
+      }),
+      (error: unknown) => error instanceof Error
+        && (error as { code?: string }).code === "PROVIDER_OBSERVATION_CORRELATION_MISMATCH"
+        && (error as { details?: { mismatches?: string[] } }).details?.mismatches?.includes("targetIdentity") === true,
+    );
+    const snapshot = await value.store.snapshot();
+    assert.equal(submitCount, 1);
+    assert.equal(snapshot.actionReceipts.length, 0);
+    assert.equal(snapshot.externalRefs.filter((ref) => ref.kind === "WEBGPT_PROVIDER_OBSERVATION").length, 0);
+  } finally {
+    await value.store.close();
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
 test("FIX-02 wrong reconcile observation cannot terminalize an UNKNOWN Receipt", async () => {
   const value = await storeFixture();
   let submitCount = 0;
@@ -378,6 +422,99 @@ test("unknown provider outcome is a single receipt and reconcile never resubmits
     assert.equal(reconciled.receipt.reconcileState, "RECONCILED");
     assert.equal(submitCount, 1);
     assert.equal((await value.store.snapshot()).actionReceipts.length, 1);
+  } finally {
+    await value.store.close();
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
+test("FIX-01 Bridge same-semantic reattach reuses the existing Attempt and ProviderRequest", async () => {
+  const value = await storeFixture();
+  const existingProviderRequest = request("provider-reattach");
+  const dispatchKey = "bridge-reattach-key";
+  existingProviderRequest.idempotencyKey = dispatchKey;
+  existingProviderRequest.semanticSha256 = "bridge-reattach-semantic";
+  let submitCount = 0;
+  let reconcileCount = 0;
+  const adapter: WebGptExternalActionAdapter = {
+    async submit() {
+      submitCount += 1;
+      return existingProviderRequest;
+    },
+    async observe() {
+      return observation(existingProviderRequest.providerRequestId, "ACCEPTED_UNKNOWN_RESULT");
+    },
+    async reconcile(input) {
+      reconcileCount += 1;
+      return observation(input.providerRequestId, "TERMINAL_CONFIRMED");
+    },
+  };
+  const action = {
+    projectId: value.project.projectId,
+    actionType: "WEBGPT_BRIDGE_REATTACH",
+    targetRef: existingProviderRequest.targetChatUrl,
+    targetChatUrl: existingProviderRequest.targetChatUrl,
+    role: "REQUIREMENT" as const,
+    prompt: "reattach without resubmit",
+    sideEffectClass: "RECONCILABLE" as const,
+    idempotencyRef: dispatchKey,
+  };
+  const reattachRecord: WebGptRequestRecord = {
+    requestId: existingProviderRequest.providerRequestId,
+    idempotencyKey: dispatchKey,
+    semanticSha256: existingProviderRequest.semanticSha256!,
+    state: "RECOVERY_REQUIRED",
+    projectId: value.project.projectId,
+    role: "REQUIREMENT",
+    targetChatUrl: existingProviderRequest.targetChatUrl,
+    chatUrl: existingProviderRequest.targetChatUrl!,
+    promptChars: action.prompt.length,
+    promptSha256: "prompt-hash",
+    baselineUserCount: 0,
+    baselineAssistantCount: 0,
+    sendStartedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    submittedAt: new Date().toISOString(),
+    completedAt: null,
+    resultPath: null,
+    resultSha256: null,
+    resultBytes: null,
+    lastKnownPageState: null,
+    error: { code: "WORKBENCH_RESTARTED", message: "reattach fixture" },
+  };
+  try {
+    const bridge = new WebGptExternalActionBridge(value.store, adapter);
+    const first = await bridge.dispatch({ ...action, dispatchContext: ready });
+    const before = await value.store.snapshot();
+    const attemptsBefore = before.actionAttempts.length;
+    const providerRefsBefore = before.externalRefs.filter((ref) => ref.kind === "WEBGPT_PROVIDER_REQUEST").length;
+    const dispatchFacts = {
+      runtimeReady: true,
+      policyPreconditionSatisfied: true,
+      targetIdentityValid: true,
+      action: {
+        projectId: value.project.projectId,
+        role: "REQUIREMENT" as const,
+        targetChatUrl: existingProviderRequest.targetChatUrl!,
+        idempotencyKey: dispatchKey,
+        semanticSha256: existingProviderRequest.semanticSha256,
+      },
+      records: [reattachRecord],
+      browserResource: { mode: "FREE" as const, activeOperationId: null, activeRequestId: null, queueDepth: 0 },
+    };
+    const dispatchContext = buildWebGptDispatchContext(dispatchFacts);
+    assert.equal(dispatchContext.reattachRequestId, existingProviderRequest.providerRequestId);
+
+    const reattached = await bridge.dispatch({ ...action, dispatchFacts });
+    const after = await value.store.snapshot();
+    assert.equal(reattached.providerRequest?.providerRequestId, existingProviderRequest.providerRequestId);
+    assert.equal(reattached.attempt.actionAttemptId, first.attempt.actionAttemptId);
+    assert.equal(reattached.receipt.status, "SUCCEEDED");
+    assert.equal(reattached.receipt.reconcileState, "RECONCILED");
+    assert.equal(submitCount, 1);
+    assert.equal(reconcileCount, 1);
+    assert.equal(after.actionAttempts.length, attemptsBefore);
+    assert.equal(after.externalRefs.filter((ref) => ref.kind === "WEBGPT_PROVIDER_REQUEST").length, providerRefsBefore);
   } finally {
     await value.store.close();
     await rm(value.root, { recursive: true, force: true });

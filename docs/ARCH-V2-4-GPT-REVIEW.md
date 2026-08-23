@@ -1,5 +1,7 @@
 # ARCH-V2-4 FIX ROUND 1 — GPT Gate Review Request
 
+> **Current review request:** Use `ARCH-V2-4-GPT-REVIEW-ROUND-2.md` and `ARCH-V2-4-FIX-ROUND-2.md`. The Round 1 request below is retained only as prior-gate context.
+
 上一轮 Gate 为 `FIX_REQUIRED (P0=3, P1=3, P2=1)`。本轮只执行 Required Fixes 01～08；请基于 Review Package 中的 PASS/FAIL_WITH_EVIDENCE 给出新的 Gate。
 
 请重点审查：

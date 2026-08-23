@@ -1,5 +1,7 @@
 # ARCH-V2-4 Regression Evidence — FIX ROUND 1
 
+> **Current authoritative addendum:** Round 2 current runs and disclosed real-smoke limitations are in `ARCH-V2-4-FIX-ROUND-2.md`, `ARCH-V2-4-ROUND-2-TEST-SUMMARY.json` and `ARCH-V2-4-ROUND-2-REAL-SMOKE.json`.
+
 ## Current runs
 
 | Boundary | Result | Evidence |

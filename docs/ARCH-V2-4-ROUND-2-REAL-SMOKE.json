@@ -1,0 +1,33 @@
+{
+  "stage": "ARCH-V2-4 FIX ROUND 2",
+  "realPromptsSent": 0,
+  "protocolSmoke": {
+    "command": "npm run test:real:webgpt:protocol",
+    "result": "PASS_WITH_EVIDENCE",
+    "statusCode": "TIMEOUT",
+    "fixtures": {
+      "versionMismatch": "PASS",
+      "unsupportedCapability": "PASS"
+    },
+    "endpointKind": "WINDOWS_NAMED_PIPE",
+    "authTokenWrittenToEvidence": false,
+    "privatePageContentLogged": false
+  },
+  "arbiterSmoke": {
+    "command": "npm run test:real:webgpt:arbiter",
+    "result": "FAIL_WITH_EVIDENCE",
+    "failure": "OPEN_FAILED",
+    "errorCode": "USER_CONTROL",
+    "isolatedPackage": true,
+    "realPromptCount": 0,
+    "rateLimitObserved": false,
+    "credentialsRead": false,
+    "privatePageContentLogged": false
+  },
+  "standardBuild": {
+    "result": "FAIL_WITH_EVIDENCE",
+    "error": "EPERM: running Workbench package output is locked"
+  },
+  "isolatedBuild": "PASS",
+  "isolatedPackage": "PASS"
+}

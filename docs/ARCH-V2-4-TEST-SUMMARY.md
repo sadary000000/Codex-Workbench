@@ -1,5 +1,7 @@
 # ARCH-V2-4 Test Summary — FIX ROUND 1
 
+> **Current authoritative addendum:** FIX ROUND 2 has 322/322 tests, isolated build/package PASS, standard build lock FAIL_WITH_EVIDENCE, and current real-smoke results in `ARCH-V2-4-FIX-ROUND-2.md`.
+
 ## Gate summary
 
 ```yaml

@@ -1,5 +1,7 @@
 # ARCH-V2-4 — FIX ROUND 1 Stage Review
 
+> **Current authoritative addendum:** FIX ROUND 2 is recorded in `ARCH-V2-4-FIX-ROUND-2.md`. The Round 1 record below is retained as historical provenance; do not read its old FIX-05/Provider-identity gap as the current implementation state.
+
 ## Scope resolution
 
 ```yaml

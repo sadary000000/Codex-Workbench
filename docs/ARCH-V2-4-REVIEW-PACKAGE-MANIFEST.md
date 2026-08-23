@@ -1,5 +1,7 @@
 # ARCH-V2-4 FIX ROUND 1 Review Package Manifest
 
+> **Current authoritative package:** `dist/review/ARCH-V2-4-REVIEW-PACKAGE.zip` is regenerated for FIX ROUND 2. Its scoped manifest is `docs/ARCH-V2-4-ROUND-2-PACKAGE-MANIFEST.md`; this Round 1 manifest is historical.
+
 ## Provenance
 
 ```yaml
