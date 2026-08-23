@@ -122,7 +122,7 @@ Final round evidence is in `ARCH-V2-5-FIX-ROUND-2.md` and
 `dist-stage-arch-v2-5-fix-round-2/review/WEBGPT-WEB6.6-REAL-GATE.json`.
 
 ```yaml
-fix_round_2_implementation_commit: 40b79cb
+fix_round_2_implementation_commit: d445fb5
 npm_test: 336/336
 packaged_status: PASS
 official_cli_runtime_status: PASS

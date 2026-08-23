@@ -3,7 +3,7 @@
 ```yaml
 stage: ARCH-V2-5 FIX ROUND 2
 base_commit: e09b80a
-implementation_commit: 40b79cb
+implementation_commit: d445fb5
 previous_gate: FIX_REQUIRED
 v1_core_changed: NO
 aut2_aut3_restored: NO
@@ -142,7 +142,7 @@ dist-stage-arch-v2-5-fix-round-2/review/WEBGPT-WEB6.6-REAL-GATE.json
 ```text
 [ARCH_V2_5_FIX_ROUND_2_REVIEW_READY]
 stage: ARCH-V2-5 FIX ROUND 2
-implementation_commit: 40b79cb
+implementation_commit: d445fb5
 test_discovery_boundary: PASS
 packaged_status: PASS
 official_cli_runtime_status: PASS

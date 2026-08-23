@@ -46,7 +46,7 @@
 `exitCode=0`、`ok=true`。完整结果见 `ARCH-V2-5-FIX-ROUND-2.md`。
 
 ```yaml
-fix_round_2_commit: 40b79cb
+fix_round_2_commit: d445fb5
 new_real_prompts: 0
 v1_core_changed: NO
 aut2_aut3_activated: NO
