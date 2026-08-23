@@ -20,7 +20,8 @@
 - explicit DENY before provider submit;
 - missing runtime capability before provider submit;
 - valid pinned policy + complete effective policy + READY runtime capability reaches only the isolated fixture;
-- policy authority uses `PROMPT` for submit and `RETRY` for reconcile without owning dispatch budget;
+- policy authority uses `PROMPT` for submit and `VERIFY` for reconcile without treating verification as retry;
+- production composition root validates the persisted ActionIntent/ActionAttempt correlation before provider side effects;
 - evidence correlation remains bounded, opaque, immutable and queryable.
 
 ## Real-world restrictions
@@ -29,4 +30,4 @@ No real App Server smoke and no real business Prompt were executed. This is inte
 
 The standard package was not overwritten because running EXE processes hold `dist/package/d3dcompiler_47.dll`. An isolated package was built at:
 
-`D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-6-fix-round-1\package\`
+`D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-6-fix-round-1c\package\`

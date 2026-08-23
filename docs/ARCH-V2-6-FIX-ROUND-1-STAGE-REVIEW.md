@@ -6,7 +6,7 @@
 stage: ARCH-V2-6 FIX ROUND 1
 result: PASS_CANDIDATE
 base_commit: c0bda93
-implementation_commit: b8591db
+implementation_commits: [b8591db, 6de4b5f]
 gate: READY_FOR_GPT_REVIEW
 v1_frozen_core_changed: NO
 real_business_prompt_sent: NO
@@ -47,10 +47,15 @@ GPT 反馈中的 P2-01（无真实 App Server smoke）本轮仍按约束保留�
 | `webgpt-provider-port.ts` | `ACTIVE_PRODUCTION` | yes |
 | `aut2-real-webgpt-gate.ts` | `PAUSED_NOT_EXECUTABLE` | no |
 | `aut3-real-planner-gate.ts` | `PAUSED_NOT_EXECUTABLE` | no |
+| `adapters.ts` | `LEGACY_READ_ONLY` | no |
 | `requirement-service.ts` | `PAUSED_NOT_EXECUTABLE` | no |
+| `requirement-webgpt-contract.ts` | `PAUSED_NOT_EXECUTABLE` | no |
 | `requirement-webgpt-adapter.ts` | `PAUSED_NOT_EXECUTABLE` | no |
 | `planner-service.ts` | `PAUSED_NOT_EXECUTABLE` | no |
 | `planner-webgpt-adapter.ts` | `PAUSED_NOT_EXECUTABLE` | no |
+| `schema.ts` | `PAUSED_NOT_EXECUTABLE` | no |
+| `store.ts` | `PAUSED_NOT_EXECUTABLE` | no |
+| `types.ts` | `PAUSED_NOT_EXECUTABLE` | no |
 | `webgpt-external-action.ts` | `TEST_ONLY` | no |
 | `webgpt-action-readiness.ts` | `LEGACY_READ_ONLY` | no |
 
@@ -67,7 +72,9 @@ GPT 反馈中的 P2-01（无真实 App Server smoke）本轮仍按约束保留�
 - `actionAttemptId`、request/target/policy correlation 必须保持一致；
 - provenance 由同一授权证明携带，不由 adapter 生成新的 policy decision。
 
-`src/automation/webgpt-policy-authority.ts` 只评估/授权已 pin 的 policy；缺 pin 或 capability 不可用时抛出 fail-closed 错误，不生成替代 policy、不覆盖调用方 identity。
+`src/automation/webgpt-policy-authority.ts` 只评估/授权已 pin 的 policy；submit 使用 `PROMPT`，reconcile 使用独立的 `VERIFY` 语义，不把验证误记为 retry。缺 pin 或 capability 不可用时抛出 fail-closed 错误，不生成替代 policy、不覆盖调用方 identity。
+
+生产组合根 `getWebGptProviderPort()` 注入 pinned policy authority、runtime capability reader 和 `ActionIntent`/`ActionAttempt` 持久化校验；Provider Port 在副作用前验证 correlation，成功 submit 将同一 `policyVersionId` 传入 Role session，并校验返回 Request identity。
 
 ### 3. Opaque target boundary
 
@@ -117,28 +124,28 @@ D audit 覆盖：
 为避开正在运行的标准 package EXE 文件锁，本轮使用：
 
 ```powershell
-$env:CODEX_WORKBENCH_DIST='dist-stage-arch-v2-6-fix-round-1'
+$env:CODEX_WORKBENCH_DIST='dist-stage-arch-v2-6-fix-round-1c'
 npm run package:win
 ```
 
 输出：
 
-- `D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-6-fix-round-1\package\Codex Workbench V1.exe`
-- `D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-6-fix-round-1\package\Codex Workbench CLI.exe`
-- `D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-6-fix-round-1\package\Codex Workbench CLI Runtime.exe`
+- `D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-6-fix-round-1c\package\Codex Workbench V1.exe`
+- `D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-6-fix-round-1c\package\Codex Workbench CLI.exe`
+- `D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-6-fix-round-1c\package\Codex Workbench CLI Runtime.exe`
 
 SHA-256：
 
 ```text
 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC  Codex Workbench V1.exe
-C1B5D37D009F2C439D2F2B7F44108C14238DAE3380C0BCA5F85089AAD6225313  Codex Workbench CLI.exe
+9714AE09B17FFBC96C546B783D27C2F71919699ABBC9D1783BFD0FEB39144255  Codex Workbench CLI.exe
 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC  Codex Workbench CLI Runtime.exe
 ```
 
-对应打包资源 hash：
+对应打包资源 hash（最终隔离构建 `dist-stage-arch-v2-6-fix-round-1c`）：
 
 ```text
-4037F0DED3524A3BF3D773A5ADF6295F71E03F09EC43F33E5E712A9EA35507D7  dist\main\main.js
+395233ABE6B95C98B8EFF88B73916778A8446565CC616C1BE32D4202A5B97A8B  dist\main\main.js
 400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB  dist\renderer\renderer.js
 09D0EFBB1BD3C7BF02DA6A98EE4AA79D1AA5BFFE60134708B13B2551387B38A2  dist\preload\preload.cjs
 ```
@@ -158,7 +165,7 @@ C1B5D37D009F2C439D2F2B7F44108C14238DAE3380C0BCA5F85089AAD6225313  Codex Workbenc
 
 ## Known limitations / blockers
 
-1. 标准 `dist/package` 当前不能更新，原因是用户运行中的 EXE 文件锁；不能在未获授权时强杀。
+1. 标准 `dist/package` 当前不能更新，原因是用户运行中的 EXE 文件锁；不能在未获授权时强杀。最终隔离构建已 PASS。
 2. 未执行真实 App Server smoke / real business Prompt，符合本轮 GPT 约束；P2-01 继续作为非阻塞限制。
 3. `cancel` 没有 active executable implementation；本轮只保证已有 submit/reconcile side-effect path 的 authorization closure。
 

@@ -2,7 +2,7 @@
   "stage": "ARCH-V2-6 FIX ROUND 1",
   "result": "PASS_CANDIDATE",
   "baseCommit": "c0bda93",
-  "implementationCommit": "b8591db",
+  "implementationCommits": ["b8591db", "6de4b5f"],
   "realBusinessPromptSent": false,
   "providerSeamClassification": {
     "activeProduction": ["webgpt-provider-port.ts"],
@@ -22,7 +22,9 @@
     "missingPolicyPin": {"result": "FAIL_CLOSED", "providerSubmitCount": 0},
     "deniedPolicy": {"result": "FAIL_CLOSED", "providerSubmitCount": 0},
     "missingCapability": {"result": "FAIL_CLOSED", "providerSubmitCount": 0},
-    "validPinnedPolicyAndCapability": {"result": "ISOLATED_FIXTURE_REACHED", "providerSubmitCount": 1}
+    "validPinnedPolicyAndCapability": {"result": "ISOLATED_FIXTURE_REACHED", "providerSubmitCount": 1},
+    "reconcilePolicyOperation": "VERIFY",
+    "productionActionAttemptValidation": "PASS"
   },
   "tests": {
     "archV2_6TargetAndCorrelation": {"passed": 9, "failed": 0},
@@ -39,9 +41,14 @@
     "realPromptSent": false
   },
   "package": {
-    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-stage-arch-v2-6-fix-round-1\\package\\Codex Workbench V1.exe",
+    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-stage-arch-v2-6-fix-round-1c\\package\\Codex Workbench V1.exe",
     "sha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
     "standardPackageUpdated": false,
-    "standardPackageBlocker": "running EXE locks dist/package/d3dcompiler_47.dll"
+    "standardPackageBlocker": "running EXE locks dist/package/d3dcompiler_47.dll",
+    "resourceHashes": {
+      "main.js": "395233ABE6B95C98B8EFF88B73916778A8446565CC616C1BE32D4202A5B97A8B",
+      "renderer.js": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
+      "preload.cjs": "09D0EFBB1BD3C7BF02DA6A98EE4AA79D1AA5BFFE60134708B13B2551387B38A2"
+    }
   }
 }
