@@ -6,6 +6,7 @@
 stage: ARCH-V2-6
 official_name: Provider-neutral Ports / WebGPT Adapter Boundary
 base_commit: b94ea6a6b21c2420f644e145c02f9ee2cf8f912d
+implementation_commit: afdbab8
 v1_frozen_core_changed: NO
 aut2_aut3_activated: NO
 real_business_prompts: 0

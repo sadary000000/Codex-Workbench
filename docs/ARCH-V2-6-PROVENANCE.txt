@@ -1,5 +1,6 @@
 stage=ARCH-V2-6
 base_commit=b94ea6a6b21c2420f644e145c02f9ee2cf8f912d
+implementation_commit=afdbab8
 v1_frozen_core_changed=NO
 isolated_build_root=dist-stage-arch-v2-6-build
 isolated_gui_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
