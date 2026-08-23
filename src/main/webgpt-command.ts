@@ -1,7 +1,7 @@
 import type { WebGptRole } from "../features/webgpt/types.ts";
 
 export type WebGptExternalCommand = {
-  type: "open-workspace";
+  type: "open-workspace" | "control-plane";
 };
 
 export type WebGptCliCommandName =
@@ -56,6 +56,7 @@ export type WebGptCliInvocation =
   | { kind: "error"; json: boolean; message: string };
 
 export function parseWebGptExternalCommand(argv: readonly string[]): WebGptExternalCommand | null {
+  if (argv.includes("--webgpt-control")) return { type: "control-plane" };
   return argv.includes("--webgpt-open") ? { type: "open-workspace" } : null;
 }
 

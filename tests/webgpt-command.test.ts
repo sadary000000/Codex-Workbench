@@ -4,6 +4,7 @@ import { parseWebGptCliInvocation, parseWebGptExternalCommand } from "../src/mai
 
 test("WebGPT command parser accepts only the narrow open flag", () => {
   assert.deepEqual(parseWebGptExternalCommand(["Codex Workbench V1.exe", "--webgpt-open"]), { type: "open-workspace" });
+  assert.deepEqual(parseWebGptExternalCommand(["Codex Workbench V1.exe", "--webgpt-control"]), { type: "control-plane" });
   assert.deepEqual(parseWebGptExternalCommand(["Codex Workbench V1.exe", "--webgpt-open", "--unknown"]), { type: "open-workspace" });
   assert.equal(parseWebGptExternalCommand(["Codex Workbench V1.exe"]), null);
   assert.equal(parseWebGptExternalCommand(["Codex Workbench V1.exe", "--webgpt-account", "account-a"]), null);

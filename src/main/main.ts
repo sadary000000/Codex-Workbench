@@ -428,6 +428,10 @@ function forwardPendingWebGptCommand(): void {
 }
 
 function requestWebGptCommand(command: WebGptExternalCommand): void {
+  if (command.type === "control-plane") {
+    void startWebGptControlPlane();
+    return;
+  }
   pendingWebGptCommand = command;
   forwardPendingWebGptCommand();
 }

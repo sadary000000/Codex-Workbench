@@ -650,14 +650,13 @@ function delay(milliseconds: number): Promise<void> {
 }
 
 function spawnWorkbench(executablePath: string): void {
-  // On Windows, Explorer launches the visible GUI through the native ShellExecute
-  // path without making Electron descendants inherit the CLI's stdout/stderr
-  // pipes. This avoids the `cmd /c start` orphan-shell behavior while keeping
-  // the GUI independent from the short-lived CLI host.
-  const launchPath = process.platform === "win32" ? "explorer.exe" : executablePath;
-  const launchArgs = process.platform === "win32" ? [executablePath] : [];
+  // A CLI-launched Workbench is an explicit Control Plane activation. Ordinary
+  // GUI startup remains idle under FIX-01, so the marker travels with the
+  // spawned process instead of relying on an eager descriptor side effect.
+  const launchPath = executablePath;
+  const launchArgs = ["--webgpt-control"];
   const child = spawn(launchPath, launchArgs, {
-    detached: false,
+    detached: true,
     stdio: "ignore",
     windowsHide: true,
   });
