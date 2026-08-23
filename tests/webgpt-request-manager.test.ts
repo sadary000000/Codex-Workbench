@@ -151,6 +151,7 @@ test("WebGPT current latest ignores a paused or stale Request for another Chat",
     const restarted = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
     const latest = await restarted.readLatestCurrent();
     assert.equal(latest.assistantText, "old");
+    assert.deepEqual(await restarted.activeSummary(), [], "historical recovery state is not live Arbiter ownership");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -160,6 +161,9 @@ test("WebGPT current latest blocks only a same-target live Request", async () =>
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-latest-same-target-"));
   const workspace = new FakeWorkspace();
   workspace.mode = "AUTO_CONTROL";
+  const arbiter = new WebGptOperationArbiter();
+  arbiter.enterAutomationControl();
+  (workspace as unknown as { getOperationArbiter: () => WebGptOperationArbiter }).getOperationArbiter = () => arbiter;
   let releaseWait!: () => void;
   workspace.waitGate = new Promise<void>((resolve) => { releaseWait = resolve; });
   try {

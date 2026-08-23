@@ -66,6 +66,41 @@ export const WEBGPT_CONTROL_COMMANDS = [
   "webgpt.request.list",
 ] as const;
 
+const COMMAND_REQUIRED_CAPABILITY: Readonly<Record<string, string>> = Object.freeze({
+  "webgpt.initialize": "webgpt.control.v1",
+  "webgpt.status": "webgpt.status",
+  "webgpt.open": "webgpt.control.v1",
+  "webgpt.current": "webgpt.status",
+  "webgpt.close": "webgpt.control.v1",
+  "webgpt.latest": "webgpt.read-latest",
+  "webgpt.screenshot": "webgpt.browser-screenshot",
+  "webgpt.control.user": "webgpt.control.v1",
+  "webgpt.control.auto": "webgpt.control.v1",
+  "webgpt.new-chat": "webgpt.control.v1",
+  "webgpt.open-chat": "webgpt.control.v1",
+  "webgpt.chat.latest": "webgpt.read-latest",
+  "webgpt.project.inspect": "webgpt.project",
+  "webgpt.project.open": "webgpt.project",
+  "webgpt.project.create": "webgpt.project",
+  "webgpt.project.new-chat": "webgpt.project",
+  "webgpt.role.list": "webgpt.role",
+  "webgpt.role.status": "webgpt.role",
+  "webgpt.role.new": "webgpt.role",
+  "webgpt.role.bind": "webgpt.role",
+  "webgpt.role.open": "webgpt.role",
+  "webgpt.role.latest": "webgpt.read-latest",
+  "webgpt.send": "webgpt.request-lifecycle",
+  "webgpt.wait": "webgpt.request-lifecycle",
+  "webgpt.result": "webgpt.request-lifecycle",
+  "webgpt.request.status": "webgpt.request-lifecycle",
+  "webgpt.request.reconcile": "webgpt.request-lifecycle",
+  "webgpt.request.list": "webgpt.request-lifecycle",
+});
+
+export function requiredControlPlaneCapability(command: string): string | null {
+  return COMMAND_REQUIRED_CAPABILITY[command] ?? null;
+}
+
 export function protocolCompatibility(value: unknown): ControlPlaneCompatibility {
   if (typeof value !== "string" || !/^\d+\.\d+$/.test(value)) return "INVALID";
   const [majorRaw, minorRaw] = value.split(".");

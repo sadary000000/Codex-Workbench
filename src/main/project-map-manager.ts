@@ -438,7 +438,7 @@ export class ProjectMapManager {
   }
 
   private async readNativeThread(projection: ThreadProjection): Promise<ThreadReadView> {
-    const client = new AppServerProcessClient({ command: this.command, cwd: projection.cwd, args: ["app-server", "--stdio"] });
+    const client = new AppServerProcessClient({ command: this.command, cwd: projection.cwd, args: ["app-server", "--stdio"], verifyBinaryProvenance: true });
     try {
       await client.start();
       await client.request("initialize", {
@@ -471,7 +471,7 @@ export class ProjectMapManager {
   }
 
   private async runCompatibilityMaintenance(projectId: string, cwd: string, prompt: string): Promise<TurnResult> {
-    const client = new AppServerProcessClient({ command: this.command, cwd, args: ["app-server", "--stdio"], onServerRequest: (message) => this.handleServerRequest(projectId, message) });
+    const client = new AppServerProcessClient({ command: this.command, cwd, args: ["app-server", "--stdio"], verifyBinaryProvenance: true, onServerRequest: (message) => this.handleServerRequest(projectId, message) });
     let fallbackThreadId: string | null = null;
     try {
       await client.start();

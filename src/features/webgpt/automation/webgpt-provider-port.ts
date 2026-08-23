@@ -1,4 +1,6 @@
 import { assertProviderExecutionAuthorization } from "../../../automation/adapters.ts";
+import { classifyRecoveryIntent, type RecoveryIntentInput } from "../../../automation/recovery-intent.ts";
+import { assertProviderCorrelationIdentity } from "../../../automation/stable-identity.ts";
 import type {
   AutomationProviderPort,
   ProviderCapabilityFact,
@@ -87,6 +89,21 @@ function assertRecordCorrelation(record: WebGptRequestRecord, correlation: Provi
   if (record.idempotencyKey !== correlation.idempotencyRef) throw new Error("PROVIDER_IDEMPOTENCY_MISMATCH");
   if (correlation.semanticRef && record.semanticSha256 !== correlation.semanticRef) throw new Error("PROVIDER_SEMANTIC_MISMATCH");
   if (record.projectId !== target.projectId || record.role !== target.role) throw new Error("PROVIDER_TARGET_CORRELATION_MISMATCH");
+  assertProviderCorrelationIdentity({
+    actionIntentId: correlation.actionIntentId,
+    actionAttemptId: correlation.actionAttemptId,
+    policyVersionId: correlation.policyVersionId,
+    idempotencyRef: correlation.idempotencyRef,
+    semanticRef: correlation.semanticRef,
+    providerTargetRef: targetRefFromRecord(record),
+    providerRequest: {
+      providerRequestRef: record.requestId,
+      providerTargetRef: targetRefFromRecord(record),
+      idempotencyRef: record.idempotencyKey,
+      semanticRef: record.semanticSha256,
+      policyVersionId: record.policyVersionId,
+    },
+  });
 }
 
 function observation(record: WebGptRequestRecord, policy?: ProviderPolicyProvenance): ProviderObservation {
@@ -199,6 +216,26 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
     const reconciled = await this.requestManager.reconcileRequest(input.providerRequestRef);
     assertRecordCorrelation(reconciled, input.correlation, target);
     return observation(reconciled, policyProvenance(input.correlation, authorization));
+  }
+
+  /**
+   * Production restart/recovery entry point. The classifier is deliberately
+   * evaluated before any provider call: recovery may only observe or reconcile
+   * an existing opaque correlation and can never turn into a fresh submit.
+   */
+  async recover(input: {
+    readonly recovery: RecoveryIntentInput;
+    readonly correlation: ProviderCorrelation;
+    readonly providerRequestRef: string;
+  }): Promise<ProviderObservation> {
+    const decision = classifyRecoveryIntent(input.recovery);
+    if (decision.providerRequestRef !== input.providerRequestRef) throw new Error("PROVIDER_RECOVERY_CORRELATION_MISMATCH");
+    if (decision.disposition === "TERMINAL") throw new Error("PROVIDER_RECOVERY_TERMINAL");
+    if (decision.disposition === "WAITING_EXTERNAL") return this.observe({ providerRequestRef: input.providerRequestRef });
+    if (decision.disposition !== "REATTACH_PROVIDER_REQUEST" && decision.disposition !== "RECONCILE_REQUIRED") {
+      throw new Error(`PROVIDER_RECOVERY_BLOCKED:${decision.disposition}`);
+    }
+    return this.reconcile({ providerRequestRef: input.providerRequestRef, correlation: input.correlation });
   }
 
   async cancel(_input: { providerRequestRef: string; correlation: ProviderCorrelation }): Promise<ProviderObservation> {

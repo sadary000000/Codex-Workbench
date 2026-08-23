@@ -14,6 +14,7 @@ import {
 import { canonicalizeJson, computeActionSemanticSha256, sha256Hex } from "./canonical.ts";
 import { RequirementDomainError, validateRequirementDomain } from "./requirement-domain.ts";
 import { createEvidenceCorrelation } from "./evidence-correlation.ts";
+import { assertIntentAttemptPolicyPin } from "./stable-identity.ts";
 
 const PROJECT_LIFECYCLES = new Set<AutomationProjectLifecycle>([
   "DRAFT",
@@ -698,7 +699,12 @@ function validateReferences(document: Record<string, unknown>): void {
     const intent = intents.get(item.intentId as string);
     if (!intent) throw new AutomationSchemaError("actionAttempts.intentId references a missing intent.");
     requireSameProject(policies, item.policyVersionId ?? null, intent.projectId as string, "actionAttempts.policyVersionId");
-    if (item.policyVersionId !== undefined && item.policyVersionId !== null && item.policyVersionId !== intent.policyVersionId) throw new AutomationSchemaError("actionAttempts.policyVersionId must match its parent ActionIntent.");
+    try {
+      assertIntentAttemptPolicyPin(intent, item);
+    } catch (error) {
+      if (error instanceof Error) throw new AutomationSchemaError(error.message);
+      throw error;
+    }
   }
   for (const item of receipts.values()) {
     const attempt = actionAttempts.get(item.actionAttemptId as string);

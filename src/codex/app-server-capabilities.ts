@@ -22,6 +22,12 @@ export interface InitializeResult {
   codexHome: string;
   platformFamily: string | null;
   platformOs: string | null;
+  protocolVersion: string | null;
+  capabilities: Record<string, unknown> | null;
+}
+
+export interface InitializeValidationOptions {
+  experimentalApi?: boolean;
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -38,7 +44,7 @@ export function parseCodexVersion(value: string): string | null {
   return String(value).match(/(?:codex-cli|Codex Desktop|codex-workbench-v1)[/\s]+(\d+\.\d+\.\d+)/i)?.[1] ?? null;
 }
 
-export function validateInitializeResult(value: unknown): InitializeResult {
+export function validateInitializeResult(value: unknown, options: InitializeValidationOptions = {}): InitializeResult {
   const result = object(value);
   const userAgent = text(result?.userAgent);
   const codexHome = text(result?.codexHome);
@@ -58,11 +64,30 @@ export function validateInitializeResult(value: unknown): InitializeResult {
     error.code = "APP_SERVER_VERSION_UNSUPPORTED";
     throw error;
   }
+  const protocolVersion = result?.protocolVersion === undefined ? null : text(result.protocolVersion);
+  if (result?.protocolVersion !== undefined && !protocolVersion) {
+    const error = new Error("App Server initialize response has an invalid protocolVersion.") as Error & { code?: string };
+    error.code = "APP_SERVER_PROTOCOL_INVALID";
+    throw error;
+  }
+  const capabilities = result?.capabilities === undefined ? null : object(result.capabilities);
+  if (result?.capabilities !== undefined && !capabilities) {
+    const error = new Error("App Server initialize response has invalid capabilities.") as Error & { code?: string };
+    error.code = "APP_SERVER_CAPABILITY_INVALID";
+    throw error;
+  }
+  if (options.experimentalApi === true && capabilities && capabilities.experimentalApi !== true) {
+    const error = new Error("App Server initialize response does not support the requested experimentalApi capability.") as Error & { code?: string };
+    error.code = "APP_SERVER_CAPABILITY_UNSUPPORTED";
+    throw error;
+  }
   return {
     userAgent,
     codexHome,
     platformFamily: text(result?.platformFamily),
     platformOs: text(result?.platformOs),
+    protocolVersion,
+    capabilities,
   };
 }
 

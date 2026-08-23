@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { inspectAutomationFile } from "./sqlite-persistence.ts";
 import { migrateAutomationDocument, AutomationSchemaError } from "./schema.ts";
 import { AutomationStore, type AutomationInspection } from "./store.ts";
+import { assertStableIdentityPreserved, stableIdentitySnapshot } from "./stable-identity.ts";
 import type { AutomationDocument } from "./types.ts";
 
 export type PersistenceCompatibilityStatus = "READ_COMPATIBLE" | "MIGRATION_REQUIRED" | "MIGRATED" | "UNSUPPORTED" | "CORRUPT";
@@ -42,8 +43,6 @@ const ID_FIELDS: Readonly<Record<string, string>> = {
   workspaceSnapshots: "workspaceSnapshotId",
   policyVersions: "policyVersionId",
 };
-
-const CORRELATION_FIELDS = ["policyVersionId", "providerRequestRef", "providerObservationRef", "idempotencyRef", "semanticSha256", "targetRef"] as const;
 
 function sourceVersion(value: unknown): number | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -92,10 +91,11 @@ export function assertMigrationIdentityPreserved(before: AutomationDocument, aft
       if (typeof identity !== "string" || !identity) continue;
       const migrated = afterById.get(identity);
       if (!migrated) throw new Error(`MIGRATION_IDENTITY_CHANGED:${table}.${idField}:${identity}`);
-      for (const field of CORRELATION_FIELDS) {
-        if (item[field] !== undefined && item[field] !== null && migrated[field] !== item[field]) {
-          throw new Error(`MIGRATION_CORRELATION_CHANGED:${table}.${identity}.${field}`);
-        }
+      try {
+        assertStableIdentityPreserved(item, migrated, `${table}.${identity}`);
+      } catch (error) {
+        if (error instanceof Error && /:changed from /.test(error.message)) throw new Error(`MIGRATION_CORRELATION_CHANGED:${table}.${identity}:${error.message}`, { cause: error });
+        throw error;
       }
     }
   }
@@ -108,7 +108,7 @@ export function migrationIdentityFingerprint(document: AutomationDocument): stri
     for (const value of items) {
       const item = value as Record<string, unknown>;
       const row: Record<string, unknown> = { table, id: item[idField] };
-      for (const field of CORRELATION_FIELDS) if (item[field] !== undefined) row[field] = item[field];
+      row.identity = stableIdentitySnapshot(item);
       identityRows.push(row);
     }
   }

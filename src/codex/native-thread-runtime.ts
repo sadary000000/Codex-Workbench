@@ -161,6 +161,7 @@ export class NativeThreadRuntime {
   private readonly command: string;
   private readonly timeoutMs: number;
   private readonly clientFactory: (options: AppServerClientOptions) => AppServerClientPort;
+  private readonly verifyBinaryProvenance: boolean;
   private readonly skipInitialize: boolean;
   private readonly onEvent: NativeThreadRuntimeOptions["onEvent"];
   private readonly onServerRequest: NativeThreadRuntimeOptions["onServerRequest"];
@@ -193,6 +194,7 @@ export class NativeThreadRuntime {
     this.command = options.command ?? resolveCodexCommand();
     this.timeoutMs = Math.min(Math.max(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1_000), DEFAULT_TIMEOUT_MS);
     this.clientFactory = options.clientFactory ?? ((clientOptions) => new AppServerProcessClient(clientOptions));
+    this.verifyBinaryProvenance = options.clientFactory === undefined;
     this.skipInitialize = options.skipInitialize ?? false;
     this.onEvent = options.onEvent;
     this.onServerRequest = options.onServerRequest;
@@ -321,10 +323,12 @@ export class NativeThreadRuntime {
           void this.processFailurePromise;
           this.onProcessExit?.(exitCode, stderr);
         },
+        verifyBinaryProvenance: this.verifyBinaryProvenance,
       });
       this.client = client;
       this.unsubscribe = client.onMessage((message) => this.emitMessage(message));
       await client.start();
+      if (this.skipInitialize && client.initialized !== true) throw new AppServerClientError("APP_SERVER_PREINITIALIZED_CLIENT_REQUIRED", "skipInitialize requires a client owned by an initialized App Server Host.");
       let initialized: unknown = null;
       if (!this.skipInitialize) {
         initialized = validateInitializeResult(await client.request("initialize", {
@@ -337,7 +341,7 @@ export class NativeThreadRuntime {
           // thread/start.dynamicTools. A resumed Thread cannot register that
           // field in the current ABI, so do not advertise it on resume.
           capabilities: { experimentalApi: this.dynamicTools.length > 0 && !requestedId },
-        }, this.timeoutMs));
+        }, this.timeoutMs), { experimentalApi: this.dynamicTools.length > 0 && !requestedId });
         client.notify("initialized", {});
       }
       this.initialized = true;

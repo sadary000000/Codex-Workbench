@@ -27,6 +27,7 @@ import {
   recoverInterruptedMigration,
   SqliteAutomationPersistence,
 } from "./sqlite-persistence.ts";
+import { assertIntentAttemptPolicyPin, assertProviderCorrelationIdentity } from "./stable-identity.ts";
 import type {
   ActionAttempt,
   ActionOutcomeCertainty,
@@ -220,6 +221,8 @@ export interface ActionIntentInput {
 export interface ActionAttemptInput {
   actionAttemptId?: string;
   intentId: string;
+  /** Optional explicit pin; when present it must equal the parent intent pin. */
+  policyVersionId?: string | null;
   executorRef?: string | null;
   providerRequestRef?: string | null;
   providerObservationRef?: string | null;
@@ -320,6 +323,25 @@ function list(value: string[] | undefined, field: string): string[] {
     throw new AutomationStoreError("AUTOMATION_INVALID", `${field} must contain bounded references.`);
   }
   return [...new Set(value)];
+}
+
+function assertStoredProviderRefs(intent: ActionIntent, attempt: ActionAttempt, requestRef: ExternalRef | null, observationRef: ExternalRef | null): void {
+  if (!requestRef && !observationRef) return;
+  try {
+    assertProviderCorrelationIdentity({
+      actionIntentId: intent.intentId,
+      actionAttemptId: attempt.actionAttemptId,
+      policyVersionId: intent.policyVersionId ?? null,
+      idempotencyRef: intent.idempotencyRef,
+      semanticRef: attempt.providerSemanticSha256 ?? null,
+      providerRequest: requestRef ? { providerRequestRef: requestRef.opaqueId } : null,
+      requestExternalRef: requestRef,
+      observationExternalRef: observationRef,
+    });
+  } catch (error) {
+    if (error instanceof Error) throw new AutomationStoreError("AUTOMATION_CONFLICT", error.message, error);
+    throw error;
+  }
 }
 
 function safeMetadata(value: BoundedMetadata | undefined, field: string): BoundedMetadata {
@@ -896,11 +918,17 @@ export class AutomationStore {
         completedAt: null,
         executorRef: optionalText(input.executorRef, "actionAttempt.executorRef", 256),
         recoveryState: "KNOWN_NOT_STARTED",
-        policyVersionId: intent.policyVersionId ?? null,
+        policyVersionId: input.policyVersionId === undefined ? intent.policyVersionId ?? null : optionalText(input.policyVersionId, "actionAttempt.policyVersionId", 256),
         providerRequestRef: optionalText(input.providerRequestRef, "actionAttempt.providerRequestRef", 256),
         providerObservationRef: optionalText(input.providerObservationRef, "actionAttempt.providerObservationRef", 256),
         providerSemanticSha256: optionalText(input.providerSemanticSha256, "actionAttempt.providerSemanticSha256", 128),
       };
+      try {
+        assertIntentAttemptPolicyPin(intent, item);
+      } catch (error) {
+        if (error instanceof Error) throw new AutomationStoreError("AUTOMATION_CONFLICT", error.message, error);
+        throw error;
+      }
       tx.insert("actionAttempts", item);
       tx.replace("actionIntents", { ...intent, state: "DISPATCHING" });
       tx.appendAudit({ projectId: intent.projectId, entityType: "ActionAttempt", entityId: item.actionAttemptId, eventType: "ACTION_ATTEMPT_RECORDED", actorType: "SYSTEM", actorRef: null, boundedPayload: { dispatchNumber: item.dispatchNumber }, correlationId: null, causationId: null });
@@ -927,8 +955,9 @@ export class AutomationStore {
           : "ABANDONED_WITH_UNKNOWN_OUTCOME";
       const providerRequestRef = optionalText(input.providerRequestRef, "receipt.providerRequestRef", 256);
       const providerObservationRef = optionalText(input.providerObservationRef, "receipt.providerObservationRef", 256);
-      if (providerRequestRef) tx.require("externalRefs", providerRequestRef);
-      if (providerObservationRef) tx.require("externalRefs", providerObservationRef);
+      const providerRequestExternalRef = providerRequestRef ? tx.require("externalRefs", providerRequestRef) : null;
+      const providerObservationExternalRef = providerObservationRef ? tx.require("externalRefs", providerObservationRef) : null;
+      assertStoredProviderRefs(intent, attempt, providerRequestExternalRef, providerObservationExternalRef);
       const evidenceRefs = list(input.evidenceRefs, "receipt.evidenceRefs");
       for (const evidenceRef of evidenceRefs) tx.require("evidences", evidenceRef);
       const receipt: ActionReceipt = {
@@ -964,8 +993,9 @@ export class AutomationStore {
       const intent = tx.require("actionIntents", attempt.intentId);
       const providerRequestRef = optionalText(input.providerRequestRef, "actionAttempt.providerRequestRef", 256);
       const providerObservationRef = optionalText(input.providerObservationRef, "actionAttempt.providerObservationRef", 256);
-      if (providerRequestRef) tx.require("externalRefs", providerRequestRef);
-      if (providerObservationRef) tx.require("externalRefs", providerObservationRef);
+      const providerRequestExternalRef = providerRequestRef ? tx.require("externalRefs", providerRequestRef) : null;
+      const providerObservationExternalRef = providerObservationRef ? tx.require("externalRefs", providerObservationRef) : null;
+      assertStoredProviderRefs(intent, attempt, providerRequestExternalRef, providerObservationExternalRef);
       const updated: ActionAttempt = {
         ...attempt,
         providerRequestRef: providerRequestRef ?? attempt.providerRequestRef ?? null,
@@ -1006,8 +1036,9 @@ export class AutomationStore {
       const status = input.status;
       const providerRequestRef = optionalText(input.providerRequestRef ?? existing.providerRequestRef, "receipt.providerRequestRef", 256);
       const providerObservationRef = optionalText(input.providerObservationRef, "receipt.providerObservationRef", 256);
-      if (providerRequestRef) tx.require("externalRefs", providerRequestRef);
-      if (providerObservationRef) tx.require("externalRefs", providerObservationRef);
+      const providerRequestExternalRef = providerRequestRef ? tx.require("externalRefs", providerRequestRef) : null;
+      const providerObservationExternalRef = providerObservationRef ? tx.require("externalRefs", providerObservationRef) : null;
+      assertStoredProviderRefs(intent, attempt, providerRequestExternalRef, providerObservationExternalRef);
       const evidenceRefs = list([...(existing.evidenceRefs ?? []), ...(input.evidenceRefs ?? [])], "receipt.evidenceRefs");
       for (const evidenceRef of evidenceRefs) tx.require("evidences", evidenceRef);
       const next: ActionReceipt = {

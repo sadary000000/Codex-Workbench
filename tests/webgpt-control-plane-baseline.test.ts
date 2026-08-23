@@ -18,6 +18,7 @@ import {
   runWebGptCli,
   WebGptControlServer,
   WEBGPT_CONTROL_PROTOCOL_VERSION,
+  boundWebGptStatusJson,
 } from "../src/main/webgpt-control.ts";
 
 function sendRawControlRequest(endpoint: string, value: unknown): Promise<Record<string, unknown>> {
@@ -140,6 +141,17 @@ test("WEB-6.6 initialize gates modern requests and negotiates versions/capabilit
     });
     assert.equal(errorCode(mismatch), "VERSION_MISMATCH");
 
+    const denied = await sendRawControlRequest(descriptor.endpoint, {
+      ...modern,
+      sessionId: "modern-session-1234",
+      requestId: "denied-command-1",
+      command: "webgpt.project.inspect",
+      projectName: "capability-fixture",
+      ...auth,
+    });
+    assert.equal(errorCode(denied), "CAPABILITY_NOT_SUPPORTED");
+    assert.deepEqual(handlerCommands, ["webgpt.status"]);
+
     const unsupported = await sendRawControlRequest(descriptor.endpoint, {
       version: 1,
       protocolVersion: "1.0",
@@ -161,6 +173,21 @@ test("WEB-6.6 initialize gates modern requests and negotiates versions/capabilit
     await removeControlDescriptor(descriptorFile);
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("webgpt.status result is bounded and deterministic without dispatch side effects", () => {
+  const value = boundWebGptStatusJson({
+    z: "last",
+    a: Array.from({ length: 40 }, (_, index) => ({ index, payload: "x".repeat(3_000) })),
+  }) as { a: Array<{ index: number; payload: string }>; z: string };
+  assert.deepEqual(Object.keys(value), ["a", "z"]);
+  assert.equal(value.a.length, 32);
+  assert.equal(value.a[0]?.payload.length, 2_048);
+  assert.equal(JSON.stringify(value), JSON.stringify(boundWebGptStatusJson({
+    a: Array.from({ length: 40 }, (_, index) => ({ payload: "x".repeat(3_000), index })),
+    z: "last",
+  })));
+  assert.ok(Buffer.byteLength(JSON.stringify(value), "utf8") < 100_000);
 });
 
 test("official CLI path initializes before the business command", async () => {

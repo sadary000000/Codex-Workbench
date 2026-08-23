@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
   AUTOMATION_SCHEMA_VERSION,
@@ -210,20 +210,20 @@ async function migrationFiles(filePath: string): Promise<string[]> {
   const prefix = `${basename(filePath)}.migration-`;
   try {
     const names = await readdir(directory);
-    return names.filter((name) => name.startsWith(prefix) && name.endsWith(".sqlite")).map((name) => join(directory, name));
+    const candidates = names.filter((name) => name.startsWith(prefix) && name.endsWith(".sqlite"));
+    const ordered = await Promise.all(candidates.map(async (name) => {
+      const path = join(directory, name);
+      try {
+        const details = await stat(path);
+        return { path, name, mtimeMs: details.mtimeMs };
+      } catch {
+        return { path, name, mtimeMs: Number.NEGATIVE_INFINITY };
+      }
+    }));
+    return ordered.sort((left, right) => right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name)).map((candidate) => candidate.path);
   } catch (error) {
     if ((error as { code?: unknown })?.code === "ENOENT") return [];
     throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Automation migration directory could not be read.", error);
-  }
-}
-
-async function validateSqliteCandidate(filePath: string): Promise<void> {
-  let persistence: SqliteAutomationPersistence | null = null;
-  try {
-    persistence = new SqliteAutomationPersistence(filePath);
-    await persistence.loadDocument();
-  } finally {
-    persistence?.close();
   }
 }
 
@@ -231,31 +231,49 @@ export async function recoverInterruptedMigration(filePath: string): Promise<voi
   if (await fileKind(filePath) !== "missing") return;
   const candidates = await migrationFiles(filePath);
   if (candidates.length) {
-    const candidate = candidates.sort().at(-1) as string;
-    try {
-      await validateSqliteCandidate(candidate);
-      await rename(candidate, filePath);
-      return;
-    } catch {
-      await rm(candidate, { force: true }).catch(() => undefined);
+    let firstFailure: { code: AutomationPersistenceErrorCode; message: string } | null = null;
+    for (const candidate of candidates) {
+      const inspection = await inspectExistingSqliteAutomationFile(candidate);
+      if (inspection.status === "valid") {
+        await rename(candidate, filePath);
+        return;
+      }
+      if (!firstFailure) {
+        const status = inspection.status === "needs_migration"
+          ? "MIGRATION_REQUIRED"
+          : inspection.code === "AUTOMATION_DB_VERSION_UNSUPPORTED" ? "UNSUPPORTED" : "CORRUPT";
+        firstFailure = { code: inspection.code ?? "AUTOMATION_MIGRATION_FAILED", message: `${status}: ${inspection.message ?? "migration candidate is invalid"}` };
+      }
     }
+    throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", `Interrupted Automation migration has no valid candidate; refusing recovery. ${firstFailure?.message ?? "CORRUPT"}`);
   }
   const directory = dirname(filePath);
   const prefix = `${basename(filePath)}.v2-backup-`;
   try {
-    const backup = (await readdir(directory)).filter((name) => name.startsWith(prefix) && name.endsWith(".json")).sort().at(-1);
-    if (backup) {
-      const backupPath = join(directory, backup);
-      let raw: string;
+    const names = (await readdir(directory)).filter((name) => name.startsWith(prefix) && name.endsWith(".json"));
+    const backups = await Promise.all(names.map(async (name) => {
+      const path = join(directory, name);
       try {
-        raw = await readFile(backupPath, "utf8");
+        const details = await stat(path);
+        return { path, name, mtimeMs: details.mtimeMs };
+      } catch {
+        return { path, name, mtimeMs: Number.NEGATIVE_INFINITY };
+      }
+    }));
+    backups.sort((left, right) => right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name));
+    let firstFailure: unknown = null;
+    for (const backup of backups) {
+      try {
+        const raw = await readFile(backup.path, "utf8");
         const parsed = JSON.parse(raw) as unknown;
         migrateAutomationDocument(parsed);
+        await rename(backup.path, filePath);
+        return;
       } catch (error) {
-        throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration found an invalid JSON backup; refusing to promote it.", error);
+        firstFailure ??= error;
       }
-      await rename(backupPath, filePath);
     }
+    if (backups.length && firstFailure) throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration found no valid JSON backup (invalid JSON backup); refusing to promote CORRUPT/MIGRATION_REQUIRED/UNSUPPORTED state.", firstFailure);
   } catch (error) {
     if ((error as { code?: unknown })?.code !== "ENOENT") {
       if (error instanceof AutomationPersistenceError) throw error;

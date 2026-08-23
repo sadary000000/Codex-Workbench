@@ -7,6 +7,8 @@ import {
 } from "./app-server-client.ts";
 import type { JsonRpcMessage } from "../shared/runtime-types.ts";
 import { isSharedHostCoreMethod } from "./app-server-protocol-contract.ts";
+import { inspectCodexCommand, type CodexBinaryProvenance } from "./codex-command.ts";
+import { validateInitializeResult } from "./app-server-capabilities.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_MESSAGES = 512;
@@ -79,6 +81,8 @@ export class AppServerHost {
   private readonly experimentalApi: boolean;
   private readonly clientInfo: { name: string; title: string; version: string };
   private readonly clientFactory: (options: AppServerClientOptions) => AppServerClientPort;
+  private readonly verifyBinaryProvenance: boolean;
+  private readonly binaryProvenance: CodexBinaryProvenance;
   private readonly handles = new Set<AppServerThreadClient>();
   private readonly boundHandles = new Map<string, AppServerThreadClient>();
   private transport: AppServerClientPort | null = null;
@@ -106,6 +110,8 @@ export class AppServerHost {
       title: "Codex Workbench V1 Shared App Server Host",
       version: "0.1.0",
     };
+    this.verifyBinaryProvenance = options.clientFactory === undefined;
+    this.binaryProvenance = inspectCodexCommand(this.command);
     this.clientFactory = options.clientFactory ?? ((clientOptions) => new AppServerProcessClient(clientOptions));
   }
 
@@ -116,6 +122,9 @@ export class AppServerHost {
   get processId(): number | null {
     return this.snapshot.processId;
   }
+
+  get isInitialized(): boolean { return this.initialized; }
+  get codexBinaryProvenance(): CodexBinaryProvenance { return { ...this.binaryProvenance }; }
 
   createThreadClient(options: AppServerThreadClientOptions = {}): AppServerThreadClient {
     if (this.closed) throw hostClosedError();
@@ -167,11 +176,16 @@ export class AppServerHost {
   }
 
   private async startInternal(): Promise<void> {
+    if (this.verifyBinaryProvenance) {
+      if (!this.binaryProvenance.resolvedPath) throw new AppServerClientError("APP_SERVER_BINARY_UNRESOLVED", "Codex App Server binary could not be resolved.");
+      if (!this.binaryProvenance.verified) throw new AppServerClientError("APP_SERVER_BINARY_PROVENANCE_MISMATCH", "Codex App Server binary provenance does not match the verified contract.", { stderr: JSON.stringify({ source: this.binaryProvenance.source, resolvedPath: this.binaryProvenance.resolvedPath, sha256: this.binaryProvenance.sha256 }) });
+    }
     const transport = this.clientFactory({
       command: this.command,
       cwd: this.cwd,
       args: this.args,
       env: this.env,
+      verifyBinaryProvenance: this.verifyBinaryProvenance,
       onServerRequest: (message) => this.routeServerRequest(message),
       onProcessExit: (exitCode, stderr) => this.handleProcessExit(exitCode, stderr),
     });
@@ -179,10 +193,11 @@ export class AppServerHost {
     this.unsubscribe = transport.onMessage((message) => this.routeMessage(message));
     try {
       await transport.start();
-      await transport.request("initialize", {
+      const initializeResult = validateInitializeResult(await transport.request("initialize", {
         clientInfo: this.clientInfo,
         capabilities: { experimentalApi: this.experimentalApi },
-      }, DEFAULT_TIMEOUT_MS);
+      }, DEFAULT_TIMEOUT_MS), { experimentalApi: this.experimentalApi });
+      void initializeResult;
       transport.notify("initialized", {});
       this.initialized = true;
     } catch (error) {
@@ -288,6 +303,7 @@ export class AppServerThreadClient implements AppServerClientPort {
   }
 
   get isClosed(): boolean { return this.closed; }
+  get initialized(): boolean { return this.host.isInitialized; }
   get threadId(): string | null { return this.threadIdValue; }
   get snapshot() { return this.host.snapshot; }
 

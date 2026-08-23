@@ -225,6 +225,7 @@
             "webgpt.wait",
             "webgpt.result",
             "webgpt.request.status",
+            "webgpt.request.reconcile",
             "webgpt.request.list"
           ]
         },
@@ -349,6 +350,7 @@
             "webgpt.wait",
             "webgpt.result",
             "webgpt.request.status",
+            "webgpt.request.reconcile",
             "webgpt.request.list"
           ]
         },

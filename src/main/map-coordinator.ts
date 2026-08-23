@@ -251,6 +251,7 @@ export class ConversationMapCoordinator {
         command: this.command,
         cwd,
         args: ["app-server", "--stdio"],
+        verifyBinaryProvenance: true,
         onServerRequest: async (message) => this.handleServerRequest(message),
       });
       await client.start();

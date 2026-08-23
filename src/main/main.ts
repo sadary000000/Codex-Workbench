@@ -41,6 +41,7 @@ import { WebGptAutomationProviderPort } from "../features/webgpt/automation/webg
 import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../automation/aut2-real-webgpt-gate.ts";
 import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
 import { classifyWebGptActionReadiness, type WebGptActionScope } from "../automation/webgpt-action-readiness.ts";
+import { createStartupPlan, runStartupPlan } from "./startup-policy.ts";
 
 const PAUSED_AUTOMATION_GATE_ENVIRONMENT_FLAGS = [
   "AUT2_REAL_WEBGPT_GATE",
@@ -143,6 +144,7 @@ let automationStore: AutomationStore | null = null;
 let automationComposition: AutomationComposition | null = null;
 let webGptPolicyAuthority: WebGptPolicyAuthority | null = null;
 let webGptProviderPort: WebGptAutomationProviderPort | null = null;
+let automationPersistenceStart: Promise<void> | null = null;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
 
 function automationDatabasePath(): string {
@@ -179,6 +181,17 @@ async function startAutomationPersistence(): Promise<void> {
   console.log(JSON.stringify({ aut2NormalGuiStoreSmoke: result }));
   if (!result.reopened) process.exitCode = 1;
   setTimeout(() => app.quit(), 50);
+}
+
+function ensureAutomationPersistence(): Promise<void> {
+  if (automationStore && webGptPolicyAuthority) return Promise.resolve();
+  if (!automationPersistenceStart) {
+    automationPersistenceStart = startAutomationPersistence().catch((error) => {
+      automationPersistenceStart = null;
+      throw error;
+    });
+  }
+  return automationPersistenceStart;
 }
 
 async function startAut2RealWebGptGate(): Promise<void> {
@@ -784,6 +797,9 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
   let operationStartMs: number | null = null;
   let response: WebGptControlResponse;
   try {
+    if (request.command !== "webgpt.status" && request.command !== "webgpt.current" && request.command !== "webgpt.close") {
+      await ensureAutomationPersistence();
+    }
     if (request.command !== "webgpt.status" && request.command !== "webgpt.close" && !workbenchReady) {
       response = controlFail(request.command, "WORKBENCH_NOT_READY", "Workbench 窗口尚未完成加载。");
     } else if (request.command === "webgpt.status") {
@@ -1366,6 +1382,7 @@ function assertWebGptSender(sender: WebContents): void {
 async function webGptCall<T>(sender: WebContents, operation: () => Promise<T> | T): Promise<{ ok: true; result: T } | { ok: false; error: ReturnType<typeof errorInfo> }> {
   try {
     assertWebGptSender(sender);
+    await ensureAutomationPersistence();
     return ok(await operation());
   } catch (error) {
     return fail(error);
@@ -2103,27 +2120,34 @@ if (officialCliMode) {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
         else forwardPendingWebGptCommand();
       });
-      return startAutomationPersistence().then(() => {
-        if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE === "1") return;
-        const pausedGate = pausedAutomationGateFlag();
-        if (pausedGate) {
-          logger.warn("automation_gate_paused_not_executable", {
-            code: "PAUSED_NOT_EXECUTABLE",
-            gateFlag: pausedGate,
-            promptSent: false,
-            providerSubmitCount: 0,
-            providerReconcileCount: 0,
-          });
-          process.exitCode = 1;
-          setTimeout(() => app.quit(), 50);
-          return;
-        }
-        // Construct the provider-neutral production seam once at the
-        // composition root. Legacy AUT-2/AUT-3 callers remain paused above;
-        // this does not dispatch, reconcile, or send a Prompt.
-        getWebGptProviderPort();
-        logger.info("webgpt_provider_port_ready", { provider: "WEBGPT", submit: true, reconcile: true, cancel: false });
-        return startWebGptControlPlane().then(() => {
+      const startupPlan = createStartupPlan({ env: process.env, initialWebGptCommand: initialWebGptCommand?.type ?? null });
+      return runStartupPlan(startupPlan, {
+        initializeAutomation: () => ensureAutomationPersistence(),
+        startControlPlane: async () => {
+          if (!startupPlan.automationAtStartup) {
+            await startWebGptControlPlane();
+            return;
+          }
+          if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE === "1") return;
+          const pausedGate = pausedAutomationGateFlag();
+          if (pausedGate) {
+            logger.warn("automation_gate_paused_not_executable", {
+              code: "PAUSED_NOT_EXECUTABLE",
+              gateFlag: pausedGate,
+              promptSent: false,
+              providerSubmitCount: 0,
+              providerReconcileCount: 0,
+            });
+            process.exitCode = 1;
+            setTimeout(() => app.quit(), 50);
+            return;
+          }
+          // Construct the provider-neutral production seam only for an explicit
+          // Automation gate. Ordinary GUI startup remains provider/workspace
+          // idle; user WebGPT IPC activates the same seam lazily.
+          getWebGptProviderPort();
+          logger.info("webgpt_provider_port_ready", { provider: "WEBGPT", submit: true, reconcile: true, cancel: false });
+          await startWebGptControlPlane();
           if (process.env.AUT2_AUT3_FIX10_REAL_GATE === "1") {
             void startAut2Fix10AndAut3RealGate().catch((error) => {
               logError(logger, "aut2_fix10_aut3_real_gate_failed", error);
@@ -2143,7 +2167,7 @@ if (officialCliMode) {
               setTimeout(() => app.quit(), 50);
             });
           }
-        });
+        },
       });
     }).catch((error) => {
       logError(logger, "app_start_failed", error);

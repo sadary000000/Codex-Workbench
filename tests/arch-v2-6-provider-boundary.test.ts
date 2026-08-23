@@ -276,6 +276,84 @@ test("WebGPT provider port keeps target opaque and separates observe from reconc
   assert.equal(calls.submit, 1, "observe/reconcile never redispatch the provider side effect");
 });
 
+test("production provider recovery runs the Recovery Intent classifier before reconcile and never resolves input", async () => {
+  const calls = { reconcile: 0, submit: 0, resolveInput: 0 };
+  const record = requestRecord("SUBMITTED");
+  const correlation = {
+    actionIntentId: "intent-recovery-port",
+    actionAttemptId: "attempt-recovery-port",
+    policyVersionId: "policy-arch-v2-6",
+    idempotencyRef: record.idempotencyKey!,
+    semanticRef: record.semanticSha256,
+  };
+  const port = new WebGptAutomationProviderPort({
+    roleSession: {
+      status: async () => ({ status: "BOUND", chatUrl: record.targetChatUrl }),
+      submit: async () => { calls.submit += 1; return record; },
+    } as never,
+    requestManager: {
+      requestStatus: async () => record,
+      reconcileRequest: async () => { calls.reconcile += 1; return requestRecord("COMPLETED"); },
+    } as never,
+    resolveInputRef: async () => { calls.resolveInput += 1; throw new Error("must-not-resolve-during-recovery"); },
+    readRuntimeCapability: async () => runtimeCapability(),
+    policyAuthority: policyAuthority(),
+  });
+
+  const result = await port.recover({
+    providerRequestRef: record.requestId,
+    correlation,
+    recovery: {
+      intent: { intentId: correlation.actionIntentId, projectId: record.projectId, semanticSha256: record.semanticSha256, sideEffectClass: "RECONCILABLE", state: "UNCERTAIN", policyVersionId: correlation.policyVersionId } as never,
+      attempt: { actionAttemptId: correlation.actionAttemptId, intentId: correlation.actionIntentId, state: "UNCERTAIN", recoveryState: "RECOVERY_REQUIRED", providerRequestRef: record.requestId, policyVersionId: correlation.policyVersionId } as never,
+      receipt: { actionAttemptId: correlation.actionAttemptId, status: "UNKNOWN", providerRequestRef: record.requestId } as never,
+      providerRequest: { externalRefId: record.requestId, opaqueId: record.requestId, state: "UNKNOWN" },
+    },
+  });
+  assert.equal(result.state, "COMPLETED");
+  assert.deepEqual(calls, { reconcile: 1, submit: 0, resolveInput: 0 });
+});
+
+test("production provider recovery stops on a terminal receipt without provider calls", async () => {
+  let reconcileCount = 0;
+  const record = requestRecord("COMPLETED");
+  const port = new WebGptAutomationProviderPort({
+    roleSession: { status: async () => ({ status: "BOUND", chatUrl: record.targetChatUrl }), submit: async () => record } as never,
+    requestManager: { requestStatus: async () => record, reconcileRequest: async () => { reconcileCount += 1; return record; } } as never,
+    resolveInputRef: async () => { throw new Error("must-not-resolve-terminal-recovery"); },
+    readRuntimeCapability: async () => runtimeCapability(),
+    policyAuthority: policyAuthority(),
+  });
+  await assert.rejects(() => port.recover({
+    providerRequestRef: record.requestId,
+    correlation: { actionIntentId: "intent-terminal-recovery", actionAttemptId: "attempt-terminal-recovery", policyVersionId: "policy-arch-v2-6", idempotencyRef: "idem-terminal-recovery", semanticRef: record.semanticSha256 },
+    recovery: {
+      intent: { intentId: "intent-terminal-recovery", projectId: record.projectId, semanticSha256: record.semanticSha256, sideEffectClass: "RECONCILABLE", state: "COMPLETED", policyVersionId: "policy-arch-v2-6" } as never,
+      attempt: { actionAttemptId: "attempt-terminal-recovery", intentId: "intent-terminal-recovery", state: "COMPLETED", recoveryState: "COMPLETED", providerRequestRef: record.requestId, policyVersionId: "policy-arch-v2-6" } as never,
+      receipt: { actionAttemptId: "attempt-terminal-recovery", status: "SUCCEEDED", providerRequestRef: record.requestId } as never,
+      providerRequest: { externalRefId: record.requestId, opaqueId: record.requestId, state: "COMPLETED" },
+    },
+  }), /PROVIDER_RECOVERY_TERMINAL/);
+  assert.equal(reconcileCount, 0);
+});
+
+test("provider input reference resolution remains fail-closed before role-session submit", async () => {
+  let submitCount = 0;
+  const record = requestRecord("SUBMITTED");
+  const port = new WebGptAutomationProviderPort({
+    roleSession: { status: async () => ({ status: "BOUND", chatUrl: record.targetChatUrl }), submit: async () => { submitCount += 1; return record; } } as never,
+    requestManager: { requestStatus: async () => record, reconcileRequest: async () => record } as never,
+    resolveInputRef: async () => { throw new Error("PROVIDER_INPUT_REF_UNRESOLVED"); },
+    readRuntimeCapability: async () => runtimeCapability(),
+    policyAuthority: policyAuthority(),
+  });
+  await assert.rejects(() => port.submit({
+    provider: "WEBGPT", operation: "PROMPT", workflowRole: "PLANNER", providerTargetRef: createWebGptRoleTargetRef(record.projectId!, "PLANNER"), inputRef: "input:unresolved", payloadRef: null,
+    correlation: { actionIntentId: "intent-input-fail-closed", actionAttemptId: "attempt-input-fail-closed", policyVersionId: "policy-arch-v2-6", idempotencyRef: record.idempotencyKey!, semanticRef: record.semanticSha256 },
+  }), /PROVIDER_INPUT_REF_UNRESOLVED/);
+  assert.equal(submitCount, 0);
+});
+
 test("provider capability denial is fail-closed and does not submit", async () => {
   let submitCount = 0;
   const port = new WebGptAutomationProviderPort({

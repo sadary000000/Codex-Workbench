@@ -17,5 +17,6 @@ export * from "./webgpt-policy-authority.ts";
 export * from "./evidence-correlation.ts";
 export * from "./provider-seam-classification.ts";
 export * from "./recovery-intent.ts";
+export * from "./stable-identity.ts";
 export * from "./migration-contract.ts";
 export * from "./composition-root.ts";

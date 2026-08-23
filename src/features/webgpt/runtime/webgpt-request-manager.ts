@@ -469,8 +469,13 @@ export class WebGptRequestManager {
 
   async activeSummary(): Promise<Array<{ requestId: string; state: WebGptRequestState; chatUrl: string; idempotencyKey: string | null }>> {
     await this.ready();
+    const liveLease = this.getOperationArbiter()?.getActiveLeaseSnapshot();
+    // A persisted non-terminal Request is historical/recovery truth, not live
+    // ownership. Only the ephemeral OperationArbiter lease can make a request
+    // ACTIVE/BUSY in this read model.
+    if (!liveLease?.requestId) return [];
     return [...this.records.values()]
-      .filter((record) => !TERMINAL_STATES.has(record.state))
+      .filter((record) => record.requestId === liveLease.requestId && isLiveRequestState(record.state))
       .map((record) => ({ requestId: record.requestId, state: record.state, chatUrl: record.chatUrl, idempotencyKey: record.idempotencyKey }));
   }
 

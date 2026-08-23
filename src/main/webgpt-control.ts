@@ -21,6 +21,7 @@ import {
   type ControlPlaneClientInfo,
   type ControlPlaneCompatibility,
 } from "../shared/webgpt-control-plane-contract.ts";
+import { requiredControlPlaneCapability } from "../shared/webgpt-control-plane-contract.ts";
 import { normalizeControlPlaneError, sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 
 export const WEBGPT_CONTROL_PROTOCOL_VERSION = CONTROL_PLANE_WIRE_VERSION;
@@ -384,7 +385,22 @@ export interface WebGptControlServerOptions {
 interface ControlPlaneSession {
   clientInfo: ControlPlaneClientInfo;
   protocolVersion: string;
+  capabilities: ReadonlySet<string>;
   expiresAt: number;
+}
+
+const MAX_STATUS_DEPTH = 4;
+const MAX_STATUS_KEYS = 64;
+const MAX_STATUS_ITEMS = 32;
+const MAX_STATUS_STRING = 2_048;
+
+export function boundWebGptStatusJson(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") return value.slice(0, MAX_STATUS_STRING);
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
+  if (depth >= MAX_STATUS_DEPTH) return typeof value === "object" ? null : String(value).slice(0, MAX_STATUS_STRING);
+  if (Array.isArray(value)) return value.slice(0, MAX_STATUS_ITEMS).map((item) => boundWebGptStatusJson(item, depth + 1));
+  if (!value || typeof value !== "object") return null;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).slice(0, MAX_STATUS_KEYS).map(([key, item]) => [key.slice(0, 128), boundWebGptStatusJson(item, depth + 1)]));
 }
 
 const CONTROL_PLANE_SESSION_TTL_MS = 30 * 60_000;
@@ -526,6 +542,10 @@ export class WebGptControlServer {
         response: controlError("CONTROL_SESSION_CLIENT_MISMATCH", "Control session 与 clientInfo 不一致。", request.command, request.requestId),
       };
     }
+    const requiredCapability = requiredControlPlaneCapability(request.command);
+    if (requiredCapability && !session.capabilities.has(requiredCapability)) {
+      return { mode: "MODERN", response: controlError("CAPABILITY_NOT_SUPPORTED", `当前 session 未协商 Control Plane capability：${requiredCapability}`, request.command, request.requestId, false, { capability: requiredCapability, requiredCommand: "webgpt.initialize" }) };
+    }
     session.expiresAt = Date.now() + CONTROL_PLANE_SESSION_TTL_MS;
     return { mode: "MODERN" };
   }
@@ -551,6 +571,7 @@ export class WebGptControlServer {
     this.sessions.set(request.sessionId, {
       clientInfo: request.clientInfo,
       protocolVersion: request.protocolVersion,
+      capabilities: new Set(capabilities.map((capability) => capability.name)),
       expiresAt: Date.now() + CONTROL_PLANE_SESSION_TTL_MS,
     });
     while (this.sessions.size > 64) this.sessions.delete(this.sessions.keys().next().value as string);
@@ -599,6 +620,7 @@ export class WebGptControlServer {
       ...response,
       version: WEBGPT_CONTROL_PROTOCOL_VERSION,
       protocolVersion: response.protocolVersion ?? (mode === "MODERN" ? WEBGPT_CONTROL_PROTOCOL_VERSION_TEXT : undefined),
+      ...(request.command === "webgpt.status" && response.result !== undefined ? { result: boundWebGptStatusJson(response.result) } : {}),
       ...(request.sessionId ? { sessionId: request.sessionId } : {}),
       ...(error ? { error } : {}),
       diagnostics: {

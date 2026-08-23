@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createCodexProcessEnvironment } from "./codex-process-environment.ts";
+import { inspectCodexCommand } from "./codex-command.ts";
 import type { JsonRpcMessage, JsonRpcError, RpcId } from "../shared/runtime-types.ts";
 
 export type ServerRequestHandler = (message: JsonRpcMessage) => Promise<unknown> | unknown;
@@ -12,6 +13,8 @@ export interface AppServerClientOptions {
   env?: NodeJS.ProcessEnv;
   onServerRequest?: ServerRequestHandler;
   onProcessExit?: (exitCode: number | null, stderr: string) => void;
+  /** Production callers must prove the resolved Codex binary before spawn. */
+  verifyBinaryProvenance?: boolean;
 }
 
 export interface ClientSnapshot {
@@ -35,6 +38,8 @@ export interface AppServerClientPort {
   close(): Promise<void>;
   readonly messages: JsonRpcMessage[];
   readonly snapshot: ClientSnapshot;
+  /** True only for a client whose owning host completed initialize. */
+  readonly initialized?: boolean;
 }
 
 export class AppServerClientError extends Error {
@@ -90,6 +95,7 @@ export class AppServerProcessClient implements AppServerClientPort {
   private readonly environment: NodeJS.ProcessEnv;
   private readonly onServerRequest: ServerRequestHandler | undefined;
   private readonly onProcessExit: AppServerClientOptions["onProcessExit"];
+  private readonly verifyBinaryProvenance: boolean;
   private child: ChildProcessWithoutNullStreams | null = null;
   private stdoutBuffer = "";
   private stderrBuffer = "";
@@ -111,6 +117,7 @@ export class AppServerProcessClient implements AppServerClientPort {
     this.environment = options.env ?? process.env;
     this.onServerRequest = options.onServerRequest;
     this.onProcessExit = options.onProcessExit;
+    this.verifyBinaryProvenance = options.verifyBinaryProvenance ?? false;
   }
 
   get messages(): JsonRpcMessage[] { return this.messageList.map((message) => ({ ...message })); }
@@ -127,6 +134,11 @@ export class AppServerProcessClient implements AppServerClientPort {
   async start(): Promise<void> {
     if (this.child || this.closed) {
       throw new AppServerClientError("CLIENT_STATE_INVALID", "App Server client can only start once.");
+    }
+    if (this.verifyBinaryProvenance) {
+      const provenance = inspectCodexCommand(this.command);
+      if (!provenance.resolvedPath) throw new AppServerClientError("APP_SERVER_BINARY_UNRESOLVED", "Codex App Server binary could not be resolved.");
+      if (!provenance.verified) throw new AppServerClientError("APP_SERVER_BINARY_PROVENANCE_MISMATCH", "Codex App Server binary provenance does not match the verified contract.", { stderr: JSON.stringify({ source: provenance.source, resolvedPath: provenance.resolvedPath, sha256: provenance.sha256 }) });
     }
     this.child = spawn(this.command, this.args, {
       cwd: this.cwd,
