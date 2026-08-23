@@ -7,7 +7,8 @@
   "sourceCodeChangedByStage": false,
   "baseline": {
     "head": "17f7c9bd096ec6aad94b8106af2a11157d25ec82",
-    "archV2_7Implementation": "a17d65e3be8e4ea5a7e16d11671dd055171849c0"
+    "archV2_7Implementation": "a17d65e3be8e4ea5a7e16d11671dd055171849c0",
+    "reviewCommit": "260812a963751b11aaf1ff28a36b960edea4b9d9"
   },
   "capability": {
     "codexCli": "codex-cli 0.147.0",
@@ -34,12 +35,12 @@
     "B": "completed and adopted as challenge evidence",
     "C": "completed and adopted as regression evidence",
     "D": "completed and adopted as challenge evidence",
-    "E": "no retrievable result; not adopted",
+    "E": "completed after rerun and adopted",
     "runningAtGate": 0
   },
   "challengeSeverity": {
     "p0": 1,
-    "p1": 5,
+    "p1": 6,
     "p2": 2
   },
   "package": {

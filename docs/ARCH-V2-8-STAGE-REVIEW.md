@@ -21,6 +21,7 @@ Do not write FINAL_FROZEN before GPT Gate and explicit user confirmation.
 - Schema generation: PASS.
 - Observed Desktop App Server: 0.148.0-alpha.9, outside current Workbench verified allowlist 0.147.0; recorded as FAIL_WITH_EVIDENCE.
 - Packaged official CLI status: bounded TIMEOUT after 15070 ms; recorded as FAIL_WITH_EVIDENCE.
+- Independent final challenge rerun: NOT_READY; P0=1, P1=6, P2=2.
 
 ## Frozen contract
 
@@ -36,13 +37,14 @@ Native Thread/Turn/Item remains the sole conversation/message/runtime identity. 
 
 ## Challenge findings requiring GPT decision
 
-Independent B/D audits identified a P0/P1 challenge set:
+Independent B/D/E audits identified a P0/P1 challenge set:
 
 - possible idle zero-cost violation from ordinary startup initialization;
 - missing enforcement of version/hash validation in all shared AppServerHost paths;
+- Control Plane capability negotiation is not enforced per command;
 - implicit diagnostics/startup persistence/migration side effects;
 - incomplete candidate fallback and semantic identity preservation checks;
-- policy pin mismatch not clearly fail-closed;
+- activeSummary may expose non-live recovery states as active;
 - Recovery Intent production side-effect wiring not proven;
 - Provider Port/projection rebuild/legacy seam gaps.
 
@@ -54,7 +56,7 @@ These are not silently accepted limitations and no source fix was made in this c
 - B — Frozen Boundary: completed, challenge findings integrated.
 - C — Compatibility Regression: completed, 584-assertion regression evidence integrated.
 - D — Persistence/Recovery/Side-effect: completed, P1 evidence integrated.
-- E — Independent Final Challenge: no retrievable result (not_found); not adopted.
+- E — Independent Final Challenge rerun: completed, adopted; NOT_READY with P0=1, P1=6, P2=2.
 - running_subagents_at_gate: 0.
 
 ## Safety and provenance

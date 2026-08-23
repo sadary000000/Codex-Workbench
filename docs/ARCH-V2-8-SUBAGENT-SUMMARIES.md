@@ -50,6 +50,30 @@
 
 这些发现全部保留为 GPT review evidence，未擅自修复。
 
-## E — Independent Final Challenge
+## E — Independent Final Challenge（重跑）
 
-结果：没有取得可验证的最终报告；状态查询为 not_found。未采用任何 E 的结论，也不将其计入已通过的独立证据。Gate 前运行代理数为 0。
+结果：重启 Maxwell 实例后完成独立挑战，结论为 NOT_READY，建议允许提交带阻断项的 GPT Final Review，但不建议 FINAL_FROZEN 或 production READY。
+
+确认的 P0：
+
+1. 普通启动不满足严格 idle zero-cost：main startup 无条件初始化 Automation persistence、policy authority、provider port；相关 store/provider 构造会创建目录、writer lock、SQLite 或 WebGPT workspace。
+
+确认的 P1：
+
+1. 共享 AppServerHost 未覆盖所有路径的 version/hash handshake；存在 skipInitialize。
+2. Control Plane capability 只协商，不按 command 执行授权 enforcement。
+3. migration candidate 失败后未证明回退到较旧有效 candidate。
+4. identity preservation 只比较有限 ID/correlation 字段，不能证明完整 source-to-target 语义保持。
+5. Recovery Intent 尚未证明接入 production side-effect bridge，且 production resolveInputRef 仍可能 fail closed。
+6. activeSummary 将 RECOVERY_REQUIRED/INDETERMINATE 等非 terminal 状态暴露为 active，可能混淆历史恢复记录和 live resource。
+
+P2：
+
+- 没有完整 production projection rebuild command。
+- 没有 user-facing migration command；legacy URL-shaped bridge/test seam 继续保留为后续边界债务。
+
+E 同时确认：npm test 377/377、审查 ZIP 与 sidecar hash 一致；没有发送业务 Prompt、创建业务 Chat 或读取敏感会话数据。
+
+采用：上述 P0/P1/P2 作为最终 challenge evidence；与 A–D 交叉确认的部分提高审查置信度。E 的 policy-pin 结论对 D 的“整体失败”进行了部分反证：新 provider-neutral seam 已有 fail-closed 校验，但 production provider path 尚未完整接通，因此整体仍不升级为 PASS。
+
+Gate 前运行代理数为 0。

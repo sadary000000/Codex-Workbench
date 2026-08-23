@@ -2,12 +2,14 @@ ARCH-V2-8 Review Package Provenance
 
 repository=D:\办公\AI\Codex_Workbench_V1
 audit_head=17f7c9bd096ec6aad94b8106af2a11157d25ec82
+review_commit=260812a963751b11aaf1ff28a36b960edea4b9d9
 stage_status=READY_FOR_GPT_FINAL_REVIEW
 implementation_changes_in_stage=NO
 v1_frozen_core_changed=NO
 real_business_prompts=0
 new_business_chats=0
 running_subagents_at_gate=0
+subagent_E=completed_after_rerun_and_adopted
 
 codex_cli_version=codex-cli 0.147.0
 resolver_binary_sha256=935A1911ED5564FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D
@@ -24,5 +26,6 @@ build_and_package=npm run build PASS; npm run package:win PASS
 audit=npm audit --omit=dev PASS; 0 vulnerabilities
 secret_scan=PASS; no high-confidence credential-pattern hits
 real_protocol=initialize PASS; schema generation PASS; official CLI status bounded TIMEOUT evidence
+challenge_counts=P0=1; P1=6; P2=2
 
 excluded=Cookie, Token, password, browser profile, private ChatGPT content, raw business Prompt, production database, full Request Journal, raw temporary logs
