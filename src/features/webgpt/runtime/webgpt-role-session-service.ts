@@ -89,19 +89,19 @@ export class WebGptRoleSessionService {
     return { ...latest, projectId: id, role: normalizedRole };
   }
 
-  async submit(projectId: string, role: WebGptRole, prompt: string, idempotencyKey?: string): Promise<WebGptRequestRecord> {
+  async submit(projectId: string, role: WebGptRole, prompt: string, idempotencyKey?: string, policyVersionId?: string | null): Promise<WebGptRequestRecord> {
     const id = await this.requireProject(projectId);
     const normalizedRole = normalizeWebGptRole(role);
     const binding = await this.registry.get(id, normalizedRole);
     this.assertSendable(binding);
     const targetChatUrl = binding.status === "BOUND" ? binding.chatUrl : null;
-    const existing = await this.requestManager.findIdempotent(prompt, { projectId: id, role: normalizedRole, targetChatUrl }, idempotencyKey);
+    const existing = await this.requestManager.findIdempotent(prompt, { projectId: id, role: normalizedRole, targetChatUrl, policyVersionId }, idempotencyKey);
     if (existing) return existing;
     if (this.workspace.getControlMode() === "USER_CONTROL") throw codedError("WEBGPT_USER_CONTROL", "当前由用户控制，Role 自动操作已暂停。");
     if (binding.status !== "BOUND" && !isHomeUrl(await this.workspace.getCurrentUrl())) {
       throw codedError("ROLE_PENDING_CHAT_URL", "Role 尚未获得稳定 Chat URL；请保持新建 Role Chat 页面并重试。");
     }
-    return this.requestManager.submit(prompt, { projectId: id, role: normalizedRole, targetChatUrl }, idempotencyKey);
+    return this.requestManager.submit(prompt, { projectId: id, role: normalizedRole, targetChatUrl, policyVersionId }, idempotencyKey);
   }
 
   async handleTerminal(record: WebGptRequestRecord): Promise<void> {
