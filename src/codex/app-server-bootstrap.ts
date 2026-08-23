@@ -1,5 +1,5 @@
 import type { AppServerClientPort } from "./app-server-client.ts";
-import { validateInitializeResult, type InitializeResult } from "./app-server-capabilities.ts";
+import { validateInitializeRequest, validateInitializeResult, type InitializeResult } from "./app-server-capabilities.ts";
 
 export interface AppServerInitializeOptions {
   clientInfo: { name: string; title: string; version: string };
@@ -17,10 +17,12 @@ export async function startAndInitializeAppServerClient(
   options: AppServerInitializeOptions,
 ): Promise<InitializeResult> {
   await client.start();
-  const initialized = validateInitializeResult(await client.request("initialize", {
+  const params = {
     clientInfo: options.clientInfo,
     capabilities: { experimentalApi: options.experimentalApi },
-  }, options.timeoutMs), { experimentalApi: options.experimentalApi });
+  };
+  validateInitializeRequest(params, { experimentalApi: options.experimentalApi });
+  const initialized = validateInitializeResult(await client.request("initialize", params, options.timeoutMs), { experimentalApi: options.experimentalApi });
   client.notify("initialized", {});
   return initialized;
 }

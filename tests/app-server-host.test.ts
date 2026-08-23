@@ -35,7 +35,7 @@ class FakeTransport implements AppServerClientPort {
     if (this.closedValue) throw new Error("fake transport closed");
     if (method === "initialize") {
       FakeTransport.initialized += 1;
-      return { userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex", protocolVersion: "1.0", capabilities: { experimentalApi: false } };
+      return { userAgent: "codex-cli 0.147.0", codexHome: "C:/fake/.codex", platformFamily: "windows", platformOs: "windows" };
     }
     if (method === "thread/start") {
       const id = `native-${this.threads.size + 1}`;
@@ -172,6 +172,11 @@ test("shared ThreadHandle exposes initialized ownership for skipInitialize calle
   assert.equal(handle.initialized, false);
   await handle.start();
   assert.equal(handle.initialized, true);
+  assert.deepEqual(handle.initializationAttestation, {
+    experimentalApi: false,
+    binaryProvenanceVerified: false,
+    schemaProvenanceVerified: true,
+  });
   await host.close();
   assert.equal(handle.initialized, false);
 });

@@ -201,9 +201,9 @@ export class AppServerHost {
         timeoutMs: DEFAULT_TIMEOUT_MS,
       });
       this.initializationAttestationValue = {
-        protocolVersion: initialized.protocolVersion ?? "",
-        experimentalApi: initialized.capabilities?.experimentalApi === true,
+        experimentalApi: initialized.requestedExperimentalApi,
         binaryProvenanceVerified: this.verifyBinaryProvenance && this.binaryProvenance.verified,
+        schemaProvenanceVerified: initialized.schemaProvenanceVerified,
       };
       this.initialized = true;
     } catch (error) {

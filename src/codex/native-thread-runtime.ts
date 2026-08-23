@@ -7,7 +7,6 @@ import {
   type AppServerClientPort,
 } from "./app-server-client.ts";
 import { startAndInitializeAppServerClient } from "./app-server-bootstrap.ts";
-import { VERIFIED_APP_SERVER_PROTOCOL_VERSION } from "./app-server-capabilities.ts";
 import { asError, errorInfo, isWriterConflictError } from "../shared/error-info.ts";
 import { V1PersistenceStore, type PromptRecoveryPatch, type ThreadProjectionPatch } from "../shared/persistence-store.ts";
 import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
@@ -331,8 +330,8 @@ export class NativeThreadRuntime {
       if (this.skipInitialize) {
         await client.start();
         const attestation = client.initializationAttestation;
-        if (client.initialized !== true || !attestation || !attestation.binaryProvenanceVerified || attestation.protocolVersion !== VERIFIED_APP_SERVER_PROTOCOL_VERSION || attestation.experimentalApi !== false) {
-          throw new AppServerClientError("APP_SERVER_PREINITIALIZED_CLIENT_REQUIRED", "skipInitialize requires a Host-owned client with verified provenance and strict initialize attestation.");
+        if (client.initialized !== true || !attestation || !attestation.binaryProvenanceVerified || !attestation.schemaProvenanceVerified || attestation.experimentalApi !== false) {
+          throw new AppServerClientError("APP_SERVER_PREINITIALIZED_CLIENT_REQUIRED", "skipInitialize requires a Host-owned client with verified binary/schema provenance and an initialize request with experimentalApi=false.");
         }
       } else {
         await startAndInitializeAppServerClient(client, {

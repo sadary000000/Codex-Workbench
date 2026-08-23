@@ -26,9 +26,9 @@ export interface ClientSnapshot {
 }
 
 export interface AppServerInitializationAttestation {
-  readonly protocolVersion: string;
   readonly experimentalApi: boolean;
   readonly binaryProvenanceVerified: boolean;
+  readonly schemaProvenanceVerified: boolean;
 }
 
 export interface AppServerClientPort {

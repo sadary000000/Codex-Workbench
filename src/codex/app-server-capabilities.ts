@@ -1,7 +1,7 @@
 import type { JsonRpcMessage } from "../shared/runtime-types.ts";
+import { assertVerifiedAppServerSchemaProvenance } from "./app-server-protocol-contract.ts";
 
 export const VERIFIED_CODEX_VERSION = "0.147.0";
-export const VERIFIED_APP_SERVER_PROTOCOL_VERSION = "1.0";
 export const REQUIRED_METHODS = Object.freeze([
   "initialize",
   "thread/start",
@@ -21,15 +21,19 @@ export const REQUIRED_NOTIFICATIONS = Object.freeze([
 export interface InitializeResult {
   userAgent: string;
   codexHome: string;
-  platformFamily: string | null;
-  platformOs: string | null;
-  protocolVersion: string | null;
-  capabilities: Record<string, unknown> | null;
+  platformFamily: string;
+  platformOs: string;
+  schemaProvenanceVerified: true;
+  requestedExperimentalApi: boolean;
 }
 
 export interface InitializeValidationOptions {
   experimentalApi?: boolean;
-  expectedProtocolVersion?: string;
+}
+
+export interface InitializeRequest {
+  clientInfo: { name: string; version: string; title?: string | null };
+  capabilities: { experimentalApi: boolean };
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -43,15 +47,58 @@ function text(value: unknown): string | null {
 }
 
 export function parseCodexVersion(value: string): string | null {
-  return String(value).match(/(?:codex-cli|Codex Desktop|codex-workbench-v1)[/\s]+(\d+\.\d+\.\d+)/i)?.[1] ?? null;
+  return String(value).match(/(?:codex-cli|Codex Desktop|codex-workbench-v1)[/\s]+(\d+\.\d+\.\d+)(?=\s|$|\()/i)?.[1] ?? null;
+}
+
+function invalidRequest(message: string): never {
+  const error = new Error(message) as Error & { code?: string };
+  error.code = "APP_SERVER_INITIALIZE_REQUEST_INVALID";
+  throw error;
+}
+
+function capabilityUnsupported(message: string): never {
+  const error = new Error(message) as Error & { code?: string };
+  error.code = "CAPABILITY_NOT_SUPPORTED";
+  throw error;
+}
+
+export function validateInitializeRequest(value: unknown, options: InitializeValidationOptions = {}): InitializeRequest {
+  assertVerifiedAppServerSchemaProvenance();
+  const request = object(value);
+  const clientInfo = object(request?.clientInfo);
+  const name = text(clientInfo?.name);
+  const version = text(clientInfo?.version);
+  if (!clientInfo || !name || !version) invalidRequest("App Server initialize request requires clientInfo.name and clientInfo.version.");
+  if (clientInfo.title !== undefined && clientInfo.title !== null && typeof clientInfo.title !== "string") {
+    invalidRequest("App Server initialize request clientInfo.title must be a string or null.");
+  }
+  const capabilities = object(request?.capabilities);
+  if (!capabilities || typeof capabilities.experimentalApi !== "boolean") {
+    capabilityUnsupported("App Server initialize request must explicitly declare capabilities.experimentalApi.");
+  }
+  const expectedExperimentalApi = options.experimentalApi === true;
+  if (capabilities.experimentalApi !== expectedExperimentalApi) {
+    capabilityUnsupported(`App Server initialize request does not match requested experimentalApi=${expectedExperimentalApi}.`);
+  }
+  return {
+    clientInfo: {
+      name,
+      version,
+      ...(clientInfo.title === undefined ? {} : { title: clientInfo.title as string | null }),
+    },
+    capabilities: { experimentalApi: capabilities.experimentalApi },
+  };
 }
 
 export function validateInitializeResult(value: unknown, options: InitializeValidationOptions = {}): InitializeResult {
+  assertVerifiedAppServerSchemaProvenance();
   const result = object(value);
   const userAgent = text(result?.userAgent);
   const codexHome = text(result?.codexHome);
-  if (!userAgent || !codexHome) {
-    const error = new Error("App Server initialize response is missing userAgent or codexHome.") as Error & { code?: string };
+  const platformFamily = text(result?.platformFamily);
+  const platformOs = text(result?.platformOs);
+  if (!userAgent || !codexHome || !platformFamily || !platformOs) {
+    const error = new Error("App Server initialize response does not match the verified InitializeResponse schema.") as Error & { code?: string };
     error.code = "APP_SERVER_HANDSHAKE_INVALID";
     throw error;
   }
@@ -66,31 +113,13 @@ export function validateInitializeResult(value: unknown, options: InitializeVali
     error.code = "APP_SERVER_VERSION_UNSUPPORTED";
     throw error;
   }
-  const protocolVersion = text(result?.protocolVersion);
-  const expectedProtocolVersion = text(options.expectedProtocolVersion) ?? VERIFIED_APP_SERVER_PROTOCOL_VERSION;
-  if (!protocolVersion || protocolVersion !== expectedProtocolVersion) {
-    const error = new Error(`App Server initialize response protocolVersion must be exactly ${expectedProtocolVersion}.`) as Error & { code?: string };
-    error.code = "VERSION_MISMATCH";
-    throw error;
-  }
-  const capabilities = object(result?.capabilities);
-  if (!capabilities || typeof capabilities.experimentalApi !== "boolean") {
-    const error = new Error("App Server initialize response is missing the negotiated experimentalApi capability.") as Error & { code?: string };
-    error.code = "CAPABILITY_NOT_SUPPORTED";
-    throw error;
-  }
-  if (capabilities.experimentalApi !== (options.experimentalApi === true)) {
-    const error = new Error(`App Server initialize response does not match requested experimentalApi=${options.experimentalApi === true}.`) as Error & { code?: string };
-    error.code = "CAPABILITY_NOT_SUPPORTED";
-    throw error;
-  }
   return {
     userAgent,
     codexHome,
-    platformFamily: text(result?.platformFamily),
-    platformOs: text(result?.platformOs),
-    protocolVersion,
-    capabilities,
+    platformFamily,
+    platformOs,
+    schemaProvenanceVerified: true,
+    requestedExperimentalApi: options.experimentalApi === true,
   };
 }
 
