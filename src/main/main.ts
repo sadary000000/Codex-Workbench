@@ -34,7 +34,9 @@ import { createWebGptCliArgumentError, createWebGptCliFailure, presentWebGptCliO
 import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 import { AutomationStore } from "../automation/store.ts";
-import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority } from "../automation/webgpt-policy-authority.ts";
+import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority, createWebGptProviderPolicyAuthority, webGptRuntimeCapability } from "../automation/webgpt-policy-authority.ts";
+import { assertProviderSeamExecutable } from "../automation/provider-seam-classification.ts";
+import { WebGptAutomationProviderPort } from "../features/webgpt/automation/webgpt-provider-port.ts";
 import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../automation/aut2-real-webgpt-gate.ts";
 import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
 import { classifyWebGptActionReadiness, type WebGptActionScope } from "../automation/webgpt-action-readiness.ts";
@@ -138,6 +140,7 @@ let webGptControlRevision = 0;
 let webGptControlQueue: Promise<void> = Promise.resolve();
 let automationStore: AutomationStore | null = null;
 let webGptPolicyAuthority: WebGptPolicyAuthority | null = null;
+let webGptProviderPort: WebGptAutomationProviderPort | null = null;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
 
 function automationDatabasePath(): string {
@@ -151,6 +154,10 @@ async function startAutomationPersistence(): Promise<void> {
   automationStore = store;
   if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE !== "1") {
     webGptPolicyAuthority = await ensureWebGptRuntimePolicy(store);
+    // Materialize the only production provider composition root before any
+    // legacy AUT gate can be considered. The paused gates below never reach
+    // this port through their compatibility callers.
+    getWebGptProviderPort();
     return;
   }
 
@@ -170,6 +177,7 @@ async function startAutomationPersistence(): Promise<void> {
 
 async function startAut2RealWebGptGate(): Promise<void> {
   if (process.env.AUT2_REAL_WEBGPT_GATE !== "1") return;
+  assertProviderSeamExecutable("aut2-real-webgpt-gate.ts", "SUBMIT");
   if (!automationStore) throw new Error("AUT-2 real WebGPT Gate requires the Automation Store.");
   const outputPath = process.env.AUT2_REAL_WEBGPT_GATE_OUTPUT?.trim() || join(app.getPath("userData"), "aut2-real-webgpt-evidence.json");
   const webgptProjectId = process.env.AUT2_WEBGPT_PROJECT_ID?.trim() || "";
@@ -208,6 +216,7 @@ async function startAut2RealWebGptGate(): Promise<void> {
 
 async function startAut3RealPlannerGate(): Promise<void> {
   if (process.env.AUT3_REAL_PLANNER_GATE !== "1") return;
+  assertProviderSeamExecutable("aut3-real-planner-gate.ts", "SUBMIT");
   if (!automationStore) throw new Error("AUT-3 real Planner Gate requires the Automation Store.");
   const outputPath = process.env.AUT3_REAL_PLANNER_GATE_OUTPUT?.trim() || join(app.getPath("userData"), "aut3-real-planner-evidence.json");
   const webgptProjectId = process.env.AUT3_WEBGPT_PROJECT_ID?.trim() || "";
@@ -232,6 +241,8 @@ async function startAut3RealPlannerGate(): Promise<void> {
 
 async function startAut2Fix10AndAut3RealGate(): Promise<void> {
   if (process.env.AUT2_AUT3_FIX10_REAL_GATE !== "1") return;
+  assertProviderSeamExecutable("aut2-real-webgpt-gate.ts", "SUBMIT");
+  assertProviderSeamExecutable("aut3-real-planner-gate.ts", "SUBMIT");
   if (!automationStore) throw new Error("AUT-2 Fix10/AUT-3 handoff Gate requires the Automation Store.");
   const aut2OutputPath = process.env.AUT2_REAL_WEBGPT_GATE_OUTPUT?.trim() || join(app.getPath("userData"), "aut2-fix10-real-evidence.json");
   const aut3OutputPath = process.env.AUT3_REAL_PLANNER_GATE_OUTPUT?.trim() || join(app.getPath("userData"), "aut3-fix10-real-evidence.json");
@@ -1090,6 +1101,34 @@ function getWebGptRoleService(): WebGptRoleSessionService {
     getProject: (projectId) => getPersistence().getProject(projectId),
   });
   return webGptRoleService;
+}
+
+/**
+ * Production composition root for the provider-neutral Automation Port.
+ * The port is deliberately not reachable from the legacy AUT-2/AUT-3
+ * compatibility gates; those gates are paused below and fail closed before
+ * constructing a provider request.  Input resolution remains explicit and
+ * fail-closed until a future Automation stage supplies an opaque input store.
+ */
+function getWebGptProviderPort(): WebGptAutomationProviderPort {
+  if (webGptProviderPort) return webGptProviderPort;
+  if (!webGptPolicyAuthority) throw new Error("WEBGPT_POLICY_AUTHORITY_REQUIRED");
+  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");
+  const store = automationStore;
+  webGptProviderPort = new WebGptAutomationProviderPort({
+    roleSession: getWebGptRoleService(),
+    requestManager: getWebGptRequestManager(),
+    resolveInputRef: async () => { throw new Error("PROVIDER_INPUT_REF_UNRESOLVED"); },
+    readRuntimeCapability: async () => webGptRuntimeCapability(getWebGptWorkspace().getControlMode()),
+    policyAuthority: createWebGptProviderPolicyAuthority(webGptPolicyAuthority),
+    validateActionAttempt: async (correlation) => {
+      const attempt = await store.get("actionAttempts", correlation.actionAttemptId ?? "");
+      if (!attempt || attempt.intentId !== correlation.actionIntentId || attempt.policyVersionId !== correlation.policyVersionId) {
+        throw new Error("PROVIDER_ACTION_ATTEMPT_CORRELATION_INVALID");
+      }
+    },
+  });
+  return webGptProviderPort;
 }
 
 interface RuntimeTarget {
@@ -2073,6 +2112,11 @@ if (officialCliMode) {
           setTimeout(() => app.quit(), 50);
           return;
         }
+        // Construct the provider-neutral production seam once at the
+        // composition root. Legacy AUT-2/AUT-3 callers remain paused above;
+        // this does not dispatch, reconcile, or send a Prompt.
+        getWebGptProviderPort();
+        logger.info("webgpt_provider_port_ready", { provider: "WEBGPT", submit: true, reconcile: true, cancel: false });
         return startWebGptControlPlane().then(() => {
           if (process.env.AUT2_AUT3_FIX10_REAL_GATE === "1") {
             void startAut2Fix10AndAut3RealGate().catch((error) => {
@@ -2117,6 +2161,7 @@ if (officialCliMode) {
           if (automationStore) await automationStore.close();
           automationStore = null;
           webGptPolicyAuthority = null;
+          webGptProviderPort = null;
           await runtimes.closeAll();
           if (nativeAppServerHost) await nativeAppServerHost.close();
           if (projectMaps) await projectMaps.close();

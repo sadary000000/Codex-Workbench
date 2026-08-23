@@ -16,47 +16,74 @@ export interface ProviderSeamClassificationEntry {
   readonly permitsReconcile: boolean;
 }
 
-const ACTIVE_PROVIDER_PORT: ProviderSeamClassificationEntry = Object.freeze({
+export interface ProviderSeamFieldInventoryEntry extends ProviderSeamClassificationEntry {
+  /** URL-shaped or Chat-shaped field names found in the classified file. */
+  readonly fields: readonly string[];
+}
+
+const ACTIVE_PROVIDER_PORT: ProviderSeamFieldInventoryEntry = Object.freeze({
   classification: "ACTIVE_PRODUCTION",
   reason: "The provider-neutral port is the only executable production seam; its target is opaque to Automation.",
   permitsSubmit: true,
   permitsReconcile: true,
+  fields: [],
 });
 
-const PAUSED: ProviderSeamClassificationEntry = Object.freeze({
+const PAUSED: ProviderSeamFieldInventoryEntry = Object.freeze({
   classification: "PAUSED_NOT_EXECUTABLE",
   reason: "AUT-2/AUT-3 legacy gate path is explicitly paused and is not a production command.",
   permitsSubmit: false,
   permitsReconcile: false,
+  fields: [],
 });
 
-const TEST_ONLY: ProviderSeamClassificationEntry = Object.freeze({
+const TEST_ONLY: ProviderSeamFieldInventoryEntry = Object.freeze({
   classification: "TEST_ONLY",
   reason: "Compatibility fixture/harness seam retained for regression evidence only.",
   permitsSubmit: false,
   permitsReconcile: false,
+  fields: [],
 });
 
-const READ_ONLY: ProviderSeamClassificationEntry = Object.freeze({
+const READ_ONLY: ProviderSeamFieldInventoryEntry = Object.freeze({
   classification: "LEGACY_READ_ONLY",
   reason: "Readiness classification only; it cannot dispatch, reconcile, or resolve a provider target.",
   permitsSubmit: false,
   permitsReconcile: false,
+  fields: [],
 });
 
-export const PROVIDER_SEAM_CLASSIFICATION: Readonly<Record<string, ProviderSeamClassificationEntry>> = Object.freeze({
+function fieldEntry(
+  base: ProviderSeamClassificationEntry,
+  fields: readonly string[],
+): ProviderSeamFieldInventoryEntry {
+  return Object.freeze({ ...base, fields: Object.freeze([...fields]) });
+}
+
+/**
+ * Machine-readable inventory for the executable Automation/Requirement/Planner
+ * seam.  These are compatibility fields, not an approval to dispatch.  The
+ * active provider port is intentionally absent: it carries only
+ * `providerTargetRef` and resolves ChatGPT URLs inside the WebGPT adapter.
+ */
+export const PROVIDER_SEAM_CLASSIFICATION: Readonly<Record<string, ProviderSeamFieldInventoryEntry>> = Object.freeze({
   "webgpt-provider-port.ts": ACTIVE_PROVIDER_PORT,
-  "aut2-real-webgpt-gate.ts": PAUSED,
-  "aut3-real-planner-gate.ts": PAUSED,
-  "requirement-service.ts": PAUSED,
-  "requirement-webgpt-adapter.ts": PAUSED,
-  "planner-service.ts": PAUSED,
-  "planner-webgpt-adapter.ts": PAUSED,
-  "webgpt-external-action.ts": TEST_ONLY,
-  "webgpt-action-readiness.ts": READ_ONLY,
+  "adapters.ts": fieldEntry(READ_ONLY, ["chatRef"]),
+  "aut2-real-webgpt-gate.ts": fieldEntry(PAUSED, ["chatUrl", "chatRef"]),
+  "aut3-real-planner-gate.ts": fieldEntry(PAUSED, ["chatUrl", "targetChatUrl"]),
+  "requirement-service.ts": fieldEntry(PAUSED, ["chatRef"]),
+  "requirement-webgpt-contract.ts": fieldEntry(PAUSED, ["chatRef"]),
+  "requirement-webgpt-adapter.ts": fieldEntry(PAUSED, ["chatRef", "chatUrl", "targetChatUrl"]),
+  "planner-service.ts": fieldEntry(PAUSED, ["targetChatUrl", "plannerChatRef"]),
+  "planner-webgpt-adapter.ts": fieldEntry(PAUSED, ["chatUrl", "targetChatUrl"]),
+  "schema.ts": fieldEntry(PAUSED, ["plannerChatRef"]),
+  "store.ts": fieldEntry(PAUSED, ["plannerChatRef"]),
+  "types.ts": fieldEntry(PAUSED, ["plannerChatRef"]),
+  "webgpt-external-action.ts": fieldEntry(TEST_ONLY, ["targetChatUrl"]),
+  "webgpt-action-readiness.ts": fieldEntry(READ_ONLY, ["chatUrl", "targetChatUrl"]),
 });
 
-export function providerSeamClassification(fileName: string): ProviderSeamClassificationEntry | null {
+export function providerSeamClassification(fileName: string): ProviderSeamFieldInventoryEntry | null {
   return PROVIDER_SEAM_CLASSIFICATION[fileName] ?? null;
 }
 

@@ -208,14 +208,17 @@ export function webGptRuntimeCapability(mode: "USER_CONTROL" | "AUTO_CONTROL" | 
     capabilityVersion: "webgpt-runtime-capability-v1",
     runtimeId: "webgpt-browser-runtime",
     status: mode === "AUTO_CONTROL" ? "READY" : mode === "PAUSED" ? "WAITING" : "UNAVAILABLE",
-    supportedOperations: ["PROMPT", "REPAIR", "RETRY", "NEW_CHAT"],
+    supportedOperations: ["PROMPT", "REPAIR", "RETRY", "NEW_CHAT", "VERIFY"],
     allowDataEgress: false,
     allowSideEffects: false,
   });
 }
 
-function providerOperationToPolicyOperation(operation: ProviderAuthorizationOperation): BudgetKind {
-  return operation === "SUBMIT" ? "PROMPT" : operation === "RECONCILE" ? "RETRY" : "RETRY";
+function providerOperationToPolicyOperation(operation: ProviderAuthorizationOperation): BudgetKind | PolicyOperation {
+  // Reconcile is verification, not a retry.  It must not consume RETRY
+  // budget or be reported as a retry admission.  CANCEL is fail-closed at
+  // the Provider Port and should never reach this mapping.
+  return operation === "SUBMIT" ? "PROMPT" : "VERIFY";
 }
 
 function providerRuntimeToPolicyCapability(capability: ProviderRuntimeCapability): RuntimeCapability {

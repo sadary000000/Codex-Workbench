@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createWebGptRoleTargetRef, WebGptAutomationProviderPort } from "../src/features/webgpt/automation/webgpt-provider-port.ts";
 import { assertProviderSeamExecutable, PROVIDER_SEAM_CLASSIFICATION, providerSeamClassification } from "../src/automation/provider-seam-classification.ts";
-import { createWebGptProviderPolicyAuthority } from "../src/automation/webgpt-policy-authority.ts";
+import { createWebGptProviderPolicyAuthority, ensureWebGptRuntimePolicy, WEBGPT_RUNTIME_POLICY_VERSION_ID, webGptRuntimeCapability } from "../src/automation/webgpt-policy-authority.ts";
+import { AutomationStore } from "../src/automation/store.ts";
 import type {
   ProviderAuthorizationDecision,
   ProviderAuthorizationOperation,
@@ -29,11 +31,11 @@ async function listTypeScriptFiles(root: string): Promise<string[]> {
   return files;
 }
 
-function requestRecord(state: WebGptRequestRecord["state"]): WebGptRequestRecord {
+function requestRecord(state: WebGptRequestRecord["state"], policyVersionId = "policy-arch-v2-6"): WebGptRequestRecord {
   return {
     requestId: "req-arch-v2-6",
     idempotencyKey: "idem-arch-v2-6",
-    policyVersionId: "policy-arch-v2-6",
+    policyVersionId,
     semanticSha256: "semantic-arch-v2-6",
     state,
     projectId: "project-arch-v2-6",
@@ -83,7 +85,7 @@ function effectivePolicyDecision(decision: EffectivePolicyDecision["decision"], 
       runtimeId: capability.runtimeId,
       pin: { policyVersionId: safePolicyVersionId, projectId: "automation-test", version: 1, correlationId: "idem-arch-v2-6", pinnedAt: "2026-08-23T00:00:00.000Z" },
       budgets: { PROMPT: 12, REPAIR: 3, RETRY: 3, NEW_CHAT: 3 },
-      allowedOperations: ["PROMPT", "RETRY"],
+      allowedOperations: ["PROMPT", "RETRY", "VERIFY"],
       requireHumanGateFor: [],
       allowDataEgress: false,
       allowSideEffects: false,
@@ -113,7 +115,7 @@ function runtimeCapability(overrides: Partial<ProviderRuntimeCapability> = {}): 
     capabilityVersion: "webgpt-capability-arch-v2-6",
     runtimeId: "webgpt-test-runtime",
     status: "READY",
-    supportedOperations: ["PROMPT", "RETRY"],
+    supportedOperations: ["PROMPT", "RETRY", "VERIFY"],
     allowDataEgress: false,
     allowSideEffects: false,
     ...overrides,
@@ -149,26 +151,35 @@ test("Automation production boundary has no direct WebGPT feature imports", asyn
   assert.deepEqual(violations, []);
 });
 
-test("URL-shaped provider fields are classified and never marked executable", async () => {
+test("URL-shaped provider fields have a complete per-file inventory and never mark a paused seam executable", async () => {
   const files = await listTypeScriptFiles(join(repoRoot, "src", "automation"));
   const violations: string[] = [];
   const observed = new Set<string>();
+  const fieldPattern = /\b(chatUrl|targetChatUrl|chatRef|plannerChatRef|browserRoute)\b/g;
   for (const file of files) {
+    if (file.endsWith("provider-seam-classification.ts")) continue;
     const source = await readFile(file, "utf8");
-    if (!/\b(?:chatUrl|targetChatUrl)\b/.test(source)) continue;
+    const fields = [...new Set([...source.matchAll(fieldPattern)].map((match) => match[1]))].sort();
+    if (fields.length === 0) continue;
     const fileName = file.split(/[\\/]/).pop() ?? "";
+    if (fileName === "provider-seam-classification.ts") continue;
     observed.add(fileName);
     const classification = providerSeamClassification(fileName);
     if (!classification) violations.push(`${relative(repoRoot, file)}:unclassified`);
-    else if (classification.classification === "ACTIVE_PRODUCTION" || classification.permitsSubmit || classification.permitsReconcile) violations.push(`${relative(repoRoot, file)}:executable`);
+    else {
+      if (classification.classification === "ACTIVE_PRODUCTION" || classification.permitsSubmit || classification.permitsReconcile) violations.push(`${relative(repoRoot, file)}:executable`);
+      if (JSON.stringify(fields) !== JSON.stringify([...classification.fields].sort())) violations.push(`${relative(repoRoot, file)}:field-inventory:${fields.join(",")}`);
+    }
   }
   assert.deepEqual(violations, []);
-  assert.deepEqual([...observed].sort(), Object.keys(PROVIDER_SEAM_CLASSIFICATION).filter((key) => key !== "webgpt-provider-port.ts" && key !== "requirement-service.ts").sort());
+  assert.deepEqual([...observed].sort(), Object.keys(PROVIDER_SEAM_CLASSIFICATION).filter((key) => key !== "webgpt-provider-port.ts").sort());
+  assert.deepEqual(PROVIDER_SEAM_CLASSIFICATION["webgpt-provider-port.ts"]?.fields, [], "active provider port carries no URL-shaped Automation fields");
   const main = await readFile(join(repoRoot, "src", "main", "main.ts"), "utf8");
   assert.match(main, /AUT2_REAL_WEBGPT_GATE/);
   assert.match(main, /AUT3_REAL_PLANNER_GATE/);
   assert.match(main, /PAUSED_NOT_EXECUTABLE/);
   assert.match(main, /providerSubmitCount: 0/);
+  assert.match(main, /getWebGptProviderPort\(\)/);
 });
 
 test("paused compatibility callers fail closed before submit or reconcile", () => {
@@ -183,10 +194,11 @@ test("WebGPT provider port keeps target opaque and separates observe from reconc
   const record = requestRecord("SUBMITTED");
   const roleSession = {
     status: async () => ({ status: "BOUND", chatUrl: record.targetChatUrl }),
-    submit: async (_projectId: string, _role: string, prompt: string, idempotencyKey?: string) => {
+    submit: async (_projectId: string, _role: string, prompt: string, idempotencyKey?: string, policyVersionId?: string | null) => {
       calls.submit += 1;
       assert.equal(prompt, "provider-input");
       assert.equal(idempotencyKey, "idem-arch-v2-6");
+      assert.equal(policyVersionId, "policy-arch-v2-6");
       return record;
     },
   };
@@ -211,7 +223,7 @@ test("WebGPT provider port keeps target opaque and separates observe from reconc
       assert.equal(inputRef, "input:arch-v2-6");
       return "provider-input";
     },
-    readRuntimeCapability: async () => ({ capabilityVersion: "webgpt-capability-arch-v2-6", runtimeId: "webgpt-test-runtime", status: "READY" as const, supportedOperations: ["PROMPT", "RETRY"] as const, allowDataEgress: false, allowSideEffects: false }),
+    readRuntimeCapability: async () => ({ capabilityVersion: "webgpt-capability-arch-v2-6", runtimeId: "webgpt-test-runtime", status: "READY" as const, supportedOperations: ["PROMPT", "RETRY", "VERIFY"] as const, allowDataEgress: false, allowSideEffects: false }),
     policyAuthority: policyAuthority(),
   });
   const targetRef = createWebGptRoleTargetRef("project-arch-v2-6", "PLANNER");
@@ -335,7 +347,7 @@ test("missing policy pin, denied policy, or missing capability fail closed befor
     readRuntimeCapability: async () => runtimeCapability(),
     policyAuthority: policyAuthority(),
   });
-  await assert.rejects(() => missingPinPort.submit({ ...base, correlation: { ...base.correlation, policyVersionId: null } } as never), /PROVIDER_CORRELATION_REQUIRED/);
+  await assert.rejects(() => missingPinPort.submit({ ...base, correlation: { ...base.correlation, policyVersionId: null } } as never), /PROVIDER_POLICY_PIN_REQUIRED/);
 
   const deniedPort = new WebGptAutomationProviderPort({
     ...baseOptions,
@@ -376,15 +388,67 @@ test("valid pinned policy plus available capability reaches the isolated provide
     correlation: { actionIntentId: "intent-valid", actionAttemptId: "attempt-valid", policyVersionId: "policy-arch-v2-6", idempotencyRef: "idem-arch-v2-6", semanticRef: null },
   });
   assert.equal(accepted.providerRequestRef, record.requestId);
-  assert.deepEqual(accepted.policy, {
-    policyVersionId: "policy-arch-v2-6",
-    operation: "SUBMIT",
-    decision: "ALLOW",
-    runtimeCapabilityVersion: "webgpt-capability-arch-v2-6",
-    runtimeId: "webgpt-test-runtime",
-    actionAttemptId: "attempt-valid",
-  });
+  assert.equal(accepted.policy.policyVersionId, "policy-arch-v2-6");
+  assert.equal(accepted.policy.operation, "SUBMIT");
+  assert.equal(accepted.policy.decision, "ALLOW");
+  assert.equal(accepted.policy.runtimeCapabilityVersion, "webgpt-capability-arch-v2-6");
+  assert.equal(accepted.policy.runtimeId, "webgpt-test-runtime");
+  assert.equal(accepted.policy.actionAttemptId, "attempt-valid");
+  assert.deepEqual(accepted.policy.effectivePolicy, effectivePolicyDecision("ALLOW", "policy-arch-v2-6", runtimeCapability()));
   assert.equal(submitCount, 1);
+});
+
+test("production provider port consumes the persisted WebGPT policy authority", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arch-v2-6-persisted-provider-policy-"));
+  const store = new AutomationStore(join(root, "automation.db"));
+  try {
+    const persistedAuthority = await ensureWebGptRuntimePolicy(store);
+    const record = requestRecord("SUBMITTED", WEBGPT_RUNTIME_POLICY_VERSION_ID);
+    let receivedPolicyVersionId: string | null = null;
+    let receivedCapabilityVersion: string | null = null;
+    const port = new WebGptAutomationProviderPort({
+      roleSession: {
+        status: async () => ({ status: "BOUND", chatUrl: record.targetChatUrl }),
+        submit: async (_projectId: string, _role: string, _prompt: string, _idempotencyKey?: string, policyVersionId?: string | null) => {
+          receivedPolicyVersionId = policyVersionId ?? null;
+          return record;
+        },
+      } as never,
+      requestManager: { requestStatus: async () => record, reconcileRequest: async () => record } as never,
+      resolveInputRef: async () => "persisted-policy-provider-input",
+      readRuntimeCapability: async () => {
+        const capability = webGptRuntimeCapability("AUTO_CONTROL");
+        receivedCapabilityVersion = capability.capabilityVersion;
+        return capability;
+      },
+      policyAuthority: createWebGptProviderPolicyAuthority(persistedAuthority),
+    });
+
+    const accepted = await port.submit({
+      provider: "WEBGPT",
+      operation: "PROMPT",
+      workflowRole: "PLANNER",
+      providerTargetRef: createWebGptRoleTargetRef("project-arch-v2-6", "PLANNER"),
+      inputRef: "input:persisted-policy",
+      payloadRef: null,
+      correlation: {
+        actionIntentId: "intent-persisted-policy",
+        actionAttemptId: "attempt-persisted-policy",
+        policyVersionId: WEBGPT_RUNTIME_POLICY_VERSION_ID,
+        idempotencyRef: "idem-arch-v2-6",
+        semanticRef: "semantic-arch-v2-6",
+      },
+    });
+
+    assert.equal(accepted.policy.policyVersionId, WEBGPT_RUNTIME_POLICY_VERSION_ID);
+    assert.equal(accepted.policy.effectivePolicy.effectivePolicy.policyVersionId, WEBGPT_RUNTIME_POLICY_VERSION_ID);
+    assert.equal(accepted.policy.effectivePolicy.decision, "ALLOW");
+    assert.equal(receivedPolicyVersionId, WEBGPT_RUNTIME_POLICY_VERSION_ID);
+    assert.equal(receivedCapabilityVersion, "webgpt-runtime-capability-v1");
+  } finally {
+    await store.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("provider policy authority evaluates submit and reconcile without owning the dispatch budget", async () => {
@@ -411,5 +475,37 @@ test("provider policy authority evaluates submit and reconcile without owning th
   const reconcileProof = await authority.authorize({ operation: "RECONCILE", correlation, runtimeCapability: capability });
   assert.equal(submitProof.effectivePolicy?.decision, "ALLOW");
   assert.equal(reconcileProof.effectivePolicy?.decision, "ALLOW");
-  assert.deepEqual(calls, ["evaluatePinned:PROMPT", "evaluatePinned:RETRY"]);
+  assert.deepEqual(calls, ["evaluatePinned:PROMPT", "evaluatePinned:VERIFY"]);
+});
+
+test("production policy authority emits a complete pinned proof", async () => {
+  const root = await mkdtemp(join(process.env.TEMP ?? repoRoot, "arch-v2-6-policy-"));
+  const store = new AutomationStore(join(root, "automation.db"));
+  try {
+    const authority = await ensureWebGptRuntimePolicy(store);
+    const providerAuthority = createWebGptProviderPolicyAuthority(authority);
+    const correlation = {
+      actionIntentId: "intent-production-proof",
+      actionAttemptId: "attempt-production-proof",
+      policyVersionId: WEBGPT_RUNTIME_POLICY_VERSION_ID,
+      idempotencyRef: "idem-production-proof",
+      semanticRef: null,
+    };
+    const proof = await providerAuthority.authorize({
+      operation: "SUBMIT",
+      correlation,
+      runtimeCapability: webGptRuntimeCapability("AUTO_CONTROL"),
+    });
+    assert.equal(proof.operation, "SUBMIT");
+    assert.equal(proof.policyVersionId, WEBGPT_RUNTIME_POLICY_VERSION_ID);
+    assert.equal(proof.effectivePolicy?.decision, "ALLOW");
+    assert.equal(proof.effectivePolicy?.effectivePolicy.policyVersionId, WEBGPT_RUNTIME_POLICY_VERSION_ID);
+    assert.equal(proof.effectivePolicy?.effectivePolicy.pin.correlationId, "idem-production-proof");
+    assert.equal(proof.effectivePolicy?.effectivePolicy.runtimeCapabilityVersion, "webgpt-runtime-capability-v1");
+    assert.equal(proof.effectivePolicy?.effectivePolicy.runtimeId, "webgpt-browser-runtime");
+    assert.equal(proof.runtimeCapability.status, "READY");
+  } finally {
+    await store.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });

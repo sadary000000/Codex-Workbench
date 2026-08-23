@@ -22,7 +22,10 @@ import type { WebGptRequestManager } from "../runtime/webgpt-request-manager.ts"
 const TARGET_PREFIX = "webgpt-role-v1:";
 
 export interface WebGptProviderPortOptions {
-  readonly roleSession: Pick<WebGptRoleSessionService, "status" | "submit">;
+  readonly roleSession: {
+    readonly status: WebGptRoleSessionService["status"];
+    readonly submit: (projectId: string, role: WebGptRole, prompt: string, idempotencyKey?: string, policyVersionId?: string | null) => Promise<WebGptRequestRecord>;
+  };
   readonly requestManager: Pick<WebGptRequestManager, "requestStatus" | "reconcileRequest">;
   readonly resolveInputRef: (inputRef: string) => Promise<string>;
   readonly readRuntimeCapability: () => Promise<ProviderRuntimeCapability>;
@@ -104,6 +107,7 @@ function observation(record: WebGptRequestRecord, policy?: ProviderPolicyProvena
 
 function ensureCorrelation(input: ProviderCorrelation): void {
   if (!input.actionIntentId || !input.actionAttemptId || !input.idempotencyRef) throw new Error("PROVIDER_CORRELATION_REQUIRED");
+  if (!input.policyVersionId) throw new Error("PROVIDER_POLICY_PIN_REQUIRED");
 }
 
 function capabilityError(operation: "SUBMIT" | "RECONCILE", capability: ProviderRuntimeCapability): string | null {
