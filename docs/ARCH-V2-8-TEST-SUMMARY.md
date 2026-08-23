@@ -1,29 +1,43 @@
-# ARCH-V2-8 Test Summary
+# ARCH-V2-8 Test Summary — Reconciled
 
-## Automated Gate
+```yaml
+implementationHead: 926440739ef3ca4a35a41f9d8b6537b31ac66d25
+repositoryHeadAtRound2Start: 41467ceff78f7e59365233f4472c3e72d1355596
+technicalGate: FAIL_WITH_EVIDENCE
+finalFrozen: false
+P0: 0
+P1: 5
+P2: 3
+```
+
+## Automated checks
+
+本轮自动化命令与既有 isolated smoke 通过，但不覆盖 5 个当前 P1 生产路径缺口；因此总体 Gate 不是 PASS。
 
 | Check | Result |
 |---|---|
-| npm run check | PASS |
-| npm test | PASS — 377/377 |
-| ARCH-V2-7 targeted | PASS — 30/30 |
-| ARCH-V2-1~6 selected regression | PASS — 64/64 |
-| Independent grouped compatibility audit | PASS — 584 assertions reported |
-| npm run build | PASS |
-| npm run package:win | PASS |
-| npm audit --omit=dev | PASS — 0 vulnerabilities |
-| git diff --check | PASS; existing LF/CRLF warnings only |
-| scoped secret scan | PASS; no high-confidence credential-pattern hits |
+| `npm run check` | PASS |
+| `npm test` | PASS — 389/389 |
+| `npm run build` | `LOCKED_WITH_EVIDENCE` — 标准 package 资源被运行中的用户 EXE 占用 |
+| isolated `npm run package:win` | PASS |
+| standard `npm run package:win` | `LOCKED_WITH_EVIDENCE` — user process owns EXE lock |
+| `npm audit --omit=dev` | PASS — 0 vulnerabilities |
+| `git diff --check` | PASS |
+| scoped secret scan | PASS |
+| final-doc consistency scan | PASS (ROUND 2 gate) |
+| manifest/package hash verification | PASS (sidecars) |
 
-## Real protocol
+## Reused smoke evidence
 
-- Direct App Server initialize: PASS.
-- JSON Schema generation: PASS; experimental output 361 files, stable contract output 642 TS / 285 JSON schema files as recorded by prior baseline.
-- Resolver-selected binary and generated stable contract: PASS.
-- Observed Desktop runtime userAgent differs from Workbench verified allowlist: FAIL_WITH_EVIDENCE.
-- Packaged official CLI webgpt.status: bounded TIMEOUT, FAIL_WITH_EVIDENCE.
-- Real business Thread/Turn/Prompt: NOT_TESTED by explicit ARCH-V2-8 safety scope.
+- WEB-6.6 protocol smoke：PASS；initialize/status、version mismatch 和 unsupported capability 均有真实隔离 packaged 证据。
+- WEB-6.4 arbiter smoke：PASS；capacity=1、USER_CONTROL 和释放行为通过。
+- 真实业务 Prompt：0。
+- 新业务 Chat：0。
 
-## Interpretation
+原始 WEB-6.6/WEB-6.4 smoke JSON 已处于既有 dirty 删除状态；本轮不恢复用户文件，报告只引用摘要、脚本边界和已核验 package/provenance。
 
-Source-level compatibility remains green, but the runtime version drift and the independent B/D challenge findings prevent this document from claiming a final freeze. The correct local gate is READY_FOR_GPT_FINAL_REVIEW.
+## Scope limitation
+
+会创建 Native Thread 或发送业务 Prompt 的业务 real smoke 在本轮仍保持暂停；不将 `TEST_ONLY` 或 `PAUSED_NOT_EXECUTABLE` 能力写成生产 real business PASS。
+
+当前 P1：strict protocol/capability enforcement、production App Server shared validator bypass、legacy per-command capability bypass、Recovery production side-effect wiring、migration identity coverage/assertion。它们均已记录在 Manifest 与 Stage Review，等待 GPT。

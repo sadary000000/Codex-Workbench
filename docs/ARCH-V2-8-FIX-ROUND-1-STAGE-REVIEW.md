@@ -5,6 +5,7 @@
 ```yaml
 stage: ARCH-V2-8 FIX ROUND 1
 result: READY_FOR_GPT_REVIEW
+historicalStatus: HISTORICAL_RESOLVED
 base_commit: 99c0dcc151095c976a02144e6dc14ca3d2774ffd
 implementation_commits:
   - 86e5569 fix: close arch-v2-8 freeze blockers

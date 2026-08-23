@@ -1,67 +1,97 @@
 {
   "stage": "ARCH-V2-8",
   "stageName": "Capability / Frozen Confirmation / Compatibility Regression / Final Architecture Freeze",
-  "status": "READY_FOR_GPT_FINAL_REVIEW",
+  "technicalGate": "FAIL_WITH_EVIDENCE",
+  "status": "GPT_REVIEW_REQUIRED_WITH_BLOCKERS",
+  "finalFrozen": false,
   "repository": "D:\\办公\\AI\\Codex_Workbench_V1",
-  "headAtAuditStart": "17f7c9bd096ec6aad94b8106af2a11157d25ec82",
-  "reviewCommit": "260812a963751b11aaf1ff28a36b960edea4b9d9",
-  "implementationChangesInThisStage": false,
+  "implementationHead": "926440739ef3ca4a35a41f9d8b6537b31ac66d25",
+  "repositoryHeadAtRound2Start": "41467ceff78f7e59365233f4472c3e72d1355596",
+  "implementationCommits": [
+    "86e5569",
+    "3637c47",
+    "5eab521",
+    "9264407"
+  ],
+  "round1ReviewCommit": "41467ceff78f7e59365233f4472c3e72d1355596",
+  "round2ProductCodeChanged": false,
   "v1FrozenCoreChanged": false,
   "realBusinessPrompts": 0,
   "newBusinessChats": 0,
-  "automationRealGateStarted": false,
-  "codexCliVersion": "codex-cli 0.147.0",
-  "resolverBinarySha256": "935A1911ED5564FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D",
-  "observedDesktopAppServerUserAgent": "Codex Desktop/0.148.0-alpha.9 (Windows 10.0.19045; x86_64) dumb",
-  "observedDesktopBinarySha256": "F29F609375F3731D8DB507A95124862A84E306982E30BA4300DDCE5638BC6946",
-  "schema": {
-    "experimentalGeneratedFileCount": 361,
-    "stableContractGeneratedTsFileCount": 642,
-    "stableContractGeneratedJsonSchemaFileCount": 285,
-    "experimentalSchemaSha256": "BABFD5C98CD978DD858B4762CDFBC9FBA941E1A0E4053DE0050E4082AE1F075A"
+  "automation": {
+    "AUT-2": "PAUSED",
+    "AUT-3": "PAUSED"
+  },
+  "provenance": {
+    "codexCliVersion": "codex-cli 0.147.0",
+    "resolverBinarySha256": "935A1911ED5564FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D",
+    "observedDesktopUserAgent": "Codex Desktop/0.148.0-alpha.9",
+    "observedDesktopCompatibility": "UNSUPPORTED",
+    "appServerGeneratedJsonSchemaTreeSha256": "0D2DDF85138073D0EA0A6828804349B65F18BF88F8B2FF7AEF62C9262B39390F",
+    "controlPlaneSchemaSha256": "0E13F0B1D6A1A9AF37DFEEE13FEFEBE70F532BB5C6F75C29AD7860C2B7A72E59"
   },
   "package": {
-    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
-    "outerSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
-    "mainJsSha256": "EFC89E08CBBF973B8DCF59D594174515A2F2BA07AD69833FFE103345C869DA84",
-    "rendererJsSha256": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
-    "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F"
+    "standardPackageStatus": "LOCKED_WITH_EVIDENCE",
+    "isolatedPackage": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-stage-arch-v2-8-fix-round-1\\package",
+    "isolatedOuterExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "isolatedMainJsSha256": "E9388F0C46E4FB81C175EB2FAA98FA373E97649CFB51BD49926B5268D0936F82",
+    "isolatedRendererJsSha256": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
+    "isolatedPackageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F",
+    "reviewPackageSha256Sidecar": "dist/review/ARCH-V2-8-REVIEW-PACKAGE.sha256",
+    "manifestSha256Sidecar": "docs/ARCH-V2-8-PROVENANCE.txt"
+  },
+  "capabilityStates": {
+    "appServerProvenanceInitializeCapabilityGate": "SUPPORTED_WITH_COMPATIBILITY_PATH",
+    "strictProtocolCapabilityEnforcement": "UNSUPPORTED",
+    "allProductionAppServerPaths": "UNSUPPORTED",
+    "controlPlaneCapabilityGate": "SUPPORTED_WITH_COMPATIBILITY_PATH",
+    "webgptStatus": "SUPPORTED",
+    "threadAndTurnBusinessFlow": "TEST_ONLY",
+    "observedDesktop01480Alpha9": "UNSUPPORTED",
+    "recoveryProductionSideEffectPath": "UNSUPPORTED",
+    "migrationIdentityProductionAssertion": "UNSUPPORTED",
+    "businessPromptAndNewChat": "PAUSED_NOT_EXECUTABLE"
+  },
+  "currentFindings": {
+    "P0": 0,
+    "P1": 5,
+    "P2": 3,
+    "p1Items": [
+      { "id": "P1-01", "severity": "P1", "blocking": true, "title": "Strict protocolVersion and requested experimentalApi enforcement incomplete" },
+      { "id": "P1-02", "severity": "P1", "blocking": true, "title": "Production map/project-map App Server paths bypass shared initialize validator" },
+      { "id": "P1-03", "severity": "P1", "blocking": true, "title": "Legacy Control Plane path bypasses per-command capability enforcement" },
+      { "id": "P1-04", "severity": "P1", "blocking": true, "title": "Recovery Provider Port production side-effect bridge/recover wiring missing" },
+      { "id": "P1-05", "severity": "P1", "blocking": true, "title": "Production migration identity coverage/assertion incomplete" }
+    ],
+    "p2Items": [
+      { "id": "P2-01", "severity": "P2", "blocking": false, "frozen_contract_impact": "NONE", "title": "No complete user-facing production projection rebuild command" },
+      { "id": "P2-02", "severity": "P2", "blocking": false, "frozen_contract_impact": "NONE", "title": "No user-facing migration command" },
+      { "id": "P2-03", "severity": "P2", "blocking": false, "frozen_contract_impact": "NONE", "title": "Legacy URL-shaped seam is TEST_ONLY / LEGACY_READ_ONLY" }
+    ],
+    "historicalResolved": "HISTORICAL_RESOLVED"
   },
   "tests": {
-    "npmTest": "377/377 PASS",
-    "archV2_7Targeted": "30/30 PASS",
-    "archV2_1_to_6Selected": "64/64 PASS",
-    "independentAuditGroupedAssertions": 584,
     "check": "PASS",
-    "build": "PASS",
-    "packageWin": "PASS",
-    "auditOmitDev": "PASS: 0 vulnerabilities",
-    "diffCheck": "PASS with existing LF/CRLF warnings",
-    "secretScan": "PASS: 0 high-confidence credential-pattern hits"
+    "npmTest": "389/389 PASS",
+    "build": "LOCKED_WITH_EVIDENCE",
+    "isolatedPackage": "PASS",
+    "standardPackage": "LOCKED_WITH_EVIDENCE",
+    "audit": "PASS: 0 vulnerabilities",
+    "diffCheck": "PASS",
+    "secretScan": "PASS"
   },
-  "realProtocol": {
-    "initialize": "PASS",
-    "schemaGeneration": "PASS",
-    "packagedOfficialCliStatus": "FAIL_WITH_EVIDENCE: TIMEOUT after 15070ms",
-    "threadTurnBusinessFlow": "NOT_TESTED_BY_SCOPE"
+  "smokes": {
+    "WEB-6.6 protocol": "PASS",
+    "WEB-6.4 arbiter": "PASS",
+    "realBusinessPromptCount": 0,
+    "newBusinessChatCount": 0
   },
-  "challengeFindings": {
-    "p0": [
-      "B: strict idle zero-cost boundary may be violated by ordinary startup initialization"
-    ],
-    "p1": [
-      "A/E: shared AppServerHost does not enforce version/hash validation in all production paths",
-      "E: Control Plane capability negotiation is not enforced per command",
-      "B/E: activeSummary may expose non-live recovery states as active",
-      "B/D/E: provider-port production path and Recovery Intent side-effect wiring are not complete",
-      "D/E: migration candidate fallback and full identity preservation gate are incomplete",
-      "B: legacy URL-shaped bridge/test seam and production projection rebuild boundary remain"
-    ],
-    "p2": [
-      "No complete production projection rebuild command",
-      "No user-facing migration command"
-    ]
-  },
-  "reviewDecision": "GPT_REVIEW_REQUIRED_WITH_BLOCKERS",
-  "finalFrozen": false
+  "subagents": {
+    "A": "completed",
+    "B": "completed",
+    "C": "completed",
+    "D": "completed",
+    "E": "completed",
+    "running": 0
+  }
 }

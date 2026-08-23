@@ -1,31 +1,27 @@
-ARCH-V2-8 Review Package Provenance
-
-repository=D:\办公\AI\Codex_Workbench_V1
-audit_head=17f7c9bd096ec6aad94b8106af2a11157d25ec82
-review_commit=260812a963751b11aaf1ff28a36b960edea4b9d9
-stage_status=READY_FOR_GPT_FINAL_REVIEW
-implementation_changes_in_stage=NO
-v1_frozen_core_changed=NO
+stage=ARCH-V2-8
+technical_gate=FAIL_WITH_EVIDENCE
+status=GPT_REVIEW_REQUIRED_WITH_BLOCKERS
+final_frozen=false
+implementation_head=926440739ef3ca4a35a41f9d8b6537b31ac66d25
+repository_head_at_round2_start=41467ceff78f7e59365233f4472c3e72d1355596
+round1_review_commit=41467ceff78f7e59365233f4472c3e72d1355596
+v1_frozen_core_changed=false
+current_findings=P0=0;P1=5;P2=3
 real_business_prompts=0
 new_business_chats=0
-running_subagents_at_gate=0
-subagent_E=completed_after_rerun_and_adopted
-
+subagents=A=completed;B=completed;C=completed;D=completed;E=completed;running=0
 codex_cli_version=codex-cli 0.147.0
 resolver_binary_sha256=935A1911ED5564FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D
-observed_desktop_app_server_user_agent=Codex Desktop/0.148.0-alpha.9 (sanitized)
-observed_desktop_binary_sha256=F29F609375F3731D8DB507A95124862A84E306982E30BA4300DDCE5638BC6946
-
-package_outer_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
-package_main_js_sha256=EFC89E08CBBF973B8DCF59D594174515A2F2BA07AD69833FFE103345C869DA84
-package_renderer_js_sha256=400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB
-package_json_sha256=1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
-
-automated_tests=npm test 377/377; targeted 30/30; selected regression 64/64; grouped audit 584 assertions
-build_and_package=npm run build PASS; npm run package:win PASS
-audit=npm audit --omit=dev PASS; 0 vulnerabilities
-secret_scan=PASS; no high-confidence credential-pattern hits
-real_protocol=initialize PASS; schema generation PASS; official CLI status bounded TIMEOUT evidence
-challenge_counts=P0=1; P1=6; P2=2
-
-excluded=Cookie, Token, password, browser profile, private ChatGPT content, raw business Prompt, production database, full Request Journal, raw temporary logs
+observed_desktop_compatibility=UNSUPPORTED
+isolated_gui_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+isolated_main_js_sha256=E9388F0C46E4FB81C175EB2FAA98FA373E97649CFB51BD49926B5268D0936F82
+isolated_renderer_js_sha256=400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB
+isolated_package_json_sha256=1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
+npm_test=389/389 PASS
+web6_6_protocol_smoke=PASS
+web6_4_arbiter_smoke=PASS
+standard_package=LOCKED_WITH_EVIDENCE
+review_package_sha256=71499A4079908B933B162C8EAF49A7A347C75924A643F0A860B6D9A27717207A
+final_manifest_sha256=89E29CE25D63656284C2B86030D4AA169FE0E93BCA0A42EE0265D89AB9505335
+legacy_project=D:\办公\AI\Codex_Workbench read-only; original dirty baseline preserved
+auto_agent=D:\办公\AI\Auto_Agent read-only; clean

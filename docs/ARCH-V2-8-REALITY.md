@@ -1,103 +1,73 @@
-# ARCH-V2-8 Reality
+# ARCH-V2-8 Reality — Final Manifest Reconciliation
 
-## 状态
+## Current state
 
-- 阶段：ARCH-V2-8 — Capability / Frozen Confirmation / Compatibility Regression / Final Architecture Freeze
-- 当前状态：READY_FOR_GPT_FINAL_REVIEW
-- 本文不是 FINAL_FROZEN 声明。
-- 工作仓库：D:\办公\AI\Codex_Workbench_V1
-- 审计基线 HEAD：17f7c9bd096ec6aad94b8106af2a11157d25ec82
-- 本阶段 real_business_prompts：0
-- 本阶段 new_business_chats：0
-- AUT-2 / AUT-3 / AUT-4+：未启动
+```yaml
+stage: ARCH-V2-8
+technicalGate: FAIL_WITH_EVIDENCE
+status: GPT_REVIEW_REQUIRED_WITH_BLOCKERS
+finalFrozen: false
+implementationHead: 926440739ef3ca4a35a41f9d8b6537b31ac66d25
+repositoryHeadAtRound2Start: 41467ceff78f7e59365233f4472c3e72d1355596
+round1ReviewCommit: 41467ceff78f7e59365233f4472c3e72d1355596
+v1FrozenCoreChanged: false
+real_business_prompts: 0
+new_business_chats: 0
+AUT-2: PAUSED
+AUT-3: PAUSED
+```
 
-## 真实版本与协议事实
+`implementationHead` 是本轮已审查的最后产品实现提交。ROUND 2 只重建文档、Manifest 和审查包，不改变产品代码。用户最终确认前不写 `FINAL_FROZEN`，也不将 `finalFrozen` 写为 `true`。
 
-### CLI 版本
+## Version and provenance facts
 
-codex --version 返回：
+- `codex --version`: `codex-cli 0.147.0`。
+- Resolver verified binary SHA-256：`935A1911ED5564FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D`。
+- 生产路径顺序：resolver-selected binary → provenance/hash → `initialize` → protocol/version/capability validation → READY。
+- 曾观察到的 `Codex Desktop/0.148.0-alpha.9` 不在 0.147.0 verified allowlist 内，状态为 `UNSUPPORTED`，生产路径 fail-closed；本轮没有放宽 allowlist。
+- 生成协议 schema 的摘要仍只保存 hash，不打包 Cookie、Token、profile 或私人页面内容。
 
-codex-cli 0.147.0
+## Capability reality
 
-### App Server 初始化事实
+当前真实可声明的能力分类见 `ARCH-V2-8-CAPABILITY-MATRIX.md`。Round 2 独立审计发现 5 个当前 P1：严格 protocolVersion/requested experimentalApi 门禁未闭合、两个生产 App Server 直连路径绕过共享 initialize 校验、legacy Control Plane 路径绕过 per-command capability、Recovery Provider Port 没有生产 side-effect bridge/recover wiring、生产 migration identity 覆盖与断言不完整。因此当前 Gate 必须是 `FAIL_WITH_EVIDENCE`，不能写成最终 Freeze；未执行真实业务 Thread/Turn 的能力仍保持 `TEST_ONLY` 或 `PAUSED_NOT_EXECUTABLE`。
 
-使用当前实际 Codex 二进制启动 stdio App Server，仅发送 initialize，不创建 Thread、不发送 Turn、不执行业务 Prompt。返回的脱敏事实为：
+## Package facts
 
-~~~json
-{
-  "userAgent": "Codex Desktop/0.148.0-alpha.9 (Windows 10.0.19045; x86_64) dumb (arch-v2-8-read-only; 1.0.0)",
-  "platformFamily": "windows",
-  "platformOs": "windows",
-  "codexHomePresent": true
-}
-~~~
+- 标准 `dist/package` 覆盖仍被用户正在运行的 EXE 文件锁阻塞，记录为 `LOCKED_WITH_EVIDENCE`，没有强杀进程。
+- 本轮现场 `npm run build` 同样在清理标准 `dist/package` 资源时收到 `EPERM`，因此最终状态为 `LOCKED_WITH_EVIDENCE`；isolated package 已通过，未把锁定误报成编译失败或产品缺陷。
+- 隔离 package：`D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-8-fix-round-1\package`，其 GUI 外壳 hash 与标准外壳一致。
+- GUI outer SHA-256：`31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC`。
+- isolated `main.js`：`E9388F0C46E4FB81C175EB2FAA98FA373E97649CFB51BD49926B5268D0936F82`。
+- `renderer.js`：`400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB`。
+- `package.json`：`1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F`。
 
-实际二进制 SHA-256：
+## Smoke facts
 
-F29F609375F3731D8DB507A95124862A84E306982E30BA4300DDCE5638BC6946
+- WEB-6.6 protocol smoke：PASS；initialize/status、version mismatch 和 unsupported capability 均按预期返回；fresh unauthenticated page 的 `webgpt` 为 `UNAVAILABLE`，符合 fail-closed。
+- WEB-6.4 arbiter smoke：PASS；capacity=1、并发仲裁、`USER_CONTROL` 和释放回 `FREE` 均成立。
+- `real_business_prompts=0`、`new_business_chats=0`；本轮不创建业务 Chat、不发送业务 Prompt。
+- 原始 WEB-6.6/WEB-6.4 smoke JSON 属于既有 dirty 删除状态，本轮不擅自恢复；审查包包含摘要、脚本边界和 hash 证据，不声称 raw JSON 自包含重放。
 
-结论：initialize 数据结构可观察且返回成功，但当前 CLI 版本 0.147.0 与实际 App Server userAgent 的 0.148.0-alpha.9 不一致。Workbench 当前 verified allowlist 仍是 0.147.0。本阶段不擅自放宽版本白名单，作为兼容性 Gate 证据提交 GPT。
+## Resolved historical findings
 
-## 协议 Schema 事实
+ROUND 1 的 P0/P1 blocker 集合中，已被当前实现关闭的历史项（idle isolation、activeSummary live lease、Recovery Intent reattach/reconcile、migration fallback、stable identity/policy pin）只在历史证据中保留，并标记为 `HISTORICAL_RESOLVED`。Round 2 审计重新发现的生产门禁/桥接/迁移覆盖问题不属于该历史集合，计入当前 P1。
 
-当前实际命令生成 JSON Schema 成功：
+## Current P1 findings — FAIL_WITH_EVIDENCE
 
-- codex app-server generate-json-schema --experimental --out <temporary-dir>：PASS
-- 生成文件数：361
-- codex_app_server_protocol.schemas.json：BABFD5C98CD978DD858B4762CDFBC9FBA941E1A0E4053DE0050E4082AE1F075A
-- codex_app_server_protocol.v2.schemas.json：FF10829CD75B67297019B39AB508AC699198574663579AA18336B7DC55EA178F
-- Schema 中可见 initialize、thread/read、turn/start 与 capabilities 定义。
+| ID | Finding | Evidence boundary |
+|---|---|---|
+| P1-01 | strict `protocolVersion` 与 requested `experimentalApi` enforcement 不完整 | initialize 允许缺失且未按期望值严格比较；requested capability 未形成统一生产拒绝门禁 |
+| P1-02 | production `map-coordinator` / `project-map-manager` App Server 路径绕过 shared initialize validator | 两处 raw initialize bypass `validateInitializeResult` |
+| P1-03 | legacy Control Plane path 绕过 per-command capability enforcement | modern path 有 gate，legacy compatibility path 可进入 handler |
+| P1-04 | Recovery Provider Port production side-effect bridge/recover wiring 缺失 | Port/resolve ref 存在，但 production 未构造 `WebGptExternalActionBridge` 并执行 submit/recover |
+| P1-05 | production migration identity coverage/assertion incomplete | migration contract 未覆盖 alignment sessions/rounds/questions/assumptions/change requests，调用点未执行 identity assertion |
 
-## Workbench 代码边界
+这些问题本轮只记录证据并提交 GPT，不能自行修复或将其降级为 P2。普通 startup 的 `app_ready` logger 边界由审计提出，但在当前“无 Automation/WebGPT/SQLite side effect”范围下不计为新增 P0，交 GPT 定义边界。
 
-- App Server 由 src/codex/app-server-client.ts 以 app-server --stdio 启动。
-- JSON-RPC 采用 line-delimited JSON；请求为 JSON-RPC 2.0。
-- src/codex/app-server-capabilities.ts 当前 verified version 为 0.147.0。
-- 必需方法 allowlist：initialize、thread/start、thread/read、thread/resume、turn/start、turn/interrupt。
-- 必需通知 allowlist：thread/started、turn/started、turn/completed、item/started、item/completed。
-- src/codex/app-server-protocol-contract.ts 保留稳定协议契约和生成证据，不承担第二套消息事实。
+## Current deferred debt
 
-## 当前 package 事实
+仍保留 3 个结构化 P2，见 `ARCH-V2-8-DEFERRED-DEBT.md`；它们均非阻塞，但不能抵消上述 P1。当前 `P0=0`、`P1=5`、`P2=3`。
 
-本阶段执行 npm run build 和 npm run package:win 均 PASS。当前标准包：
+## Safety boundary
 
-D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
-
-当前 SHA-256：
-
-31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
-
-Packaged app resource hashes：
-
-- resources/app/dist/main/main.js：EFC89E08CBBF973B8DCF59D594174515A2F2BA07AD69833FFE103345C869DA84
-- resources/app/dist/renderer/renderer.js：400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB
-- resources/app/package.json：1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
-
-以上是本次实际 package 产物的 provenance，不把历史报告中其他资源哈希当作当前产物。
-
-## 真实 smoke 限制与异常
-
-已有隔离 packaged protocol smoke 的官方 CLI status 结果：
-
-~~~json
-{
-  "ok": false,
-  "command": "webgpt.status",
-  "diagnostics": {
-    "elapsedMs": 15070,
-    "protocolVersion": "1.0",
-    "compatibilityMode": "MODERN",
-    "clientType": "OFFICIAL_CLI"
-  },
-  "error": {
-    "code": "TIMEOUT",
-    "retryable": true
-  }
-}
-~~~
-
-这是真实的有界 timeout 证据；不是把 timeout 泛化为网络失败，也不是本阶段擅自修改 Control Plane。直接 App Server initialize smoke 是 PASS，但它不能证明 thread/turn 的完整真实闭环。
-
-## 安全边界
-
-本阶段未读取 Cookie、Token、localStorage、浏览器 profile、生产数据库或私人 ChatGPT 内容；未创建业务 Chat；未发送真实业务 Prompt。临时 schema 和 smoke 输出位于用户临时目录，不作为产品源码或审查 ZIP 的原始日志打包。
+没有读取 Cookie、Token、localStorage、浏览器 profile、生产数据库或私人 ChatGPT 内容；没有进入 AUT-2/AUT-3；没有创建替代 Conversation truth、Transcript truth、Task truth 或隐藏 Thread。

@@ -1,0 +1,30 @@
+ARCH-V2-8 ROUND 2 review package contents
+
+Current review result: FAIL_WITH_EVIDENCE; P0=0; P1=5 blocking; P2=3 non-blocking.
+The package is for GPT review and does not assert final freeze.
+
+This archive contains the sanitized final-manifest review documents and the
+generated protocol schema summary. It intentionally excludes cookies, tokens,
+browser profiles, passwords, private ChatGPT content, raw business Prompts,
+and the locked standard executable.
+
+Included final artifacts:
+docs/ARCH-V2-8-REALITY.md
+docs/ARCH-V2-8-CAPABILITY-MATRIX.md
+docs/ARCH-V2-8-FROZEN-CONTRACT-CHECK.md
+docs/ARCH-V2-8-COMPATIBILITY-REGRESSION.md
+docs/ARCH-V2-8-DEFERRED-DEBT.md
+docs/ARCHITECTURE-BASELINE-V2-FINAL.md
+docs/ARCH-V2-8-FINAL-FREEZE-MANIFEST.json
+docs/ARCH-V2-8-STAGE-REVIEW.md
+docs/ARCH-V2-8-TEST-SUMMARY.md
+docs/ARCH-V2-8-SOURCE-EVIDENCE-INDEX.md
+docs/ARCH-V2-8-EVIDENCE.json
+docs/ARCH-V2-8-SUBAGENT-SUMMARIES.md
+docs/ARCH-V2-8-REVIEW-PACKAGE-CONTENTS.txt
+dist-stage-arch-v2-8-fix-round-1/contracts/control-plane.schema.json
+
+The archive SHA-256 is recorded in the external sidecar:
+dist/review/ARCH-V2-8-REVIEW-PACKAGE.sha256
+The final manifest SHA-256 and package SHA-256 are also recorded in:
+docs/ARCH-V2-8-PROVENANCE.txt

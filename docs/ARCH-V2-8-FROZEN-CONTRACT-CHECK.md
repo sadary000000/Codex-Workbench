@@ -1,8 +1,15 @@
-# ARCH-V2-8 Frozen Contract Check
+# ARCH-V2-8 Frozen Contract Check — Reconciled
 
-## 结论范围
-
-本检查确认 ARCH-V2-7 之后的架构不变量是否仍被当前源码、测试和 package provenance 支持。它不是把所有 real runtime 证据自动升级为 PASS。
+```yaml
+technicalGate: FAIL_WITH_EVIDENCE
+finalFrozen: false
+implementationHead: 926440739ef3ca4a35a41f9d8b6537b31ac66d25
+repositoryHeadAtRound2Start: 41467ceff78f7e59365233f4472c3e72d1355596
+v1FrozenCoreChanged: false
+P0: 0
+P1: 5
+P2: 3
+```
 
 ## Truth ownership
 
@@ -10,13 +17,12 @@
 |---|---|---|---|
 | Native Thread identity | Codex App Server / Native Runtime | projection/binding | PASS |
 | Native Turn / Native Item | Native Runtime | UI projection | PASS |
-| App Server runtime lifecycle | Codex App Server | adapter/client | PASS_WITH_LIMITATION |
-| V1 project/thread/composer/recovery metadata | V1PersistenceStore | minimal persistence/recovery | PASS |
-| Automation entities | AutomationStore / SQLite | explicit domain boundary | PASS |
+| App Server lifecycle | Codex App Server | adapter/client with readiness gate | PASS |
+| V1 project/thread/composer/recovery metadata | V1 persistence boundary | minimal persistence/recovery | PASS |
 | WebGPT request facts | provider-local Request Journal | request/recovery facts only | PASS |
 | WebGPT Project/Role binding | provider-local registries | provider boundary | PASS |
-| UI transcript reconstruction | no independent store | forbidden second truth | PASS |
-| Workflow/task/agent lifecycle | no V1 replacement | out of scope for this stage | PASS |
+| UI transcript | Native items + projection | no independent truth | PASS |
+| Workflow/task/agent lifecycle | out of frozen V1 boundary | no replacement truth | PASS |
 
 ## Contract assertions
 
@@ -25,12 +31,19 @@
 - 不以 Request Journal 重建 Workflow truth：PASS。
 - 不以当前浏览器页面代替 Project/Role binding：PASS。
 - 不静默替换 Native Thread identity：PASS。
-- PromptRecovery 持久化为 hash/length/ref 边界，不以 raw Prompt 作为 canonical recovery truth：PASS。
-- Migration/query/read 与显式 write boundary 分离：PASS_WITH_LIMITATION，V2-7 isolated harness 已覆盖，完整生产 rebuild command 仍是 debt。
-- ARCH-V2-8 未修改 V1 Frozen Core：PASS，当前阶段只新增审查文档/审查包。
+- Recovery 只使用 correlation/identity/policy 边界，不以 raw Prompt 作为 canonical truth：PASS。
+- migration fallback 在候选无效时 fail-closed，不能 fallback latest：PASS。
+- production App Server 路径不允许未经 initialize/provenance 的 ready：FAIL_WITH_EVIDENCE；map/project-map raw paths 绕过 shared validator。
+- strict protocolVersion/requested experimentalApi enforcement：FAIL_WITH_EVIDENCE。
+- legacy Control Plane per-command capability enforcement：FAIL_WITH_EVIDENCE。
+- Recovery Provider Port production side-effect bridge/recover：FAIL_WITH_EVIDENCE。
+- production migration identity coverage/assertion：FAIL_WITH_EVIDENCE。
+- 本轮产品代码未被 ROUND 2 修改：PASS。
 
-## Compatibility exceptions requiring GPT decision
+## Historical resolution
 
-1. Installed App Server userAgent is Codex Desktop 0.148.0-alpha.9 while Workbench verified allowlist is 0.147.0.
-2. Packaged official CLI status smoke returned a bounded TIMEOUT.
-3. These exceptions are evidence, not silently accepted limitations; no source fix is included in ARCH-V2-8.
+ROUND 1 的 blocker findings 标记为 `HISTORICAL_RESOLVED`，当前不再计入 blocker。最终人工确认前只允许 `finalFrozen=false`。
+
+## Deferred contract impact
+
+5 个 P1 是当前阻塞项；三个 P2 仍均 `blocking=false`、`frozen_contract_impact=NONE`，详见 `ARCH-V2-8-DEFERRED-DEBT.md`。当前最终冻结保持 `finalFrozen=false`。

@@ -1,54 +1,61 @@
 {
   "stage": "ARCH-V2-8",
-  "status": "READY_FOR_GPT_FINAL_REVIEW",
-  "scope": "read-only capability, frozen-contract, compatibility and provenance review",
-  "realBusinessPrompts": 0,
-  "newBusinessChats": 0,
-  "sourceCodeChangedByStage": false,
-  "baseline": {
-    "head": "17f7c9bd096ec6aad94b8106af2a11157d25ec82",
-    "archV2_7Implementation": "a17d65e3be8e4ea5a7e16d11671dd055171849c0",
-    "reviewCommit": "260812a963751b11aaf1ff28a36b960edea4b9d9"
+  "result": "GPT_REVIEW_REQUIRED_WITH_BLOCKERS",
+  "technicalGate": "FAIL_WITH_EVIDENCE",
+  "finalFrozen": false,
+  "implementationHead": "926440739ef3ca4a35a41f9d8b6537b31ac66d25",
+  "repositoryHeadAtRound2Start": "41467ceff78f7e59365233f4472c3e72d1355596",
+  "round1ReviewCommit": "41467ceff78f7e59365233f4472c3e72d1355596",
+  "v1FrozenCoreChanged": false,
+  "currentFindings": {
+    "P0": 0,
+    "P1": 5,
+    "P2": 3,
+    "p1Items": [
+      { "id": "P1-01", "severity": "P1", "blocking": true, "title": "Strict protocolVersion and requested experimentalApi enforcement incomplete" },
+      { "id": "P1-02", "severity": "P1", "blocking": true, "title": "Production map/project-map App Server paths bypass shared initialize validator" },
+      { "id": "P1-03", "severity": "P1", "blocking": true, "title": "Legacy Control Plane path bypasses per-command capability enforcement" },
+      { "id": "P1-04", "severity": "P1", "blocking": true, "title": "Recovery Provider Port production side-effect bridge/recover wiring missing" },
+      { "id": "P1-05", "severity": "P1", "blocking": true, "title": "Production migration identity coverage/assertion incomplete" }
+    ],
+    "p2Items": [
+      { "id": "P2-01", "severity": "P2", "blocking": false, "frozen_contract_impact": "NONE", "title": "No complete user-facing production projection rebuild command" },
+      { "id": "P2-02", "severity": "P2", "blocking": false, "frozen_contract_impact": "NONE", "title": "No user-facing migration command" },
+      { "id": "P2-03", "severity": "P2", "blocking": false, "frozen_contract_impact": "NONE", "title": "Legacy URL-shaped seam is TEST_ONLY / LEGACY_READ_ONLY" }
+    ]
+  },
+  "resolvedHistoricalFindings": "HISTORICAL_RESOLVED",
+  "real_business_prompts": 0,
+  "new_business_chats": 0,
+  "tests": {
+    "npmRunCheck": "PASS",
+    "npmTest": "389/389 PASS",
+    "npmRunBuild": "LOCKED_WITH_EVIDENCE",
+    "isolatedPackage": "PASS",
+    "standardPackage": "LOCKED_WITH_EVIDENCE",
+    "npmAuditOmitDev": "PASS: 0 vulnerabilities",
+    "gitDiffCheck": "PASS",
+    "secretScan": "PASS",
+    "finalDocConsistency": "PASS"
   },
   "capability": {
-    "codexCli": "codex-cli 0.147.0",
-    "directInitialize": "PASS",
-    "schemaGeneration": "PASS",
-    "observedDesktopAppServer": "Codex Desktop/0.148.0-alpha.9",
-    "versionCompatibility": "FAIL_WITH_EVIDENCE",
-    "officialCliStatus": "FAIL_WITH_EVIDENCE: TIMEOUT after 15070ms",
-    "businessThreadTurn": "NOT_TESTED_BY_SCOPE"
+    "resolver": "SUPPORTED",
+    "appServerProductionGate": "SUPPORTED_WITH_COMPATIBILITY_PATH",
+    "strictProtocolCapabilityEnforcement": "UNSUPPORTED",
+    "allProductionAppServerPaths": "UNSUPPORTED",
+    "controlPlaneCapabilityGate": "SUPPORTED_WITH_COMPATIBILITY_PATH",
+    "recoveryProductionSideEffectPath": "UNSUPPORTED",
+    "migrationIdentityProductionAssertion": "UNSUPPORTED",
+    "observedDesktop01480Alpha9": "UNSUPPORTED",
+    "webgptStatus": "SUPPORTED",
+    "businessThreadTurn": "TEST_ONLY"
   },
-  "regression": {
-    "npmTest": "377/377 PASS",
-    "archV2_7Targeted": "30/30 PASS",
-    "archV2_1_to_6Selected": "64/64 PASS",
-    "independentGroupedAssertions": 584,
-    "check": "PASS",
-    "build": "PASS",
-    "packageWin": "PASS",
-    "audit": "PASS: 0 vulnerabilities",
-    "secretScan": "PASS"
+  "smokes": {
+    "WEB-6.6 protocol": "PASS",
+    "WEB-6.4 arbiter": "PASS",
+    "rawJsonReplay": "NOT_SELF_CONTAINED_BY_SCOPE: pre-existing dirty deletion preserved"
   },
-  "subagents": {
-    "A": "completed and adopted",
-    "B": "completed and adopted as challenge evidence",
-    "C": "completed and adopted as regression evidence",
-    "D": "completed and adopted as challenge evidence",
-    "E": "completed after rerun and adopted",
-    "runningAtGate": 0
-  },
-  "challengeSeverity": {
-    "p0": 1,
-    "p1": 6,
-    "p2": 2
-  },
-  "package": {
-    "outerExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
-    "mainJsSha256": "EFC89E08CBBF973B8DCF59D594174515A2F2BA07AD69833FFE103345C869DA84",
-    "rendererJsSha256": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
-    "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F"
-  },
-  "finalFrozen": false,
-  "gptDecisionRequired": true
+  "subagents": { "A": "completed", "B": "completed", "C": "completed", "D": "completed", "E": "completed", "running": 0 },
+  "reviewPackageHashSidecar": "dist/review/ARCH-V2-8-REVIEW-PACKAGE.sha256",
+  "manifestHashSidecar": "docs/ARCH-V2-8-PROVENANCE.txt"
 }
