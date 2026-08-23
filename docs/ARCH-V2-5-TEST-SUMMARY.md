@@ -40,3 +40,29 @@ No real business Prompt was sent. The WEB-6.6 smoke completed with:
 - VERSION_MISMATCH fixture PASS;
 - CAPABILITY_NOT_SUPPORTED fixture PASS;
 - status subprocess launch caveat exitCode 2147483651, disclosed rather than hidden.
+
+## FIX ROUND 2 final verification
+
+```yaml
+npm_run_check: PASS
+npm_test: 336/336 PASS
+arch_v2_4_arch_v2_5_control_plane_targeted: 10/10 PASS
+isolated_build: PASS
+isolated_package: PASS
+npm_audit_omit_dev: 0 vulnerabilities
+git_diff_check: PASS
+secret_scan: PASS
+web6_6_packaged_status: PASS
+web6_6_official_cli_runtime_status: PASS
+version_mismatch: PASS
+unsupported_capability: PASS
+real_business_prompts: 0
+```
+
+最终 status evidence 使用隔离 packaged GUI host 和同一临时 userData 的
+`Codex Workbench CLI Runtime.exe --workbench-official-cli`，不是启动第二个 GUI
+EXE。直接 Control Plane 与 official CLI Runtime 都返回 `ok=true`、
+`command=webgpt.status`、Workbench `READY`、WebGPT `UNAVAILABLE`。
+
+历史 staging 测试目录保持原状；修复的是默认 test discovery 边界，不是删除该
+目录来掩盖失败。

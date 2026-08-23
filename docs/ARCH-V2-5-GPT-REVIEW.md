@@ -31,3 +31,24 @@
 - ARCH-V2-5-RESERVATION-LIFECYCLE.md
 
 当前状态为 READY_FOR_GPT_REVIEW，不是本地自宣称 PASS。
+
+## FIX ROUND 2 submission
+
+最新 GPT Gate：`FIX_REQUIRED`，P0=0、P1=2、P2=1。P1 要求是：
+
+1. 默认 `npm test` 不得收集历史 review staging 测试副本；
+2. packaged WEB-6.6 `webgpt.status` 必须有真实启动/readiness/CLI 证据和
+   有界确定性 JSON。
+
+本轮已按最小范围修复并复测：`npm test` 为 336/336；隔离 packaged Workbench
+保持运行并通过同一 Control Plane 完成 `initialize -> webgpt.status`，随后用
+打包内 CLI Runtime 的 official CLI ABI 对同一 descriptor 再读一次 status，均为
+`exitCode=0`、`ok=true`。完整结果见 `ARCH-V2-5-FIX-ROUND-2.md`。
+
+```yaml
+fix_round_2_commit: 40b79cb
+new_real_prompts: 0
+v1_core_changed: NO
+aut2_aut3_activated: NO
+next_action: USER_SUBMIT_REVIEW_TO_GPT
+```

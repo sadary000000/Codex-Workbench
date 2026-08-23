@@ -102,3 +102,32 @@ This addendum records the closure implemented in 880e3ee.
 Current local result is READY_FOR_GPT_REVIEW. Full evidence is in
 ARCH-V2-5-FIX-ROUND-1.md and the supporting inventory, lifecycle, regression,
 test-summary, subagent and sanitized JSON evidence files.
+
+## FIX ROUND 2 Addendum
+
+GPT's next review returned `FIX_REQUIRED` with P0=0, P1=2 and P2=1. This round
+closed the two P1 findings without changing the policy architecture:
+
+- `package.json` now limits `npm test` and `npm run test:unit` to the formal
+  `tests/**/*.test.ts` tree. The historical `dist-stage-arch-v2-5/review-staging`
+  copy was not removed or modified.
+- `src/main/main.ts` now keeps normal packaged startup alive after policy
+  initialization. The explicit `AUT2_NORMAL_GUI_STORE_SMOKE=1` branch retains the
+  one-shot smoke behavior; it no longer runs on normal startup.
+- The WEB-6.6 smoke waits for the packaged descriptor, verifies packaged direct
+  `initialize -> webgpt.status`, and verifies the packaged official CLI Runtime
+  against the same isolated userData. Both return bounded deterministic JSON.
+
+Final round evidence is in `ARCH-V2-5-FIX-ROUND-2.md` and
+`dist-stage-arch-v2-5-fix-round-2/review/WEBGPT-WEB6.6-REAL-GATE.json`.
+
+```yaml
+fix_round_2_implementation_commit: 40b79cb
+npm_test: 336/336
+packaged_status: PASS
+official_cli_runtime_status: PASS
+new_real_prompts: 0
+v1_core_changed: NO
+aut2_aut3_activated: NO
+gate: READY_FOR_GPT_REVIEW
+```

@@ -139,8 +139,10 @@ async function startAutomationPersistence(): Promise<void> {
   const store = new AutomationStore(automationDatabasePath());
   await store.persistenceDiagnostics();
   automationStore = store;
-  if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE === "1") return;
-  webGptPolicyAuthority = await ensureWebGptRuntimePolicy(store);
+  if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE !== "1") {
+    webGptPolicyAuthority = await ensureWebGptRuntimePolicy(store);
+    return;
+  }
 
   const projectId = "aut2-normal-gui-project";
   const existing = await store.get("automationProjects", projectId);
