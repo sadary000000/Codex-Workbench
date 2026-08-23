@@ -1,8 +1,9 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createConnection } from "node:net";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { spawn, type ChildProcess } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -14,11 +15,14 @@ import {
 
 const execFile = promisify(execFileCallback);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const cli = process.env.WEBGPT_CLI_EXECUTABLE?.trim() || join(root, "dist", "package", "Codex Workbench CLI.exe");
-const appData = process.env.APPDATA?.trim() || join(homedir(), "AppData", "Roaming");
-const userData = process.env.WEBGPT_USER_DATA?.trim() || join(appData, "codex-workbench-v1");
+const compiledRoot = resolve(process.env.CODEX_WORKBENCH_DIST?.trim() || join(root, "dist"));
+const cli = process.env.WEBGPT_CLI_EXECUTABLE?.trim() || process.env.WEBGPT_EXECUTABLE?.trim() || join(root, "dist", "package", "Codex Workbench V1.exe");
+const ownsUserData = !process.env.WEBGPT_USER_DATA?.trim();
+const userData = process.env.WEBGPT_USER_DATA?.trim() || await mkdtemp(join(tmpdir(), "codex-workbench-web6-6-"));
 const descriptorPath = join(userData, "webgpt", "control-plane.json");
 const evidencePath = process.env.WEBGPT_WEB6_6_EVIDENCE_PATH?.trim() || join(root, "dist", "review", "WEBGPT-WEB6.6-REAL-GATE.json");
+let ownedWorkbench: ChildProcess | null = null;
+let ownedWorkbenchExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
 
 interface SafeInvocation {
   args: string[];
@@ -72,7 +76,7 @@ function safeResponse(value: Record<string, unknown> | null): Record<string, unk
 async function runCli(args: string[]): Promise<SafeInvocation> {
   const started = Date.now();
   try {
-    const output = await execFile(cli, ["webgpt", ...args, "--json"], { cwd: root, windowsHide: true, timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
+    const output = await execFile(cli, ["--disable-gpu", `--user-data-dir=${userData}`, "webgpt", ...args, "--json"], { cwd: root, windowsHide: true, timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
     return { args, exitCode: 0, elapsedMs: Date.now() - started, stdoutBytes: Buffer.byteLength(output.stdout), stderrBytes: Buffer.byteLength(output.stderr), json: parseJson(output.stdout) };
   } catch (error) {
     const candidate = error as { code?: unknown; stdout?: string; stderr?: string };
@@ -83,6 +87,7 @@ async function runCli(args: string[]): Promise<SafeInvocation> {
 async function waitForDescriptor(timeoutMs = 60_000): Promise<Record<string, unknown>> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (ownedWorkbenchExit) throw new Error(`OWNED_WORKBENCH_EXITED_${ownedWorkbenchExit.code ?? ownedWorkbenchExit.signal ?? "UNKNOWN"}`);
     try {
       const raw = JSON.parse(await readFile(descriptorPath, "utf8")) as Record<string, unknown>;
       if (typeof raw.authToken === "string" && typeof raw.endpoint === "string") return raw;
@@ -92,6 +97,11 @@ async function waitForDescriptor(timeoutMs = 60_000): Promise<Record<string, unk
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
   }
   throw new Error("CONTROL_DESCRIPTOR_TIMEOUT");
+}
+
+async function stopOwnedWorkbench(): Promise<void> {
+  if (!ownedWorkbench?.pid) return;
+  try { await execFile("taskkill.exe", ["/PID", String(ownedWorkbench.pid), "/T", "/F"], { windowsHide: true, timeout: 15_000 }); } catch { /* owned host may already be gone */ }
 }
 
 function rawControl(endpoint: string, authToken: string, request: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -115,8 +125,13 @@ function rawControl(endpoint: string, authToken: string, request: Record<string,
 }
 
 async function main(): Promise<void> {
-  const status = await runCli(["status"]);
+  if (ownsUserData) {
+    ownedWorkbench = spawn(cli, ["--disable-gpu", `--user-data-dir=${userData}`], { cwd: root, windowsHide: true, stdio: "ignore", env: { ...process.env, WEBGPT_TEST_HOOKS: "0" } });
+    ownedWorkbench.on("error", () => undefined);
+    ownedWorkbench.on("exit", (code, signal) => { ownedWorkbenchExit = { code, signal }; });
+  }
   const descriptor = await waitForDescriptor();
+  const status = await runCli(["status"]);
   const clientInfo = { clientName: "WEB-6.6 real smoke", clientVersion: String(descriptor.workbenchVersion ?? "unknown"), clientType: "TEST" };
   const mismatch = await rawControl(String(descriptor.endpoint), String(descriptor.authToken), {
     version: CONTROL_PLANE_WIRE_VERSION,
@@ -135,7 +150,7 @@ async function main(): Promise<void> {
     clientInfo,
     requestedCapabilities: ["webgpt.unsupported.fixture"],
   });
-  const schemaPath = join(root, "dist", "contracts", "control-plane.schema.json");
+  const schemaPath = join(compiledRoot, "contracts", "control-plane.schema.json");
   const schema = JSON.parse(await readFile(schemaPath, "utf8")) as Record<string, unknown>;
   const schemaHash = createHash("sha256").update(await readFile(schemaPath)).digest("hex");
   const evidence = {
@@ -144,6 +159,7 @@ async function main(): Promise<void> {
     newRealPrompts: 0,
     commands: ["webgpt status --json", "initialize mismatch fixture", "initialize unsupported capability fixture"],
     status: { ...status, json: safeResponse(status.json) },
+    startup: { userDataIsolated: ownsUserData, descriptorPath, descriptorReady: true, ownedWorkbenchPid: ownedWorkbench?.pid ?? null, ownedWorkbenchExit },
     descriptor: {
       version: descriptor.version ?? null,
       protocolVersion: descriptor.protocolVersion ?? null,
@@ -159,6 +175,7 @@ async function main(): Promise<void> {
   };
   await mkdir(join(root, "dist", "review"), { recursive: true });
   await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
+  await stopOwnedWorkbench();
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
 }
 

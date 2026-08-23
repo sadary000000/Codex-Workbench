@@ -724,6 +724,15 @@ export class WebGptWorkspace implements WebGptPublicService {
   }
 
   async getPageState(): Promise<WebGptPageState> {
+    // A Control Plane status request must remain bounded while the Browser
+    // view is still starting or navigating. Electron's executeJavaScript can
+    // remain pending on a not-yet-ready WebContentsView; probing in that
+    // window used to turn a harmless STARTING/UNAVAILABLE state into the
+    // caller's fixed Control Plane timeout. The navigation/load handlers will
+    // probe again after did-finish-load.
+    if (this.closed || this.view.webContents.isDestroyed() || !this.state.ready || this.view.webContents.isLoading()) {
+      return this.state.page;
+    }
     return this.refreshPageState();
   }
 
