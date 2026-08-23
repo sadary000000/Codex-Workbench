@@ -114,8 +114,9 @@ test("Project CLI operations have a bounded server deadline and cancel stale nav
   assert.match(workspace, /newChatActionStartAt/);
   assert.match(workspace, /newChatContextConfirmStartAt/);
   assert.match(control, /CONTROL_RESPONSE_TIMEOUT/);
-  assert.match(control, /process\.platform === "win32" \? "explorer\.exe" : executablePath/);
-  assert.match(control, /detached: false/);
+  assert.match(control, /const launchPath = executablePath/);
+  assert.match(control, /--webgpt-control/);
+  assert.match(control, /detached: true/);
   assert.doesNotMatch(control, /process\.env\.ComSpec \|\| "cmd\.exe"/);
   assert.doesNotMatch(control, /start "" \/b/);
   assert.match(control, /cliStartAt/);
