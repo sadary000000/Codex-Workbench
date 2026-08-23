@@ -145,7 +145,6 @@ export class WebGptProjectRegistry {
   private async ready(): Promise<void> { await this.loadPromise; }
 
   private async load(): Promise<void> {
-    await mkdir(this.storageDirectory, { recursive: true });
     let parsed: unknown;
     try { parsed = JSON.parse(await readFile(this.registryFile, "utf8")); }
     catch (error) {

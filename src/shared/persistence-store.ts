@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type {
@@ -146,6 +146,10 @@ function boundedString(value: unknown, max: number): string | null {
   return result && result.length <= max ? result : null;
 }
 
+function promptSha256(prompt: string): string {
+  return createHash("sha256").update(prompt, "utf8").digest("hex");
+}
+
 function optionalString(value: unknown, max: number): string | null | undefined {
   if (value === null) return null;
   if (value === undefined) return undefined;
@@ -271,7 +275,14 @@ function normalizePrompt(value: unknown): PromptRecoveryRecord | null {
   const localRunId = boundedString(candidate.localRunId, MAX_ID_LENGTH);
   const nativeThreadId = boundedString(candidate.nativeThreadId, MAX_ID_LENGTH);
   const turnId = candidate.turnId === null ? null : boundedString(candidate.turnId, MAX_ID_LENGTH);
-  const prompt = boundedString(candidate.prompt, MAX_PROMPT_LENGTH);
+  const legacyPrompt = boundedString(candidate.prompt, MAX_PROMPT_LENGTH);
+  const promptSha256Value = boundedString(candidate.promptSha256, 64) ?? (legacyPrompt ? promptSha256(legacyPrompt) : null);
+  const promptLength = Number.isSafeInteger(candidate.promptLength)
+    ? Number(candidate.promptLength)
+    : legacyPrompt?.length ?? null;
+  const promptRef = candidate.promptRef === null || candidate.promptRef === undefined
+    ? null
+    : boundedString(candidate.promptRef, MAX_ID_LENGTH);
   const status = candidate.status;
   const createdAt = timestamp(candidate.createdAt);
   const updatedAt = timestamp(candidate.updatedAt);
@@ -280,7 +291,12 @@ function normalizePrompt(value: unknown): PromptRecoveryRecord | null {
     !localRunId ||
     !nativeThreadId ||
     (candidate.turnId !== null && !turnId) ||
-    !prompt ||
+    !promptSha256Value ||
+    promptSha256Value.length !== 64 ||
+    promptLength === null ||
+    promptLength < 1 ||
+    promptLength > MAX_PROMPT_LENGTH ||
+    (candidate.promptRef !== undefined && candidate.promptRef !== null && !promptRef) ||
     !PROMPT_STATES.has(status as PromptRecoveryStatus) ||
     !createdAt ||
     !updatedAt ||
@@ -290,7 +306,9 @@ function normalizePrompt(value: unknown): PromptRecoveryRecord | null {
     localRunId,
     nativeThreadId,
     turnId: turnId ?? null,
-    prompt,
+    promptSha256: promptSha256Value,
+    promptLength,
+    promptRef,
     status: status as PromptRecoveryStatus,
     createdAt,
     updatedAt,
@@ -433,6 +451,8 @@ export class V1PersistenceStore {
   private readonly filePath: string;
   private readonly now: () => string;
   private mutationQueue: Promise<void> = Promise.resolve();
+  /** Raw prompt compatibility is process-local and deliberately not persisted. */
+  private readonly transientPrompts = new Map<string, string>();
 
   constructor(filePath: string, now: () => string = () => new Date().toISOString()) {
     if (!filePath?.trim()) throw new Error("Persistence file path is required.");
@@ -729,7 +749,8 @@ export class V1PersistenceStore {
     }
     const document = await this.read();
     return clone(document.prompts.filter((prompt) =>
-      (id === undefined || prompt.nativeThreadId === id) && prompt.status !== "interrupted"));
+      (id === undefined || prompt.nativeThreadId === id) && prompt.status !== "interrupted")
+      .map((prompt) => this.withTransientPrompt(prompt)));
   }
 
   async beginPrompt(input: BeginPromptInput): Promise<PromptRecoveryRecord> {
@@ -752,11 +773,15 @@ export class V1PersistenceStore {
         nativeThreadId,
         turnId: null,
         prompt,
+        promptSha256: promptSha256(prompt),
+        promptLength: prompt.length,
+        promptRef: null,
         status: "pending",
         createdAt: now,
         updatedAt: now,
         lastError: null,
       };
+      this.transientPrompts.set(localRunId, prompt);
       document.prompts.push(recovery);
       return clone(recovery);
     });
@@ -782,7 +807,7 @@ export class V1PersistenceStore {
       if (turnId !== undefined) prompt.turnId = turnId ?? null;
       if (lastError !== undefined) prompt.lastError = lastError ?? null;
       prompt.updatedAt = this.now();
-      return clone(prompt);
+      return this.withTransientPrompt(clone(prompt));
     });
   }
 
@@ -793,6 +818,7 @@ export class V1PersistenceStore {
       const index = document.prompts.findIndex((prompt) => prompt.localRunId === id);
       if (index < 0) throw new PersistenceStoreError("PROMPT_NOT_FOUND", "Prompt recovery record does not exist.", this.filePath);
       document.prompts.splice(index, 1);
+      this.transientPrompts.delete(id);
       return undefined;
     });
   }
@@ -814,7 +840,7 @@ export class V1PersistenceStore {
         prompt.status = status;
         prompt.lastError = normalizedLastError;
         prompt.updatedAt = now;
-        return clone(prompt);
+        return this.withTransientPrompt(clone(prompt));
       });
       return updated;
     });
@@ -836,6 +862,11 @@ export class V1PersistenceStore {
     });
     this.mutationQueue = run.then(() => undefined, () => undefined);
     return run;
+  }
+
+  private withTransientPrompt(prompt: PromptRecoveryRecord): PromptRecoveryRecord {
+    const value = this.transientPrompts.get(prompt.localRunId);
+    return value === undefined ? prompt : { ...prompt, prompt: value };
   }
 
   private async write(document: WorkbenchPersistenceDocument): Promise<void> {

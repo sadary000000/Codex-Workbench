@@ -246,11 +246,18 @@ test("WebGPT Request Manager marks unfinished persisted work indeterminate after
     error: null,
   };
   try {
-    await writeFile(join(directory, "requests.json"), JSON.stringify({ version: 1, requests: [record] }), "utf8");
+    const original = JSON.stringify({ version: 1, requests: [record] });
+    await writeFile(join(directory, "requests.json"), original, "utf8");
     const manager = new WebGptRequestManager({ workspace: new FakeWorkspace() as never, storageDirectory: directory });
     const result = await manager.getResult("wgpt-restart");
     assert.equal(result.state, "RECOVERY_REQUIRED");
     assert.equal(result.error?.code, "WORKBENCH_RESTARTED");
+    assert.equal(await readFile(join(directory, "requests.json"), "utf8"), original);
+    await manager.migrate();
+    const migrated = JSON.parse(await readFile(join(directory, "requests.json"), "utf8")) as { version: number; requests: Array<{ requestId: string; idempotencyKey: string }> };
+    assert.equal(migrated.version, 2);
+    assert.equal(migrated.requests[0]?.requestId, record.requestId);
+    assert.equal(migrated.requests[0]?.idempotencyKey, record.idempotencyKey);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

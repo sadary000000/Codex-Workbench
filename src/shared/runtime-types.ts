@@ -95,7 +95,11 @@ export interface PromptRecoveryRecord {
   localRunId: string;
   nativeThreadId: string;
   turnId: string | null;
-  prompt: string;
+  /** Compatibility-only in-memory value; never part of the canonical JSON document. */
+  prompt?: string;
+  promptSha256: string;
+  promptLength: number;
+  promptRef: string | null;
   status: PromptRecoveryStatus;
   createdAt: string;
   updatedAt: string;

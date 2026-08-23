@@ -270,7 +270,6 @@ export class WebGptRoleSessionRegistry {
   private async ready(): Promise<void> { await this.loadPromise; }
 
   private async load(): Promise<void> {
-    await mkdir(this.storageDirectory, { recursive: true });
     let parsed: unknown;
     try {
       parsed = JSON.parse(await readFile(this.filePath, "utf8")) as unknown;
@@ -309,12 +308,15 @@ export class WebGptRoleSessionRegistry {
     await this.ready();
     let result!: T;
     let failure: unknown;
+    const previousBindings = new Map([...this.bindings.entries()].map(([key, binding]) => [key, cloneBinding(binding)] as const));
     const previous = this.mutationQueue.promise;
     const next = previous.then(async () => {
       try {
         result = operation();
         await this.persist();
       } catch (error) {
+        this.bindings.clear();
+        for (const [key, binding] of previousBindings) this.bindings.set(key, binding);
         failure = error;
       }
     });

@@ -67,6 +67,7 @@ export class WebGptRequestManager {
   private persistQueue: Promise<void> = Promise.resolve();
   private loadPromise: Promise<void>;
   private drainRunning = false;
+  private loadedJournalVersion: 1 | 2 | null = null;
 
   constructor(options: WebGptRequestManagerOptions) {
     this.workspace = options.workspace;
@@ -353,6 +354,17 @@ export class WebGptRequestManager {
     const record = this.requireRecord(requestId);
     if (reconcile && (record.state === "RECOVERY_REQUIRED" || record.state === "INDETERMINATE")) return this.reconcileRequest(record.requestId);
     return this.clone(record);
+  }
+
+  /**
+   * Explicitly persist an in-memory legacy Journal migration.  Loading or
+   * querying a Journal must not rewrite it as a read-side effect.
+   */
+  async migrate(): Promise<void> {
+    await this.ready();
+    if (this.loadedJournalVersion === 2) return;
+    await this.persist();
+    this.loadedJournalVersion = 2;
   }
 
   async reconcileRequest(requestId: string): Promise<WebGptRequestRecord> {
@@ -788,7 +800,6 @@ export class WebGptRequestManager {
   }
 
   private async load(): Promise<void> {
-    await mkdir(this.storageDirectory, { recursive: true });
     let parsed: { version?: unknown; requests?: unknown } | null = null;
     try {
       parsed = JSON.parse(await readFile(this.requestFile, "utf8")) as { version?: unknown; requests?: unknown };
@@ -800,7 +811,7 @@ export class WebGptRequestManager {
     // Schema migration is persistent; restart recovery classification is
     // derived in memory. A read-only status/preflight must not rewrite every
     // historical non-terminal record or erase its original error evidence.
-    const schemaChanged = parsed.version !== 2;
+    this.loadedJournalVersion = parsed.version === 1 ? 1 : 2;
     const seenIdempotencyKeys = new Set<string>();
     for (const candidate of parsed.requests) {
       if (!candidate || typeof candidate !== "object") continue;
@@ -815,7 +826,9 @@ export class WebGptRequestManager {
       }
       this.records.set(record.requestId, record);
     }
-    if (schemaChanged) await this.persist();
+    // Legacy schema conversion is deliberately explicit via migrate().  The
+    // normalized records above remain in memory so callers can inspect them
+    // without changing the source file or its hash/mtime.
   }
 
   private normalizeRecord(value: Partial<WebGptRequestRecord>): WebGptRequestRecord {
@@ -863,6 +876,7 @@ export class WebGptRequestManager {
       try {
         await writeFile(temporary, `${JSON.stringify({ version: 2, requests } satisfies StoredDocument, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
         await rename(temporary, this.requestFile);
+        this.loadedJournalVersion = 2;
       } finally {
         await unlink(temporary).catch(() => undefined);
       }

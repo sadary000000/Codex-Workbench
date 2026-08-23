@@ -244,9 +244,23 @@ export async function recoverInterruptedMigration(filePath: string): Promise<voi
   const prefix = `${basename(filePath)}.v2-backup-`;
   try {
     const backup = (await readdir(directory)).filter((name) => name.startsWith(prefix) && name.endsWith(".json")).sort().at(-1);
-    if (backup) await rename(join(directory, backup), filePath);
+    if (backup) {
+      const backupPath = join(directory, backup);
+      let raw: string;
+      try {
+        raw = await readFile(backupPath, "utf8");
+        const parsed = JSON.parse(raw) as unknown;
+        migrateAutomationDocument(parsed);
+      } catch (error) {
+        throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration found an invalid JSON backup; refusing to promote it.", error);
+      }
+      await rename(backupPath, filePath);
+    }
   } catch (error) {
-    if ((error as { code?: unknown })?.code !== "ENOENT") throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration could not be recovered.", error);
+    if ((error as { code?: unknown })?.code !== "ENOENT") {
+      if (error instanceof AutomationPersistenceError) throw error;
+      throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration could not be recovered.", error);
+    }
   }
 }
 

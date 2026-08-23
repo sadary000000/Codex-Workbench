@@ -34,6 +34,7 @@ import { createWebGptCliArgumentError, createWebGptCliFailure, presentWebGptCliO
 import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 import { AutomationStore } from "../automation/store.ts";
+import { createProductionAutomationComposition, type AutomationComposition } from "../automation/composition-root.ts";
 import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority, createWebGptProviderPolicyAuthority, webGptRuntimeCapability } from "../automation/webgpt-policy-authority.ts";
 import { assertProviderSeamExecutable } from "../automation/provider-seam-classification.ts";
 import { WebGptAutomationProviderPort } from "../features/webgpt/automation/webgpt-provider-port.ts";
@@ -139,6 +140,7 @@ let webGptProjectRegistry: WebGptProjectRegistry | null = null;
 let webGptControlRevision = 0;
 let webGptControlQueue: Promise<void> = Promise.resolve();
 let automationStore: AutomationStore | null = null;
+let automationComposition: AutomationComposition | null = null;
 let webGptPolicyAuthority: WebGptPolicyAuthority | null = null;
 let webGptProviderPort: WebGptAutomationProviderPort | null = null;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
@@ -149,7 +151,9 @@ function automationDatabasePath(): string {
 }
 
 async function startAutomationPersistence(): Promise<void> {
-  const store = new AutomationStore(automationDatabasePath());
+  const composition = createProductionAutomationComposition(automationDatabasePath());
+  const store = composition.store;
+  automationComposition = composition;
   await store.persistenceDiagnostics();
   automationStore = store;
   if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE !== "1") {
@@ -166,7 +170,9 @@ async function startAutomationPersistence(): Promise<void> {
   const project = existing ?? await store.createAutomationProject({ projectId, name: "AUT-2 normal GUI store gate" });
   await store.close();
   automationStore = null;
-  const reopened = new AutomationStore(automationDatabasePath());
+  automationComposition = null;
+  const reopenedComposition = createProductionAutomationComposition(automationDatabasePath());
+  const reopened = reopenedComposition.store;
   const restored = await reopened.get("automationProjects", projectId);
   const result = { mode: "normal-gui-host", created: !existing, projectId: project.projectId, reopened: restored?.projectId === projectId, persistence: await reopened.persistenceDiagnostics() };
   await reopened.close();
@@ -2158,7 +2164,9 @@ if (officialCliMode) {
           cancelPendingNativeApprovals();
           if (webGptControlServer) await webGptControlServer.close();
           if (webGptControlDescriptorFile) await removeControlDescriptor(webGptControlDescriptorFile);
-          if (automationStore) await automationStore.close();
+          if (automationComposition) await automationComposition.close();
+          else if (automationStore) await automationStore.close();
+          automationComposition = null;
           automationStore = null;
           webGptPolicyAuthority = null;
           webGptProviderPort = null;
