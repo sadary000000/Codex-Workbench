@@ -91,11 +91,21 @@ internal static class Program
     private static string BuildArguments(string[] userArgs)
     {
         var builder = new StringBuilder();
+        for (var index = 0; index < userArgs.Length; index++)
+        {
+            var value = userArgs[index];
+            if (value == "--disable-gpu" || value.StartsWith("--user-data-dir=", StringComparison.Ordinal))
+            {
+                builder.Append(Quote(value));
+                builder.Append(' ');
+            }
+        }
         builder.Append(Quote("--workbench-official-cli"));
         builder.Append(' ');
         builder.Append(Quote("--"));
         for (var index = 0; index < userArgs.Length; index++)
         {
+            if (userArgs[index] == "--disable-gpu" || userArgs[index].StartsWith("--user-data-dir=", StringComparison.Ordinal)) continue;
             builder.Append(' ');
             builder.Append(Quote(userArgs[index]));
         }

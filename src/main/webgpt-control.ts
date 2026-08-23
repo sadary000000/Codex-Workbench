@@ -649,12 +649,12 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function spawnWorkbench(executablePath: string): void {
+function spawnWorkbench(executablePath: string, userDataDirectory: string): void {
   // A CLI-launched Workbench is an explicit Control Plane activation. Ordinary
   // GUI startup remains idle under FIX-01, so the marker travels with the
   // spawned process instead of relying on an eager descriptor side effect.
   const launchPath = executablePath;
-  const launchArgs = ["--webgpt-control"];
+  const launchArgs = [`--user-data-dir=${userDataDirectory}`, "--webgpt-control"];
   const child = spawn(launchPath, launchArgs, {
     detached: true,
     stdio: "ignore",
@@ -918,7 +918,7 @@ export async function runWebGptCli(
         };
       }
       try {
-        spawnWorkbench(workbenchExecutablePath);
+        spawnWorkbench(workbenchExecutablePath, dirname(dirname(descriptorPath)));
         spawned = true;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);

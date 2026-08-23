@@ -14,6 +14,7 @@ test("official CLI front door is a same-package stdio firewall", () => {
   assert.match(source, /RedirectStandardError\s*=\s*true/);
   assert.match(source, /--workbench-official-cli/);
   assert.match(source, /ReadToEnd\(\)/);
+  assert.match(source, /--user-data-dir=/);
 });
 
 test("package contract emits GUI, CLI front door, and same-package CLI runtime", () => {

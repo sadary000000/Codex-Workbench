@@ -191,7 +191,7 @@ function rawControl(endpoint: string, authToken: string, request: Record<string,
 
 async function main(): Promise<void> {
   if (ownsUserData) {
-    ownedWorkbench = spawn(hostExecutable, ["--disable-gpu", `--user-data-dir=${userData}`], { cwd: root, windowsHide: true, stdio: "ignore", env: { ...process.env, WEBGPT_TEST_HOOKS: "0" } });
+    ownedWorkbench = spawn(hostExecutable, ["--disable-gpu", `--user-data-dir=${userData}`, "--webgpt-control"], { cwd: root, windowsHide: true, stdio: "ignore", env: { ...process.env, WEBGPT_TEST_HOOKS: "0" } });
     ownedWorkbench.on("error", () => undefined);
     ownedWorkbench.on("exit", (code, signal) => { ownedWorkbenchExit = { code, signal }; });
   }

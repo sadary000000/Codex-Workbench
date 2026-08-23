@@ -187,7 +187,7 @@ let rateLimitObserved = false;
 
 try {
   if (ownsUserData) {
-    ownedWorkbench = spawn(executable, ["--disable-gpu", `--user-data-dir=${userData}`], { cwd: root, windowsHide: true, stdio: "ignore", env: { ...process.env, WEBGPT_TEST_HOOKS: "0" } });
+    ownedWorkbench = spawn(executable, ["--disable-gpu", `--user-data-dir=${userData}`, "--webgpt-control"], { cwd: root, windowsHide: true, stdio: "ignore", env: { ...process.env, WEBGPT_TEST_HOOKS: "0" } });
     ownedWorkbench.on("error", () => undefined);
     ownedWorkbench.on("exit", (code, signal) => { ownedWorkbenchExit = { code, signal }; });
     await waitForOwnedDescriptor();
