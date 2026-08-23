@@ -7,7 +7,7 @@ import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import { isWebGptInterruptionTestHookEnabled, waitForWebGptInterruptionTestHook, waitForWebGptSubmittedUserMessage } from "./webgpt-interruption-test-hook.ts";
 import type { WebGptWorkspace } from "./webgpt-workspace.ts";
 import type { WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
-import type { WebGptOperationArbiter, WebGptOperationLease, WebGptOperationRequest, WebGptOperationType } from "./webgpt-operation-arbiter.ts";
+import type { WebGptLiveLeaseSnapshot, WebGptOperationArbiter, WebGptOperationLease, WebGptOperationRequest, WebGptOperationType } from "./webgpt-operation-arbiter.ts";
 import { normalizeWebGptProjectUrl, WebGptProjectRegistry } from "./webgpt-project-registry.ts";
 
 const REQUEST_FILE = "requests.json";
@@ -401,9 +401,28 @@ export class WebGptRequestManager {
       this.emit(record);
     }
     if (changed) await this.persist();
-    await this.reconcilePending();
     this.getOperationArbiter()?.resumeQueue();
     await this.drain();
+  }
+
+  /**
+   * Read the authoritative live lease without persisting or reconciling any
+   * historical Request.  The short bounded wait covers the asynchronous
+   * drain() admission window after submit().
+   */
+  async waitForActiveOperationLease(requestId: string, timeoutMs = 2_000): Promise<WebGptLiveLeaseSnapshot | null> {
+    await this.ready();
+    const arbiter = this.getOperationArbiter();
+    if (!arbiter) return null;
+    const deadline = Date.now() + Math.max(0, Math.min(Math.round(timeoutMs), 10_000));
+    while (true) {
+      const lease = arbiter.getActiveLeaseSnapshot(requestId);
+      if (lease) return lease;
+      const record = this.records.get(requestId);
+      if (!record || TERMINAL_STATES.has(record.state) || record.state === "RECOVERY_REQUIRED" || record.state === "INDETERMINATE") return null;
+      if (Date.now() >= deadline) return null;
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
   }
 
   async activeSummary(): Promise<Array<{ requestId: string; state: WebGptRequestState; chatUrl: string; idempotencyKey: string | null }>> {

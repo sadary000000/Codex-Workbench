@@ -190,7 +190,8 @@ try {
   const blocked = await runCli(["project", "open", "--name", projectName]);
   invocations.userBlockedProjectOpen = blocked;
   rateLimitObserved ||= blocked.rateLimit;
-  if (blocked.json?.ok !== false || (blocked.json.error as Record<string, unknown> | undefined)?.code !== "WEBGPT_USER_CONTROL") throw new Error("USER_CONTROL_DID_NOT_BLOCK_AUTO");
+  const blockedCode = (blocked.json?.error as Record<string, unknown> | undefined)?.code;
+  if (blocked.json?.ok !== false || (blockedCode !== "USER_CONTROL" && blockedCode !== "WEBGPT_USER_CONTROL")) throw new Error("USER_CONTROL_DID_NOT_BLOCK_AUTO");
 
   invocations.controlAutoAfterUser = await runCli(["control", "auto"]);
   rateLimitObserved ||= (invocations.controlAutoAfterUser as Invocation).rateLimit;

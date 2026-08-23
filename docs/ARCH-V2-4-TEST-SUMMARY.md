@@ -1,30 +1,32 @@
-# ARCH-V2-4 Test Summary
+# ARCH-V2-4 Test Summary — FIX ROUND 1
 
-## Automated
+## Gate summary
 
 ```yaml
 npm_run_check: PASS
 npm_test: PASS
-unit_test_count: 313/313
-arch_v2_4_targeted: 11/11
-npm_run_build: PASS
-npm_run_package_win: PASS
+tests: 317/317
+arch_v2_4_targeted: PASS_WITH_DISCLOSED_BRIDGE_REATTACH_GAP
+npm_run_build_standard: FAIL_WITH_EVIDENCE (EPERM: running EXE lock)
+npm_run_package_standard: NOT_UPDATED (same lock)
+isolated_build_package: PASS (dist-stage-arch-v2-4)
 npm_audit_omit_dev: PASS / 0 vulnerabilities
-secret_scan: PASS
-production_request_journal: BLOCKED / mutation detected during existing WEBGPT control.auto regression smoke
+git_diff_check: PASS
+scoped_secret_scan: PASS
+real_prompts: 0
 ```
 
-## ARCH-V2-4 targeted coverage
+## Covered contracts
 
-- pure `canDispatch` conjunction and blockers;
-- ActionIntent/Attempt/provider request/observation/Receipt mapping;
-- provider lease ref/epoch mapping;
-- unknown result fail-closed;
-- explicit reconcile without resubmission;
-- terminal failure retry with a new Attempt/provider request;
-- 15 unrelated historical non-terminal records ignored by scope-aware readiness;
-- same-target, live-resource, idempotency-conflict and unreadable-request blockers.
+- `control.auto` does not call global historical reconcile;
+- production Arbiter lease correlation reaches ProviderRequest/ExternalRef/ResourceClaim;
+- accepted provider side effect plus local persistence fault is UNKNOWN/recovery-only and never redispatched;
+- authoritative dispatch context uses the existing scope-aware classifier and live facts;
+- normal observation is `NOT_REQUIRED`; explicit reconcile is `RECONCILED`;
+- 15 unrelated historical records do not block a free Browser;
+- same-side-effect unknown, live lease busy and semantic drift fail closed;
+- ARCH-V2-1/2/3 real regressions remain passing.
 
-## Package
+## Packaging note
 
-The final review package is generated only from sanitized docs, source/test excerpts, evidence summaries and provenance. It does not contain production Journal contents, Cookies, Tokens, browser profiles, passwords, or private chat content.
+The current running `D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe` held the standard output path. The required command was therefore also executed with the task-scoped `CODEX_WORKBENCH_DIST=D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-4`; both build and package passed there. No process was force-terminated.

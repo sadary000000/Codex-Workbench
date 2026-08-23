@@ -56,6 +56,22 @@ export interface WebGptBrowserResourceDiagnostics {
   lastOperation: Pick<WebGptOperationIdentity, "operationId" | "source" | "ownerKey" | "requestId" | "operationType" | "createdAt" | "startedAt" | "endedAt" | "state"> | null;
 }
 
+/**
+ * Ephemeral identity of the currently live browser lease.  This is derived
+ * from the arbiter's active operation; it is not a second lease store and is
+ * never persisted as workflow truth.
+ */
+export interface WebGptLiveLeaseSnapshot {
+  leaseRef: string;
+  operationId: string;
+  ownerKey: string;
+  leaseEpoch: number;
+  requestId: string | null;
+  projectId: string | null;
+  role: string | null;
+  targetChatUrl: string | null;
+}
+
 export interface WebGptOperationLease {
   readonly operation: WebGptOperationIdentity;
   release(terminalState?: string): boolean;
@@ -262,6 +278,21 @@ export class WebGptOperationArbiter {
             state: this.lastOperation.state,
           }
         : null,
+    };
+  }
+
+  getActiveLeaseSnapshot(requestId?: string | null): WebGptLiveLeaseSnapshot | null {
+    const operation = this.active?.operation;
+    if (!operation || (requestId !== undefined && operation.requestId !== requestId)) return null;
+    return {
+      leaseRef: `webgpt-operation:${operation.operationId}`,
+      operationId: operation.operationId,
+      ownerKey: operation.ownerKey,
+      leaseEpoch: operation.leaseEpoch,
+      requestId: operation.requestId ?? null,
+      projectId: operation.projectId ?? null,
+      role: operation.role ?? null,
+      targetChatUrl: operation.targetChatUrl ?? null,
     };
   }
 

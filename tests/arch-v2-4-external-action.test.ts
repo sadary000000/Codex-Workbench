@@ -7,10 +7,14 @@ import {
   AutomationStore,
   WebGptExternalActionBridge,
   canDispatch,
+  createWebGptRequestManagerActionAdapter,
   type WebGptExternalActionAdapter,
   type WebGptProviderObservation,
   type WebGptProviderRequest,
 } from "../src/automation/index.ts";
+import { WebGptOperationArbiter } from "../src/features/webgpt/runtime/webgpt-operation-arbiter.ts";
+import { WebGptRequestManager } from "../src/features/webgpt/runtime/webgpt-request-manager.ts";
+import type { WebGptPageProbe, WebGptState } from "../src/features/webgpt/types.ts";
 
 const ready = {
   runtimeReady: true,
@@ -30,7 +34,7 @@ function request(id: string, lease = true): WebGptProviderRequest {
     semanticSha256: `${id}:semantic`,
     targetChatUrl: "https://chatgpt.com/c/target",
     state: "SUBMITTED",
-    resourceLease: lease ? { leaseRef: `${id}:lease`, ownerKey: "fixture", leaseEpoch: 1 } : null,
+    resourceLease: lease ? { operationId: `${id}:operation`, leaseRef: `${id}:lease`, ownerKey: "fixture", leaseEpoch: 1 } : null,
   };
 }
 
@@ -66,6 +70,59 @@ async function storeFixture() {
   return { root, store, project };
 }
 
+function productionAdapterProbe(url: string, userCount = 1): WebGptPageProbe {
+  return {
+    page: {
+      url,
+      title: "ChatGPT",
+      loginRequired: false,
+      onChatPage: true,
+      composerFound: true,
+      composerHasDraft: false,
+      generating: false,
+      userCount,
+      assistantCount: 0,
+    },
+    latestAssistantText: "",
+    latestUserText: "",
+    composerText: "",
+    sendAvailable: true,
+  };
+}
+
+/** Real RequestManager + adapter composition with only the page boundary faked. */
+class ProductionAdapterWorkspaceHarness {
+  readonly arbiter = new WebGptOperationArbiter();
+  readonly targetChatUrl = "https://chatgpt.com/c/production-adapter-correlation";
+  private readonly responseGate: Promise<void>;
+  private releaseGate!: () => void;
+  private probe = productionAdapterProbe(this.targetChatUrl);
+  private mode: WebGptState["mode"] = "AUTO_CONTROL";
+
+  constructor() {
+    this.arbiter.enterAutomationControl();
+    this.responseGate = new Promise<void>((resolve) => { this.releaseGate = resolve; });
+  }
+
+  getControlMode(): WebGptState["mode"] { return this.mode; }
+  getOperationArbiter(): WebGptOperationArbiter { return this.arbiter; }
+  async getPageProbe(): Promise<WebGptPageProbe> { return this.probe; }
+  async getCurrentUrl(): Promise<string> { return this.probe.page.url; }
+  async submitPrompt(prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe; submitted: WebGptPageProbe }> {
+    const baseline = this.probe;
+    this.probe = productionAdapterProbe(this.targetChatUrl, baseline.page.userCount + 1);
+    this.probe.latestUserText = prompt;
+    return { chatUrl: this.targetChatUrl, baseline, submitted: this.probe };
+  }
+  async waitForResponse(): Promise<{ response: string; samples: number; elapsedMs: number }> {
+    await this.responseGate;
+    this.probe.latestAssistantText = "PRODUCTION_ADAPTER_TEST_OK";
+    this.probe.page.assistantCount = 1;
+    return { response: "PRODUCTION_ADAPTER_TEST_OK", samples: 1, elapsedMs: 1 };
+  }
+  releaseResponse(): void { this.releaseGate(); }
+}
+
 test("canDispatch is a pure conjunction of the ARCH-V2-4 safety facts", () => {
   assert.deepEqual(canDispatch(ready), { ok: true, blockers: [] });
   const blocked = canDispatch({ ...ready, liveResourceAvailable: false, noUnknownOutcomeForSameSideEffect: false });
@@ -90,6 +147,7 @@ test("ActionIntent -> Attempt -> ProviderRequest -> Observation -> Receipt maps 
     });
     assert.equal(result.receipt.status, "SUCCEEDED");
     assert.equal(result.receipt.outcomeCertainty, "TERMINAL_CONFIRMED");
+    assert.equal(result.receipt.reconcileState, "NOT_REQUIRED");
     assert.equal(result.attempt.providerRequestRef !== null, true);
     assert.equal(result.attempt.providerObservationRef !== null, true);
     assert.equal(result.resourceClaim.state, "ACQUIRED");
@@ -100,6 +158,55 @@ test("ActionIntent -> Attempt -> ProviderRequest -> Observation -> Receipt maps 
     assert.equal(refs.actionIntents[0]?.state, "COMPLETED");
   } finally {
     await value.store.close();
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
+test("FIX-03 production RequestManager adapter maps the live Arbiter lease into ResourceClaim correlation", async () => {
+  const value = await storeFixture();
+  const requestDirectory = await mkdtemp(join(tmpdir(), "codex-workbench-v1-arch-v2-4-production-adapter-"));
+  const workspace = new ProductionAdapterWorkspaceHarness();
+  const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: requestDirectory });
+  const adapter = createWebGptRequestManagerActionAdapter(manager);
+  try {
+    const bridge = new WebGptExternalActionBridge(value.store, adapter);
+    const result = await bridge.dispatch({
+      projectId: value.project.projectId,
+      actionType: "WEBGPT_PRODUCTION_ADAPTER_LEASE_CORRELATION",
+      targetRef: workspace.targetChatUrl,
+      targetChatUrl: workspace.targetChatUrl,
+      role: "PLANNER",
+      prompt: "local production-adapter correlation probe",
+      sideEffectClass: "RECONCILABLE",
+      idempotencyRef: "production-adapter-correlation-key",
+      dispatchContext: ready,
+    });
+    const providerRequest = result.providerRequest;
+    assert.ok(providerRequest?.resourceLease);
+    const diagnostics = workspace.arbiter.getDiagnostics();
+    assert.equal(providerRequest.resourceLease.operationId, diagnostics.activeOperationId);
+    assert.equal(providerRequest.resourceLease.leaseRef, `webgpt-operation:${providerRequest.resourceLease.operationId}`);
+    assert.equal(providerRequest.resourceLease.leaseEpoch, diagnostics.activeLeaseEpoch);
+    assert.equal(providerRequest.resourceLease.ownerKey, diagnostics.activeRequester);
+    const persisted = await value.store.snapshot();
+    const leaseExternalRef = persisted.externalRefs.find((ref) => ref.kind === "WEBGPT_RESOURCE_LEASE");
+    assert.ok(leaseExternalRef);
+    assert.equal(leaseExternalRef.opaqueId, providerRequest.resourceLease.leaseRef);
+    assert.equal(result.resourceClaim.resourceLeaseRef, leaseExternalRef.externalRefId);
+    assert.equal(result.resourceClaim.leaseEpoch, providerRequest.resourceLease.leaseEpoch);
+    assert.equal(result.resourceClaim.ownerAttemptId, result.attempt.actionAttemptId);
+    assert.equal(result.resourceClaim.state, "ACQUIRED");
+    assert.equal(workspace.getOperationArbiter(), workspace.arbiter);
+    assert.equal(workspace.arbiter.getDiagnostics().capacity, 1);
+
+    workspace.releaseResponse();
+    const completed = await manager.waitForRequest(providerRequest.providerRequestId, 10_000);
+    assert.equal(completed.record.state, "COMPLETED");
+    assert.equal(workspace.arbiter.getDiagnostics().activeOperationId, null);
+  } finally {
+    workspace.releaseResponse();
+    await value.store.close();
+    await rm(requestDirectory, { recursive: true, force: true });
     await rm(value.root, { recursive: true, force: true });
   }
 });

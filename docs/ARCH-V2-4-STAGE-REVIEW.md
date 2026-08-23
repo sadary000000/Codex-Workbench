@@ -1,25 +1,31 @@
-# ARCH-V2-4 Stage Review
+# ARCH-V2-4 — FIX ROUND 1 Stage Review
 
 ## Scope resolution
 
 ```yaml
 stage: ARCH-V2-4 External Action / Resource / Reconciliation Integration
-base_commit: af8659b8e3619a84d26465e0a46aeabf72a30521
-implementation_commit: d304e70
-goal: connect the existing Automation Action Domain with WebGPT RequestRecord, provider observation, and the existing live browser lease without creating a second truth
+previous_gate: FIX_REQUIRED (P0=3, P1=3, P2=1, BLOCKER=0)
+base_commit: da9c7b9
+implementation_commit: d304e70 plus uncommitted FIX ROUND 1 overlay
 v1_core_changed: NO
-real_aut2_aut3_prompts: 0
+real_webgpt_prompts: 0
+scope_expanded: NO
 ```
 
-## Implemented vertical slice
+本轮只执行上一轮 GPT 明确授权的 FIX-01～FIX-08。没有进入 ARCH-V2-5、AUT-2/AUT-3 或其它自动化产品层；没有修改旧 donor、`Auto_Agent` 或生产 Journal 的历史内容。
 
-- Added outcome certainty and provider correlation fields to existing ActionAttempt/ActionReceipt/ExternalRef/ResourceClaim records.
-- Added project-scoped schema validation for provider/evidence/lease references, while inferring safe defaults for legacy persisted records.
-- Added `WebGptExternalActionBridge` and pure `canDispatch()` safety gate.
-- Added explicit unknown-result and reconcile semantics: one UNKNOWN Receipt, no blind resend, explicit reconcile updates the same Receipt.
-- Added terminal-failure retry semantics: new Attempt and new provider request.
-- Added `leaseEpoch` to the existing OperationArbiter identity/diagnostics and mapped provider lease references onto the existing ResourceClaim.
-- Exported the bridge without changing Native Thread/Turn/Item, Request Journal ownership, Requirement/Planner truth, Map, Renderer or Control Plane architecture.
+## Required Fix matrix
+
+| Fix | 结果 | 证据/限制 |
+|---|---|---|
+| FIX-01 | PASS | `automationControl()` 不再调用 `reconcilePending(all)`；历史 reconcile 仍是显式路径；FIX-01/FIX-07 测试通过。 |
+| FIX-02 | PASS_WITH_EVIDENCE | 第二次真实安全 smoke：`USER_CONTROL → control auto`、并发 Project Open、0 Prompt、Journal before/after unchanged；第一次 smoke 的旧断言和 SHA 变化保留披露。 |
+| FIX-03 | PASS | production RequestManager adapter 的真实 composition 将 Arbiter `operationId/leaseRef/leaseEpoch/ownerKey` 映射到 ProviderRequest、ExternalRef、ResourceClaim；integration test 通过。 |
+| FIX-04 | PASS | provider accepted 后一次性本地持久化故障进入 `UNKNOWN/RECOVERY_REQUIRED`；显式 reconcile 不再 submit；submit count 保持 1。 |
+| FIX-05 | FAIL_WITH_EVIDENCE | `buildWebGptDispatchContext()` 已从现有 readiness classifier、live resource、target/runtime facts 派生，15 条无关历史和四类 blocker 测试通过；但审计发现 readiness 的 `reattachRequestId` 未贯穿 Bridge，缺少“Attempt 不增加”的 Bridge 级证据。未自行扩大修复。 |
+| FIX-06 | PASS | 普通 terminal observe 为 `NOT_REQUIRED`；只有 explicit reconcile 的 terminal observe 为 `RECONCILED`。 |
+| FIX-07 | PASS_WITH_EVIDENCE | 当前生产 Journal 作为 post-incident baseline；第二次 safe control smoke SHA 不变；没有 rollback、删除、terminalize 或猜测恢复。 |
+| FIX-08 | FAIL_WITH_EVIDENCE | `check`、317 tests、audit、diff、secret scan 和 ARCH-V2-1/2/3 real regressions 通过；标准 `dist/package` 因运行中的 EXE 锁定而未能更新，隔离 `dist-stage-arch-v2-4` build/package 通过。 |
 
 ## Architecture boundary
 
@@ -33,33 +39,48 @@ V1 Frozen Core
               ExternalRef / Evidence / ResourceClaim
 ```
 
-Provider Request is not an ActionReceipt. A historical RequestRecord is not a live resource lease. Provider Observation is not Workflow PASS.
+`OperationArbiter` 是唯一 live Browser lease truth；`ResourceClaim` 仅保存 workflow claim 与 lease correlation；ProviderRequest/Observation 不等于 Receipt；历史 Journal 不等于 live lease；Provider Observation 不写 Workflow/Requirement/Planner PASS。
 
-## Tests and gates
+## Automated and real evidence
 
 ```yaml
 npm_run_check: PASS
-npm_test: PASS / 313/313
-arch_v2_4_targeted: PASS / 11/11
-npm_run_build: PASS
-npm_run_package_win: PASS
-npm_audit_omit_dev: PASS / 0 vulnerabilities
-secret_scan: PASS
-production_request_journal: BLOCKED / SHA_CHANGED_BY_EXISTING_CONTROL_AUTO_SMOKE
+npm_test: PASS (317/317)
+npm_run_build: STANDARD_OUTPUT_BLOCKED_BY_RUNNING_EXE
+npm_run_package_win: STANDARD_OUTPUT_BLOCKED_BY_RUNNING_EXE
+isolated_build: PASS (dist-stage-arch-v2-4)
+isolated_package: PASS (dist-stage-arch-v2-4/package)
+npm_audit_omit_dev: PASS (0 vulnerabilities)
+git_diff_check: PASS (only CRLF normalization warnings)
+scoped_secret_scan: PASS
+real_control_auto: PASS_WITH_EVIDENCE
+arch_v2_1_2_3_regression: PASS (navigation/workspace/multi-thread/shared-host/map/project-map/protocol)
+real_prompt_count: 0
 ```
 
-Passing real regressions are recorded in `ARCH-V2-4-REGRESSION-EVIDENCE.md`. The existing packaged WEB-6.4 arbiter smoke remains a disclosed failure: `webgpt control auto` timed out after `webgpt open` returned `USER_CONTROL`; it sent zero real prompts and did not read credentials or page content. It is outside this stage's allowed Control Plane scope and is not hidden.
+标准 package 失败是明确的文件锁错误：`EPERM unlink dist/package/Codex Workbench V1.exe`；没有强杀 Workbench 进程，没有删除用户文件。
 
 ## Subagents
 
-Five bounded audits were dispatched per the stage instruction. Their final messages must be reviewed before the gate and each agent closed after its result. `running_subagents_at_gate` is not zero until that review/close step is complete.
+本轮 A～E 及前置旧五个代理均收到继续工作的非中断消息；完成后逐一审核并关闭，Gate 时 `running_subagents=0`。
 
-## Scope boundary
+| 角色 | 代理 | 结果 | 处理 |
+|---|---|---|---|
+| A FIX-01/02 | Dalton | control/reconcile 分离、真实 control smoke 证据 | 采用，已关闭 |
+| B FIX-03 | Ampere | production live lease correlation integration | 采用，已关闭 |
+| C FIX-04/06 | Meitner | accepted/local-failure 与 reconcileState | 采用，已关闭 |
+| D 独立 FIX-05 audit | Huygens | classifier/blocker matrix PASS；Bridge reattach evidence PARTIAL | 采用为 FAIL_WITH_EVIDENCE，已关闭 |
+| E 独立 FIX-07/08 audit | Herschel | Journal safe smoke PASS；package/provenance PARTIAL | 采用，已关闭 |
+| 旧五个 | Ohm/Fermat/Godel/Newton/Nietzsche | 自然返回只读审计；发现的未授权扩展风险已列入 out-of-scope | 审核后已关闭 |
 
-No AUT-2/AUT-3 Prompt, real external side effect, Automation/Workflow/Planner/Scheduler, PolicyVersion activation, provider-neutral ports, V1 Frozen Core, Native runtime, Map, Renderer or Shared Host redesign is included.
+## Disclosed findings
 
-## Current gate
+旧代理与本轮独立审计还发现：Bridge 级 same-semantic reattach、Provider observation identity 校验、ResourceClaim release/liveness 以及完整 production caller wiring 仍需 GPT 决定是否授权下一轮。它们没有在本轮被自行修复，详见 `ARCH-V2-4-OUT-OF-SCOPE-FINDINGS.md`。
 
-`ARCH-V2-4 CONTRACT PASS; FINAL GATE REVIEW REQUIRED`
+## Gate
 
-The review package must disclose the pre-existing WEB-6.4 arbiter failure, the production Journal mutation, and the final subagent results. It must not claim an all-regressions PASS while that evidence remains unresolved.
+```text
+REVIEW_READY_WITH_DISCLOSED_FAILS
+```
+
+无论存在上述 FAIL_WITH_EVIDENCE，本轮均按指令生成脱敏 Review Package，提交当前网页 GPT 并等待新的 Gate；不自行进入下一阶段。

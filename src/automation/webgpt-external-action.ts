@@ -1,10 +1,12 @@
 import type { WebGptRequestRecord, WebGptRequestState, WebGptRole } from "../features/webgpt/types.ts";
 import type { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
+import type { WebGptBrowserResourceDiagnostics, WebGptLiveLeaseSnapshot } from "../features/webgpt/runtime/webgpt-operation-arbiter.ts";
 import {
   AutomationStore,
   type ActionReceiptInput,
   type TransitionInput,
 } from "./store.ts";
+import { classifyWebGptActionReadiness, type WebGptActionScope } from "./webgpt-action-readiness.ts";
 import type {
   ActionOutcomeCertainty,
   ActionReceipt,
@@ -32,6 +34,42 @@ export interface WebGptDispatchDecision {
 }
 
 /**
+ * Authoritative facts used to compose the dispatch gate. Callers provide
+ * runtime/policy/target facts and the existing scoped readiness classifier
+ * supplies Journal/resource/idempotency facts. Callers do not hand-fill the
+ * seven derived booleans.
+ */
+export interface WebGptDispatchFacts {
+  runtimeReady: boolean;
+  policyPreconditionSatisfied: boolean;
+  targetIdentityValid: boolean;
+  action: WebGptActionScope;
+  records: readonly WebGptRequestRecord[];
+  unavailableRequestIds?: readonly string[];
+  browserResource: Partial<WebGptBrowserResourceDiagnostics> | null | undefined;
+}
+
+export function buildWebGptDispatchContext(facts: WebGptDispatchFacts): WebGptActionDispatchContext {
+  const readiness = classifyWebGptActionReadiness({
+    action: facts.action,
+    records: facts.records,
+    unavailableRequestIds: facts.unavailableRequestIds,
+    browserResource: facts.browserResource,
+  });
+  const blockers = new Set(readiness.blockers.map((blocker) => blocker.code));
+  const activeConflict = readiness.dispositions.some((item) => item.disposition === "ACTIVE_BLOCKING");
+  return {
+    runtimeReady: facts.runtimeReady,
+    policyPreconditionSatisfied: facts.policyPreconditionSatisfied,
+    targetIdentityValid: facts.targetIdentityValid,
+    liveResourceAvailable: !blockers.has("ACTIVE_BROWSER_RESOURCE"),
+    noConflictingActiveAction: !activeConflict,
+    noUnknownOutcomeForSameSideEffect: !blockers.has("UNKNOWN_REQUEST_STATE") && !blockers.has("ACTIONABLE_REQUEST"),
+    idempotencySafe: !blockers.has("IDEMPOTENCY_CONFLICT"),
+  };
+}
+
+/**
  * Pure dispatch gate.  It intentionally accepts facts from the existing
  * scope-aware readiness classifier and does not read or mutate persistence.
  */
@@ -48,6 +86,7 @@ export function canDispatch(context: WebGptActionDispatchContext): WebGptDispatc
 }
 
 export interface WebGptProviderLeaseSnapshot {
+  operationId: string;
   leaseRef: string;
   ownerKey: string;
   leaseEpoch: number;
@@ -103,7 +142,9 @@ export interface WebGptExternalActionInput {
   executionOptions?: BoundedMetadata;
   expectedOutcomeRef?: string | null;
   idempotencyRef?: string | null;
-  dispatchContext: WebGptActionDispatchContext;
+  /** Legacy/test-only escape hatch; production callers should use dispatchFacts. */
+  dispatchContext?: WebGptActionDispatchContext;
+  dispatchFacts?: WebGptDispatchFacts;
   executorRef?: string | null;
   transition?: TransitionInput;
 }
@@ -144,7 +185,9 @@ export class WebGptExternalActionBridge {
   }
 
   async dispatch(input: WebGptExternalActionInput): Promise<WebGptExternalActionResult> {
-    const decision = canDispatch(input.dispatchContext);
+    const dispatchContext = input.dispatchFacts ? buildWebGptDispatchContext(input.dispatchFacts) : input.dispatchContext;
+    if (!dispatchContext) throw new WebGptExternalActionError("DISPATCH_CONTEXT_REQUIRED", "Dispatch requires authoritative dispatchFacts; the legacy boolean context is test-only.");
+    const decision = canDispatch(dispatchContext);
     if (!decision.ok) throw new WebGptExternalActionError("ACTION_NOT_DISPATCHABLE", "Action dispatch is fail-closed until all runtime, target, resource, and idempotency preconditions hold.", { blockers: decision.blockers });
 
     let intent = await this.store.createActionIntent({
@@ -215,10 +258,12 @@ export class WebGptExternalActionBridge {
       } catch (error) {
         observation = unknownObservation(providerRequest, error);
       }
-      const finalized = await this.recordObservation(input, intent, attempt, resourceClaim, providerRequest, providerRequestRef, requestEvidence, observation);
+      const finalized = await this.recordObservation(input, intent, attempt, resourceClaim, providerRequest, providerRequestRef, requestEvidence, observation, false);
       return finalized;
     } catch (error) {
-      if (providerAccepted) throw error;
+      if (providerAccepted && providerRequest) {
+        return this.recordAcceptedUnknown(input, intent, attempt, resourceClaim, providerRequest, error);
+      }
       const unknown = isUnknownDispatch(error);
       const receipt = await this.store.createActionReceipt({
         actionAttemptId: attempt.actionAttemptId,
@@ -267,10 +312,10 @@ export class WebGptExternalActionBridge {
       sideEffectClass: "RECONCILABLE",
       dispatchContext: { runtimeReady: true, policyPreconditionSatisfied: true, targetIdentityValid: true, liveResourceAvailable: true, noConflictingActiveAction: true, noUnknownOutcomeForSameSideEffect: true, idempotencySafe: true },
     };
-    return this.recordObservation(reconcileContext, intent, attempt, resourceClaim, providerRequest, existingProviderRequestRef, requestEvidence, observation);
+    return this.recordObservation(reconcileContext, intent, attempt, resourceClaim, providerRequest, existingProviderRequestRef, requestEvidence, observation, true);
   }
 
-  private async recordObservation(input: WebGptExternalActionInput, intent: ActionIntent, attempt: ActionAttempt, resourceClaim: ResourceClaim, providerRequest: WebGptProviderRequest, providerRequestRef: string, requestEvidence: string, observation: WebGptProviderObservation): Promise<WebGptExternalActionResult> {
+  private async recordObservation(input: WebGptExternalActionInput, intent: ActionIntent, attempt: ActionAttempt, resourceClaim: ResourceClaim, providerRequest: WebGptProviderRequest, providerRequestRef: string, requestEvidence: string, observation: WebGptProviderObservation, explicitReconcile: boolean): Promise<WebGptExternalActionResult> {
     const observationRef = await this.createExternalRef(intent.projectId, "WEBGPT_PROVIDER_OBSERVATION", observation.providerRequestId);
     const observationEvidence = await this.createEvidence(input, attempt, "WEBGPT_PROVIDER_OBSERVATION", {
       providerRequestId: observation.providerRequestId,
@@ -293,7 +338,9 @@ export class WebGptExternalActionBridge {
       providerObservationRef: observationRef,
       outcomeCertainty: observation.outcomeCertainty,
       evidenceRefs: [requestEvidence, observationEvidence],
-      reconcileState: terminalSuccess || terminalFailure ? "RECONCILED" : "RECOVERY_REQUIRED",
+      reconcileState: terminalSuccess || terminalFailure
+        ? explicitReconcile ? "RECONCILED" : "NOT_REQUIRED"
+        : "RECOVERY_REQUIRED",
     };
     const existingReceipt = (await this.store.snapshot()).actionReceipts.find((value) => value.actionAttemptId === attempt.actionAttemptId);
     const receipt = existingReceipt?.status === "UNKNOWN"
@@ -302,23 +349,73 @@ export class WebGptExternalActionBridge {
     return { intent: (await this.store.get("actionIntents", intent.intentId))!, attempt: (await this.store.get("actionAttempts", attempt.actionAttemptId))!, resourceClaim: (await this.store.get("resourceClaims", resourceClaim.resourceClaimId))!, providerRequest, observation, receipt };
   }
 
+  /**
+   * A provider submit can be accepted before a local correlation write
+   * finishes. Persist an UNKNOWN recovery-only receipt best-effort and never
+   * redispatch the provider operation from this path.
+   */
+  private async recordAcceptedUnknown(input: WebGptExternalActionInput, intent: ActionIntent, attempt: ActionAttempt, resourceClaim: ResourceClaim, providerRequest: WebGptProviderRequest, persistenceError: unknown): Promise<WebGptExternalActionResult> {
+    const current = await this.store.snapshot();
+    const existing = current.actionReceipts.find((receipt) => receipt.actionAttemptId === attempt.actionAttemptId);
+    if (existing) {
+      return { intent: (await this.store.get("actionIntents", intent.intentId))!, attempt: (await this.store.get("actionAttempts", attempt.actionAttemptId))!, resourceClaim: (await this.store.get("resourceClaims", resourceClaim.resourceClaimId))!, providerRequest, observation: null, receipt: existing };
+    }
+    const providerRequestRef = await this.ensureExternalRef(input.projectId, "WEBGPT_PROVIDER_REQUEST", providerRequest.providerRequestId);
+    const requestEvidence = await this.ensureEvidence(input, attempt, "WEBGPT_PROVIDER_REQUEST", {
+      providerRequestId: providerRequest.providerRequestId,
+      providerState: providerRequest.state,
+      providerSemanticSha256: providerRequest.semanticSha256,
+      targetChatUrl: providerRequest.targetChatUrl,
+      localPersistenceError: errorCode(persistenceError),
+    });
+    attempt = await this.store.attachActionAttemptProvider({ actionAttemptId: attempt.actionAttemptId, providerRequestRef, providerSemanticSha256: providerRequest.semanticSha256 });
+    if (providerRequest.resourceLease) {
+      const leaseRef = await this.ensureExternalRef(input.projectId, "WEBGPT_RESOURCE_LEASE", providerRequest.resourceLease.leaseRef);
+      await this.store.attachResourceClaimLease({ resourceClaimId: resourceClaim.resourceClaimId, resourceLeaseRef: leaseRef, leaseEpoch: providerRequest.resourceLease.leaseEpoch });
+    }
+    const receipt = await this.store.createActionReceipt({
+      actionAttemptId: attempt.actionAttemptId,
+      status: "UNKNOWN",
+      provider: WEBGPT_PROVIDER,
+      externalStatus: "ACCEPTED_UNKNOWN_RESULT",
+      providerRequestRef,
+      outcomeCertainty: "ACCEPTED_UNKNOWN_RESULT",
+      evidenceRefs: [requestEvidence],
+      reconcileState: "RECOVERY_REQUIRED",
+    });
+    return { intent: (await this.store.get("actionIntents", intent.intentId))!, attempt: (await this.store.get("actionAttempts", attempt.actionAttemptId))!, resourceClaim: (await this.store.get("resourceClaims", resourceClaim.resourceClaimId))!, providerRequest, observation: null, receipt };
+  }
+
   private async createExternalRef(projectId: string, kind: "WEBGPT_PROVIDER_REQUEST" | "WEBGPT_PROVIDER_OBSERVATION" | "WEBGPT_RESOURCE_LEASE", opaqueId: string): Promise<string> {
     const ref = await this.store.createExternalRef({ projectId, kind, provider: WEBGPT_PROVIDER, opaqueId });
     return ref.externalRefId;
+  }
+
+  private async ensureExternalRef(projectId: string, kind: "WEBGPT_PROVIDER_REQUEST" | "WEBGPT_PROVIDER_OBSERVATION" | "WEBGPT_RESOURCE_LEASE", opaqueId: string): Promise<string> {
+    const existing = (await this.store.snapshot()).externalRefs.find((ref) => ref.projectId === projectId && ref.kind === kind && ref.provider === WEBGPT_PROVIDER && ref.opaqueId === opaqueId);
+    return existing?.externalRefId ?? this.createExternalRef(projectId, kind, opaqueId);
   }
 
   private async createEvidence(input: WebGptExternalActionInput, attempt: ActionAttempt, type: string, metadata: BoundedMetadata): Promise<string> {
     const evidence = await this.store.createEvidence({ projectId: input.projectId, stageSpecId: null, stepSpecId: null, attemptId: attempt.actionAttemptId, type, source: "WebGPT Provider Observation", producer: WEBGPT_PROVIDER, exitCode: null, sha256: null, artifactRefId: null, metadata });
     return evidence.evidenceId;
   }
+
+  private async ensureEvidence(input: WebGptExternalActionInput, attempt: ActionAttempt, type: string, metadata: BoundedMetadata): Promise<string> {
+    const existing = (await this.store.snapshot()).evidences.find((evidence) => evidence.attemptId === attempt.actionAttemptId && evidence.type === type);
+    return existing?.evidenceId ?? this.createEvidence(input, attempt, type, metadata);
+  }
 }
 
 /** Adapter over the existing RequestManager; it never sends during observe/reconcile. */
-export function createWebGptRequestManagerActionAdapter(requestManager: Pick<WebGptRequestManager, "submit" | "requestStatus" | "reconcileRequest">): WebGptExternalActionAdapter {
+export function createWebGptRequestManagerActionAdapter(requestManager: Pick<WebGptRequestManager, "submit" | "requestStatus" | "reconcileRequest"> & Partial<Pick<WebGptRequestManager, "waitForActiveOperationLease">>): WebGptExternalActionAdapter {
   return {
     async submit(input) {
       const record = await requestManager.submit(input.prompt, { projectId: input.projectId, role: input.role ?? undefined, targetChatUrl: input.targetChatUrl }, input.providerIdempotencyKey ?? undefined);
-      return providerRequestFromRecord(record);
+      const lease = typeof requestManager.waitForActiveOperationLease === "function"
+        ? await requestManager.waitForActiveOperationLease(record.requestId)
+        : null;
+      return providerRequestFromRecord(record, lease);
     },
     async observe(request) {
       return observationFromRecord(await requestManager.requestStatus(request.providerRequestId));
@@ -329,8 +426,8 @@ export function createWebGptRequestManagerActionAdapter(requestManager: Pick<Web
   };
 }
 
-function providerRequestFromRecord(record: WebGptRequestRecord): WebGptProviderRequest {
-  return { provider: WEBGPT_PROVIDER, providerRequestId: record.requestId, idempotencyKey: record.idempotencyKey, semanticSha256: record.semanticSha256, targetChatUrl: record.targetChatUrl, state: mapRequestState(record.state), resourceLease: null };
+function providerRequestFromRecord(record: WebGptRequestRecord, lease: WebGptLiveLeaseSnapshot | null = null): WebGptProviderRequest {
+  return { provider: WEBGPT_PROVIDER, providerRequestId: record.requestId, idempotencyKey: record.idempotencyKey, semanticSha256: record.semanticSha256, targetChatUrl: record.targetChatUrl, state: mapRequestState(record.state), resourceLease: lease ? { operationId: lease.operationId, leaseRef: lease.leaseRef, ownerKey: lease.ownerKey, leaseEpoch: lease.leaseEpoch } : null };
 }
 
 function observationFromRecord(record: WebGptRequestRecord): WebGptProviderObservation {
