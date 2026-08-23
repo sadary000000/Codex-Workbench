@@ -34,10 +34,9 @@ export function assertMigrationIdentityPreserved(before: AutomationDocument, aft
   for (const [table, idField] of Object.entries(AUTOMATION_ID_FIELDS) as Array<[AutomationTableName, string]>) {
     const beforeItems = before[table] as unknown as Array<Record<string, unknown>>;
     const afterItems = after[table] as unknown as Array<Record<string, unknown>>;
-    const afterById = new Map(afterItems.map((item) => [String(item[idField]), item]));
-    for (const item of beforeItems) {
-      const identity = item[idField];
-      if (typeof identity !== "string" || !identity) continue;
+    const beforeById = indexIdentities(table, idField, beforeItems, "source");
+    const afterById = indexIdentities(table, idField, afterItems, "target");
+    for (const [identity, item] of beforeById) {
       const migrated = afterById.get(identity);
       if (!migrated) throw new Error(`MIGRATION_IDENTITY_CHANGED:${table}.${idField}:${identity}`);
       try {
@@ -54,8 +53,28 @@ export function migrationIdentityFingerprint(document: AutomationDocument): stri
   const identityRows: unknown[] = [];
   for (const [table, idField] of Object.entries(AUTOMATION_ID_FIELDS) as Array<[AutomationTableName, string]>) {
     const items = document[table] as unknown as Array<Record<string, unknown>>;
-    for (const item of items) identityRows.push({ table, id: item[idField], identity: stableIdentitySnapshot(item) });
+    for (const [id, item] of indexIdentities(table, idField, items, "fingerprint")) identityRows.push({ table, id, identity: stableIdentitySnapshot(item) });
   }
   identityRows.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
   return createHash("sha256").update(JSON.stringify(identityRows), "utf8").digest("hex");
+}
+
+function indexIdentities(
+  table: AutomationTableName,
+  idField: string,
+  items: Array<Record<string, unknown>>,
+  side: "source" | "target" | "fingerprint",
+): Map<string, Record<string, unknown>> {
+  const indexed = new Map<string, Record<string, unknown>>();
+  for (const item of items) {
+    const identity = item?.[idField];
+    if (typeof identity !== "string" || !identity.trim()) {
+      throw new Error(`MIGRATION_IDENTITY_MISSING:${side}:${table}.${idField}`);
+    }
+    if (indexed.has(identity)) {
+      throw new Error(`MIGRATION_IDENTITY_CONFLICT:${side}:${table}.${idField}:${identity}`);
+    }
+    indexed.set(identity, item);
+  }
+  return indexed;
 }

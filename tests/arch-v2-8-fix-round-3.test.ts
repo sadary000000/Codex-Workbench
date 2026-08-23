@@ -34,6 +34,12 @@ test("FIX-05 covers every persisted collection identity, including alignment rec
   const table = "requirementQuestions" as keyof AutomationDocument;
   (drifted[table] as unknown as Array<Record<string, unknown>>)[0]!.questionId = "question-drift";
   assert.throws(() => assertMigrationIdentityPreserved(before, drifted), /MIGRATION_IDENTITY_CHANGED/);
+  const missing = structuredClone(before) as AutomationDocument;
+  delete (missing[table] as unknown as Array<Record<string, unknown>>)[0]!.questionId;
+  assert.throws(() => assertMigrationIdentityPreserved(before, missing), /MIGRATION_IDENTITY_MISSING/);
+  const duplicate = structuredClone(before) as AutomationDocument;
+  (duplicate[table] as unknown as Array<Record<string, unknown>>).push({ questionId: "requirementQuestions-identity" });
+  assert.throws(() => assertMigrationIdentityPreserved(before, duplicate), /MIGRATION_IDENTITY_CONFLICT/);
 });
 
 test("FIX-01/FIX-02 production App Server paths use the shared strict bootstrap", async () => {
