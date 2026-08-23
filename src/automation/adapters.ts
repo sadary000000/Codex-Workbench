@@ -7,6 +7,8 @@
  * boundary, not in Automation Domain consumers.
  */
 
+import type { EffectivePolicyDecision, RuntimeCapability } from "./effective-policy.ts";
+
 export type AutomationProviderId = "NATIVE" | "WEBGPT" | (string & {});
 export type ProviderTargetRef = string;
 export type ProviderRequestRef = string;
@@ -15,6 +17,33 @@ export type ProviderOperation = "SUBMIT" | "OBSERVE" | "RECONCILE" | "CANCEL";
 export type ProviderRequestState = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED" | "UNKNOWN";
 export type ProviderOutcomeCertainty = "NOT_DISPATCHED" | "ACCEPTED_UNKNOWN_RESULT" | "RESULT_OBSERVED" | "TERMINAL_CONFIRMED" | "TERMINAL_FAILED";
 export type ProviderCapabilityCode = "AVAILABLE" | "UNAUTHENTICATED" | "TARGET_UNREACHABLE" | "CAPABILITY_NOT_SUPPORTED" | "VERSION_MISMATCH" | "BUSY";
+export type ProviderPolicyOperation = "PROMPT" | "REPAIR" | "RETRY";
+export type ProviderPolicyDecision = "ALLOW" | "DENY" | "REQUIRE_HUMAN_GATE" | "WAITING_EXTERNAL" | "UNSUPPORTED";
+
+/**
+ * Runtime facts supplied to the policy authority.  This is a neutral view;
+ * it intentionally does not expose a WebGPT page, Chat URL, DOM, or browser
+ * runtime object to Automation.
+ */
+/** Provider-neutral alias for the immutable runtime capability proof. */
+export type ProviderRuntimeCapability = RuntimeCapability;
+export type ProviderAuthorizationOperation = "SUBMIT" | "RECONCILE" | "CANCEL";
+export type ProviderAuthorizationDecision = "ALLOW" | "DENY";
+
+/**
+ * Immutable execution proof supplied by the policy/composition authority.
+ * Provider adapters may validate this proof, but they must never create,
+ * replace, or upgrade it.  A missing pin, denied decision, or unavailable
+ * capability is therefore a provider-side fail-closed condition.
+ */
+export interface ProviderExecutionAuthorization {
+  readonly operation: ProviderAuthorizationOperation;
+  readonly policyVersionId: string | null;
+  /** Complete immutable EffectivePolicy decision; null means the authority could not produce one and must fail closed. */
+  readonly effectivePolicy: EffectivePolicyDecision | null;
+  /** Complete immutable RuntimeCapability fact used for that decision. */
+  readonly runtimeCapability: ProviderRuntimeCapability;
+}
 
 export interface ProviderCorrelation {
   readonly actionIntentId: string | null;
@@ -22,6 +51,22 @@ export interface ProviderCorrelation {
   readonly policyVersionId: string | null;
   readonly idempotencyRef: string | null;
   readonly semanticRef: string | null;
+}
+
+/**
+ * Bounded admission provenance returned by an executable provider port.
+ * Automation may record the decision identity, but it never receives or
+ * reconstructs provider/browser state from this DTO.
+ */
+export interface ProviderPolicyProvenance {
+  readonly policyVersionId: string;
+  readonly operation: string;
+  readonly decision: "ALLOW";
+  readonly runtimeCapabilityVersion: string;
+  readonly runtimeId: string;
+  readonly actionAttemptId: string;
+  /** Complete immutable decision evidence; this is not a provider-generated summary. */
+  readonly effectivePolicy: EffectivePolicyDecision;
 }
 
 export interface ProviderTargetResolution {
@@ -48,6 +93,7 @@ export interface ProviderRequestAccepted {
   readonly providerRequestRef: ProviderRequestRef;
   readonly providerTargetRef: ProviderTargetRef;
   readonly semanticRef: string | null;
+  readonly policy: ProviderPolicyProvenance;
 }
 
 export interface ProviderObservation {
@@ -59,12 +105,26 @@ export interface ProviderObservation {
   readonly resultRef: ProviderResultRef | null;
   readonly resultHash: string | null;
   readonly evidenceRefs: readonly string[];
+  readonly policy?: ProviderPolicyProvenance;
 }
 
 export interface ProviderCapabilityFact {
   readonly provider: AutomationProviderId;
   readonly code: ProviderCapabilityCode;
   readonly detail?: string | null;
+}
+
+/**
+ * Composition-root supplied policy authority.  A Provider Port must receive
+ * an admission decision for every side-effecting operation; it may not invent
+ * a policy decision or silently fall back to the current policy version.
+ */
+export interface ProviderPolicyAuthorityPort {
+  authorize(input: {
+    readonly operation: ProviderAuthorizationOperation;
+    readonly correlation: ProviderCorrelation;
+    readonly runtimeCapability: ProviderRuntimeCapability;
+  }): Promise<ProviderExecutionAuthorization>;
 }
 
 /**
@@ -80,6 +140,30 @@ export interface AutomationProviderPort {
   observe(input: { providerRequestRef: ProviderRequestRef }): Promise<ProviderObservation>;
   reconcile(input: { providerRequestRef: ProviderRequestRef; correlation: ProviderCorrelation }): Promise<ProviderObservation>;
   cancel?(input: { providerRequestRef: ProviderRequestRef; correlation: ProviderCorrelation }): Promise<ProviderObservation>;
+}
+
+/**
+ * Shared provider-neutral validation for side-effecting operations.  This is
+ * intentionally pure and contains no WebGPT or browser knowledge.
+ */
+export function assertProviderExecutionAuthorization(input: {
+  readonly operation: ProviderAuthorizationOperation;
+  readonly correlation: ProviderCorrelation;
+  readonly authorization: ProviderExecutionAuthorization | null | undefined;
+}): void {
+  const authorization = input.authorization;
+  if (!authorization) throw new Error("PROVIDER_AUTHORIZATION_REQUIRED");
+  if (authorization.operation !== input.operation) throw new Error("PROVIDER_AUTHORIZATION_OPERATION_MISMATCH");
+  if (!authorization.policyVersionId) throw new Error("PROVIDER_POLICY_PIN_REQUIRED");
+  if (!authorization.effectivePolicy) throw new Error("PROVIDER_EFFECTIVE_POLICY_REQUIRED");
+  if (!authorization.effectivePolicy.effectivePolicy.policyVersionId || authorization.effectivePolicy.effectivePolicy.policyVersionId !== authorization.policyVersionId) {
+    throw new Error("PROVIDER_POLICY_PIN_MISMATCH");
+  }
+  if (authorization.policyVersionId !== input.correlation.policyVersionId) throw new Error("PROVIDER_POLICY_CORRELATION_MISMATCH");
+  if (authorization.effectivePolicy.decision !== "ALLOW") throw new Error("PROVIDER_POLICY_DENIED");
+  if (!authorization.runtimeCapability.capabilityVersion || !authorization.runtimeCapability.runtimeId || authorization.runtimeCapability.status !== "READY") {
+    throw new Error("PROVIDER_CAPABILITY_MISSING");
+  }
 }
 
 export interface NativeAutomationAdapter {

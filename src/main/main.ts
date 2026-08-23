@@ -39,6 +39,16 @@ import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../autom
 import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
 import { classifyWebGptActionReadiness, type WebGptActionScope } from "../automation/webgpt-action-readiness.ts";
 
+const PAUSED_AUTOMATION_GATE_ENVIRONMENT_FLAGS = [
+  "AUT2_REAL_WEBGPT_GATE",
+  "AUT3_REAL_PLANNER_GATE",
+  "AUT2_AUT3_FIX10_REAL_GATE",
+] as const;
+
+function pausedAutomationGateFlag(): string | null {
+  return PAUSED_AUTOMATION_GATE_ENVIRONMENT_FLAGS.find((name) => process.env[name] === "1") ?? null;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const workbenchInstanceId = randomUUID();
@@ -2050,6 +2060,19 @@ if (officialCliMode) {
       });
       return startAutomationPersistence().then(() => {
         if (process.env.AUT2_NORMAL_GUI_STORE_SMOKE === "1") return;
+        const pausedGate = pausedAutomationGateFlag();
+        if (pausedGate) {
+          logger.warn("automation_gate_paused_not_executable", {
+            code: "PAUSED_NOT_EXECUTABLE",
+            gateFlag: pausedGate,
+            promptSent: false,
+            providerSubmitCount: 0,
+            providerReconcileCount: 0,
+          });
+          process.exitCode = 1;
+          setTimeout(() => app.quit(), 50);
+          return;
+        }
         return startWebGptControlPlane().then(() => {
           if (process.env.AUT2_AUT3_FIX10_REAL_GATE === "1") {
             void startAut2Fix10AndAut3RealGate().catch((error) => {

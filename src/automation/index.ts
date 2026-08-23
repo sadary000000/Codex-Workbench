@@ -15,3 +15,4 @@ export * from "./webgpt-external-action.ts";
 export * from "./effective-policy.ts";
 export * from "./webgpt-policy-authority.ts";
 export * from "./evidence-correlation.ts";
+export * from "./provider-seam-classification.ts";

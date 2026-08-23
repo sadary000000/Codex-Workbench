@@ -1,13 +1,18 @@
+import { assertProviderExecutionAuthorization } from "../../../automation/adapters.ts";
 import type {
   AutomationProviderPort,
   ProviderCapabilityFact,
   ProviderCorrelation,
+  ProviderExecutionAuthorization,
+  ProviderPolicyAuthorityPort,
+  ProviderPolicyProvenance,
   ProviderObservation,
   ProviderRequestAccepted,
   ProviderRequestState,
   ProviderSubmitInput,
   ProviderTargetRef,
   ProviderTargetResolution,
+  ProviderRuntimeCapability,
 } from "../../../automation/adapters.ts";
 import type { WebGptRole, WebGptRequestRecord, WebGptRequestState } from "../types.ts";
 import { normalizeWebGptRole } from "../runtime/webgpt-role-session-registry.ts";
@@ -20,7 +25,11 @@ export interface WebGptProviderPortOptions {
   readonly roleSession: Pick<WebGptRoleSessionService, "status" | "submit">;
   readonly requestManager: Pick<WebGptRequestManager, "requestStatus" | "reconcileRequest">;
   readonly resolveInputRef: (inputRef: string) => Promise<string>;
-  readonly readControlFacts: () => Promise<{ runtimeReady: boolean; authenticated: boolean; busy: boolean }>;
+  readonly readRuntimeCapability: () => Promise<ProviderRuntimeCapability>;
+  /** The composition root must provide the pinned policy authority. */
+  readonly policyAuthority: ProviderPolicyAuthorityPort;
+  /** Composition-root validation of the persisted ActionIntent/ActionAttempt pair. */
+  readonly validateActionAttempt?: (correlation: ProviderCorrelation) => Promise<void>;
 }
 
 /**
@@ -29,6 +38,7 @@ export interface WebGptProviderPortOptions {
  * it. Only this WebGPT adapter resolves it.
  */
 export function createWebGptRoleTargetRef(projectId: string, role: WebGptRole): ProviderTargetRef {
+  if (!projectId.trim() || /^https?:\/\//i.test(projectId.trim())) throw new Error("WEBGPT_TARGET_REF_INVALID");
   return `${TARGET_PREFIX}${encodeURIComponent(projectId)}:${normalizeWebGptRole(role)}`;
 }
 
@@ -39,12 +49,12 @@ function parseTargetRef(value: ProviderTargetRef): { projectId: string; role: We
   if (separator <= 0) throw new Error("WEBGPT_TARGET_REF_INVALID");
   const projectId = decodeURIComponent(encoded.slice(0, separator)).trim();
   const role = normalizeWebGptRole(encoded.slice(separator + 1));
-  if (!projectId) throw new Error("WEBGPT_TARGET_REF_INVALID");
+  if (!projectId || /^https?:\/\//i.test(projectId)) throw new Error("WEBGPT_TARGET_REF_INVALID");
   return { projectId, role };
 }
 
 function targetRefFromRecord(record: Pick<WebGptRequestRecord, "projectId" | "role">): ProviderTargetRef {
-  if (!record.projectId || !record.role) return "webgpt-request-unscoped";
+  if (!record.projectId || !record.role) throw new Error("WEBGPT_TARGET_REF_UNAVAILABLE");
   return createWebGptRoleTargetRef(record.projectId, record.role);
 }
 
@@ -56,7 +66,27 @@ function providerState(state: WebGptRequestState): ProviderRequestState {
   return "UNKNOWN";
 }
 
-function observation(record: WebGptRequestRecord): ProviderObservation {
+function policyProvenance(correlation: ProviderCorrelation, authorization: ProviderExecutionAuthorization): ProviderPolicyProvenance {
+  if (!authorization.effectivePolicy) throw new Error("PROVIDER_EFFECTIVE_POLICY_REQUIRED");
+  return {
+    policyVersionId: authorization.effectivePolicy.effectivePolicy.policyVersionId,
+    operation: authorization.operation,
+    decision: "ALLOW",
+    runtimeCapabilityVersion: authorization.runtimeCapability.capabilityVersion,
+    runtimeId: authorization.runtimeCapability.runtimeId,
+    actionAttemptId: correlation.actionAttemptId!,
+    effectivePolicy: authorization.effectivePolicy,
+  };
+}
+
+function assertRecordCorrelation(record: WebGptRequestRecord, correlation: ProviderCorrelation, target: { projectId: string; role: WebGptRole }): void {
+  if (record.policyVersionId !== correlation.policyVersionId) throw new Error("PROVIDER_POLICY_PIN_MISMATCH");
+  if (record.idempotencyKey !== correlation.idempotencyRef) throw new Error("PROVIDER_IDEMPOTENCY_MISMATCH");
+  if (correlation.semanticRef && record.semanticSha256 !== correlation.semanticRef) throw new Error("PROVIDER_SEMANTIC_MISMATCH");
+  if (record.projectId !== target.projectId || record.role !== target.role) throw new Error("PROVIDER_TARGET_CORRELATION_MISMATCH");
+}
+
+function observation(record: WebGptRequestRecord, policy?: ProviderPolicyProvenance): ProviderObservation {
   const terminalSuccess = record.state === "COMPLETED";
   const terminalFailure = record.state === "FAILED" || record.state === "CANCELED";
   return {
@@ -68,11 +98,26 @@ function observation(record: WebGptRequestRecord): ProviderObservation {
     resultRef: record.resultSha256 ? `webgpt-result:${record.requestId}` : null,
     resultHash: record.resultSha256,
     evidenceRefs: [`webgpt-request:${record.requestId}`],
+    ...(policy ? { policy } : {}),
   };
 }
 
 function ensureCorrelation(input: ProviderCorrelation): void {
-  if (!input.actionIntentId || !input.actionAttemptId || !input.policyVersionId || !input.idempotencyRef) throw new Error("PROVIDER_CORRELATION_REQUIRED");
+  if (!input.actionIntentId || !input.actionAttemptId || !input.idempotencyRef) throw new Error("PROVIDER_CORRELATION_REQUIRED");
+}
+
+function capabilityError(operation: "SUBMIT" | "RECONCILE", capability: ProviderRuntimeCapability): string | null {
+  if (capability.status === "UNAVAILABLE") return "WEBGPT_PROVIDER_UNAVAILABLE:TARGET_UNREACHABLE";
+  if (capability.status === "WAITING") return "WEBGPT_PROVIDER_UNAVAILABLE:BUSY";
+  const required = operation === "RECONCILE" ? "VERIFY" : "PROMPT";
+  if (!capability.supportedOperations.includes(required)) return "WEBGPT_PROVIDER_UNAVAILABLE:CAPABILITY_NOT_SUPPORTED";
+  return null;
+}
+
+function assertLiveCapabilityProof(authorization: ProviderExecutionAuthorization, live: ProviderRuntimeCapability): void {
+  if (authorization.runtimeCapability.capabilityVersion !== live.capabilityVersion || authorization.runtimeCapability.runtimeId !== live.runtimeId || authorization.runtimeCapability.status !== live.status) {
+    throw new Error("PROVIDER_CAPABILITY_PROOF_MISMATCH");
+  }
 }
 
 export class WebGptAutomationProviderPort implements AutomationProviderPort {
@@ -80,13 +125,17 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
   private readonly roleSession: WebGptProviderPortOptions["roleSession"];
   private readonly requestManager: WebGptProviderPortOptions["requestManager"];
   private readonly resolveInputRef: WebGptProviderPortOptions["resolveInputRef"];
-  private readonly readControlFacts: WebGptProviderPortOptions["readControlFacts"];
+  private readonly readRuntimeCapability: WebGptProviderPortOptions["readRuntimeCapability"];
+  private readonly policyAuthority: WebGptProviderPortOptions["policyAuthority"];
+  private readonly validateActionAttempt: WebGptProviderPortOptions["validateActionAttempt"];
 
   constructor(options: WebGptProviderPortOptions) {
     this.roleSession = options.roleSession;
     this.requestManager = options.requestManager;
     this.resolveInputRef = options.resolveInputRef;
-    this.readControlFacts = options.readControlFacts;
+    this.readRuntimeCapability = options.readRuntimeCapability;
+    this.policyAuthority = options.policyAuthority;
+    this.validateActionAttempt = options.validateActionAttempt;
   }
 
   async resolveTarget(input: { workflowRole: string | null; providerTargetRef: ProviderTargetRef }): Promise<ProviderTargetResolution> {
@@ -98,24 +147,32 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
   }
 
   async capabilities(): Promise<readonly ProviderCapabilityFact[]> {
-    const facts = await this.readControlFacts();
-    if (!facts.runtimeReady) return [{ provider: "WEBGPT", code: "TARGET_UNREACHABLE", detail: "runtime_not_ready" }];
-    if (!facts.authenticated) return [{ provider: "WEBGPT", code: "UNAUTHENTICATED", detail: "webgpt_session_not_authenticated" }];
-    if (facts.busy) return [{ provider: "WEBGPT", code: "BUSY", detail: "provider_resource_busy" }];
+    const capability = await this.readRuntimeCapability();
+    if (capability.status === "UNAVAILABLE") return [{ provider: "WEBGPT", code: "TARGET_UNREACHABLE", detail: "runtime_not_ready" }];
+    if (capability.status === "WAITING") return [{ provider: "WEBGPT", code: "BUSY", detail: "provider_resource_busy" }];
+    if (!capability.supportedOperations.includes("PROMPT")) return [{ provider: "WEBGPT", code: "CAPABILITY_NOT_SUPPORTED", detail: "prompt_not_supported" }];
     return [{ provider: "WEBGPT", code: "AVAILABLE", detail: null }];
   }
 
   async submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted> {
     ensureCorrelation(input.correlation);
-    const capability = (await this.capabilities()).find((fact) => fact.code !== "AVAILABLE");
-    if (capability) throw new Error(`WEBGPT_PROVIDER_UNAVAILABLE:${capability.code}`);
+    if (input.provider !== this.provider) throw new Error("PROVIDER_ID_MISMATCH");
+    if (input.operation !== "PROMPT" && input.operation !== "SUBMIT") throw new Error("PROVIDER_OPERATION_UNSUPPORTED");
+    const liveCapability = await this.readRuntimeCapability();
+    const unavailable = capabilityError("SUBMIT", liveCapability);
+    if (unavailable) throw new Error(unavailable);
+    const authorization = await this.authorize("SUBMIT", input.correlation, liveCapability);
+    assertProviderExecutionAuthorization({ operation: "SUBMIT", correlation: input.correlation, authorization });
+    assertLiveCapabilityProof(authorization, liveCapability);
+    await this.validateActionAttempt?.(input.correlation);
     const target = parseTargetRef(input.providerTargetRef);
     const resolved = await this.resolveTarget({ workflowRole: input.workflowRole, providerTargetRef: input.providerTargetRef });
     if (resolved.status !== "AVAILABLE") throw new Error(`WEBGPT_TARGET_UNAVAILABLE:${resolved.capability ?? "UNKNOWN"}`);
     if (!input.inputRef) throw new Error("PROVIDER_INPUT_REF_REQUIRED");
     const payload = await this.resolveInputRef(input.inputRef);
-    const record = await this.roleSession.submit(target.projectId, target.role, payload, input.correlation.idempotencyRef ?? undefined);
-    return { provider: "WEBGPT", providerRequestRef: record.requestId, providerTargetRef: input.providerTargetRef, semanticRef: record.semanticSha256 };
+    const record = await this.roleSession.submit(target.projectId, target.role, payload, input.correlation.idempotencyRef ?? undefined, authorization.policyVersionId);
+    assertRecordCorrelation(record, input.correlation, target);
+    return { provider: "WEBGPT", providerRequestRef: record.requestId, providerTargetRef: input.providerTargetRef, semanticRef: record.semanticSha256, policy: policyProvenance(input.correlation, authorization) };
   }
 
   async observe(input: { providerRequestRef: string }): Promise<ProviderObservation> {
@@ -124,6 +181,27 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
 
   async reconcile(input: { providerRequestRef: string; correlation: ProviderCorrelation }): Promise<ProviderObservation> {
     ensureCorrelation(input.correlation);
-    return observation(await this.requestManager.reconcileRequest(input.providerRequestRef));
+    const liveCapability = await this.readRuntimeCapability();
+    const unavailable = capabilityError("RECONCILE", liveCapability);
+    if (unavailable) throw new Error(unavailable);
+    const authorization = await this.authorize("RECONCILE", input.correlation, liveCapability);
+    assertProviderExecutionAuthorization({ operation: "RECONCILE", correlation: input.correlation, authorization });
+    assertLiveCapabilityProof(authorization, liveCapability);
+    const before = await this.requestManager.requestStatus(input.providerRequestRef, false);
+    const target = before.projectId && before.role ? { projectId: before.projectId, role: normalizeWebGptRole(before.role) } : null;
+    if (!target) throw new Error("PROVIDER_TARGET_CORRELATION_MISSING");
+    assertRecordCorrelation(before, input.correlation, target);
+    await this.validateActionAttempt?.(input.correlation);
+    const reconciled = await this.requestManager.reconcileRequest(input.providerRequestRef);
+    assertRecordCorrelation(reconciled, input.correlation, target);
+    return observation(reconciled, policyProvenance(input.correlation, authorization));
+  }
+
+  async cancel(_input: { providerRequestRef: string; correlation: ProviderCorrelation }): Promise<ProviderObservation> {
+    throw new Error("PROVIDER_OPERATION_UNSUPPORTED:CANCEL");
+  }
+
+  private async authorize(operation: "SUBMIT" | "RECONCILE", correlation: ProviderCorrelation, runtimeCapability: ProviderRuntimeCapability): Promise<ProviderExecutionAuthorization> {
+    return this.policyAuthority.authorize({ operation, correlation, runtimeCapability });
   }
 }
