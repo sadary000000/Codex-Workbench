@@ -1,0 +1,45 @@
+{
+  "stage": "ARCH-V2-7",
+  "result": "PASS_CANDIDATE",
+  "baseCommit": "35db6d4ea15b72d115bc2b96ac4bc95c477388a9",
+  "implementationCommit": "a17d65e3be8e4ea5a7e16d11671dd055171849c0",
+  "realBusinessPromptCount": 0,
+  "newBusinessChatCount": 0,
+  "v1FrozenCoreChanged": false,
+  "tests": {
+    "check": "PASS",
+    "full": "377/377 PASS",
+    "archV27Targeted": "30/30 PASS",
+    "archV21ToV26SelectedRegression": "64/64 PASS",
+    "isolatedBuild": "PASS",
+    "isolatedPackage": "PASS",
+    "audit": "PASS: 0 vulnerabilities",
+    "diffCheck": "PASS",
+    "secretScan": "PASS: 0 high-confidence credential-pattern hits"
+  },
+  "package": {
+    "path": "dist-arch-v2-7/package/Codex Workbench V1.exe",
+    "outerSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "mainJsSha256": "EFC89E08CBBF973B8DCF59D594174515A2F2BA07AD69833FFE103345C869DA84",
+    "rendererJsSha256": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
+    "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F",
+    "standardDistStatus": "NOT_OVERWRITTEN_ACTIVE_EXE_LOCK"
+  },
+  "recovery": {
+    "blindResendAllowed": false,
+    "nativeIdentityPreserved": true,
+    "policyPinRequired": true,
+    "historicalResourceClaimIsNotLiveLease": true,
+    "promptRecoveryRawPromptPersisted": false
+  },
+  "subagents": {
+    "runningAtGate": 0,
+    "completed": ["Galileo", "Pascal", "Hooke", "Halley", "Tesla"]
+  },
+  "sensitiveDataBoundary": {
+    "cookies": false,
+    "tokens": false,
+    "browserProfiles": false,
+    "privateChatContent": false
+  }
+}

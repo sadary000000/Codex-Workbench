@@ -4,6 +4,7 @@
 
 - Stage: `ARCH-V2-7 — Persistence Migration / Review Harness / Composition Isolation / Recovery Intent`
 - Base: `35db6d4ea15b72d115bc2b96ac4bc95c477388a9`
+- Implementation commit: `a17d65e3be8e4ea5a7e16d11671dd055171849c0`
 - In scope: explicit persistence compatibility/migration, identity-safe recovery classifier, projection rebuild evidence, isolated production-equivalent harness, read purity and fault gates.
 - Out of scope: AUT-2/AUT-3, real business prompts, new Chat creation, ARCH-V2-8, workflow/Planner/Reviewer/Automation product features.
 
@@ -36,4 +37,11 @@ Final local evidence: full suite 377/377 PASS; ARCH-V2-7 targeted tests 30/30 PA
 
 ## Current status
 
-`READY_FOR_GPT_REVIEW` pending review-package hash/commit capture.
+## Review package
+
+- Path: `D:\办公\AI\Codex_Workbench_V1\dist\review\ARCH-V2-7-REVIEW-PACKAGE.zip`
+- The package is rebuilt from the committed implementation evidence; its final SHA-256 is recorded in the adjacent `.sha256` sidecar.
+
+## Gate
+
+`READY_FOR_GPT_REVIEW`
