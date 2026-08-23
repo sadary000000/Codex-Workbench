@@ -1,10 +1,14 @@
 # ARCH-V2-6 FIX ROUND 1 — Test Summary
 
+Implementation commits: `b8591db`, `6de4b5f`, `a034737`, `0d362b7`, `9a49338`
+Real business Prompt: **NO**
+Gate subagents: **A/B/C/D/E naturally completed and archived; running=0**
+
 | suite | result |
 |---|---:|
 | `npm run check` | PASS |
-| `npm test` | 345/345 PASS |
-| ARCH-V2-6 provider boundary + evidence correlation | 9/9 PASS |
+| `npm test` | 347/347 PASS |
+| ARCH-V2-6 provider boundary + evidence correlation | 11/11 PASS |
 | ARCH-V2-3/4/5 regression | 27/27 PASS |
 | `npm audit --omit=dev` | PASS, 0 vulnerabilities |
 | changed source/test secret scan | PASS |
@@ -30,4 +34,4 @@ No real App Server smoke and no real business Prompt were executed. This is inte
 
 The standard package was not overwritten because running EXE processes hold `dist/package/d3dcompiler_47.dll`. An isolated package was built at:
 
-`D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-6-fix-round-1c\package\`
+`D:\办公\AI\Codex_Workbench_V1\dist-stage-arch-v2-6-fix-round-1d\package\`

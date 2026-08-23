@@ -2,53 +2,81 @@
   "stage": "ARCH-V2-6 FIX ROUND 1",
   "result": "PASS_CANDIDATE",
   "baseCommit": "c0bda93",
-  "implementationCommits": ["b8591db", "6de4b5f"],
+  "implementationCommits": ["b8591db", "6de4b5f", "a034737", "0d362b7", "9a49338"],
+  "reviewEvidenceCommit": "f8fcb17",
   "realBusinessPromptSent": false,
+  "v1FrozenCoreChanged": false,
   "providerSeamClassification": {
     "activeProduction": ["webgpt-provider-port.ts"],
     "pausedNotExecutable": [
       "aut2-real-webgpt-gate.ts",
       "aut3-real-planner-gate.ts",
       "requirement-service.ts",
+      "requirement-webgpt-contract.ts",
       "requirement-webgpt-adapter.ts",
       "planner-service.ts",
-      "planner-webgpt-adapter.ts"
+      "planner-webgpt-adapter.ts",
+      "schema.ts",
+      "store.ts",
+      "types.ts"
     ],
     "testOnly": ["webgpt-external-action.ts"],
-    "legacyReadOnly": ["webgpt-action-readiness.ts"]
+    "legacyReadOnly": ["adapters.ts", "webgpt-action-readiness.ts"],
+    "activeFields": [],
+    "staticInventory": true
+  },
+  "pausedRuntimeProtection": {
+    "guard": "src/main/main.ts",
+    "code": "PAUSED_NOT_EXECUTABLE",
+    "promptSent": false,
+    "providerSubmitCount": 0,
+    "providerReconcileCount": 0,
+    "legacyGateStarted": false
   },
   "providerAuthorization": {
-    "required": ["policyVersionId", "EffectivePolicy", "RuntimeCapability", "ActionAttempt correlation"],
+    "required": ["policyVersionId", "EffectivePolicyDecision", "RuntimeCapability", "ActionAttempt correlation"],
     "missingPolicyPin": {"result": "FAIL_CLOSED", "providerSubmitCount": 0},
     "deniedPolicy": {"result": "FAIL_CLOSED", "providerSubmitCount": 0},
     "missingCapability": {"result": "FAIL_CLOSED", "providerSubmitCount": 0},
     "validPinnedPolicyAndCapability": {"result": "ISOLATED_FIXTURE_REACHED", "providerSubmitCount": 1},
     "reconcilePolicyOperation": "VERIFY",
-    "productionActionAttemptValidation": "PASS"
+    "reconcileConsumesRetryBudget": false,
+    "cancel": "CAPABILITY_NOT_SUPPORTED",
+    "productionActionAttemptValidation": "PASS",
+    "acceptedRecordIdentityReadback": "PASS"
   },
   "tests": {
-    "archV2_6TargetAndCorrelation": {"passed": 9, "failed": 0},
+    "archV2_6TargetAndCorrelation": {"passed": 11, "failed": 0},
     "archV2_3_4_5Regression": {"passed": 27, "failed": 0},
-    "fullSuite": {"passed": 345, "failed": 0},
+    "fullSuite": {"passed": 347, "failed": 0},
     "check": "PASS",
     "npmAuditOmitDev": "PASS_0_VULNERABILITIES",
     "secretScan": "PASS",
     "gitDiffCheck": "PASS"
   },
-  "subagentD": {
-    "execution": "main_read_only_audit_because_multi_agent_tool_unavailable",
-    "temporaryOutput": "C:\\Users\\sadar\\AppData\\Local\\Temp\\arch-v2-6-subagent-d-audit-20260823",
-    "realPromptSent": false
-  },
+  "subagents": [
+    {"agent": "A", "threadId": "01a02e62-ce11-7502-bfac-b401cd34741d", "status": "COMPLETE_NO_ACTIVE_RUNTIME", "realPromptSent": false},
+    {"agent": "B", "threadId": "01a02e60-7f6f-72c0-8204-59fb273d1c30", "status": "COMPLETE_NO_ACTIVE_RUNTIME", "realPromptSent": false},
+    {"agent": "C", "threadId": "01a02e62-d0a7-7233-ae0e-a6501f5b0d00", "status": "COMPLETE_NO_ACTIVE_RUNTIME", "realPromptSent": false},
+    {"agent": "D", "threadId": "01a02e62-d381-7752-a749-6abc26509d29", "status": "COMPLETE_NO_ACTIVE_RUNTIME", "realPromptSent": false},
+    {"agent": "E", "threadId": "01a02e62-d6d4-74e0-b0b8-86746f73e8dc", "status": "COMPLETE_NO_ACTIVE_RUNTIME", "realPromptSent": false}
+  ],
+  "runningSubagentsAtGate": 0,
   "package": {
-    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-stage-arch-v2-6-fix-round-1c\\package\\Codex Workbench V1.exe",
-    "sha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\review\\ARCH-V2-6-FIX-ROUND-1-REVIEW-PACKAGE.zip",
+    "sha256Sidecar": "dist/review/ARCH-V2-6-FIX-ROUND-1-REVIEW-PACKAGE.zip.sha256",
     "standardPackageUpdated": false,
     "standardPackageBlocker": "running EXE locks dist/package/d3dcompiler_47.dll",
-    "resourceHashes": {
-      "main.js": "395233ABE6B95C98B8EFF88B73916778A8446565CC616C1BE32D4202A5B97A8B",
-      "renderer.js": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
-      "preload.cjs": "09D0EFBB1BD3C7BF02DA6A98EE4AA79D1AA5BFFE60134708B13B2551387B38A2"
-    }
-  }
+    "isolatedPackage": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-stage-arch-v2-6-fix-round-1d\\package\\Codex Workbench V1.exe",
+    "isolatedPackageSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC"
+  },
+  "knownLimitations": [
+    "No real App Server smoke and no real business Prompt by explicit gate constraint",
+    "Legacy URL-shaped compatibility data is not migrated; it remains paused/test-only/read-only",
+    "Provider-side CANCEL is unsupported",
+    "Composition-root input resolver is intentionally fail-closed until Automation is authorized"
+  ],
+  "legacyProject": "D:\\办公\\AI\\Codex_Workbench unchanged/read-only",
+  "autoAgent": "D:\\办公\\AI\\Auto_Agent clean",
+  "gate": "READY_FOR_GPT_REVIEW"
 }
