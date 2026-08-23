@@ -12,3 +12,22 @@
 - 本阶段是否保持 V1 Frozen Core、AUT-2/AUT-3 和 WebGPT 业务边界未被扩大。
 
 本地 gate 是 `REVIEW_READY_WITH_DISCLOSED_LIMITATIONS`，不是自动宣布后续阶段通过。
+
+## FIX ROUND 1 GPT finding
+
+上一轮 GPT Gate 返回 FIX_REQUIRED，范围为：
+
+- FIX-01：枚举并闭合全部生产 Budget callers；
+- FIX-02：PROMPT/RETRY/NEW_CHAT production consumer evidence；
+- FIX-03：legacy unpinned mutation fail-closed；
+- P2：reserve/commit/abort-before-dispatch lifecycle。
+
+本轮实现和证据见：
+
+- ARCH-V2-5-FIX-ROUND-1.md
+- ARCH-V2-5-BUDGET-CALLER-INVENTORY.md
+- ARCH-V2-5-PRODUCTION-BUDGET-CONSUMERS.md
+- ARCH-V2-5-LEGACY-UNPINNED-EVIDENCE.md
+- ARCH-V2-5-RESERVATION-LIFECYCLE.md
+
+当前状态为 READY_FOR_GPT_REVIEW，不是本地自宣称 PASS。

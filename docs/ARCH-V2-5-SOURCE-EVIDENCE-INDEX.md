@@ -1,24 +1,16 @@
-# ARCH-V2-5 Source Evidence Index
+# ARCH-V2-5 FIX ROUND 1 Source Evidence Index
 
-## Product source
+| Evidence | Purpose |
+|---|---|
+| src/automation/webgpt-policy-authority.ts | stable persisted PolicyVersion and single host budget authority |
+| src/features/webgpt/runtime/webgpt-request-manager.ts | production Prompt/NewChat pin, admission and commit boundary |
+| src/automation/requirement-webgpt-adapter.ts | repair pre-dispatch release and commit-before-transport |
+| src/automation/effective-policy.ts | pin correlation and pinned resolver fail-closed |
+| src/automation/webgpt-external-action.ts | policyVersionId propagation into provider evidence |
+| src/main/main.ts | normal production authority injection |
+| tests/arch-v2-5-production-consumers.test.ts | Prompt/Retry/NewChat, legacy unpinned, reservation evidence |
+| docs/ARCH-V2-5-BUDGET-CALLER-INVENTORY.md | caller classification |
+| docs/ARCH-V2-5-RESERVATION-LIFECYCLE.md | reserve/commit/release semantics |
 
-- `src/automation/effective-policy.ts` — resolver, pin, hard boundary, budget authority。
-- `src/automation/store.ts` — PolicyVersion persistence and execution identity binding。
-- `src/automation/schema.ts` — bounded schema and project/pin reference checks。
-- `src/automation/sqlite-persistence.ts` — persistence privacy boundary。
-- `src/automation/requirement-webgpt-adapter.ts` — optional repair authority injection。
-- `src/automation/types.ts` / `src/automation/index.ts` — type and public export surface。
-
-## Test source
-
-- `tests/arch-v2-5-policy.test.ts` — stage-specific contract tests。
-
-## Real evidence
-
-- `dist-stage-arch-v2-5/WEBGPT-WEB6.6-REAL-GATE.json` — sanitized read-only protocol smoke;
-  auth token presence is only boolean and token value is not persisted。
-
-## Scope protection
-
-No files under `D:\办公\AI\Codex_Workbench` or `D:\办公\AI\Auto_Agent` were used as write
-targets. No V1 Frozen Core runtime files were modified by this stage.
+No Cookie, Token, browser profile, private Chat content or raw user credential is
+included in the review package.

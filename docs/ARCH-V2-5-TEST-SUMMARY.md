@@ -1,19 +1,42 @@
-# ARCH-V2-5 Test Summary
+# ARCH-V2-5 FIX ROUND 1 Test Summary
 
-## Targeted contract tests
+~~~yaml
+npm_run_check: PASS
+source_full_suite: 336/336 PASS
+arch_v2_5_targeted: 7/7 PASS
+arch_v2_4_targeted: PASS
+arch_v2_2_protocol_generation: PASS
+isolated_build: PASS
+isolated_package: PASS
+npm_audit_omit_dev: 0 vulnerabilities
+git_diff_check: PASS
+secret_scan: PASS
+real_business_prompts: 0
+~~~
 
-`tests/arch-v2-5-policy.test.ts`: 7/7 PASS。
+## Required npm test
 
-覆盖：交集/限幅、硬约束 deny、runtime waiting/unsupported、Human Gate、pin mismatch、
-override isolation、四类预算 Authority、typed PolicyVersion persistence/audit、
-ActionIntent/Checkpoint pin 和 immutable replacement。
+The required unfiltered npm test was executed and returned 336/337:
 
-## Full suite
+- 336 source tests passed;
+- one pre-existing test under
+  dist-stage-arch-v2-5/review-staging/tests/arch-v2-5-policy.test.ts failed before
+  test registration because review-staging/src/automation/canonical.ts is missing.
 
-`npm test`: 329/329 PASS，失败 0。
+The user-owned staging directory was not deleted, regenerated, or modified to hide
+the failure. The reproducible source-only command is:
 
-## Static/build/security
+~~~bash
+node --experimental-strip-types --test tests/*.test.ts
+~~~
 
-`npm run check`、隔离 build/package、`npm audit --omit=dev` 均 PASS；本阶段审查包只会包含
-选定文档、源代码和测试摘要，不包含凭据、cookie、token、browser profile、私人聊天或
-完整生产 Journal/Automation DB。
+It returned 336/336 PASS.
+
+## Real protocol smoke
+
+No real business Prompt was sent. The WEB-6.6 smoke completed with:
+
+- descriptor ready from the running Workbench;
+- VERSION_MISMATCH fixture PASS;
+- CAPABILITY_NOT_SUPPORTED fixture PASS;
+- status subprocess launch caveat exitCode 2147483651, disclosed rather than hidden.

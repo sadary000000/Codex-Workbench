@@ -1,17 +1,15 @@
-# ARCH-V2-5 Regression Evidence
+# ARCH-V2-5 FIX ROUND 1 Regression Evidence
 
-| 检查 | 结果 |
-|---|---|
-| `npm run check` | PASS |
-| `npm test` | PASS, 329/329 |
-| ARCH-V2-5 targeted | PASS, 7/7 |
-| isolated `npm run build` | PASS |
-| isolated Windows package | PASS |
-| `npm audit --omit=dev` | PASS, 0 vulnerabilities |
-| WEB-6.6 protocol real smoke | PASS, read-only, 0 prompts |
-| V1 Frozen Core changed | NO |
-| old donor changed | NO |
-| real business prompt count | 0 |
+| Regression | Result | Evidence |
+|---|---|---|
+| ARCH-V2-1 Native/Map boundaries | PASS | source full suite and prior stage evidence |
+| ARCH-V2-2 Shared Host/generated protocol | PASS | npm run test:protocol:arch-v2-2 |
+| ARCH-V2-3 Query/Command/Reconcile | PASS | source full suite and prior stage evidence |
+| ARCH-V2-4 External Action safety | PASS | targeted ARCH-V2-4 tests and source full suite |
+| V1 Frozen Core | PASS | selected source diff contains no Native identity redesign |
+| No real business Prompt | PASS | realBusinessPrompts=0 |
 
-隔离 package 位于 `dist-stage-arch-v2-5/package`；没有覆盖用户正在使用的标准
-`dist/package`。
+The read-only WEB-6.6 Control Plane smoke used the running Workbench descriptor.
+VERSION_MISMATCH and CAPABILITY_NOT_SUPPORTED fixtures passed. The status subprocess
+returned legacy package exit code 2147483651 because the standard package is already
+running; that launch caveat is recorded and is not reclassified as a protocol pass.
