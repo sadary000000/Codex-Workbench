@@ -1,0 +1,53 @@
+{
+  "stage": "ARCH-V2-8",
+  "status": "READY_FOR_GPT_FINAL_REVIEW",
+  "scope": "read-only capability, frozen-contract, compatibility and provenance review",
+  "realBusinessPrompts": 0,
+  "newBusinessChats": 0,
+  "sourceCodeChangedByStage": false,
+  "baseline": {
+    "head": "17f7c9bd096ec6aad94b8106af2a11157d25ec82",
+    "archV2_7Implementation": "a17d65e3be8e4ea5a7e16d11671dd055171849c0"
+  },
+  "capability": {
+    "codexCli": "codex-cli 0.147.0",
+    "directInitialize": "PASS",
+    "schemaGeneration": "PASS",
+    "observedDesktopAppServer": "Codex Desktop/0.148.0-alpha.9",
+    "versionCompatibility": "FAIL_WITH_EVIDENCE",
+    "officialCliStatus": "FAIL_WITH_EVIDENCE: TIMEOUT after 15070ms",
+    "businessThreadTurn": "NOT_TESTED_BY_SCOPE"
+  },
+  "regression": {
+    "npmTest": "377/377 PASS",
+    "archV2_7Targeted": "30/30 PASS",
+    "archV2_1_to_6Selected": "64/64 PASS",
+    "independentGroupedAssertions": 584,
+    "check": "PASS",
+    "build": "PASS",
+    "packageWin": "PASS",
+    "audit": "PASS: 0 vulnerabilities",
+    "secretScan": "PASS"
+  },
+  "subagents": {
+    "A": "completed and adopted",
+    "B": "completed and adopted as challenge evidence",
+    "C": "completed and adopted as regression evidence",
+    "D": "completed and adopted as challenge evidence",
+    "E": "no retrievable result; not adopted",
+    "runningAtGate": 0
+  },
+  "challengeSeverity": {
+    "p0": 1,
+    "p1": 5,
+    "p2": 2
+  },
+  "package": {
+    "outerExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "mainJsSha256": "EFC89E08CBBF973B8DCF59D594174515A2F2BA07AD69833FFE103345C869DA84",
+    "rendererJsSha256": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
+    "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F"
+  },
+  "finalFrozen": false,
+  "gptDecisionRequired": true
+}

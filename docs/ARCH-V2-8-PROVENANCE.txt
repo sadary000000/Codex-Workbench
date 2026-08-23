@@ -1,0 +1,28 @@
+ARCH-V2-8 Review Package Provenance
+
+repository=D:\办公\AI\Codex_Workbench_V1
+audit_head=17f7c9bd096ec6aad94b8106af2a11157d25ec82
+stage_status=READY_FOR_GPT_FINAL_REVIEW
+implementation_changes_in_stage=NO
+v1_frozen_core_changed=NO
+real_business_prompts=0
+new_business_chats=0
+running_subagents_at_gate=0
+
+codex_cli_version=codex-cli 0.147.0
+resolver_binary_sha256=935A1911ED5564FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D
+observed_desktop_app_server_user_agent=Codex Desktop/0.148.0-alpha.9 (sanitized)
+observed_desktop_binary_sha256=F29F609375F3731D8DB507A95124862A84E306982E30BA4300DDCE5638BC6946
+
+package_outer_exe_sha256=31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+package_main_js_sha256=EFC89E08CBBF973B8DCF59D594174515A2F2BA07AD69833FFE103345C869DA84
+package_renderer_js_sha256=400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB
+package_json_sha256=1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F
+
+automated_tests=npm test 377/377; targeted 30/30; selected regression 64/64; grouped audit 584 assertions
+build_and_package=npm run build PASS; npm run package:win PASS
+audit=npm audit --omit=dev PASS; 0 vulnerabilities
+secret_scan=PASS; no high-confidence credential-pattern hits
+real_protocol=initialize PASS; schema generation PASS; official CLI status bounded TIMEOUT evidence
+
+excluded=Cookie, Token, password, browser profile, private ChatGPT content, raw business Prompt, production database, full Request Journal, raw temporary logs

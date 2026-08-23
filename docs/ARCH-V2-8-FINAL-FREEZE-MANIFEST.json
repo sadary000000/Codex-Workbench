@@ -1,0 +1,63 @@
+{
+  "stage": "ARCH-V2-8",
+  "stageName": "Capability / Frozen Confirmation / Compatibility Regression / Final Architecture Freeze",
+  "status": "READY_FOR_GPT_FINAL_REVIEW",
+  "repository": "D:\\办公\\AI\\Codex_Workbench_V1",
+  "headAtAuditStart": "17f7c9bd096ec6aad94b8106af2a11157d25ec82",
+  "implementationChangesInThisStage": false,
+  "v1FrozenCoreChanged": false,
+  "realBusinessPrompts": 0,
+  "newBusinessChats": 0,
+  "automationRealGateStarted": false,
+  "codexCliVersion": "codex-cli 0.147.0",
+  "resolverBinarySha256": "935A1911ED5564FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D",
+  "observedDesktopAppServerUserAgent": "Codex Desktop/0.148.0-alpha.9 (Windows 10.0.19045; x86_64) dumb",
+  "observedDesktopBinarySha256": "F29F609375F3731D8DB507A95124862A84E306982E30BA4300DDCE5638BC6946",
+  "schema": {
+    "experimentalGeneratedFileCount": 361,
+    "stableContractGeneratedTsFileCount": 642,
+    "stableContractGeneratedJsonSchemaFileCount": 285,
+    "experimentalSchemaSha256": "BABFD5C98CD978DD858B4762CDFBC9FBA941E1A0E4053DE0050E4082AE1F075A"
+  },
+  "package": {
+    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+    "outerSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "mainJsSha256": "EFC89E08CBBF973B8DCF59D594174515A2F2BA07AD69833FFE103345C869DA84",
+    "rendererJsSha256": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
+    "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F"
+  },
+  "tests": {
+    "npmTest": "377/377 PASS",
+    "archV2_7Targeted": "30/30 PASS",
+    "archV2_1_to_6Selected": "64/64 PASS",
+    "independentAuditGroupedAssertions": 584,
+    "check": "PASS",
+    "build": "PASS",
+    "packageWin": "PASS",
+    "auditOmitDev": "PASS: 0 vulnerabilities",
+    "diffCheck": "PASS with existing LF/CRLF warnings",
+    "secretScan": "PASS: 0 high-confidence credential-pattern hits"
+  },
+  "realProtocol": {
+    "initialize": "PASS",
+    "schemaGeneration": "PASS",
+    "packagedOfficialCliStatus": "FAIL_WITH_EVIDENCE: TIMEOUT after 15070ms",
+    "threadTurnBusinessFlow": "NOT_TESTED_BY_SCOPE"
+  },
+  "challengeFindings": {
+    "p0": [
+      "B: strict idle zero-cost boundary may be violated by ordinary startup initialization"
+    ],
+    "p1": [
+      "A: shared AppServerHost does not enforce version/hash validation in all production paths",
+      "B: activeSummary/provider-port/production projection and legacy seam concerns",
+      "D: implicit startup migration, candidate fallback, incomplete identity gate, policy-pin mismatch, Recovery Intent production wiring"
+    ],
+    "p2": [
+      "No complete production projection rebuild command",
+      "No user-facing migration command"
+    ]
+  },
+  "reviewDecision": "GPT_REVIEW_REQUIRED",
+  "finalFrozen": false
+}
