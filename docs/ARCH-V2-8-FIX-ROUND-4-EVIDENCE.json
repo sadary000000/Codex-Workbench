@@ -1,0 +1,78 @@
+{
+  "stage": "ARCH-V2-8 FIX ROUND 4",
+  "result": "PASS_CANDIDATE",
+  "technicalGate": "READY_FOR_FINAL_HUMAN_FREEZE",
+  "baseCommit": "80ca088",
+  "implementationCommit": "fe30b94e090ea2bfd2b2ef78b700bf81d72e5db3",
+  "finalFrozen": false,
+  "automationState": {
+    "AUT-2": "PAUSED",
+    "AUT-3": "PAUSED"
+  },
+  "gateCounts": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 3
+  },
+  "abi": {
+    "codexVersion": "codex-cli 0.147.0",
+    "binarySha256": "935A1911ED2556E4FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D",
+    "initializeResponseRequiredFields": [
+      "codexHome",
+      "platformFamily",
+      "platformOs",
+      "userAgent"
+    ],
+    "initializeResponseSchemaSha256": "62AD689C2CB6379913C1D72749CFD8DE5089D35760214123518EB92EEF11ACC9",
+    "initializeParamsRequiredFields": ["clientInfo"],
+    "initializeParamsSchemaSha256": "6F0094BE9A65242EC779A40794CBD4FDFA32FCA1E45084A16ADFB50501D33EA2",
+    "responseProtocolVersionRequired": false,
+    "responseCapabilitiesRequired": false,
+    "requestExperimentalApiExplicit": true
+  },
+  "realInitializeProbe": {
+    "status": "PASS",
+    "responseKeys": ["userAgent", "codexHome", "platformFamily", "platformOs"],
+    "schemaProvenanceVerified": true,
+    "requestedExperimentalApi": false,
+    "remoteControlNotificationObserved": true,
+    "processExitCode": 0,
+    "threadStarted": false,
+    "turnStarted": false,
+    "promptSent": false,
+    "businessChatCreated": false
+  },
+  "verification": {
+    "check": "PASS",
+    "tests": "400/400 PASS",
+    "targetedRound4": "11/11 PASS",
+    "protocolGeneration": "PASS; TypeScript 642, JSON schema 285, repeatable",
+    "audit": "PASS; 0 vulnerabilities",
+    "diffCheck": "PASS",
+    "secretScan": "PASS",
+    "isolatedBuild": "PASS",
+    "isolatedPackage": "PASS"
+  },
+  "package": {
+    "path": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\review\\ARCH-V2-8-REVIEW-PACKAGE.zip",
+    "sha256Sidecar": "ARCH-V2-8-REVIEW-PACKAGE.zip.sha256",
+    "outerExeSha256": "31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC",
+    "cliExeSha256": "9438EEC0E05BECC5B9221E4D8B5E4DA1256AF3CA7510FECBF02C505CC89C00FE",
+    "mainJsSha256": "3EB53C61973D82863A92D1FFBF035EDE7BA2C2E25CC61D019849BAD71416FF93",
+    "rendererJsSha256": "400E6F3C9F3699F1327FAE6B5C50342FDB0F83B6DF420CF839B365436E2BCDBB",
+    "packageJsonSha256": "1BEA3D35305D3499CBDC1D7F2B17FE03FF2A9F51978C080C8C925FB18C1B385F",
+    "controlPlaneSchemaSha256": "0E13F0B1D6A1A9AF37DFEEE13FEFEBE70F532BB5C6F75C29AD7860C2B7A72E59"
+  },
+  "sideEffects": {
+    "realBusinessPrompts": 0,
+    "newBusinessChats": 0,
+    "cookiesTokensPrivateChatsIncluded": false
+  },
+  "subagents": {
+    "started": 4,
+    "completed": 4,
+    "runningAtGate": 0,
+    "allReadOnly": true
+  },
+  "requestedGate": "PASS"
+}
