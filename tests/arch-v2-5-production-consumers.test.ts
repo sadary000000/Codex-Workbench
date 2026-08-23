@@ -190,10 +190,10 @@ test("production RequestManager without an injected authority fails closed befor
   const workspace = new ConsumerWorkspace();
   try {
     const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: join(root, "requests"), requirePolicyAuthority: true });
-    const request = await manager.submit("LEGACY_UNPINNED_MUST_NOT_SEND", {}, "legacy-no-authority");
-    const result = await manager.waitForRequest(request.requestId, 5_000);
-    assert.equal(result.record.state, "FAILED");
-    assert.equal(result.record.error?.code, "POLICY_AUTHORITY_REQUIRED");
+    await assert.rejects(
+      () => manager.submit("LEGACY_UNPINNED_MUST_NOT_SEND", {}, "legacy-no-authority"),
+      (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "POLICY_PIN_REQUIRED"),
+    );
     assert.equal(workspace.submitCount, 0);
   } finally {
     await rm(root, { recursive: true, force: true });

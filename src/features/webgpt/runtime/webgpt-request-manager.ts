@@ -42,6 +42,8 @@ export interface WebGptRequestMetadata {
   projectId?: string;
   role?: WebGptRole;
   targetChatUrl?: string | null;
+  /** Immutable PolicyVersion selected by the provider admission authority. */
+  policyVersionId?: string | null;
 }
 
 export interface WebGptWaitResult {
@@ -232,6 +234,9 @@ export class WebGptRequestManager {
     const existing = this.findByIdempotencyKey(key);
     if (!existing) return null;
     this.assertSameSemantic(existing, prompt, metadata);
+    if (metadata.policyVersionId && existing.policyVersionId !== metadata.policyVersionId) {
+      throw this.codedError("POLICY_PIN_MISMATCH", "相同 idempotency key 已绑定其它 PolicyVersion，已拒绝静默换 pin。", { requestId: existing.requestId });
+    }
     return this.clone(existing);
   }
 
@@ -247,6 +252,9 @@ export class WebGptRequestManager {
       const existing = this.findByIdempotencyKey(key);
       if (existing) {
         if (existing.semanticSha256 !== semanticSha256) throw this.codedError("IDEMPOTENCY_CONFLICT", "相同 idempotency key 对应的请求语义不同，已拒绝覆盖或重发。");
+        if (normalizedMetadata.policyVersionId && existing.policyVersionId !== normalizedMetadata.policyVersionId) {
+          throw this.codedError("POLICY_PIN_MISMATCH", "相同 idempotency key 已绑定其它 PolicyVersion，已拒绝静默换 pin。", { requestId: existing.requestId });
+        }
         if ((existing.state === "QUEUED" || existing.state === "PAUSED_FOR_USER") && !this.prompts.has(existing.requestId)) {
           this.prompts.set(existing.requestId, value);
           if (existing.state === "QUEUED" && this.workspace.getControlMode() === "AUTO_CONTROL") void this.drain();
@@ -256,7 +264,11 @@ export class WebGptRequestManager {
     }
     const requestId = `wgpt-${randomUUID()}`;
     const now = new Date().toISOString();
-    const policyVersionId = this.policyAuthority ? await this.policyAuthority.currentPolicyVersionId() : null;
+    const requestedPolicyVersionId = typeof normalizedMetadata.policyVersionId === "string" && normalizedMetadata.policyVersionId.trim()
+      ? normalizedMetadata.policyVersionId.trim().slice(0, 256)
+      : null;
+    const policyVersionId = requestedPolicyVersionId ?? (this.policyAuthority ? await this.policyAuthority.currentPolicyVersionId() : null);
+    if (this.requirePolicyAuthority && !policyVersionId) throw this.codedError("POLICY_PIN_REQUIRED", "生产 WebGPT Request 缺少显式 PolicyVersion pin；已拒绝创建请求。 ");
     const record: WebGptRequestRecord = {
       requestId,
       idempotencyKey: key,
