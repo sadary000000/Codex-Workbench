@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { shell, WebContentsView, type BaseWindow, type Rectangle, type Session } from "electron";
-import { buildWebGptCreateProjectChatScript, buildWebGptCreateProjectScript, buildWebGptInspectProjectScript, buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
+import { resolve } from "node:path";
+import { buildWebGptCreateProjectChatScript, buildWebGptCreateProjectScript, buildWebGptInspectProjectScript, buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptReviewSubmissionProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_REVIEW_ATTACHMENT_PROBE_SCRIPT, WEBGPT_REVIEW_OPEN_ATTACHMENT_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
 import { createWebGptSession, webGptSessionPath } from "../session/webgpt-session.ts";
 import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import { projectOperationBudgetMs, type WebGptProjectClickResult, type WebGptProjectOperationCommand, type WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
@@ -19,6 +20,7 @@ import type {
   WebGptScreenshot,
   WebGptState,
 } from "../types.ts";
+import type { ReviewSubmissionReconcileResult, ReviewSubmissionWorkspacePort, ReviewSubmissionWorkspaceRequest, ReviewSubmissionWorkspaceResult } from "../review-submission/review-submission-types.ts";
 
 const ZERO_BOUNDS: Rectangle = { x: 0, y: 0, width: 0, height: 0 };
 
@@ -64,7 +66,7 @@ export interface WebGptWorkspaceOptions {
   onState: (state: WebGptState) => void;
 }
 
-export class WebGptWorkspace implements WebGptPublicService {
+export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWorkspacePort {
   private readonly mainWindow: BaseWindow;
   private readonly session: Session;
   private readonly sessionPath: string;
@@ -862,6 +864,139 @@ export class WebGptWorkspace implements WebGptPublicService {
     await this.waitForComposer();
     this.assertAutomationEpoch(epoch);
     return this.state;
+  }
+
+  private async attachReviewZip(zipPath: string): Promise<Record<string, unknown>> {
+    const contents = this.view.webContents;
+    const debuggerSession = contents.debugger;
+    const attachedBefore = debuggerSession.isAttached();
+    if (!attachedBefore) debuggerSession.attach("1.3");
+    try {
+      let nodeId = 0;
+      for (let attempt = 0; attempt < 20 && nodeId === 0; attempt += 1) {
+        const document = await debuggerSession.sendCommand("DOM.getDocument", { depth: -1, pierce: true }) as { root?: { nodeId?: number } };
+        const rootNodeId = document.root?.nodeId;
+        if (typeof rootNodeId === "number") {
+          const result = await debuggerSession.sendCommand("DOM.querySelector", { nodeId: rootNodeId, selector: 'input[type="file"]' }) as { nodeId?: number };
+          nodeId = typeof result.nodeId === "number" ? result.nodeId : 0;
+        }
+        if (nodeId === 0 && attempt === 0) {
+          await contents.executeJavaScript(WEBGPT_REVIEW_OPEN_ATTACHMENT_SCRIPT);
+        }
+        if (nodeId === 0) await new Promise((resolveDelay) => setTimeout(resolveDelay, 150));
+      }
+      if (nodeId === 0) throw this.codedError("WEBGPT_REVIEW_ATTACHMENT_INPUT_NOT_FOUND", "未找到 ChatGPT 附件 file input。", { operation: "review-submit" });
+      await debuggerSession.sendCommand("DOM.setFileInputFiles", { nodeId, files: [resolve(zipPath)] });
+    } catch (error) {
+      if ((error as { code?: string })?.code) throw error;
+      throw this.codedError("WEBGPT_REVIEW_ATTACHMENT_FAILED", `ZIP 附件未能交给当前 WebGPT 页面：${error instanceof Error ? error.message : String(error)}`, { operation: "review-submit" });
+    } finally {
+      if (!attachedBefore && debuggerSession.isAttached()) debuggerSession.detach();
+    }
+    const probe = await this.view.webContents.executeJavaScript(WEBGPT_REVIEW_ATTACHMENT_PROBE_SCRIPT) as Record<string, unknown>;
+    if (probe.ready !== true) throw this.codedError("WEBGPT_REVIEW_ATTACHMENT_TIMEOUT", "ZIP 已尝试上传，但页面未确认附件就绪。", { operation: "review-submit" });
+    return probe;
+  }
+
+  async submitReviewPackage(input: ReviewSubmissionWorkspaceRequest): Promise<ReviewSubmissionWorkspaceResult> {
+    const epoch = this.requireAutomationEpoch();
+    const lease = await this.operationArbiter.acquire({ source: "CLI", ownerKey: "review-submission", targetChatUrl: input.target === "current" ? null : input.target, operationType: "REVIEW_SUBMIT" });
+    const startedAt = Date.now();
+    let sendClicked = false;
+    try {
+      const targetStartedAt = Date.now();
+      this.setVisible(true);
+      if (input.target !== "current") await this.openChatForAutomation(input.target);
+      this.assertAutomationEpoch(epoch);
+      let probe = await this.getPageProbe();
+      if (probe.page.loginRequired) throw this.codedError("WEBGPT_LOGIN_REQUIRED", "ChatGPT 页面需要登录。");
+      if (!probe.page.onChatPage || !probe.page.composerFound) throw this.codedError("WEBGPT_REVIEW_TARGET_NOT_READY", "当前 WebGPT 页面不是已就绪的 Chat 对话。", { operation: "review-submit" });
+      const actualTarget = normalizeRoleChatUrl(normalizeChatUrl(probe.page.url || this.view.webContents.getURL() || this.state.url));
+      if (input.target !== "current" && actualTarget !== normalizeRoleChatUrl(normalizeChatUrl(input.target))) {
+        throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "当前页面不是指定的 Review 目标 Chat。", { operation: "review-submit" });
+      }
+      const targetReadyMs = Date.now() - targetStartedAt;
+      const beforeUserMessageCount = probe.page.userCount;
+
+      const attachStartedAt = Date.now();
+      const attachment = await this.attachReviewZip(input.zipPath);
+      const attachMs = Date.now() - attachStartedAt;
+
+      const summaryStartedAt = Date.now();
+      let setResult = await this.view.webContents.executeJavaScript(buildWebGptSetPromptScript(input.summary));
+      if (!setResult || typeof setResult !== "object" || (setResult as { ok?: unknown }).ok !== true) {
+        const code = String((setResult as { code?: unknown })?.code || "COMPOSER_DRAFT_MISMATCH");
+        if (code !== "COMPOSER_NATIVE_INPUT_REQUIRED") throw this.codedError(code, "Review 摘要未能可靠写入 Composer。", { operation: "review-submit" });
+        await this.view.webContents.insertText(input.summary);
+      }
+      const summaryProbe = await this.view.webContents.executeJavaScript(buildWebGptReviewSubmissionProbeScript(input.marker)) as Record<string, unknown>;
+      if (!summaryProbe || typeof summaryProbe !== "object") {
+        throw this.codedError("WEBGPT_REVIEW_SUMMARY_NOT_READY", "Review 摘要未能确认写入 Composer。", { operation: "review-submit" });
+      }
+      if (summaryProbe.composerMarkerFound !== true) throw this.codedError("WEBGPT_REVIEW_SUMMARY_NOT_READY", "Review 摘要未能确认写入 Composer。", { operation: "review-submit" });
+      const summaryMs = Date.now() - summaryStartedAt;
+      this.assertAutomationEpoch(epoch);
+
+      const sendStartedAt = Date.now();
+      const submitResult = await this.view.webContents.executeJavaScript(WEBGPT_SUBMIT_PROMPT_SCRIPT) as Record<string, unknown>;
+      if (submitResult?.submitted !== true) throw this.codedError("WEBGPT_REVIEW_SEND_NOT_SUBMITTED", "Review 摘要未能触发发送。", { operation: "review-submit" });
+      sendClicked = true;
+      const sendMs = Date.now() - sendStartedAt;
+
+      const verifyStartedAt = Date.now();
+      const deadline = Date.now() + 10_000;
+      let verified: Record<string, unknown> | null = null;
+      while (Date.now() < deadline) {
+        this.assertAutomationEpoch(epoch);
+        const candidate = await this.view.webContents.executeJavaScript(buildWebGptReviewSubmissionProbeScript(input.marker)) as Record<string, unknown>;
+        const userCount = typeof candidate.userCount === "number" ? candidate.userCount : beforeUserMessageCount;
+        if (candidate.markerFound === true || userCount > beforeUserMessageCount) {
+          verified = candidate;
+          break;
+        }
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 150));
+      }
+      if (!verified) throw this.codedError("WEBGPT_REVIEW_UNKNOWN_AFTER_SEND", "已点击发送，但未在限定时间内确认新用户消息；禁止盲重发。", { operation: "review-submit" });
+      probe = await this.getPageProbe();
+      const verifyMs = Date.now() - verifyStartedAt;
+      return {
+        targetUrl: actualTarget,
+        beforeUserMessageCount,
+        afterUserMessageCount: probe.page.userCount,
+        verification: { ...verified, attachment },
+        timings: { targetReadyMs, attachMs, summaryMs, sendMs, verifyMs, totalMs: Date.now() - startedAt },
+      };
+    } catch (error) {
+      if (sendClicked && (error as { code?: string })?.code !== "WEBGPT_REVIEW_UNKNOWN_AFTER_SEND") {
+        throw this.codedError("WEBGPT_REVIEW_UNKNOWN_AFTER_SEND", "发送动作已发生但结果未确认；必须先 reconcile，禁止盲重发。", { operation: "review-submit" });
+      }
+      throw error;
+    } finally {
+      lease.release();
+    }
+  }
+
+  async reconcileReviewSubmission(input: { target: "current" | string; marker: string }): Promise<ReviewSubmissionReconcileResult> {
+    const epoch = this.requireAutomationEpoch();
+    const lease = await this.operationArbiter.acquire({ source: "CLI", ownerKey: "review-submission-reconcile", targetChatUrl: input.target === "current" ? null : input.target, operationType: "REVIEW_SUBMIT" });
+    try {
+      this.setVisible(true);
+      if (input.target !== "current") await this.openChatForAutomation(input.target);
+      this.assertAutomationEpoch(epoch);
+      const probe = await this.getPageProbe();
+      if (probe.page.loginRequired) throw this.codedError("WEBGPT_LOGIN_REQUIRED", "ChatGPT 页面需要登录。");
+      if (!probe.page.onChatPage) throw this.codedError("WEBGPT_REVIEW_TARGET_NOT_READY", "reconcile 目标不是 ChatGPT 对话页面。", { operation: "review-submit" });
+      const targetUrl = normalizeRoleChatUrl(normalizeChatUrl(probe.page.url || this.view.webContents.getURL() || this.state.url));
+      const evidence = await this.view.webContents.executeJavaScript(buildWebGptReviewSubmissionProbeScript(input.marker)) as Record<string, unknown>;
+      return {
+        targetUrl,
+        found: evidence.markerFound === true,
+        userMessageCount: typeof evidence.userCount === "number" ? evidence.userCount : null,
+        latestUserText: typeof evidence.latestUserText === "string" ? evidence.latestUserText.slice(0, 512) : "",
+      };
+    } finally {
+      lease.release();
+    }
   }
 
   async submitPrompt(prompt: string, expectedChatUrl?: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe; submitted: WebGptPageProbe }> {

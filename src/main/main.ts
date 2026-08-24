@@ -26,6 +26,7 @@ import { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-
 import { WebGptRoleSessionRegistry } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
 import { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
 import { WebGptProjectRegistry } from "../features/webgpt/runtime/webgpt-project-registry.ts";
+import { WebGptReviewSubmissionService } from "../features/webgpt/review-submission/webgpt-review-submission-service.ts";
 import { isWebGptProjectOperationCommand, projectOperationBudgetMs } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
 import type { WebGptLatestResponse, WebGptRequestRecord, WebGptRole } from "../features/webgpt/types.ts";
 import { parseWebGptCliInvocation, parseWebGptExternalCommand, type WebGptCliInvocation, type WebGptExternalCommand } from "./webgpt-command.ts";
@@ -35,6 +36,7 @@ import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 import { AutomationStore } from "../automation/store.ts";
 import { createProductionAutomationComposition, type AutomationComposition } from "../automation/composition-root.ts";
+import { automationDataDirectoryFromDatabasePath } from "../automation/production-path-contract.ts";
 import { WebGptExternalActionBridge, createWebGptRequestManagerActionAdapter } from "../automation/webgpt-external-action.ts";
 import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority, createWebGptProviderPolicyAuthority, webGptRuntimeCapability } from "../automation/webgpt-policy-authority.ts";
 import { assertProviderSeamExecutable } from "../automation/provider-seam-classification.ts";
@@ -139,6 +141,7 @@ let webGptRequestManager: WebGptRequestManager | null = null;
 let webGptRoleRegistry: WebGptRoleSessionRegistry | null = null;
 let webGptRoleService: WebGptRoleSessionService | null = null;
 let webGptProjectRegistry: WebGptProjectRegistry | null = null;
+let webGptReviewSubmissionService: WebGptReviewSubmissionService | null = null;
 let webGptControlRevision = 0;
 let webGptControlQueue: Promise<void> = Promise.resolve();
 let automationStore: AutomationStore | null = null;
@@ -155,7 +158,8 @@ function automationDatabasePath(): string {
 }
 
 async function startAutomationPersistence(): Promise<void> {
-  const composition = createProductionAutomationComposition(automationDatabasePath());
+  const automationDataDirectory = automationDataDirectoryFromDatabasePath(automationDatabasePath());
+  const composition = createProductionAutomationComposition(automationDataDirectory);
   const store = composition.store;
   automationComposition = composition;
   await store.persistenceDiagnostics();
@@ -175,7 +179,7 @@ async function startAutomationPersistence(): Promise<void> {
   await store.close();
   automationStore = null;
   automationComposition = null;
-  const reopenedComposition = createProductionAutomationComposition(automationDatabasePath());
+  const reopenedComposition = createProductionAutomationComposition(automationDataDirectory);
   const reopened = reopenedComposition.store;
   const restored = await reopened.get("automationProjects", projectId);
   const result = { mode: "normal-gui-host", created: !existing, projectId: project.projectId, reopened: restored?.projectId === projectId, persistence: await reopened.persistenceDiagnostics() };
@@ -438,11 +442,32 @@ function requestWebGptCommand(command: WebGptExternalCommand): void {
   forwardPendingWebGptCommand();
 }
 
-async function closeCliOutputStreams(): Promise<void> {
-  await Promise.all([
-    new Promise<void>((resolveOutput) => process.stdout.end(() => resolveOutput())),
-    new Promise<void>((resolveOutput) => process.stderr.end(() => resolveOutput())),
-  ]);
+function exitCliProcess(exitCode: number): never {
+  // Electron's app.exit closes the runtime and its Chromium children. Do not
+  // end stdout/stderr here: packaged GUI descendants can retain inherited
+  // pipe handles, making callers wait even after the CLI response was emitted.
+  app.exit(exitCode);
+  process.exit(exitCode);
+}
+
+function cliOutputFilePath(stream: "stdout" | "stderr"): string | null {
+  const prefix = `--workbench-cli-${stream}=`;
+  const value = process.argv.find((argument) => argument.startsWith(prefix))?.slice(prefix.length).trim();
+  return value && value.length <= 4_096 ? value : null;
+}
+
+async function emitCliOutput(presented: ReturnType<typeof presentWebGptCliOutput>): Promise<void> {
+  const stdoutPath = cliOutputFilePath("stdout");
+  const stderrPath = cliOutputFilePath("stderr");
+  if (stdoutPath || stderrPath) {
+    await Promise.all([
+      stdoutPath ? writeFile(stdoutPath, presented.stdout, "utf8") : Promise.resolve(),
+      stderrPath ? writeFile(stderrPath, presented.stderr, "utf8") : Promise.resolve(),
+    ]);
+    return;
+  }
+  if (presented.stdout) await new Promise<void>((resolveOutput) => process.stdout.write(presented.stdout, () => resolveOutput()));
+  if (presented.stderr) await new Promise<void>((resolveOutput) => process.stderr.write(presented.stderr, () => resolveOutput()));
 }
 
 function controlOk(command: string, result: unknown): WebGptControlResponse {
@@ -847,6 +872,24 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "webgpt.chat.latest") {
       if (!request.url) response = controlFail(request.command, "CHAT_URL_REQUIRED", "chat latest 必须提供 Chat URL。");
       else response = controlOk(request.command, await latestControlResult(await getWebGptRequestManager().readLatestChat(request.url), request.out));
+    } else if (request.command === "webgpt.review-submit") {
+      if (!request.zipPath || request.summary === undefined || !request.target) {
+        response = controlFail(request.command, "CONTROL_REVIEW_INPUT_REQUIRED", "review-submit 必须提供 ZIP、摘要和 target。");
+      } else {
+        const result = await getWebGptReviewSubmissionService().submitReview({
+          zipPath: request.zipPath,
+          summary: request.summary,
+          target: request.target,
+          ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
+        });
+        response = result.ok
+          ? controlOk(request.command, result)
+          : controlFail(request.command, result.error?.code ?? "WEBGPT_REVIEW_SUBMISSION_FAILED", result.error?.message ?? "Review 提交失败。", result, {
+            retryable: result.error?.retryable,
+            userAction: result.error?.userAction,
+            details: result.error?.details,
+          });
+      }
     } else if (request.command === "webgpt.project.inspect") {
       operationStartMs = Date.now();
       if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project inspect 必须提供 Project 名称。");
@@ -995,15 +1038,12 @@ function enqueueWebGptControlRequest(request: WebGptControlRequest): Promise<Web
 async function runCliInvocation(invocation: WebGptCliInvocation, workbenchExecutablePath = process.execPath): Promise<void> {
   if (invocation.kind === "error") {
     const presented = presentWebGptCliOutput({ json: invocation.json }, createWebGptCliArgumentError(invocation.message));
-    if (presented.stdout) await new Promise<void>((resolveOutput) => process.stdout.write(presented.stdout, () => resolveOutput()));
-    if (presented.stderr) await new Promise<void>((resolveOutput) => process.stderr.write(presented.stderr, () => resolveOutput()));
-    await closeCliOutputStreams();
-    process.exit(presented.exitCode);
+    await emitCliOutput(presented);
+    exitCliProcess(presented.exitCode);
     return;
   }
   if (invocation.kind !== "command") {
-    await closeCliOutputStreams();
-    process.exit(2);
+    exitCliProcess(2);
     return;
   }
   const response = await runWebGptCli(invocation.command, process.execPath, controlDescriptorPath(app.getPath("userData")), undefined, workbenchExecutablePath);
@@ -1015,10 +1055,8 @@ async function runCliInvocation(invocation: WebGptCliInvocation, workbenchExecut
     },
   };
   const presented = presentWebGptCliOutput(invocation.command, responseWithExit);
-  if (presented.stdout) await new Promise<void>((resolveOutput) => process.stdout.write(presented.stdout, () => resolveOutput()));
-  if (presented.stderr) await new Promise<void>((resolveOutput) => process.stderr.write(presented.stderr, () => resolveOutput()));
-  await closeCliOutputStreams();
-  process.exit(presented.exitCode);
+  await emitCliOutput(presented);
+  exitCliProcess(presented.exitCode);
 }
 
 function runtimeCwd(): string {
@@ -1102,6 +1140,15 @@ function getWebGptRequestManager(): WebGptRequestManager {
     },
   });
   return webGptRequestManager;
+}
+
+function getWebGptReviewSubmissionService(): WebGptReviewSubmissionService {
+  if (webGptReviewSubmissionService) return webGptReviewSubmissionService;
+  webGptReviewSubmissionService = new WebGptReviewSubmissionService({
+    workspace: getWebGptWorkspace(),
+    storageDirectory: join(app.getPath("userData"), "webgpt", "review-submissions"),
+  });
+  return webGptReviewSubmissionService;
 }
 
 function getWebGptProjectRegistry(): WebGptProjectRegistry {
@@ -2102,19 +2149,15 @@ if (officialCliMode) {
   app.whenReady().then(() => runCliInvocation(cliInvocation, join(dirname(process.execPath), "Codex Workbench V1.exe"))).catch(async () => {
     const json = cliInvocation.kind === "error" ? cliInvocation.json : cliInvocation.kind === "command" ? cliInvocation.command.json : false;
     const presented = presentWebGptCliOutput({ json }, createWebGptCliFailure("CLI_UNHANDLED", "WebGPT CLI 未处理错误。"));
-    if (presented.stdout) await new Promise<void>((resolveOutput) => process.stdout.write(presented.stdout, () => resolveOutput()));
-    if (presented.stderr) await new Promise<void>((resolveOutput) => process.stderr.write(presented.stderr, () => resolveOutput()));
-    await closeCliOutputStreams();
-    process.exit(presented.exitCode);
+    await emitCliOutput(presented);
+    exitCliProcess(presented.exitCode);
   });
 } else if (cliInvocation.kind !== "not-cli") {
   void runCliInvocation(cliInvocation).catch(async () => {
     const json = cliInvocation.kind === "error" ? cliInvocation.json : cliInvocation.kind === "command" ? cliInvocation.command.json : false;
     const presented = presentWebGptCliOutput({ json }, createWebGptCliFailure("CLI_UNHANDLED", "WebGPT CLI 未处理错误。"));
-    if (presented.stdout) await new Promise<void>((resolveOutput) => process.stdout.write(presented.stdout, () => resolveOutput()));
-    if (presented.stderr) await new Promise<void>((resolveOutput) => process.stderr.write(presented.stderr, () => resolveOutput()));
-    await closeCliOutputStreams();
-    process.exit(presented.exitCode);
+    await emitCliOutput(presented);
+    exitCliProcess(presented.exitCode);
   });
 } else {
   const initialWebGptCommand = parseWebGptExternalCommand(process.argv);
@@ -2221,6 +2264,7 @@ if (officialCliMode) {
           if (nativeAppServerHost) await nativeAppServerHost.close();
           if (projectMaps) await projectMaps.close();
           if (webGptWorkspace) webGptWorkspace.close();
+          webGptReviewSubmissionService = null;
         } catch (error) {
           logError(logger, "runtime_shutdown_failed", error);
         } finally {

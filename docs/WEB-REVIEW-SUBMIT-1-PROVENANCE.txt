@@ -1,0 +1,15 @@
+stage=WEB-REVIEW-SUBMIT-1
+workbench_repository=D:\办公\AI\Codex_Workbench_V1
+workbench_base_commit=f219398bdeb3b7d0e260d92e7106d8cb219356c7
+independent_runner_repository=D:\办公\AI\Codex_ChatGPT_Submission_Runner
+independent_runner_validation_commit=4bbd6a0abfcda4b3841f58a037bce203450b187b
+v1_frozen_core_changed=NO
+second_browser_session=NO
+old_donor_modified=NO
+real_workbench_positive_smoke=NOT_CLAIMED
+warm_packaged_lifecycle=304ms CONTROL_NOT_AVAILABLE/WEBGPT_USER_CONTROL promptSent=0
+cold_packaged_lifecycle=NOT_READY_WITHIN_30S promptSent=0
+automated_check=PASS
+full_tests=406/406 PASS
+isolated_package=PASS
+generated_at=2026-08-24

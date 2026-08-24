@@ -606,6 +606,75 @@ export const WEBGPT_SUBMIT_PROMPT_SCRIPT = `(() => {
   return { submitted: true, method: "enter" };
 })()`;
 
+/**
+ * Review submission uses the same visible WebGPT composer as normal Prompt
+ * submission.  The attachment control is only opened when the file input is
+ * not already present in the DOM; no coordinates or global clipboard are
+ * involved.
+ */
+export const WEBGPT_REVIEW_OPEN_ATTACHMENT_SCRIPT = `(() => {
+  const visible = (element) => {
+    if (!(element instanceof Element)) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  };
+  const label = (element) => String(element.getAttribute("aria-label") || element.getAttribute("title") || element.innerText || element.textContent || element.getAttribute("data-testid") || "").trim();
+  const candidates = [...document.querySelectorAll("button, [role=\\"button\\"], label")]
+    .filter((element) => visible(element) && /attach|upload|file|附件|上传|文件/i.test(label(element)));
+  const target = candidates[0] || null;
+  if (!target) return { clicked: false, actionCount: 0 };
+  target.focus?.();
+  target.click();
+  return { clicked: true, actionCount: candidates.length, action: label(target).slice(0, 160) };
+})()`;
+
+export const WEBGPT_REVIEW_ATTACHMENT_PROBE_SCRIPT = `(() => {
+  const visible = (element) => {
+    if (!(element instanceof Element)) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  };
+  const inputs = [...document.querySelectorAll('input[type="file"]')];
+  const input = inputs.find((element) => (element.files?.length || 0) > 0) || null;
+  const remove = [...document.querySelectorAll("button, [role=\\"button\\"]")]
+    .find((element) => visible(element) && /remove|delete|移除|删除/i.test(String(element.getAttribute("aria-label") || element.getAttribute("title") || element.innerText || element.textContent || "")));
+  return {
+    inputCount: inputs.length,
+    ready: Boolean(input) || Boolean(remove),
+    fileCount: input?.files?.length || 0,
+    fileName: input?.files?.[0]?.name || null,
+    removalControlVisible: Boolean(remove),
+  };
+})()`;
+
+export function buildWebGptReviewSubmissionProbeScript(marker: string): string {
+  return `((expectedMarker) => {
+  const visible = (element) => {
+    if (!(element instanceof Element)) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  };
+  const text = (element) => String(("value" in element ? element.value : element.innerText || element.textContent || "") || "").replace(/\\u200b/g, "").trim();
+  const composer = [...document.querySelectorAll("textarea, [contenteditable=\\"true\\"], [role=\\"textbox\\"]")]
+    .find((element) => visible(element) && !/search|搜索/i.test(String(element.getAttribute("placeholder") || "")));
+  const users = [...document.querySelectorAll('[data-message-author-role="user"], [data-testid*="user"], article[data-testid*="user"]')]
+    .filter(visible)
+    .map(text)
+    .filter(Boolean);
+  const latestUserText = users.at(-1) || "";
+  return {
+    userCount: users.length,
+    latestUserText,
+    markerFound: Boolean(expectedMarker) && latestUserText.includes(expectedMarker),
+    composerMarkerFound: Boolean(expectedMarker) && Boolean(composer) && text(composer).includes(expectedMarker),
+    composerEmpty: Boolean(composer) && text(composer).length === 0,
+  };
+})(${pageScriptArgument(marker)})`;
+}
+
 function boundedString(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }

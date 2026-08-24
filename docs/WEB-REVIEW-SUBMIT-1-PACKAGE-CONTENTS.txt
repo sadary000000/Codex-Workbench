@@ -1,0 +1,18 @@
+WEB-REVIEW-SUBMIT-1-REVIEW-PACKAGE
+
+Included:
+- WEB-REVIEW-SUBMIT-1-STAGE-REVIEW.md
+- WEB-REVIEW-SUBMIT-1-REALITY-AUDIT.md
+- WEB-REVIEW-SUBMIT-1-DESIGN.md
+- WEB-REVIEW-SUBMIT-1-TESTS.md
+- WEB-REVIEW-SUBMIT-1-BENCHMARK.md
+- WEB-REVIEW-SUBMIT-1-EVIDENCE.json
+- WEB-REVIEW-SUBMIT-1-PROVENANCE.txt
+
+Excluded:
+- Cookie, token, password, browser profile
+- private chat text or screenshots
+- unrelated Workbench historical dist/review archives
+- old donor project
+
+This package is a review/evidence package. It is not a browser session export.

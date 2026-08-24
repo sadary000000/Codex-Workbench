@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { closeSync, openSync } from "node:fs";
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import type { WebGptCliCommand, WebGptCliCommandName } from "./webgpt-command.ts";
-import { isWebGptProjectOperationCommand, projectCliTimeoutMs, type WebGptProjectOperationCommand } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
+import { isWebGptProjectOperationCommand, projectCliTimeoutMs, WEBGPT_REVIEW_SUBMIT_CLI_TIMEOUT_MS, type WebGptProjectOperationCommand } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
 import type { WebGptProjectOperationTimeline } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
 import type { WebGptRole } from "../features/webgpt/types.ts";
 import { normalizeRoleChatUrl } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
@@ -54,6 +55,9 @@ export interface WebGptControlRequest {
   out?: string;
   url?: string;
   text?: string;
+  summary?: string;
+  zipPath?: string;
+  target?: string;
   projectName?: string;
   projectId?: string;
   role?: WebGptRole;
@@ -211,6 +215,9 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (record.out !== undefined && (typeof record.out !== "string" || record.out.length > 4_096)) return controlError("CONTROL_OUTPUT_PATH_INVALID", "输出路径无效。", record.command, requestId);
   if (record.url !== undefined && (typeof record.url !== "string" || record.url.length > 2_048)) return controlError("CONTROL_URL_INVALID", "WebGPT URL 无效。", record.command, requestId);
   if (record.text !== undefined && (typeof record.text !== "string" || record.text.length > 2_000_000)) return controlError("CONTROL_PROMPT_TOO_LARGE", "Prompt 无效或过大。", record.command, requestId);
+  if (record.summary !== undefined && (typeof record.summary !== "string" || record.summary.trim().length === 0 || record.summary.length > 2_000_000)) return controlError("CONTROL_REVIEW_SUMMARY_INVALID", "Review 摘要无效或过大。", record.command, requestId);
+  if (record.zipPath !== undefined && (typeof record.zipPath !== "string" || !record.zipPath.trim() || record.zipPath.length > 4_096)) return controlError("CONTROL_REVIEW_ZIP_INVALID", "Review ZIP 路径无效。", record.command, requestId);
+  if (record.target !== undefined && (typeof record.target !== "string" || !record.target.trim() || record.target.length > 2_048)) return controlError("CONTROL_REVIEW_TARGET_INVALID", "Review 目标无效。", record.command, requestId);
   if (record.projectName !== undefined && (typeof record.projectName !== "string" || !record.projectName.trim() || record.projectName.length > 256)) return controlError("PROJECT_NAME_INVALID", "Project 名称必须是 1 到 256 个字符。", record.command, requestId);
   if (record.projectId !== undefined && (typeof record.projectId !== "string" || !record.projectId.trim() || record.projectId.length > 256)) return controlError("PROJECT_REQUIRED", "Project ID 无效。", record.command, requestId);
   const role = record.role === undefined ? undefined : roleValue(record.role);
@@ -239,11 +246,17 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     try { normalizeRoleChatUrl(record.url); } catch (error) { return controlError("ROLE_CHAT_URL_INVALID", error instanceof Error ? error.message : "Role Chat URL 无效。", command, requestId); }
   }
   if (command === "webgpt.chat.latest" && typeof record.url !== "string") return controlError("CHAT_URL_REQUIRED", "chat latest 必须提供 Chat URL。", command, requestId);
+  if (command === "webgpt.review-submit") {
+    if (typeof record.zipPath !== "string" || typeof record.summary !== "string" || typeof record.target !== "string") return controlError("CONTROL_REVIEW_INPUT_REQUIRED", "review-submit 必须提供 zipPath、summary 和 target。", command, requestId);
+    if (record.target.trim() !== "current") {
+      try { normalizeRoleChatUrl(record.target); } catch (error) { return controlError("TARGET_CHAT_MISMATCH", error instanceof Error ? error.message : "Review 目标 Chat URL 无效。", command, requestId); }
+    }
+  }
   if (command === "webgpt.send" && ((record.projectId !== undefined) !== (role !== undefined))) return controlError("PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 projectId 和 role。", command, requestId);
   if ((command === "webgpt.request.status" || command === "webgpt.request.reconcile") && typeof record.targetRequestId !== "string") return controlError("REQUEST_ID_REQUIRED", `${command.endsWith("reconcile") ? "request reconcile" : "request status"} 必须提供 requestId。`, command, requestId);
   if (command === "webgpt.request.list" && record.active !== true) return controlError("REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。", command, requestId);
   if (["webgpt.project.inspect", "webgpt.project.open", "webgpt.project.create", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
-  if (record.idempotencyKey !== undefined && command !== "webgpt.send") return controlError("CONTROL_IDEMPOTENCY_UNSUPPORTED", "idempotencyKey 只支持 send。", command, requestId);
+  if (record.idempotencyKey !== undefined && command !== "webgpt.send" && command !== "webgpt.review-submit") return controlError("CONTROL_IDEMPOTENCY_UNSUPPORTED", "idempotencyKey 只支持 send/review-submit。", command, requestId);
   if (record.replace !== undefined && command !== "webgpt.role.new" && command !== "webgpt.role.bind") return controlError("CONTROL_REPLACE_INVALID", "replace 只支持 role new/bind。", command, requestId);
   const allowedByCommand: Record<string, readonly string[]> = {
     "webgpt.status": [],
@@ -268,6 +281,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.role.open": ["projectId", "role"],
     "webgpt.role.latest": ["projectId", "role", "out"],
     "webgpt.send": ["text", "projectId", "role", "idempotencyKey"],
+    "webgpt.review-submit": ["zipPath", "summary", "target", "idempotencyKey"],
     "webgpt.wait": ["targetRequestId", "timeoutMs"],
     "webgpt.result": ["targetRequestId", "out"],
     "webgpt.request.status": ["targetRequestId"],
@@ -287,6 +301,9 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     ...(typeof record.out === "string" ? { out: record.out } : {}),
     ...(typeof record.url === "string" ? { url: record.url } : {}),
     ...(typeof record.text === "string" ? { text: record.text } : {}),
+    ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
+    ...(typeof record.zipPath === "string" ? { zipPath: record.zipPath.trim() } : {}),
+    ...(typeof record.target === "string" ? { target: record.target.trim() } : {}),
     ...(typeof record.projectName === "string" ? { projectName: record.projectName.trim() } : {}),
     ...(typeof record.projectId === "string" ? { projectId: record.projectId.trim() } : {}),
     ...(role ? { role } : {}),
@@ -666,13 +683,27 @@ function spawnWorkbench(executablePath: string, userDataDirectory: string): void
   // GUI startup remains idle under FIX-01, so the marker travels with the
   // spawned process instead of relying on an eager descriptor side effect.
   const launchPath = executablePath;
-  const launchArgs = [`--user-data-dir=${userDataDirectory}`, "--webgpt-control"];
-  const child = spawn(launchPath, launchArgs, {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-  });
-  child.unref();
+  const shell = process.env.ComSpec?.trim() || "cmd.exe";
+  const commandLine = `start "" /b "${launchPath.replace(/"/g, '""')}" "--user-data-dir=${userDataDirectory.replace(/"/g, '""')}" --webgpt-control`;
+  // Electron/Chromium descendants can retain the caller's stdout pipe on
+  // Windows. Use cmd's start boundary plus explicit NUL redirection so the
+  // long-lived Workbench host cannot inherit the CLI caller's pipes.
+  const nulDevice = "\\\\.\\NUL";
+  const stdin = openSync(nulDevice, "r");
+  const stdout = openSync(nulDevice, "w");
+  const stderr = openSync(nulDevice, "w");
+  try {
+    const child = spawn(shell, ["/d", "/s", "/c", commandLine], {
+      detached: true,
+      stdio: [stdin, stdout, stderr],
+      windowsHide: true,
+    });
+    child.unref();
+  } finally {
+    closeSync(stdin);
+    closeSync(stdout);
+    closeSync(stderr);
+  }
 }
 
 async function sendWebGptControlRequestWithDescriptor(
@@ -748,6 +779,20 @@ async function requestFromCommand(command: WebGptCliCommand): Promise<WebGptCont
       throw new Error("CLI_PROMPT_FILE_NOT_UTF8: Prompt 文件必须是 UTF-8 文本。");
     }
   }
+  let summary = undefined as string | undefined;
+  if (command.summaryPath) {
+    const extension = extname(command.summaryPath).toLowerCase();
+    if (extension !== ".md" && extension !== ".txt") throw new Error("CLI_REVIEW_SUMMARY_UNSUPPORTED: Review 摘要只支持 .md 或 .txt。");
+    const summaryPath = resolve(command.summaryPath);
+    const information = await stat(summaryPath).catch(() => null);
+    if (!information?.isFile()) throw new Error("CLI_REVIEW_SUMMARY_NOT_FOUND: Review 摘要文件不存在。");
+    if (information.size > 2_000_000) throw new Error("CLI_REVIEW_SUMMARY_TOO_LARGE: Review 摘要超过 2 MB 限制。");
+    try {
+      summary = new TextDecoder("utf-8", { fatal: true }).decode(await readFile(summaryPath));
+    } catch {
+      throw new Error("CLI_REVIEW_SUMMARY_NOT_UTF8: Review 摘要必须是 UTF-8 文本。");
+    }
+  }
   return {
     version: WEBGPT_CONTROL_PROTOCOL_VERSION,
     requestId: randomUUID(),
@@ -755,6 +800,9 @@ async function requestFromCommand(command: WebGptCliCommand): Promise<WebGptCont
     ...(command.out ? { out: command.out } : {}),
     ...(command.url ? { url: command.url } : {}),
     ...(text !== undefined ? { text } : {}),
+    ...(summary !== undefined ? { summary } : {}),
+    ...(command.zipPath ? { zipPath: resolve(command.zipPath) } : {}),
+    ...(command.target ? { target: command.target } : {}),
     ...(command.projectName ? { projectName: command.projectName } : {}),
     ...(command.projectId ? { projectId: command.projectId } : {}),
     ...(command.role ? { role: command.role } : {}),
@@ -774,7 +822,9 @@ export async function runWebGptCli(
   workbenchExecutablePath = executablePath,
 ): Promise<WebGptControlResponse> {
   const projectCommand = isWebGptProjectOperationCommand(command.name) ? command.name : null;
-  const commandTimeout = projectCommand
+  const commandTimeout = command.name === "webgpt.review-submit"
+    ? Math.max(timeoutMs, WEBGPT_REVIEW_SUBMIT_CLI_TIMEOUT_MS)
+    : projectCommand
     ? Math.max(timeoutMs, projectCliTimeoutMs(projectCommand))
     : command.name === "webgpt.wait"
     ? Math.min(320_000, Math.max(timeoutMs, (command.timeoutMs ?? 120_000) + 5_000))

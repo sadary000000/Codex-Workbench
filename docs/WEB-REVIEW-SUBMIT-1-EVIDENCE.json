@@ -1,0 +1,45 @@
+{
+  "stage": "WEB-REVIEW-SUBMIT-1",
+  "capability": "Workbench WebGPT Review Submission",
+  "result": "PASS_CANDIDATE_WITH_REAL_SMOKE_BOUNDARY",
+  "v1FrozenCoreChanged": false,
+  "secondBrowserSession": false,
+  "automationChanged": false,
+  "automated": {
+    "check": "PASS",
+    "targetedTests": "4/4 PASS",
+    "fullTests": "406/406 PASS",
+    "isolatedPackage": "PASS"
+  },
+  "independentRunner": {
+    "commit": "4bbd6a0abfcda4b3841f58a037bce203450b187b",
+    "runs": 10,
+    "sent": 10,
+    "duplicateSendCount": 0,
+    "medianMs": 13436,
+    "p90Ms": 14742,
+    "maxMs": 15570,
+    "positiveGate": "10/10 SENT; median target missed; p90 target met"
+  },
+  "workbenchPositivePackagedSmoke": {
+    "status": "NOT_CLAIMED",
+    "claim": "Positive SENT was not claimed; isolated warm lifecycle returned CONTROL_NOT_AVAILABLE / WEBGPT_USER_CONTROL in 304 ms with promptSent=0.",
+    "warmLifecycle": {
+      "elapsedMs": 304,
+      "state": "CONTROL_NOT_AVAILABLE",
+      "errorCode": "WEBGPT_USER_CONTROL",
+      "promptSent": 0
+    },
+    "coldLifecycle": {
+      "observationWindowMs": 30000,
+      "result": "NOT_READY_WITHIN_WINDOW",
+      "promptSent": 0
+    }
+  },
+  "sensitiveData": {
+    "cookies": "excluded",
+    "tokens": "excluded",
+    "passwords": "excluded",
+    "chatContent": "excluded"
+  }
+}

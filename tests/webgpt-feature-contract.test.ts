@@ -115,10 +115,12 @@ test("Project CLI operations have a bounded server deadline and cancel stale nav
   assert.match(workspace, /newChatContextConfirmStartAt/);
   assert.match(control, /CONTROL_RESPONSE_TIMEOUT/);
   assert.match(control, /const launchPath = executablePath/);
+  assert.match(control, /const shell = process\.env\.ComSpec/);
   assert.match(control, /--webgpt-control/);
   assert.match(control, /detached: true/);
-  assert.doesNotMatch(control, /process\.env\.ComSpec \|\| "cmd\.exe"/);
-  assert.doesNotMatch(control, /start "" \/b/);
+  assert.match(control, /const nulDevice = "\\\\\\\\\.\\\\NUL"/);
+  assert.match(control, /stdio: \[stdin, stdout, stderr\]/);
+  assert.match(control, /start "" \/b/);
   assert.match(control, /cliStartAt/);
   assert.match(control, /responseWriteAt/);
   assert.match(control, /operationTimeline/);
@@ -129,7 +131,7 @@ test("WebGPT CLI avoids Electron Chromium initialization before returning to exe
   const cliBlock = main.slice(main.indexOf("async function runCliInvocation"), main.indexOf("function runtimeCwd"));
   assert.doesNotMatch(cliBlock, /await app\.whenReady\(\)/);
   assert.match(cliBlock, /controlDescriptorPath\(app\.getPath\("userData"\)\)/);
-  assert.match(cliBlock, /closeCliOutputStreams\(\)/);
+  assert.doesNotMatch(cliBlock, /closeCliOutputStreams\(\)/);
   assert.match(cliBlock, /presentWebGptCliOutput/);
-  assert.match(cliBlock, /process\.exit\(presented\.exitCode\)/);
+  assert.match(cliBlock, /exitCliProcess\(presented\.exitCode\)/);
 });

@@ -16,6 +16,7 @@ export type WebGptOperationType =
   | "ROLE_OPEN"
   | "ROLE_NEW"
   | "SEND"
+  | "REVIEW_SUBMIT"
   | "RECOVERY"
   | "OTHER";
 

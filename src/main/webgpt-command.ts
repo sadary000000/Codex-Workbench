@@ -27,6 +27,7 @@ export type WebGptCliCommandName =
   | "webgpt.role.open"
   | "webgpt.role.latest"
   | "webgpt.send"
+  | "webgpt.review-submit"
   | "webgpt.wait"
   | "webgpt.result"
   | "webgpt.request.status"
@@ -40,6 +41,9 @@ export interface WebGptCliCommand {
   url?: string;
   text?: string;
   file?: string;
+  zipPath?: string;
+  summaryPath?: string;
+  target?: string;
   projectName?: string;
   projectId?: string;
   role?: WebGptRole;
@@ -116,7 +120,7 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
   const parsed = parseJsonFlag(argv.slice(markerIndex + 1));
   const args = parsed.args;
   const [verb, ...rest] = args;
-  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、close、latest、chat latest、new-chat、open-chat、project inspect、project open、project create、project new-chat、role、send、wait、result、request status|reconcile|list、screenshot、control user、control auto。");
+  if (!verb) return invalid(parsed.json, "缺少 WebGPT 命令。可用：status、open、current、close、latest、chat latest、new-chat、open-chat、project inspect、project open、project create、project new-chat、role、send、review-submit、wait、result、request status|reconcile|list、screenshot、control user、control auto。");
 
   if (verb === "status" && rest.length === 0) return { kind: "command", command: { name: "webgpt.status", json: parsed.json } };
   if (verb === "open" && rest.length === 0) return { kind: "command", command: { name: "webgpt.open", json: parsed.json } };
@@ -228,6 +232,19 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
     const values = text ? ["--text", ...(projectId ? ["--project", "--role"] : []), "--idempotency-key"] : ["--file", ...(projectId ? ["--project", "--role"] : []), "--idempotency-key"];
     if (!hasOnlyValueOptionsAndFlags(rest, values)) return invalid(parsed.json, "send 只支持 --text/--file 以及成对的 --project --role。");
     return { kind: "command", command: { name: "webgpt.send", json: parsed.json, ...(text ? { text } : { file: file! }), ...(projectId && role ? { projectId, role } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) } };
+  }
+
+  if (verb === "review-submit") {
+    const zipPath = optionValue(rest, "--zip");
+    const summaryPath = optionValue(rest, "--summary-file");
+    const target = optionValue(rest, "--target") ?? optionValue(rest, "--target-url");
+    const idempotencyKey = optionValue(rest, "--idempotency-key");
+    if (!zipPath || !summaryPath || !target || optionCount(rest, "--zip") !== 1 || optionCount(rest, "--summary-file") !== 1 || (optionCount(rest, "--target") + optionCount(rest, "--target-url") !== 1) || (idempotencyKey !== null && optionCount(rest, "--idempotency-key") !== 1)) {
+      return invalid(parsed.json, "review-submit 必须使用 --zip <package.zip> --summary-file <summary.txt> --target current|<chat-url>。");
+    }
+    if (target !== "current" && !/^https:\/\/chatgpt\.com\//i.test(target)) return invalid(parsed.json, "review-submit 的 target 必须是 current 或 https://chatgpt.com Chat URL。");
+    if (!hasOnlyValueOptionsAndFlags(rest, ["--zip", "--summary-file", "--target", "--target-url", "--idempotency-key"])) return invalid(parsed.json, "review-submit 只支持 --zip、--summary-file、--target/--target-url 和 --idempotency-key。");
+    return { kind: "command", command: { name: "webgpt.review-submit", json: parsed.json, zipPath, summaryPath, target, ...(idempotencyKey ? { idempotencyKey } : {}) } };
   }
 
   if (verb === "wait" || verb === "result") {

@@ -6,14 +6,18 @@ import { parseWebGptCliInvocation } from "../src/main/webgpt-command.ts";
 
 const root = process.cwd();
 
-test("official CLI front door is a same-package stdio firewall", () => {
+test("official CLI front door is a same-package NUL/file transport firewall", () => {
   const source = readFileSync(join(root, "tools", "official-cli", "Program.cs"), "utf8");
   assert.match(source, /Codex Workbench CLI Runtime\.exe/);
-  assert.match(source, /UseShellExecute\s*=\s*false/);
-  assert.match(source, /RedirectStandardOutput\s*=\s*true/);
-  assert.match(source, /RedirectStandardError\s*=\s*true/);
+  assert.match(source, /CreateFile\("NUL"/);
+  assert.match(source, /CreateProcess\(/);
+  assert.match(source, /DisableStandardHandleInheritance\(\)/);
   assert.match(source, /--workbench-official-cli/);
-  assert.match(source, /ReadToEnd\(\)/);
+  assert.match(source, /--workbench-cli-stdout=/);
+  assert.match(source, /--workbench-cli-stderr=/);
+  assert.match(source, /ReadOutputFile\(/);
+  assert.match(source, /TryDelete\(/);
+  assert.doesNotMatch(source, /ReadToEnd\(\)/);
   assert.match(source, /--user-data-dir=/);
 });
 
