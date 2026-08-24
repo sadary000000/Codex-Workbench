@@ -9,6 +9,7 @@ import type {
   ProviderPolicyAuthorityPort,
   ProviderPolicyProvenance,
   ProviderObservation,
+  ProviderResult,
   ProviderRequestAccepted,
   ProviderRequestState,
   ProviderSubmitInput,
@@ -28,7 +29,7 @@ export interface WebGptProviderPortOptions {
     readonly status: WebGptRoleSessionService["status"];
     readonly submit: (projectId: string, role: WebGptRole, prompt: string, idempotencyKey?: string, policyVersionId?: string | null) => Promise<WebGptRequestRecord>;
   };
-  readonly requestManager: Pick<WebGptRequestManager, "requestStatus" | "reconcileRequest">;
+  readonly requestManager: Pick<WebGptRequestManager, "requestStatus" | "reconcileRequest"> & Partial<Pick<WebGptRequestManager, "getResult" | "waitForRequest">>;
   readonly resolveInputRef: (inputRef: string) => Promise<string>;
   readonly readRuntimeCapability: () => Promise<ProviderRuntimeCapability>;
   /** The composition root must provide the pinned policy authority. */
@@ -87,14 +88,19 @@ function policyProvenance(correlation: ProviderCorrelation, authorization: Provi
 function assertRecordCorrelation(record: WebGptRequestRecord, correlation: ProviderCorrelation, target: { projectId: string; role: WebGptRole }): void {
   if (record.policyVersionId !== correlation.policyVersionId) throw new Error("PROVIDER_POLICY_PIN_MISMATCH");
   if (record.idempotencyKey !== correlation.idempotencyRef) throw new Error("PROVIDER_IDEMPOTENCY_MISMATCH");
-  if (correlation.semanticRef && record.semanticSha256 !== correlation.semanticRef) throw new Error("PROVIDER_SEMANTIC_MISMATCH");
+  // Keep legacy callers strict while allowing the new Requirement path to
+  // distinguish its domain semantic from the provider's execution semantic.
+  const expectedProviderSemantic = correlation.providerSemanticRef === undefined ? correlation.semanticRef : correlation.providerSemanticRef;
+  if (expectedProviderSemantic && record.semanticSha256 !== expectedProviderSemantic) throw new Error("PROVIDER_SEMANTIC_MISMATCH");
   if (record.projectId !== target.projectId || record.role !== target.role) throw new Error("PROVIDER_TARGET_CORRELATION_MISMATCH");
   assertProviderCorrelationIdentity({
     actionIntentId: correlation.actionIntentId,
     actionAttemptId: correlation.actionAttemptId,
     policyVersionId: correlation.policyVersionId,
     idempotencyRef: correlation.idempotencyRef,
-    semanticRef: correlation.semanticRef,
+    // The provider request's semantic is not the Requirement/domain semantic;
+    // it is verified against the persisted WebGPT record itself.
+    semanticRef: record.semanticSha256,
     providerTargetRef: targetRefFromRecord(record),
     providerRequest: {
       providerRequestRef: record.requestId,
@@ -216,6 +222,27 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
     const reconciled = await this.requestManager.reconcileRequest(input.providerRequestRef);
     assertRecordCorrelation(reconciled, input.correlation, target);
     return observation(reconciled, policyProvenance(input.correlation, authorization));
+  }
+
+  async readResult(input: { providerRequestRef: string }): Promise<ProviderResult> {
+    const getResult = this.requestManager.getResult;
+    if (!getResult) throw new Error("PROVIDER_RESULT_READ_UNAVAILABLE");
+    const result = await getResult.call(this.requestManager, input.providerRequestRef);
+    return {
+      provider: "WEBGPT",
+      providerRequestRef: result.requestId,
+      state: providerState(result.state),
+      response: result.response,
+      resultHash: result.resultSha256,
+    };
+  }
+
+  async waitResult(input: { providerRequestRef: string; timeoutMs: number }): Promise<ProviderResult> {
+    const waitForRequest = this.requestManager.waitForRequest;
+    if (!waitForRequest) return this.readResult(input);
+    const waited = await waitForRequest.call(this.requestManager, input.providerRequestRef, input.timeoutMs);
+    const result = await this.readResult({ providerRequestRef: waited.record.requestId });
+    return result;
   }
 
   /**

@@ -1,4 +1,6 @@
 export * from "./adapters.ts";
+export * from "./input-ref.ts";
+export * from "./requirement-provider-dispatch.ts";
 export * from "./canonical.ts";
 export * from "./sqlite-persistence.ts";
 export * from "./schema.ts";
@@ -7,7 +9,6 @@ export * from "./store.ts";
 export * from "./types.ts";
 export * from "./requirement-egress-policy.ts";
 export * from "./requirement-service.ts";
-export * from "./requirement-webgpt-adapter.ts";
 export * from "./planner-contract.ts";
 export * from "./planner-service.ts";
 export * from "./planner-webgpt-adapter.ts";

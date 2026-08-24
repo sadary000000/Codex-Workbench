@@ -8,6 +8,9 @@ export const WEBGPT_PROJECT_INSPECT_CLI_TIMEOUT_MS = WEBGPT_PROJECT_INSPECT_OPER
 export const WEBGPT_PROJECT_CREATE_CLI_TIMEOUT_MS = WEBGPT_PROJECT_CREATE_OPERATION_TIMEOUT_MS + 5_000;
 export const WEBGPT_REVIEW_SUBMIT_OPERATION_TIMEOUT_MS = 120_000;
 export const WEBGPT_REVIEW_SUBMIT_CLI_TIMEOUT_MS = WEBGPT_REVIEW_SUBMIT_OPERATION_TIMEOUT_MS + 5_000;
+/** Requirement provider calls may include one bounded WebGPT turn. */
+export const WEBGPT_REQUIREMENT_OPERATION_TIMEOUT_MS = 300_000;
+export const WEBGPT_REQUIREMENT_CLI_TIMEOUT_MS = WEBGPT_REQUIREMENT_OPERATION_TIMEOUT_MS + 5_000;
 
 export type WebGptProjectOperationCommand = "webgpt.project.inspect" | "webgpt.project.open" | "webgpt.project.create" | "webgpt.project.new-chat";
 

@@ -3,16 +3,21 @@ import {
   computeRequirementSemanticSha256,
   createRequirementRequest,
   requirementContextFromRequest,
+  parseRequirementResponse,
   type IWebGPTRequirementRequest,
   type IWebGPTRequirementService,
   type RequirementChatBinding,
   type RequirementDraft,
   type RequirementEnvelope,
+  type RequirementEnvelopeContext,
   REQUIREMENT_ROLE,
   REQUIREMENT_MODEL_RESPONSE_INSTRUCTIONS,
   validateRequirementEnvelope,
   validateRequirementRequest,
 } from "./requirement-webgpt-contract.ts";
+import type { AutomationProviderPort, ProviderTargetRef } from "./adapters.ts";
+import { InputRefRegistry } from "./input-ref.ts";
+import { RequirementProviderDispatch, RequirementProviderDispatchError, type RequirementProviderDispatchResult } from "./requirement-provider-dispatch.ts";
 import { RequirementEgressPolicy, type ContextItem } from "./requirement-egress-policy.ts";
 import { canonicalize } from "./canonical.ts";
 import {
@@ -63,6 +68,8 @@ export type RequirementServiceErrorCode =
   | "MALFORMED_REQUIREMENT_RESPONSE"
   | "ROLE_BINDING_INVALID"
   | "REQUEST_CONFLICT"
+  | "RECOVERY_REQUIRED"
+  | "PROVIDER_DISPATCH_FAILED"
   | "REQUIREMENT_INVALID";
 
 export class RequirementServiceError extends Error {
@@ -106,6 +113,8 @@ export interface StartAlignmentInput {
   assumptions?: RequirementAssumptionInput[];
   webgptProjectId?: string;
   requirementBinding?: RequirementChatBinding;
+  /** Provider-neutral target; the provider owns any project/chat resolution. */
+  providerTargetRef?: ProviderTargetRef;
 }
 
 export interface AnswerQuestionsInput {
@@ -138,7 +147,9 @@ export interface RequirementEvidenceProvider {
 
 export interface RequestDraftInput {
   sessionId: string;
-  binding: RequirementChatBinding;
+  /** Legacy compatibility input; not used by the provider-neutral path. */
+  binding?: RequirementChatBinding;
+  providerTargetRef?: ProviderTargetRef;
   contextItems?: readonly ContextItem[];
   repairEnvelope?: RequirementEnvelope;
 }
@@ -193,6 +204,10 @@ export interface ConfirmChangeInput {
 
 export interface RequirementServiceOptions {
   store: AutomationStore;
+  /** New production seam. It is never allowed to expose URLs or DOM state. */
+  provider?: AutomationProviderPort;
+  inputRefs?: InputRefRegistry;
+  providerDispatch?: RequirementProviderDispatch;
   webgpt?: IWebGPTRequirementService;
   evidenceProvider?: RequirementEvidenceProvider;
   egressPolicy?: RequirementEgressPolicy;
@@ -307,6 +322,8 @@ function updateProjectLifecycle(tx: AutomationTransaction, project: AutomationPr
 
 export class RequirementAutomationService {
   readonly store: AutomationStore;
+  readonly providerDispatch: RequirementProviderDispatch | null;
+  readonly inputRefs: InputRefRegistry | null;
   readonly webgpt: IWebGPTRequirementService | null;
   readonly evidenceProvider: RequirementEvidenceProvider | null;
   readonly egressPolicy: RequirementEgressPolicy;
@@ -315,6 +332,10 @@ export class RequirementAutomationService {
 
   constructor(options: RequirementServiceOptions) {
     this.store = options.store;
+    this.inputRefs = options.inputRefs ?? (options.provider ? new InputRefRegistry() : null);
+    this.providerDispatch = options.providerDispatch ?? (options.provider && this.inputRefs
+      ? new RequirementProviderDispatch({ store: options.store, provider: options.provider, inputRefs: this.inputRefs })
+      : null);
     this.webgpt = options.webgpt ?? null;
     this.evidenceProvider = options.evidenceProvider ?? null;
     this.egressPolicy = options.egressPolicy ?? new RequirementEgressPolicy();
@@ -326,6 +347,8 @@ export class RequirementAutomationService {
     const projectId = boundedText(input.projectId, "projectId");
     const goal = boundedText(input.goal, "goal");
     if (!Array.isArray(input.questions) || input.questions.length > 32) throw new RequirementServiceError("REQUIREMENT_INVALID", "questions must be a bounded batch.");
+    if (input.providerTargetRef && (!input.webgptProjectId || /^https?:\/\//i.test(input.providerTargetRef))) throw new RequirementServiceError("ROLE_BINDING_INVALID", "Provider-neutral Requirement alignment requires a project identity and an opaque providerTargetRef.");
+    if (input.providerTargetRef && input.requirementBinding) throw new RequirementServiceError("ROLE_BINDING_INVALID", "Provider-neutral and legacy Requirement bindings cannot be mixed.");
     return this.store.transaction((tx) => {
       const project = tx.require("automationProjects", projectId);
       const timestamp = this.clock();
@@ -333,7 +356,9 @@ export class RequirementAutomationService {
       const roundId = this.makeId("round");
       const binding = input.requirementBinding;
       const webgptProjectRef = input.webgptProjectId ? externalRef(tx, { projectId, kind: "WORKBENCH_PROJECT", provider: "WEBGPT", opaqueId: input.webgptProjectId }, this.makeId).externalRefId : null;
-      const bindingRef = binding ? externalRef(tx, { projectId, kind: "WEBGPT_ROLE_BINDING", provider: "WEBGPT", opaqueId: binding.chatRef }, this.makeId).externalRefId : null;
+      const bindingRef = input.providerTargetRef
+        ? externalRef(tx, { projectId, kind: "WEBGPT_ROLE_BINDING", provider: "WEBGPT", opaqueId: input.providerTargetRef }, this.makeId).externalRefId
+        : binding ? externalRef(tx, { projectId, kind: "WEBGPT_ROLE_BINDING", provider: "WEBGPT", opaqueId: binding.chatRef }, this.makeId).externalRefId : null;
       if (binding && (binding.role !== REQUIREMENT_ROLE || binding.projectId !== input.webgptProjectId)) throw new RequirementServiceError("ROLE_BINDING_INVALID", "Requirement binding must use the explicit REQUIREMENT role and its explicit WebGPT project.");
       const session: RequirementAlignmentSession = {
         alignmentSessionId: sessionId,
@@ -499,7 +524,7 @@ export class RequirementAutomationService {
   async reconcileRequirementEnvelope(input: ReconcileRequirementEnvelopeInput): Promise<RequirementDraftResult> {
     const request = validateRequirementRequest(input.request);
     const envelope = validateRequirementEnvelope(input.envelope, requirementContextFromRequest(request));
-    return this.applyEnvelope({ sessionId: input.sessionId, roundId: input.roundId, request, envelope });
+    return this.applyEnvelope({ sessionId: input.sessionId, roundId: input.roundId, request, responseContext: requirementContextFromRequest(request), envelope });
   }
 
   async requestDraft(input: RequestDraftInput): Promise<RequirementDraftResult> {
@@ -510,11 +535,26 @@ export class RequirementAutomationService {
     if (!roundId) throw new RequirementServiceError("ROUND_NOT_FOUND", "The alignment session has no current round.");
     const round = snapshot.requirementAlignmentRounds.find((item) => item.alignmentRoundId === roundId);
     if (!round) throw new RequirementServiceError("ROUND_NOT_FOUND", `Alignment round ${roundId} was not found.`);
-    if (!this.webgpt) throw new RequirementServiceError("INVALID_STATE", "No WebGPT REQUIREMENT service is attached.");
-    if (input.binding.role !== REQUIREMENT_ROLE || !input.binding.chatRef || input.binding.chatRef === "current" || input.binding.chatRef === "current-chat") throw new RequirementServiceError("ROLE_BINDING_INVALID", "An explicit REQUIREMENT project/Chat binding is required; current-chat fallback is forbidden.");
-    if (session.webgptProjectRef) {
-      const ref = snapshot.externalRefs.find((item) => item.externalRefId === session.webgptProjectRef);
-      if (ref && ref.opaqueId !== input.binding.projectId) throw new RequirementServiceError("ROLE_BINDING_INVALID", "The request binding does not match the session's explicit WebGPT project.");
+    const providerMode = Boolean(this.providerDispatch);
+    // A resolved round already owns the canonical draft.  Replaying the same
+    // public operation must return that draft instead of rebuilding a prompt
+    // from the now-resolved session (which would change the semantic input and
+    // could incorrectly enter the provider recovery guard).
+    if (providerMode && round.status === "RESOLVED" && session.latestDraftVersionId) {
+      const existingDraft = snapshot.requirementVersions.find((item) => item.requirementVersionId === session.latestDraftVersionId);
+      if (existingDraft?.status === "DRAFT") return { status: "DRAFT_READY", session, round, draft: existingDraft, request: null, envelope: null };
+    }
+    if (!providerMode && !this.webgpt) throw new RequirementServiceError("INVALID_STATE", "No Requirement provider is attached.");
+    const projectRef = session.webgptProjectRef ? snapshot.externalRefs.find((item) => item.externalRefId === session.webgptProjectRef) : null;
+    const bindingRef = session.requirementRoleBindingRef ? snapshot.externalRefs.find((item) => item.externalRefId === session.requirementRoleBindingRef) : null;
+    const providerTargetRef = input.providerTargetRef ?? (providerMode ? bindingRef?.opaqueId : null);
+    const providerProjectId = input.binding?.projectId ?? projectRef?.opaqueId ?? null;
+    if (providerMode) {
+      if (!providerTargetRef || !providerProjectId || /^https?:\/\//i.test(providerTargetRef)) throw new RequirementServiceError("ROLE_BINDING_INVALID", "An opaque providerTargetRef and explicit provider project are required; current-chat fallback is forbidden.");
+      if (bindingRef && bindingRef.opaqueId !== providerTargetRef) throw new RequirementServiceError("ROLE_BINDING_INVALID", "The provider target does not match the alignment session binding.");
+    } else {
+      if (!input.binding || input.binding.role !== REQUIREMENT_ROLE || !input.binding.chatRef || input.binding.chatRef === "current" || input.binding.chatRef === "current-chat") throw new RequirementServiceError("ROLE_BINDING_INVALID", "An explicit REQUIREMENT project/Chat binding is required; current-chat fallback is forbidden.");
+      if (projectRef && projectRef.opaqueId !== input.binding.projectId) throw new RequirementServiceError("ROLE_BINDING_INVALID", "The request binding does not match the session's explicit WebGPT project.");
     }
     const items = input.contextItems ?? [];
     const contextDecision = this.egressPolicy.evaluatePayload(items);
@@ -531,7 +571,7 @@ export class RequirementAutomationService {
       questions,
       assumptions,
       context: sha256Hex(contextWire),
-      binding: input.binding,
+      binding: providerMode ? { providerTargetRef } : input.binding,
       protocolVersion: 1,
     });
     const requestId = `aut2-webgpt-${sha256Hex(`${session.alignmentSessionId}:${round.alignmentRoundId}:${requestFingerprint}`).slice(0, 48)}`;
@@ -553,24 +593,37 @@ export class RequirementAutomationService {
       "If any blocking fact is missing, return NEEDS_INPUT with all independent semantic questions in one batch; otherwise return READY_FOR_DRAFT with the bounded draft.",
     ].join("\n");
     const semanticSha256 = computeRequirementSemanticSha256({
-      projectId: input.binding.projectId,
+      projectId: providerProjectId!,
       role: REQUIREMENT_ROLE,
-      targetRef: input.binding.chatRef,
+      targetRef: providerMode ? providerTargetRef! : input.binding!.chatRef,
       prompt: promptTemplate,
     });
     const prompt = promptTemplate.replace("<SEMANTIC_SHA256>", semanticSha256);
-    const request = createRequirementRequest({
-      projectId: input.binding.projectId,
-      binding: input.binding,
+    const responseContext: RequirementEnvelopeContext = {
+      projectId: providerProjectId!,
+      role: REQUIREMENT_ROLE,
       requestId,
       idempotencyKey,
-      prompt,
-    });
+      semanticSha256,
+    };
+    // The provider-neutral path owns only an opaque target and an InputRef.
+    // Do not construct a legacy chat binding just to parse the response.
+    // The old request object remains available only for the paused/test-only
+    // adapter branch.
+    const request = providerMode
+      ? null
+      : createRequirementRequest({
+        projectId: providerProjectId!,
+        binding: input.binding!,
+        requestId,
+        idempotencyKey,
+        prompt,
+      });
     const existingNeedsInputAudit = snapshot.auditEvents.find((event) =>
       event.entityType === "RequirementAlignmentSession"
       && event.entityId === session.alignmentSessionId
       && event.eventType === "REQUIREMENT_WEBGPT_NEEDS_INPUT"
-      && event.causationId === request.requestId,
+      && event.causationId === responseContext.requestId,
     );
     if (existingNeedsInputAudit) {
       const auditRoundId = existingNeedsInputAudit.boundedPayload.roundId;
@@ -579,22 +632,77 @@ export class RequirementAutomationService {
       if (!persistedRound) throw new RequirementServiceError("REQUEST_CONFLICT", "The persisted NEEDS_INPUT result references a missing owning round.");
       return { status: "WAITING_FOR_USER", session, round: persistedRound, draft: null, request, envelope: null };
     }
-    if (session.latestDraftVersionId && session.latestRequestRef && session.latestSemanticSha256 === request.semanticSha256) {
+    if (session.latestDraftVersionId && session.latestRequestRef && session.latestSemanticSha256 === responseContext.semanticSha256) {
       const existingDraft = snapshot.requirementVersions.find((item) => item.requirementVersionId === session.latestDraftVersionId);
       if (existingDraft?.status === "DRAFT") {
         return { status: "DRAFT_READY", session, round, draft: existingDraft, request, envelope: null };
       }
     }
+    if (providerMode && (round.providerActionAttemptRef || round.inputRef || round.webgptRequestRef)) {
+      throw new RequirementServiceError("RECOVERY_REQUIRED", "A provider Requirement request is already persisted for this round; reconcile it before any further dispatch.");
+    }
+    const inputRegistration = providerMode
+      ? this.inputRefs!.register({ kind: "REQUIREMENT_PROMPT", payload: prompt, ownerRef: responseContext.requestId })
+      : null;
     await this.store.transaction((tx) => {
       const current = getRound(tx, session.alignmentSessionId, round.alignmentRoundId);
-      const requestRef = externalRef(tx, { projectId: session.projectId, kind: "WEBGPT_REQUEST", provider: "WEBGPT", opaqueId: request.requestId }, this.makeId);
-      tx.replace("requirementAlignmentRounds", { ...current.round, webgptRequestRef: requestRef.externalRefId, providerSemanticHash: request.semanticSha256 });
-      tx.replace("requirementAlignmentSessions", { ...current.session, latestRequestRef: requestRef.externalRefId, latestSemanticSha256: request.semanticSha256, updatedAt: this.clock(), revision: (current.session.revision ?? 0) + 1 });
+      const requestRef = externalRef(tx, { projectId: session.projectId, kind: "WEBGPT_REQUEST", provider: "WEBGPT", opaqueId: responseContext.requestId }, this.makeId);
+      tx.replace("requirementAlignmentRounds", {
+        ...current.round,
+        webgptRequestRef: requestRef.externalRefId,
+        providerSemanticHash: responseContext.semanticSha256,
+        inputRef: inputRegistration?.inputRef ?? current.round.inputRef ?? null,
+        inputSha256: inputRegistration?.sha256 ?? current.round.inputSha256 ?? null,
+        inputLength: inputRegistration?.length ?? current.round.inputLength ?? null,
+      });
+      tx.replace("requirementAlignmentSessions", { ...current.session, latestRequestRef: requestRef.externalRefId, latestSemanticSha256: responseContext.semanticSha256, updatedAt: this.clock(), revision: (current.session.revision ?? 0) + 1 });
     });
     let envelope: RequirementEnvelope;
-    try {
-      envelope = await this.webgpt.submit(request);
-    } catch (error) {
+    if (providerMode) {
+      let dispatch: RequirementProviderDispatchResult;
+      try {
+        dispatch = await this.providerDispatch!.submit({
+          projectId: session.projectId,
+          providerTargetRef: providerTargetRef!,
+          inputRef: inputRegistration!.inputRef,
+          inputSha256: inputRegistration!.sha256,
+          inputLength: inputRegistration!.length,
+          requestId: responseContext.requestId,
+          idempotencyRef: responseContext.idempotencyKey,
+          semanticRef: responseContext.semanticSha256,
+          workflowRole: REQUIREMENT_ROLE,
+          onActionPrepared: async ({ actionIntentId, actionAttemptId }) => {
+            await this.store.transaction((tx) => {
+              const current = getRound(tx, session.alignmentSessionId, round.alignmentRoundId);
+              tx.replace("requirementAlignmentRounds", { ...current.round, providerActionIntentRef: actionIntentId, providerActionAttemptRef: actionAttemptId });
+            });
+          },
+        });
+      } catch (error) {
+        const code = error instanceof RequirementProviderDispatchError ? error.code : "PROVIDER_DISPATCH_FAILED";
+        if (code === "REQUIREMENT_PROVIDER_RECOVERY_REQUIRED") throw new RequirementServiceError("RECOVERY_REQUIRED", error instanceof Error ? error.message : "Requirement provider recovery is required.");
+        throw new RequirementServiceError("PROVIDER_DISPATCH_FAILED", error instanceof Error ? error.message : "Requirement provider dispatch failed.");
+      }
+      await this.store.transaction((tx) => {
+        const current = getRound(tx, session.alignmentSessionId, round.alignmentRoundId);
+        tx.replace("requirementAlignmentRounds", { ...current.round, providerActionIntentRef: dispatch.actionIntentId, providerActionAttemptRef: dispatch.actionAttemptId, providerSemanticHash: responseContext.semanticSha256 });
+      });
+      if (dispatch.state !== "COMPLETED" || dispatch.response === null) throw new RequirementServiceError("RECOVERY_REQUIRED", "Requirement provider accepted the request but its result is not safely available; reconcile before retrying.");
+      try {
+        envelope = parseRequirementResponse(dispatch.response, responseContext, { repairBudget: 0 });
+      } catch (error) {
+        if (!input.repairEnvelope) throw new RequirementServiceError("MALFORMED_REQUIREMENT_RESPONSE", error instanceof Error ? error.message : "The WebGPT requirement response was invalid.");
+        try {
+          envelope = validateRequirementEnvelope(input.repairEnvelope, responseContext);
+        } catch (repairError) {
+          throw new RequirementServiceError("MALFORMED_REQUIREMENT_RESPONSE", repairError instanceof Error ? repairError.message : "The repair requirement response was invalid.");
+        }
+      }
+    } else {
+      if (!request) throw new RequirementServiceError("INVALID_STATE", "Legacy Requirement request construction unexpectedly produced no request.");
+      try {
+        envelope = await this.webgpt!.submit(request);
+      } catch (error) {
       if (!input.repairEnvelope) {
         throw new RequirementServiceError("MALFORMED_REQUIREMENT_RESPONSE", error instanceof Error ? error.message : "The WebGPT requirement response was invalid.");
       }
@@ -602,16 +710,58 @@ export class RequirementAutomationService {
         // A repair candidate is supplied by the bounded contract adapter. It
         // is validated against the exact original request and consumed once;
         // this service never asks the provider for an unbounded retry.
-        const candidate = validateRequirementEnvelope(input.repairEnvelope, requirementContextFromRequest(request));
+        const candidate = validateRequirementEnvelope(input.repairEnvelope, responseContext);
         envelope = candidate;
       } catch (repairError) {
         throw new RequirementServiceError("MALFORMED_REQUIREMENT_RESPONSE", repairError instanceof Error ? repairError.message : "The repair requirement response was invalid.");
       }
+      }
     }
-    return this.applyEnvelope({ sessionId: session.alignmentSessionId, roundId: round.alignmentRoundId, request, envelope });
+    return this.applyEnvelope({ sessionId: session.alignmentSessionId, roundId: round.alignmentRoundId, request, responseContext, envelope });
   }
 
-  private async applyEnvelope(input: { sessionId: string; roundId: string; request: IWebGPTRequirementRequest; envelope: RequirementEnvelope }): Promise<RequirementDraftResult> {
+  /**
+   * Explicit restart/reconcile path for the provider-neutral Requirement
+   * request. It never reconstructs or resubmits the raw prompt; the provider
+   * request/action correlation is the only recovery input.
+   */
+  async reconcileProviderRequest(input: { sessionId: string; roundId?: string; waitTimeoutMs?: number }): Promise<RequirementDraftResult> {
+    if (!this.providerDispatch) throw new RequirementServiceError("INVALID_STATE", "No provider-neutral Requirement dispatch is attached.");
+    const snapshot = await this.store.snapshot();
+    const session = snapshot.requirementAlignmentSessions.find((item) => item.alignmentSessionId === input.sessionId);
+    if (!session) throw new RequirementServiceError("SESSION_NOT_FOUND", `Alignment session ${input.sessionId} was not found.`);
+    const roundId = input.roundId ?? session.currentRoundId;
+    if (!roundId) throw new RequirementServiceError("ROUND_NOT_FOUND", "The alignment session has no current round.");
+    const round = snapshot.requirementAlignmentRounds.find((item) => item.alignmentRoundId === roundId);
+    if (!round) throw new RequirementServiceError("ROUND_NOT_FOUND", `Alignment round ${roundId} was not found.`);
+    if (!round.providerActionAttemptRef || !round.webgptRequestRef) throw new RequirementServiceError("RECOVERY_REQUIRED", "No persisted provider ActionAttempt is available for Requirement reconciliation.");
+    const requestRef = snapshot.externalRefs.find((item) => item.externalRefId === round.webgptRequestRef);
+    const bindingRef = session.requirementRoleBindingRef ? snapshot.externalRefs.find((item) => item.externalRefId === session.requirementRoleBindingRef) : null;
+    const projectRef = session.webgptProjectRef ? snapshot.externalRefs.find((item) => item.externalRefId === session.webgptProjectRef) : null;
+    const attempt = snapshot.actionAttempts.find((item) => item.actionAttemptId === round.providerActionAttemptRef);
+    const intent = attempt ? snapshot.actionIntents.find((item) => item.intentId === attempt.intentId) : null;
+    if (!requestRef || requestRef.kind !== "WEBGPT_REQUEST" || !projectRef || !bindingRef || !attempt || !intent?.idempotencyRef) throw new RequirementServiceError("RECOVERY_REQUIRED", "Persisted Requirement recovery identity is incomplete.");
+    const result = await this.providerDispatch.reconcile({ projectId: session.projectId, actionAttemptId: round.providerActionAttemptRef, waitTimeoutMs: input.waitTimeoutMs });
+    if (result.state !== "COMPLETED" || result.response === null) throw new RequirementServiceError("RECOVERY_REQUIRED", "Requirement provider reconciliation did not produce a safe terminal result.");
+    const semanticSha256 = round.providerSemanticHash ?? attempt.providerSemanticSha256;
+    if (!semanticSha256) throw new RequirementServiceError("RECOVERY_REQUIRED", "Persisted Requirement recovery has no semantic identity.");
+    const responseContext: RequirementEnvelopeContext = {
+      projectId: projectRef.opaqueId,
+      role: REQUIREMENT_ROLE,
+      requestId: requestRef.opaqueId,
+      idempotencyKey: intent.idempotencyRef,
+      semanticSha256,
+    };
+    let envelope: RequirementEnvelope;
+    try {
+      envelope = parseRequirementResponse(result.response, responseContext, { repairBudget: 0 });
+    } catch (error) {
+      throw new RequirementServiceError("MALFORMED_REQUIREMENT_RESPONSE", error instanceof Error ? error.message : "The reconciled Requirement response was invalid.");
+    }
+    return this.applyEnvelope({ sessionId: session.alignmentSessionId, roundId: round.alignmentRoundId, request: null, responseContext, envelope });
+  }
+
+  private async applyEnvelope(input: { sessionId: string; roundId: string; request: IWebGPTRequirementRequest | null; responseContext: RequirementEnvelopeContext; envelope: RequirementEnvelope }): Promise<RequirementDraftResult> {
     const snapshot = await this.store.snapshot();
     const currentSession = snapshot.requirementAlignmentSessions.find((item) => item.alignmentSessionId === input.sessionId);
     const currentRound = snapshot.requirementAlignmentRounds.find((item) => item.alignmentRoundId === input.roundId);
@@ -624,14 +774,14 @@ export class RequirementAutomationService {
         const requestRef = round.webgptRequestRef
           ? tx.table("externalRefs").find((item) => item.externalRefId === round.webgptRequestRef)
           : null;
-        if (!requestRef || requestRef.opaqueId !== input.request.requestId || session.latestSemanticSha256 !== input.request.semanticSha256) {
+        if (!requestRef || requestRef.opaqueId !== input.responseContext.requestId || session.latestSemanticSha256 !== input.responseContext.semanticSha256) {
           throw new RequirementServiceError("REQUEST_CONFLICT", "The Requirement response does not match the persisted request identity for this round.");
         }
         const existingAudit = tx.table("auditEvents").find((event) =>
           event.entityType === "RequirementAlignmentSession"
           && event.entityId === session.alignmentSessionId
           && event.eventType === "REQUIREMENT_WEBGPT_NEEDS_INPUT"
-          && event.causationId === input.request.requestId,
+          && event.causationId === input.responseContext.requestId,
         );
         if (existingAudit) {
           const storedResultSemanticHash = existingAudit.boundedPayload.resultSemanticHash;
@@ -693,11 +843,32 @@ export class RequirementAutomationService {
           tx.insert("requirementAssumptions", assumption);
           assumptionIds.push(assumption.assumptionId);
         }
-        const newRound: RequirementAlignmentRound = { alignmentRoundId: nextRoundId, alignmentSessionId: session.alignmentSessionId, roundNumber: round.roundNumber + 1, status: "WAITING_FOR_USER", questionIds, assumptionIds, evidenceRefs: [], webgptRequestRef: round.webgptRequestRef ?? null, providerSemanticHash: input.request.semanticSha256, createdAt: timestamp, completedAt: null };
+        // A NEEDS_INPUT response closes this request's round.  The next
+        // round must receive a fresh request identity and Action ledger
+        // records; carrying the old provider ref would permanently trigger
+        // the recovery guard and block the legitimate next question batch.
+        const newRound: RequirementAlignmentRound = {
+          alignmentRoundId: nextRoundId,
+          alignmentSessionId: session.alignmentSessionId,
+          roundNumber: round.roundNumber + 1,
+          status: "WAITING_FOR_USER",
+          questionIds,
+          assumptionIds,
+          evidenceRefs: [],
+          webgptRequestRef: null,
+          providerSemanticHash: null,
+          inputRef: null,
+          inputSha256: null,
+          inputLength: null,
+          providerActionIntentRef: null,
+          providerActionAttemptRef: null,
+          createdAt: timestamp,
+          completedAt: null,
+        };
         tx.insert("requirementAlignmentRounds", newRound);
         const nextSession: RequirementAlignmentSession = { ...session, currentRoundId: newRound.alignmentRoundId, status: "WAITING_FOR_USER", updatedAt: timestamp, revision: (session.revision ?? 0) + 1 };
         tx.replace("requirementAlignmentSessions", nextSession);
-        tx.appendAudit({ projectId: session.projectId, entityType: "RequirementAlignmentSession", entityId: session.alignmentSessionId, eventType: "REQUIREMENT_WEBGPT_NEEDS_INPUT", actorType: "WEBGPT_RUNTIME", actorRef: null, boundedPayload: { roundId: newRound.alignmentRoundId, questionCount: questionIds.length, assumptionCount: assumptionIds.length, resultSemanticHash: responseSemanticHash }, correlationId: session.alignmentSessionId, causationId: input.request.requestId });
+        tx.appendAudit({ projectId: session.projectId, entityType: "RequirementAlignmentSession", entityId: session.alignmentSessionId, eventType: "REQUIREMENT_WEBGPT_NEEDS_INPUT", actorType: "WEBGPT_RUNTIME", actorRef: null, boundedPayload: { roundId: newRound.alignmentRoundId, questionCount: questionIds.length, assumptionCount: assumptionIds.length, resultSemanticHash: responseSemanticHash }, correlationId: session.alignmentSessionId, causationId: input.responseContext.requestId });
         return { session: clone(nextSession), round: clone(newRound), idempotent: false };
       });
       return { status: "WAITING_FOR_USER", session: next.session, round: next.round, draft: null, request: input.request, envelope: input.envelope };
@@ -706,11 +877,11 @@ export class RequirementAutomationService {
       const blocked = input.envelope.payload;
       const next = await this.store.transaction((tx) => {
         const { session, round } = getRound(tx, input.sessionId, input.roundId);
-        const nextSession: RequirementAlignmentSession = { ...session, status: "BLOCKED", latestSemanticSha256: input.request.semanticSha256, updatedAt: this.clock(), revision: (session.revision ?? 0) + 1 };
+        const nextSession: RequirementAlignmentSession = { ...session, status: "BLOCKED", latestSemanticSha256: input.responseContext.semanticSha256, updatedAt: this.clock(), revision: (session.revision ?? 0) + 1 };
         tx.replace("requirementAlignmentSessions", nextSession);
-        const nextRound: RequirementAlignmentRound = { ...round, status: "BLOCKED", providerSemanticHash: input.request.semanticSha256 };
+        const nextRound: RequirementAlignmentRound = { ...round, status: "BLOCKED", providerSemanticHash: input.responseContext.semanticSha256 };
         tx.replace("requirementAlignmentRounds", nextRound);
-        tx.appendAudit({ projectId: session.projectId, entityType: "RequirementAlignmentSession", entityId: session.alignmentSessionId, eventType: "REQUIREMENT_WEBGPT_BLOCKED", actorType: "WEBGPT_RUNTIME", actorRef: null, boundedPayload: { code: blocked.code, reason: blocked.reason, retryable: blocked.retryable }, correlationId: session.alignmentSessionId, causationId: input.request.requestId });
+        tx.appendAudit({ projectId: session.projectId, entityType: "RequirementAlignmentSession", entityId: session.alignmentSessionId, eventType: "REQUIREMENT_WEBGPT_BLOCKED", actorType: "WEBGPT_RUNTIME", actorRef: null, boundedPayload: { code: blocked.code, reason: blocked.reason, retryable: blocked.retryable }, correlationId: session.alignmentSessionId, causationId: input.responseContext.requestId });
         return { session: clone(nextSession), round: clone(nextRound) };
       });
       return { status: "BLOCKED", session: next.session, round: next.round, draft: null, request: input.request, envelope: input.envelope };
@@ -723,11 +894,11 @@ export class RequirementAutomationService {
       const item: RequirementVersion = { requirementVersionId: this.makeId("requirement"), projectId: project.projectId, version, status: "DRAFT", contentRef: null, structuredPayloadRef: null, canonicalPayload: payload.canonical, payloadSha256: payload.sha256, createdAt: this.clock(), confirmedAt: null, supersedes: null };
       tx.insert("requirementVersions", item);
       const timestamp = this.clock();
-      const nextSession: RequirementAlignmentSession = { ...session, status: "RESOLVED", latestDraftVersionId: item.requirementVersionId, latestSemanticSha256: input.request.semanticSha256, completedAt: timestamp, updatedAt: timestamp, revision: (session.revision ?? 0) + 1 };
+      const nextSession: RequirementAlignmentSession = { ...session, status: "RESOLVED", latestDraftVersionId: item.requirementVersionId, latestSemanticSha256: input.responseContext.semanticSha256, completedAt: timestamp, updatedAt: timestamp, revision: (session.revision ?? 0) + 1 };
       tx.replace("requirementAlignmentSessions", nextSession);
-      const nextRound: RequirementAlignmentRound = { ...round, status: "RESOLVED", providerSemanticHash: input.request.semanticSha256, completedAt: timestamp };
+      const nextRound: RequirementAlignmentRound = { ...round, status: "RESOLVED", providerSemanticHash: input.responseContext.semanticSha256, completedAt: timestamp };
       tx.replace("requirementAlignmentRounds", nextRound);
-      tx.appendAudit({ projectId: project.projectId, entityType: "RequirementVersion", entityId: item.requirementVersionId, eventType: "REQUIREMENT_DRAFT_CREATED", actorType: "WEBGPT_RUNTIME", actorRef: null, boundedPayload: { version: item.version, payloadSha256: item.payloadSha256 }, correlationId: session.alignmentSessionId, causationId: input.request.requestId });
+      tx.appendAudit({ projectId: project.projectId, entityType: "RequirementVersion", entityId: item.requirementVersionId, eventType: "REQUIREMENT_DRAFT_CREATED", actorType: "WEBGPT_RUNTIME", actorRef: null, boundedPayload: { version: item.version, payloadSha256: item.payloadSha256 }, correlationId: session.alignmentSessionId, causationId: input.responseContext.requestId });
       return { session: clone(nextSession), round: clone(nextRound), draft: clone(item) };
     });
     return { status: "DRAFT_READY", session: result.session, round: result.round, draft: result.draft, request: input.request, envelope: input.envelope };

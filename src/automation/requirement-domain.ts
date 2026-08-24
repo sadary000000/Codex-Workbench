@@ -298,6 +298,11 @@ export function validateRequirementAlignmentRound(value: unknown, field = "requi
     "evidenceRefs",
     "webgptRequestRef",
     "providerSemanticHash",
+    "inputRef",
+    "inputSha256",
+    "inputLength",
+    "providerActionIntentRef",
+    "providerActionAttemptRef",
     "createdAt",
     "completedAt",
   ]);
@@ -310,6 +315,11 @@ export function validateRequirementAlignmentRound(value: unknown, field = "requi
   if (item.evidenceRefs !== undefined) strings(item.evidenceRefs, `${field}.evidenceRefs`, 128);
   if (item.webgptRequestRef !== undefined) optionalBoundedString(item.webgptRequestRef, `${field}.webgptRequestRef`, 512);
   if (item.providerSemanticHash !== undefined) optionalBoundedString(item.providerSemanticHash, `${field}.providerSemanticHash`, 128);
+  if (item.inputRef !== undefined) optionalBoundedString(item.inputRef, `${field}.inputRef`, 256);
+  if (item.inputSha256 !== undefined) optionalBoundedString(item.inputSha256, `${field}.inputSha256`, 128);
+  if (item.inputLength !== undefined && item.inputLength !== null) integer(item.inputLength, `${field}.inputLength`, 0);
+  if (item.providerActionIntentRef !== undefined) optionalBoundedString(item.providerActionIntentRef, `${field}.providerActionIntentRef`, 256);
+  if (item.providerActionAttemptRef !== undefined) optionalBoundedString(item.providerActionAttemptRef, `${field}.providerActionAttemptRef`, 256);
   timestamp(item.createdAt, `${field}.createdAt`);
   optionalTimestamp(item.completedAt, `${field}.completedAt`);
   return item as unknown as RequirementAlignmentRound;

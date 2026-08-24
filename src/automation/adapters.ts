@@ -50,7 +50,10 @@ export interface ProviderCorrelation {
   readonly actionAttemptId: string | null;
   readonly policyVersionId: string | null;
   readonly idempotencyRef: string | null;
+  /** Automation/domain semantic identity for the operation. */
   readonly semanticRef: string | null;
+  /** Provider-owned execution semantic, learned only after acceptance. */
+  readonly providerSemanticRef?: string | null;
 }
 
 /**
@@ -92,6 +95,7 @@ export interface ProviderRequestAccepted {
   readonly provider: AutomationProviderId;
   readonly providerRequestRef: ProviderRequestRef;
   readonly providerTargetRef: ProviderTargetRef;
+  /** Provider-owned execution semantic; it may differ from the domain semantic. */
   readonly semanticRef: string | null;
   readonly policy: ProviderPolicyProvenance;
 }
@@ -106,6 +110,18 @@ export interface ProviderObservation {
   readonly resultHash: string | null;
   readonly evidenceRefs: readonly string[];
   readonly policy?: ProviderPolicyProvenance;
+}
+
+/**
+ * Typed provider result materialization.  The payload is returned only to the
+ * active caller; durable Automation state keeps the opaque result ref/hash.
+ */
+export interface ProviderResult {
+  readonly provider: AutomationProviderId;
+  readonly providerRequestRef: ProviderRequestRef;
+  readonly state: ProviderRequestState;
+  readonly response: string | null;
+  readonly resultHash: string | null;
 }
 
 export interface ProviderCapabilityFact {
@@ -139,6 +155,10 @@ export interface AutomationProviderPort {
   submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted>;
   observe(input: { providerRequestRef: ProviderRequestRef }): Promise<ProviderObservation>;
   reconcile(input: { providerRequestRef: ProviderRequestRef; correlation: ProviderCorrelation }): Promise<ProviderObservation>;
+  /** Optional provider-owned result read; it never exposes provider internals. */
+  readResult?(input: { providerRequestRef: ProviderRequestRef }): Promise<ProviderResult>;
+  /** Optional bounded wait used by a synchronous domain operation. */
+  waitResult?(input: { providerRequestRef: ProviderRequestRef; timeoutMs: number }): Promise<ProviderResult>;
   cancel?(input: { providerRequestRef: ProviderRequestRef; correlation: ProviderCorrelation }): Promise<ProviderObservation>;
 }
 

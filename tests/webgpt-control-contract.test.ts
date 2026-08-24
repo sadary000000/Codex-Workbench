@@ -186,6 +186,33 @@ test("WebGPT Project navigation Control Plane requires a bounded project name", 
   assert.equal("error" in unexpectedName && unexpectedName.error?.code, "CONTROL_FIELD_UNSUPPORTED");
 });
 
+test("AUT-R0 Control Plane exposes only the provider-neutral Requirement entry", () => {
+  const start = parseWebGptControlRequest({
+    version: 1,
+    requestId: "requirement-start-1",
+    command: "webgpt.requirement.start",
+    projectId: "automation-project",
+    webgptProjectId: "workts",
+    providerTargetRef: "webgpt-role-v1:requirement",
+    goal: "Build a bounded test tool",
+  });
+  assert.deepEqual(start, {
+    version: 1,
+    requestId: "requirement-start-1",
+    command: "webgpt.requirement.start",
+    projectId: "automation-project",
+    webgptProjectId: "workts",
+    providerTargetRef: "webgpt-role-v1:requirement",
+    goal: "Build a bounded test tool",
+  });
+  const draft = parseWebGptControlRequest({ version: 1, requestId: "requirement-draft-1", command: "webgpt.requirement.draft", requirementSessionId: "alignment:123" });
+  assert.deepEqual(draft, { version: 1, requestId: "requirement-draft-1", command: "webgpt.requirement.draft", requirementSessionId: "alignment:123" });
+  const badTarget = parseWebGptControlRequest({ version: 1, requestId: "requirement-start-2", command: "webgpt.requirement.start", projectId: "automation-project", webgptProjectId: "workts", providerTargetRef: "https://chatgpt.com/c/not-opaque", goal: "x" });
+  assert.equal("error" in badTarget && badTarget.error?.code, "REQUIREMENT_PROVIDER_TARGET_INVALID");
+  const badField = parseWebGptControlRequest({ version: 1, requestId: "requirement-draft-2", command: "webgpt.requirement.draft", requirementSessionId: "alignment:123", text: "raw prompt" });
+  assert.equal("error" in badField && badField.error?.code, "CONTROL_FIELD_UNSUPPORTED");
+});
+
 test("Project navigation budgets leave a transport margin over bounded server work", () => {
   assert.equal(projectOperationBudgetMs("webgpt.project.inspect"), WEBGPT_PROJECT_INSPECT_OPERATION_TIMEOUT_MS);
   assert.equal(projectOperationBudgetMs("webgpt.project.create"), WEBGPT_PROJECT_CREATE_OPERATION_TIMEOUT_MS);

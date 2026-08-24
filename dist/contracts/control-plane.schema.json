@@ -65,6 +65,8 @@
             "webgpt.project",
             "webgpt.role",
             "webgpt.request-lifecycle",
+            "webgpt.requirement",
+            "webgpt.review-submit",
             "webgpt.read-latest",
             "webgpt.browser-screenshot",
             "webgpt.legacy-transport"
@@ -222,11 +224,15 @@
             "webgpt.role.open",
             "webgpt.role.latest",
             "webgpt.send",
+            "webgpt.review-submit",
             "webgpt.wait",
             "webgpt.result",
             "webgpt.request.status",
             "webgpt.request.reconcile",
-            "webgpt.request.list"
+            "webgpt.request.list",
+            "webgpt.requirement.start",
+            "webgpt.requirement.draft",
+            "webgpt.requirement.reconcile"
           ]
         },
         "sessionId": {
@@ -258,6 +264,20 @@
         "text": {
           "type": "string",
           "maxLength": 2000000
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 2000000
+        },
+        "zipPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
         },
         "projectName": {
           "type": "string",
@@ -347,11 +367,15 @@
             "webgpt.role.open",
             "webgpt.role.latest",
             "webgpt.send",
+            "webgpt.review-submit",
             "webgpt.wait",
             "webgpt.result",
             "webgpt.request.status",
             "webgpt.request.reconcile",
-            "webgpt.request.list"
+            "webgpt.request.list",
+            "webgpt.requirement.start",
+            "webgpt.requirement.draft",
+            "webgpt.requirement.reconcile"
           ]
         },
         "sessionId": {

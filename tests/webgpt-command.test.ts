@@ -107,6 +107,42 @@ test("WebGPT WEB-4 CLI parser keeps Project Role routing explicit", () => {
   assert.equal(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "role", "bind", "--project", "project-a", "--role", "reviewer", "--url", "https://example.com/c/x"]).kind, "command");
 });
 
+test("AUT-R0 CLI exposes a provider-neutral Requirement production entry", () => {
+  assert.deepEqual(parseWebGptCliInvocation([
+    "Codex Workbench V1.exe", "webgpt", "requirement", "start",
+    "--project", "automation-project",
+    "--webgpt-project", "workts",
+    "--provider-target", "webgpt-role-v1:requirement",
+    "--goal", "Build a bounded test tool",
+    "--json",
+  ]), {
+    kind: "command",
+    command: {
+      name: "webgpt.requirement.start",
+      json: true,
+      projectId: "automation-project",
+      webgptProjectId: "workts",
+      providerTargetRef: "webgpt-role-v1:requirement",
+      goal: "Build a bounded test tool",
+    },
+  });
+  assert.deepEqual(parseWebGptCliInvocation([
+    "Codex Workbench V1.exe", "webgpt", "requirement", "draft", "--session-id", "alignment:123",
+  ]), {
+    kind: "command",
+    command: { name: "webgpt.requirement.draft", json: false, requirementSessionId: "alignment:123" },
+  });
+  assert.deepEqual(parseWebGptCliInvocation([
+    "Codex Workbench V1.exe", "webgpt", "requirement", "reconcile", "--session-id", "alignment:123", "--round-id", "round:1", "--timeout-ms", "5000",
+  ]), {
+    kind: "command",
+    command: { name: "webgpt.requirement.reconcile", json: false, requirementSessionId: "alignment:123", requirementRoundId: "round:1", timeoutMs: 5000 },
+  });
+  assert.equal(parseWebGptCliInvocation([
+    "Codex Workbench V1.exe", "webgpt", "requirement", "start", "--project", "automation-project", "--webgpt-project", "workts", "--provider-target", "https://chatgpt.com/c/not-opaque", "--goal", "x",
+  ]).kind, "error");
+});
+
 test("WebGPT WEB-6.5 CLI parser keeps targeted latest reads explicit", () => {
   assert.deepEqual(parseWebGptCliInvocation(["Codex Workbench V1.exe", "webgpt", "latest", "--json"]), {
     kind: "command",

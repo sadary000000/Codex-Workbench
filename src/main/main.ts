@@ -35,11 +35,13 @@ import { createWebGptCliArgumentError, createWebGptCliFailure, presentWebGptCliO
 import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 import { AutomationStore } from "../automation/store.ts";
+import { RequirementAutomationService } from "../automation/requirement-service.ts";
 import { createProductionAutomationComposition, type AutomationComposition } from "../automation/composition-root.ts";
 import { automationDataDirectoryFromDatabasePath } from "../automation/production-path-contract.ts";
 import { WebGptExternalActionBridge, createWebGptRequestManagerActionAdapter } from "../automation/webgpt-external-action.ts";
 import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority, createWebGptProviderPolicyAuthority, webGptRuntimeCapability } from "../automation/webgpt-policy-authority.ts";
 import { assertProviderSeamExecutable } from "../automation/provider-seam-classification.ts";
+import { InputRefRegistry } from "../automation/input-ref.ts";
 import { WebGptAutomationProviderPort } from "../features/webgpt/automation/webgpt-provider-port.ts";
 import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../automation/aut2-real-webgpt-gate.ts";
 import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
@@ -149,6 +151,9 @@ let automationStore: AutomationStore | null = null;
 let automationComposition: AutomationComposition | null = null;
 let webGptPolicyAuthority: WebGptPolicyAuthority | null = null;
 let webGptProviderPort: WebGptAutomationProviderPort | null = null;
+let requirementAutomationService: RequirementAutomationService | null = null;
+/** Process-owned provider payload boundary; only opaque InputRefs cross into Automation. */
+const automationInputRefs = new InputRefRegistry();
 let webGptExternalActionBridge: WebGptExternalActionBridge | null = null;
 let automationPersistenceStart: Promise<void> | null = null;
 let logger: Logger = createLogger(join(process.cwd(), "user-data", "logs", "workbench-v1.log"));
@@ -171,6 +176,7 @@ async function startAutomationPersistence(): Promise<void> {
     // legacy AUT gate can be considered. The paused gates below never reach
     // this port through their compatibility callers.
     getWebGptProviderPort();
+    getRequirementAutomationService();
     return;
   }
 
@@ -909,6 +915,15 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
       operationStartMs = Date.now();
       if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project new-chat 必须提供 Project 名称。");
       else response = controlOk(request.command, await getWebGptRequestManager().createChatInProject(request.projectName));
+    } else if (request.command === "webgpt.requirement.start") {
+      if (!request.projectId || !request.webgptProjectId || !request.providerTargetRef || !request.goal) response = controlFail(request.command, "REQUIREMENT_START_REQUIRED", "requirement start 必须提供 Automation project、provider project、opaque target 和 goal。");
+      else response = controlOk(request.command, await getRequirementAutomationService().startAlignment({ projectId: request.projectId, goal: request.goal, questions: [], webgptProjectId: request.webgptProjectId, providerTargetRef: request.providerTargetRef }));
+    } else if (request.command === "webgpt.requirement.draft") {
+      if (!request.requirementSessionId) response = controlFail(request.command, "REQUIREMENT_SESSION_REQUIRED", "requirement draft 必须提供 sessionId。");
+      else response = controlOk(request.command, await getRequirementAutomationService().requestDraft({ sessionId: request.requirementSessionId }));
+    } else if (request.command === "webgpt.requirement.reconcile") {
+      if (!request.requirementSessionId) response = controlFail(request.command, "REQUIREMENT_SESSION_REQUIRED", "requirement reconcile 必须提供 sessionId。");
+      else response = controlOk(request.command, await getRequirementAutomationService().reconcileProviderRequest({ sessionId: request.requirementSessionId, ...(request.requirementRoundId ? { roundId: request.requirementRoundId } : {}), ...(request.timeoutMs === undefined ? {} : { waitTimeoutMs: request.timeoutMs }) }));
     } else if (request.command === "webgpt.role.list") {
       if (!request.projectId) response = controlFail(request.command, "PROJECT_REQUIRED", "role list 必须提供 Project ID。");
       else response = controlOk(request.command, await getWebGptRoleService().list(request.projectId));
@@ -1185,8 +1200,8 @@ function getWebGptRoleService(): WebGptRoleSessionService {
  * Production composition root for the provider-neutral Automation Port.
  * The port is deliberately not reachable from the legacy AUT-2/AUT-3
  * compatibility gates; those gates are paused below and fail closed before
- * constructing a provider request.  Input resolution remains explicit and
- * fail-closed until a future Automation stage supplies an opaque input store.
+ * constructing a provider request.  Input resolution is process-owned and
+ * fail-closed: only a registered opaque InputRef can cross this boundary.
  */
 function getWebGptProviderPort(): WebGptAutomationProviderPort {
   if (webGptProviderPort) return webGptProviderPort;
@@ -1197,7 +1212,7 @@ function getWebGptProviderPort(): WebGptAutomationProviderPort {
   webGptProviderPort = new WebGptAutomationProviderPort({
     roleSession: getWebGptRoleService(),
     requestManager: getWebGptRequestManager(),
-    resolveInputRef: async () => { throw new Error("PROVIDER_INPUT_REF_UNRESOLVED"); },
+    resolveInputRef: async (inputRef) => automationInputRefs.resolve(inputRef),
     readRuntimeCapability: async () => webGptRuntimeCapability(getWebGptWorkspace().getControlMode()),
     policyAuthority: createWebGptProviderPolicyAuthority(webGptPolicyAuthority),
     validateActionAttempt: async (correlation) => {
@@ -1211,9 +1226,28 @@ function getWebGptProviderPort(): WebGptAutomationProviderPort {
 }
 
 /**
- * Production composition owns the only bridge instance. It is materialized
- * for the provider boundary, but remains idle until a future Automation stage
- * supplies an opaque inputRef and explicit dispatch facts.
+ * Active Requirement production composition.  This is the only main-process
+ * caller that creates RequirementAutomationService for live execution: it
+ * shares the same provider port and process-owned InputRef registry, so an
+ * opaque input reference cannot be resolved by a second, unrelated registry.
+ * The paused AUT-2/AUT-3 harnesses remain legacy/test-only and are not routed
+ * through this service.
+ */
+function getRequirementAutomationService(): RequirementAutomationService {
+  if (requirementAutomationService) return requirementAutomationService;
+  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");
+  requirementAutomationService = new RequirementAutomationService({
+    store: automationStore,
+    provider: getWebGptProviderPort(),
+    inputRefs: automationInputRefs,
+  });
+  return requirementAutomationService;
+}
+
+/**
+ * Production composition owns the only bridge instance. Requirement Control
+ * Plane commands supply the opaque target and bounded goal; the service then
+ * creates the transient InputRef and dispatches only through this bridge.
  */
 function getWebGptExternalActionBridge(): WebGptExternalActionBridge {
   if (webGptExternalActionBridge) return webGptExternalActionBridge;

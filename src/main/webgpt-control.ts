@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import type { WebGptCliCommand, WebGptCliCommandName } from "./webgpt-command.ts";
-import { isWebGptProjectOperationCommand, projectCliTimeoutMs, WEBGPT_REVIEW_SUBMIT_CLI_TIMEOUT_MS, type WebGptProjectOperationCommand } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
+import { isWebGptProjectOperationCommand, projectCliTimeoutMs, WEBGPT_REQUIREMENT_CLI_TIMEOUT_MS, WEBGPT_REVIEW_SUBMIT_CLI_TIMEOUT_MS, type WebGptProjectOperationCommand } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
 import type { WebGptProjectOperationTimeline } from "../features/webgpt/runtime/webgpt-operation-budget.ts";
 import type { WebGptRole } from "../features/webgpt/types.ts";
 import { normalizeRoleChatUrl } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
@@ -66,6 +66,11 @@ export interface WebGptControlRequest {
   targetRequestId?: string;
   timeoutMs?: number;
   active?: boolean;
+  goal?: string;
+  webgptProjectId?: string;
+  providerTargetRef?: string;
+  requirementSessionId?: string;
+  requirementRoundId?: string;
 }
 
 export interface WebGptControlError {
@@ -225,6 +230,11 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (record.replace !== undefined && typeof record.replace !== "boolean") return controlError("CONTROL_REPLACE_INVALID", "replace 必须是布尔值。", record.command, requestId);
   if (record.idempotencyKey !== undefined && (typeof record.idempotencyKey !== "string" || !record.idempotencyKey.trim() || record.idempotencyKey.length > 256)) return controlError("IDEMPOTENCY_KEY_INVALID", "idempotency key 长度必须为 1 到 256 个字符。", record.command, requestId);
   if (record.active !== undefined && typeof record.active !== "boolean") return controlError("REQUEST_LIST_SCOPE_INVALID", "active 必须是布尔值。", record.command, requestId);
+  if (record.goal !== undefined && (typeof record.goal !== "string" || !record.goal.trim() || record.goal.length > 4_096)) return controlError("REQUIREMENT_GOAL_INVALID", "Requirement goal 必须是 1 到 4096 个字符。", record.command, requestId);
+  if (record.webgptProjectId !== undefined && (typeof record.webgptProjectId !== "string" || !record.webgptProjectId.trim() || record.webgptProjectId.length > 256)) return controlError("REQUIREMENT_PROVIDER_PROJECT_INVALID", "Requirement provider project 无效。", record.command, requestId);
+  if (record.providerTargetRef !== undefined && (typeof record.providerTargetRef !== "string" || !record.providerTargetRef.trim() || record.providerTargetRef.length > 512 || /^https?:\/\//i.test(record.providerTargetRef.trim()))) return controlError("REQUIREMENT_PROVIDER_TARGET_INVALID", "Requirement providerTargetRef 必须是有限长度的 opaque reference。", record.command, requestId);
+  if (record.requirementSessionId !== undefined && (typeof record.requirementSessionId !== "string" || !record.requirementSessionId.trim() || record.requirementSessionId.length > 256)) return controlError("REQUIREMENT_SESSION_INVALID", "Requirement sessionId 无效。", record.command, requestId);
+  if (record.requirementRoundId !== undefined && (typeof record.requirementRoundId !== "string" || !record.requirementRoundId.trim() || record.requirementRoundId.length > 256)) return controlError("REQUIREMENT_ROUND_INVALID", "Requirement roundId 无效。", record.command, requestId);
   if (record.targetRequestId !== undefined && (typeof record.targetRequestId !== "string" || record.targetRequestId.length === 0 || record.targetRequestId.length > 128)) return controlError("CONTROL_REQUEST_ID_INVALID", "目标 requestId 无效。", record.command, requestId);
   if (record.timeoutMs !== undefined && (typeof record.timeoutMs !== "number" || !Number.isSafeInteger(record.timeoutMs) || record.timeoutMs < 0 || record.timeoutMs > 300_000)) return controlError("CONTROL_TIMEOUT_INVALID", "timeoutMs 必须是 0 到 300000 之间的整数。", record.command, requestId);
   if (command === "webgpt.initialize") {
@@ -255,6 +265,9 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (command === "webgpt.send" && ((record.projectId !== undefined) !== (role !== undefined))) return controlError("PROJECT_ROLE_REQUIRED", "Role-aware send 必须同时提供 projectId 和 role。", command, requestId);
   if ((command === "webgpt.request.status" || command === "webgpt.request.reconcile") && typeof record.targetRequestId !== "string") return controlError("REQUEST_ID_REQUIRED", `${command.endsWith("reconcile") ? "request reconcile" : "request status"} 必须提供 requestId。`, command, requestId);
   if (command === "webgpt.request.list" && record.active !== true) return controlError("REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。", command, requestId);
+  if (command === "webgpt.requirement.start" && (typeof record.projectId !== "string" || typeof record.webgptProjectId !== "string" || typeof record.providerTargetRef !== "string" || typeof record.goal !== "string")) return controlError("REQUIREMENT_START_REQUIRED", "requirement start 必须提供 projectId、webgptProjectId、providerTargetRef 和 goal。", command, requestId);
+  if (command === "webgpt.requirement.draft" && typeof record.requirementSessionId !== "string") return controlError("REQUIREMENT_SESSION_REQUIRED", "requirement draft 必须提供 sessionId。", command, requestId);
+  if (command === "webgpt.requirement.reconcile" && typeof record.requirementSessionId !== "string") return controlError("REQUIREMENT_SESSION_REQUIRED", "requirement reconcile 必须提供 sessionId。", command, requestId);
   if (["webgpt.project.inspect", "webgpt.project.open", "webgpt.project.create", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
   if (record.idempotencyKey !== undefined && command !== "webgpt.send" && command !== "webgpt.review-submit") return controlError("CONTROL_IDEMPOTENCY_UNSUPPORTED", "idempotencyKey 只支持 send/review-submit。", command, requestId);
   if (record.replace !== undefined && command !== "webgpt.role.new" && command !== "webgpt.role.bind") return controlError("CONTROL_REPLACE_INVALID", "replace 只支持 role new/bind。", command, requestId);
@@ -287,6 +300,9 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.request.status": ["targetRequestId"],
     "webgpt.request.reconcile": ["targetRequestId"],
     "webgpt.request.list": ["active"],
+    "webgpt.requirement.start": ["projectId", "webgptProjectId", "providerTargetRef", "goal"],
+    "webgpt.requirement.draft": ["requirementSessionId"],
+    "webgpt.requirement.reconcile": ["requirementSessionId", "requirementRoundId", "timeoutMs"],
   };
   const allowedFields = new Set(["version", "protocolVersion", "requestId", "command", "clientInfo", "sessionId", ...(allowedByCommand[command] ?? [])]);
   const unexpectedField = Object.keys(record).find((field) => !allowedFields.has(field));
@@ -312,6 +328,11 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     ...(typeof record.targetRequestId === "string" ? { targetRequestId: record.targetRequestId } : {}),
     ...(typeof record.timeoutMs === "number" ? { timeoutMs: record.timeoutMs } : {}),
     ...(typeof record.active === "boolean" ? { active: record.active } : {}),
+    ...(typeof record.goal === "string" ? { goal: record.goal.trim() } : {}),
+    ...(typeof record.webgptProjectId === "string" ? { webgptProjectId: record.webgptProjectId.trim() } : {}),
+    ...(typeof record.providerTargetRef === "string" ? { providerTargetRef: record.providerTargetRef.trim() } : {}),
+    ...(typeof record.requirementSessionId === "string" ? { requirementSessionId: record.requirementSessionId.trim() } : {}),
+    ...(typeof record.requirementRoundId === "string" ? { requirementRoundId: record.requirementRoundId.trim() } : {}),
   };
 }
 
@@ -815,6 +836,11 @@ async function requestFromCommand(command: WebGptCliCommand): Promise<WebGptCont
     ...(command.targetRequestId ? { targetRequestId: command.targetRequestId } : {}),
     ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
     ...(command.active === undefined ? {} : { active: command.active }),
+    ...(command.goal ? { goal: command.goal } : {}),
+    ...(command.webgptProjectId ? { webgptProjectId: command.webgptProjectId } : {}),
+    ...(command.providerTargetRef ? { providerTargetRef: command.providerTargetRef } : {}),
+    ...(command.requirementSessionId ? { requirementSessionId: command.requirementSessionId } : {}),
+    ...(command.requirementRoundId ? { requirementRoundId: command.requirementRoundId } : {}),
   };
 }
 
@@ -828,6 +854,8 @@ export async function runWebGptCli(
   const projectCommand = isWebGptProjectOperationCommand(command.name) ? command.name : null;
   const commandTimeout = command.name === "webgpt.review-submit"
     ? Math.max(timeoutMs, WEBGPT_REVIEW_SUBMIT_CLI_TIMEOUT_MS)
+    : command.name === "webgpt.requirement.start" || command.name === "webgpt.requirement.draft" || command.name === "webgpt.requirement.reconcile"
+    ? Math.max(timeoutMs, WEBGPT_REQUIREMENT_CLI_TIMEOUT_MS)
     : projectCommand
     ? Math.max(timeoutMs, projectCliTimeoutMs(projectCommand))
     : command.name === "webgpt.wait"

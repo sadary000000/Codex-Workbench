@@ -173,6 +173,12 @@ export interface RequirementAlignmentRound {
   evidenceRefs?: string[];
   webgptRequestRef?: string | null;
   providerSemanticHash?: string | null;
+  /** Opaque provider input identity; raw prompt content is never persisted here. */
+  inputRef?: string | null;
+  inputSha256?: string | null;
+  inputLength?: number | null;
+  providerActionIntentRef?: string | null;
+  providerActionAttemptRef?: string | null;
   createdAt: IsoTimestamp;
   completedAt: IsoTimestamp | null;
 }

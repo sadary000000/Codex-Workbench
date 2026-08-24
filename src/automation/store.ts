@@ -991,8 +991,12 @@ export class AutomationStore {
     return this.transaction((tx) => {
       const attempt = tx.require("actionAttempts", input.actionAttemptId);
       const intent = tx.require("actionIntents", attempt.intentId);
-      const providerRequestRef = optionalText(input.providerRequestRef, "actionAttempt.providerRequestRef", 256);
-      const providerObservationRef = optionalText(input.providerObservationRef, "actionAttempt.providerObservationRef", 256);
+      // Observation attachment is incremental.  Preserve the already persisted
+      // request identity when the caller only supplies the observation ref;
+      // otherwise the stable-identity check would compare the observation to
+      // an empty request and reject a valid provider correlation.
+      const providerRequestRef = optionalText(input.providerRequestRef, "actionAttempt.providerRequestRef", 256) ?? attempt.providerRequestRef ?? null;
+      const providerObservationRef = optionalText(input.providerObservationRef, "actionAttempt.providerObservationRef", 256) ?? attempt.providerObservationRef ?? null;
       const providerRequestExternalRef = providerRequestRef ? tx.require("externalRefs", providerRequestRef) : null;
       const providerObservationExternalRef = providerObservationRef ? tx.require("externalRefs", providerObservationRef) : null;
       assertStoredProviderRefs(intent, attempt, providerRequestExternalRef, providerObservationExternalRef);
@@ -1005,6 +1009,83 @@ export class AutomationStore {
       tx.replace("actionAttempts", updated);
       tx.appendAudit({ projectId: intent.projectId, entityType: "ActionAttempt", entityId: attempt.actionAttemptId, eventType: "PROVIDER_CORRELATION_ATTACHED", actorType: "AUTOMATION", actorRef: null, boundedPayload: { providerRequestRef: updated.providerRequestRef ?? null, providerObservationRef: updated.providerObservationRef ?? null }, correlationId: intent.intentId, causationId: null });
       return clone(updated);
+    });
+  }
+
+  /**
+   * Persist the provider request identity and the Automation external-ref
+   * mapping in one durable transaction.  The provider may already have
+   * accepted the side effect; keeping the request ref and ActionAttempt
+   * mapping atomic makes that acceptance recoverable without a blind resend.
+   */
+  async persistActionAttemptProviderRequest(input: {
+    projectId: string;
+    actionAttemptId: string;
+    provider: string;
+    providerRequestRef: string;
+    providerSemanticSha256?: string | null;
+  }): Promise<{ externalRef: ExternalRef; attempt: ActionAttempt }> {
+    return this.transaction((tx) => {
+      const attempt = tx.require("actionAttempts", input.actionAttemptId);
+      const intent = tx.require("actionIntents", attempt.intentId);
+      if (intent.projectId !== input.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Provider request project does not match the ActionIntent project.");
+      const existing = tx.table("externalRefs").find((item) => item.projectId === input.projectId && item.kind === "WEBGPT_PROVIDER_REQUEST" && item.provider === input.provider && item.opaqueId === input.providerRequestRef);
+      const externalRef: ExternalRef = existing ?? {
+        externalRefId: id(undefined, "externalRefId"),
+        projectId: input.projectId,
+        kind: "WEBGPT_PROVIDER_REQUEST",
+        provider: text(input.provider, "externalRef.provider", 256),
+        opaqueId: text(input.providerRequestRef, "externalRef.opaqueId", 512),
+        createdAt: now(),
+      };
+      if (!existing) tx.insert("externalRefs", externalRef);
+      assertStoredProviderRefs(intent, attempt, externalRef, null);
+      const updated: ActionAttempt = {
+        ...attempt,
+        providerRequestRef: externalRef.externalRefId,
+        providerSemanticSha256: optionalText(input.providerSemanticSha256, "actionAttempt.providerSemanticSha256", 128) ?? attempt.providerSemanticSha256 ?? null,
+      };
+      tx.replace("actionAttempts", updated);
+      tx.appendAudit({ projectId: intent.projectId, entityType: "ActionAttempt", entityId: attempt.actionAttemptId, eventType: "PROVIDER_REQUEST_PERSISTED", actorType: "AUTOMATION", actorRef: null, boundedPayload: { providerRequestRef: externalRef.externalRefId }, correlationId: intent.intentId, causationId: null });
+      return { externalRef: clone(externalRef), attempt: clone(updated) };
+    });
+  }
+
+  /** Persist an observation external ref and attach it to an already mapped request. */
+  async persistActionAttemptProviderObservation(input: {
+    projectId: string;
+    actionAttemptId: string;
+    provider: string;
+    providerObservationRef: string;
+    providerRequestExternalRef?: string | null;
+    providerSemanticSha256?: string | null;
+  }): Promise<{ externalRef: ExternalRef; attempt: ActionAttempt }> {
+    return this.transaction((tx) => {
+      const attempt = tx.require("actionAttempts", input.actionAttemptId);
+      const intent = tx.require("actionIntents", attempt.intentId);
+      if (intent.projectId !== input.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Provider observation project does not match the ActionIntent project.");
+      const requestExternalRefId = input.providerRequestExternalRef ?? attempt.providerRequestRef;
+      const requestExternalRef = requestExternalRefId ? tx.require("externalRefs", requestExternalRefId) : null;
+      const existing = tx.table("externalRefs").find((item) => item.projectId === input.projectId && item.kind === "WEBGPT_PROVIDER_OBSERVATION" && item.provider === input.provider && item.opaqueId === input.providerObservationRef);
+      const externalRef: ExternalRef = existing ?? {
+        externalRefId: id(undefined, "externalRefId"),
+        projectId: input.projectId,
+        kind: "WEBGPT_PROVIDER_OBSERVATION",
+        provider: text(input.provider, "externalRef.provider", 256),
+        opaqueId: text(input.providerObservationRef, "externalRef.opaqueId", 512),
+        createdAt: now(),
+      };
+      if (!existing) tx.insert("externalRefs", externalRef);
+      assertStoredProviderRefs(intent, attempt, requestExternalRef, externalRef);
+      const updated: ActionAttempt = {
+        ...attempt,
+        providerRequestRef: requestExternalRef?.externalRefId ?? attempt.providerRequestRef ?? null,
+        providerObservationRef: externalRef.externalRefId,
+        providerSemanticSha256: optionalText(input.providerSemanticSha256, "actionAttempt.providerSemanticSha256", 128) ?? attempt.providerSemanticSha256 ?? null,
+      };
+      tx.replace("actionAttempts", updated);
+      tx.appendAudit({ projectId: intent.projectId, entityType: "ActionAttempt", entityId: attempt.actionAttemptId, eventType: "PROVIDER_OBSERVATION_PERSISTED", actorType: "AUTOMATION", actorRef: null, boundedPayload: { providerObservationRef: externalRef.externalRefId }, correlationId: intent.intentId, causationId: null });
+      return { externalRef: clone(externalRef), attempt: clone(updated) };
     });
   }
 

@@ -32,7 +32,10 @@ export type WebGptCliCommandName =
   | "webgpt.result"
   | "webgpt.request.status"
   | "webgpt.request.reconcile"
-  | "webgpt.request.list";
+  | "webgpt.request.list"
+  | "webgpt.requirement.start"
+  | "webgpt.requirement.draft"
+  | "webgpt.requirement.reconcile";
 
 export interface WebGptCliCommand {
   name: WebGptCliCommandName;
@@ -52,6 +55,11 @@ export interface WebGptCliCommand {
   targetRequestId?: string;
   timeoutMs?: number;
   active?: boolean;
+  goal?: string;
+  webgptProjectId?: string;
+  providerTargetRef?: string;
+  requirementSessionId?: string;
+  requirementRoundId?: string;
 }
 
 export type WebGptCliInvocation =
@@ -153,6 +161,35 @@ export function parseWebGptCliInvocation(argv: readonly string[]): WebGptCliInvo
     if (projectVerb === "create") return { kind: "command", command: { name: "webgpt.project.create", json: parsed.json, projectName } };
     if (projectVerb === "new-chat") return { kind: "command", command: { name: "webgpt.project.new-chat", json: parsed.json, projectName } };
     return invalid(parsed.json, `不支持的 project 命令：${projectVerb}`);
+  }
+
+  if (verb === "requirement") {
+    const [requirementVerb, ...requirementArgs] = rest;
+    if (requirementVerb === "start") {
+      const projectId = optionValue(requirementArgs, "--project");
+      const webgptProjectId = optionValue(requirementArgs, "--webgpt-project");
+      const providerTargetRef = optionValue(requirementArgs, "--provider-target");
+      const goal = optionValue(requirementArgs, "--goal");
+      if (!projectId || !webgptProjectId || !providerTargetRef || /^https?:\/\//i.test(providerTargetRef) || !goal || optionCount(requirementArgs, "--project") !== 1 || optionCount(requirementArgs, "--webgpt-project") !== 1 || optionCount(requirementArgs, "--provider-target") !== 1 || optionCount(requirementArgs, "--goal") !== 1 || !hasOnlyValueOptionsAndFlags(requirementArgs, ["--project", "--webgpt-project", "--provider-target", "--goal"])) {
+        return invalid(parsed.json, "requirement start 必须使用 --project <automation-project> --webgpt-project <provider-project> --provider-target <opaque-target> --goal <goal>。");
+      }
+      return { kind: "command", command: { name: "webgpt.requirement.start", json: parsed.json, projectId, webgptProjectId, providerTargetRef, goal } };
+    }
+    if (requirementVerb === "draft") {
+      const sessionId = optionValue(requirementArgs, "--session-id");
+      if (!sessionId || optionCount(requirementArgs, "--session-id") !== 1 || !hasOnlyValueOptionsAndFlags(requirementArgs, ["--session-id"])) return invalid(parsed.json, "requirement draft 必须使用 --session-id <id>。");
+      return { kind: "command", command: { name: "webgpt.requirement.draft", json: parsed.json, requirementSessionId: sessionId } };
+    }
+    if (requirementVerb === "reconcile") {
+      const sessionId = optionValue(requirementArgs, "--session-id");
+      const roundId = optionValue(requirementArgs, "--round-id");
+      const timeoutRaw = optionValue(requirementArgs, "--timeout-ms");
+      if (!sessionId || optionCount(requirementArgs, "--session-id") !== 1 || (roundId !== null && optionCount(requirementArgs, "--round-id") !== 1) || (timeoutRaw !== null && optionCount(requirementArgs, "--timeout-ms") !== 1) || !hasOnlyValueOptionsAndFlags(requirementArgs, ["--session-id", "--round-id", "--timeout-ms"])) return invalid(parsed.json, "requirement reconcile 必须使用 --session-id <id> [--round-id <id>] [--timeout-ms <ms>]。");
+      const timeoutMs = timeoutRaw === null ? undefined : Number(timeoutRaw);
+      if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 300_000)) return invalid(parsed.json, "--timeout-ms 必须是 0 到 300000 之间的整数。");
+      return { kind: "command", command: { name: "webgpt.requirement.reconcile", json: parsed.json, requirementSessionId: sessionId, ...(roundId ? { requirementRoundId: roundId } : {}), ...(timeoutMs === undefined ? {} : { timeoutMs }) } };
+    }
+    return invalid(parsed.json, `不支持的 requirement 命令：${requirementVerb ?? ""}`);
   }
 
   if (verb === "role") {
