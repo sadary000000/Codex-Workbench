@@ -1,0 +1,20 @@
+AUT-R0 review package contents
+
+docs/AUT-R0-STAGE-REVIEW.md
+docs/AUT-R0-REALITY-CHECK.md
+docs/AUT-R0-INPUTREF-CONTRACT.md
+docs/AUT-R0-REQUIREMENT-PRODUCTION-REWIRE.md
+docs/AUT-R0-PRODUCTION-CALLER-INVENTORY.md
+docs/AUT-R0-TESTS.md
+docs/AUT-R0-EVIDENCE.json
+docs/AUT-R0-PACKAGE-MANIFEST.txt
+docs/AUT-R0-TEST-SUMMARY.md
+docs/AUT-R0-SUBAGENTS.md
+docs/AUT-R0-PROVENANCE.txt
+docs/AUT-R0-REVIEW-PROMPT.md
+
+Excluded by design:
+- cookies, tokens, passwords, browser profiles
+- raw Requirement prompts and private ChatGPT messages
+- production databases and full request journals
+- unrelated user-local documents, dist-stage folders, and old review archives

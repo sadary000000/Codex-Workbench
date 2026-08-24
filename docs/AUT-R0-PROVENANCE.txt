@@ -1,0 +1,30 @@
+AUT-R0 provenance
+
+stage=AUT-R0 Provider-neutral InputRef + Requirement Production Rewire
+base_commit=0edcec5
+implementation_commit=ae4eb95
+implementation_message=feat: rewire requirement through provider-neutral input refs
+review_package=dist/review/AUT-R0-REVIEW-PACKAGE.zip
+target_branch=codex/workbench-v1
+main_branch_touched=NO
+v1_frozen_core_changed=NO
+old_donor_modified=NO
+
+verification:
+- npm run check: PASS
+- targeted AUT-R0/control tests: 25/25 PASS
+- npm test: 414/414 PASS
+- npm run build: PASS
+- npm run package:win: PASS
+- npm audit --omit=dev: PASS, 0 vulnerabilities
+- git diff --check: PASS
+- credential/secret shape scan: PASS; no credential values included in evidence
+- npm run test:real:webgpt:protocol: PASS; 0 new real prompts
+- live AUT-R0 Requirement provider smoke: NOT RUN
+
+packaged_outputs:
+- dist/package/Codex Workbench V1.exe
+- dist/package/Codex Workbench CLI.exe
+
+review package excludes cookies, tokens, passwords, browser profiles, private
+ChatGPT messages, raw prompts, full production databases, and unrelated logs.

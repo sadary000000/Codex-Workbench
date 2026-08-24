@@ -1,0 +1,36 @@
+{
+  "stage": "AUT-R0",
+  "name": "Provider-neutral InputRef + Requirement Production Rewire",
+  "result": "PASS_CANDIDATE",
+  "baseCommit": "0edcec5",
+  "implementationCommit": "ae4eb95",
+  "v1FrozenCoreChanged": false,
+  "oldDonorModified": false,
+  "targetedTests": { "passed": 25, "failed": 0 },
+  "fullTests": { "passed": 414, "failed": 0 },
+  "checks": {
+    "npmRunCheck": "PASS",
+    "npmTest": "PASS",
+    "npmRunBuild": "PASS",
+    "npmRunPackageWin": "PASS",
+    "npmAuditOmitDev": "PASS_0_VULNERABILITIES",
+    "gitDiffCheck": "PASS",
+    "credentialShapeScan": "PASS"
+  },
+  "realSmoke": {
+    "webgptProtocol": "PASS_NO_REAL_PROMPTS",
+    "autR0LiveRequirementProvider": "NOT_RUN",
+    "productionRequirementControlPlane": "PASS_CONTRACT_ONLY"
+  },
+  "safety": {
+    "rawPromptDurablePersistence": false,
+    "blindResendAfterAcceptedUnknown": false,
+    "currentChatFallbackInProviderPath": false,
+    "providerTargetReplacement": false,
+    "cookiesTokensPasswordsInEvidence": false,
+    "resultIdentityMismatchTerminalized": false,
+    "inputRefReleasedAfterSubmit": true,
+    "roundActionAttemptPersistedBeforeSubmit": true
+  },
+  "reviewPackage": "dist/review/AUT-R0-REVIEW-PACKAGE.zip"
+}
