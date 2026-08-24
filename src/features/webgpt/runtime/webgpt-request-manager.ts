@@ -19,6 +19,8 @@ const TERMINAL_STATES = new Set<WebGptRequestState>(["COMPLETED", "FAILED", "CAN
 const RECOVERY_STATES = new Set<WebGptRequestState>(["SUBMITTING", "SUBMITTED", "GENERATING", "INDETERMINATE", "RECOVERY_REQUIRED", "TIMEOUT"]);
 const WAIT_SETTLED_STATES = new Set<WebGptRequestState>(["COMPLETED", "FAILED", "CANCELED", "INDETERMINATE", "RECOVERY_REQUIRED", "TIMEOUT"]);
 const TARGET_PAGE_HYDRATION_TIMEOUT_MS = 10_000;
+const TARGET_REOPEN_ATTEMPTS = 2;
+const TARGET_REOPEN_DELAY_MS = 250;
 
 interface StoredDocument {
   version: 2;
@@ -388,15 +390,7 @@ export class WebGptRequestManager {
         operationType: "RECOVERY",
       });
       await this.validateTarget?.(this.clone(record));
-      const target = this.recoveryTarget(record);
-      await this.workspace.openChatForAutomation(target);
-      const probe = await this.waitForTargetPageHydration(await this.workspace.getPageProbe());
-      record.chatUrl = probe.page.url;
-      record.lastKnownPageState = { ...probe.page };
-      await this.persist();
-      this.emit(record);
-      const actual = normalizeChatUrl(probe.page.url);
-      if (actual !== target) throw this.codedError("TARGET_CHAT_CHANGED", "恢复时当前页面不是请求记录的目标 Chat。");
+      const probe = await this.reopenAndVerifyTarget(record);
       if (!probe.page.onChatPage || !probe.page.composerFound) throw this.codedError("PAGE_ADAPTER_UNHEALTHY", "恢复时目标 Chat 页面尚未可观察。");
       const userConfirmed = (record.baselineUserCount === null || probe.page.userCount > record.baselineUserCount)
         && promptHash(probe.latestUserText) === record.promptSha256;
@@ -417,6 +411,33 @@ export class WebGptRequestManager {
       lease?.release(record.state);
     }
     return this.clone(record);
+  }
+
+  /**
+   * Reopen only the persisted target identity during recovery. A transient
+   * redirect to the home page is retried once with the same exact target;
+   * this never searches history, creates a Chat, or changes targetChatUrl.
+   */
+  private async reopenAndVerifyTarget(record: WebGptRequestRecord): Promise<WebGptPageProbe> {
+    const target = this.recoveryTarget(record);
+    let lastActualUrl: string | null = null;
+    for (let attempt = 1; attempt <= TARGET_REOPEN_ATTEMPTS; attempt += 1) {
+      try {
+        await this.workspace.openChatForAutomation(target);
+        const probe = await this.waitForTargetPageHydration(await this.workspace.getPageProbe());
+        record.chatUrl = probe.page.url;
+        record.lastKnownPageState = { ...probe.page };
+        await this.persist();
+        this.emit(record);
+        try { lastActualUrl = normalizeChatUrl(probe.page.url); } catch { lastActualUrl = null; }
+        if (lastActualUrl === target) return probe;
+      } catch (error) {
+        const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "";
+        if (code !== "COMPOSER_NOT_READY" || attempt >= TARGET_REOPEN_ATTEMPTS) throw error;
+      }
+      if (attempt < TARGET_REOPEN_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, TARGET_REOPEN_DELAY_MS));
+    }
+    throw this.codedError("TARGET_CHAT_CHANGED", "恢复时当前页面不是请求记录的目标 Chat。", { targetChatUrl: target, actualChatUrl: lastActualUrl, reopenAttempts: TARGET_REOPEN_ATTEMPTS });
   }
 
   async userControl(): Promise<void> {

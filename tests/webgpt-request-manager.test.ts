@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,12 +36,13 @@ class FakeWorkspace {
   submitCount = 0;
   waitErrorCode: string | null = null;
   openChatUrlOverride: string | null = null;
+  openChatUrlSequence: string[] = [];
   waitGate: Promise<void> | null = null;
 
   getControlMode(): WebGptState["mode"] { return this.mode; }
   async returnAutomationControl(): Promise<WebGptState> { this.mode = "AUTO_CONTROL"; return this.state(); }
   async createChat(): Promise<WebGptState> { this.createChatCount += 1; this.probe = pageProbe(true); return this.state(); }
-  async openChatForAutomation(url: string): Promise<WebGptState> { this.openChatCount += 1; const text = this.probe.latestAssistantText || "WEBGPT_TEST_OK"; this.probe = pageProbe(true, 1, text); this.probe.page.userCount = 1; this.probe.page.url = this.openChatUrlOverride ?? url; return this.state(); }
+  async openChatForAutomation(url: string): Promise<WebGptState> { this.openChatCount += 1; const text = this.probe.latestAssistantText || "WEBGPT_TEST_OK"; this.probe = pageProbe(true, 1, text); this.probe.page.userCount = 1; this.probe.page.url = this.openChatUrlSequence.shift() ?? this.openChatUrlOverride ?? url; return this.state(); }
   async getPageProbe(): Promise<WebGptPageProbe> { return this.probe; }
   async getCurrentUrl(): Promise<string> { return this.probe.page.url; }
   async waitForTargetChatHistory(_expectedChatUrl: string): Promise<WebGptPageProbe> { return this.probe; }
@@ -342,6 +344,49 @@ test("WebGPT reconciliation is explicit and status does not perform it", async (
     assert.equal(reconciled.state, "RECOVERY_REQUIRED");
     assert.notEqual(reconciled.error?.code, "WEBGPT_RESPONSE_TIMEOUT");
     assert.equal(workspace.openChatCount, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT recovery reopens the exact persisted target after one transient home redirect", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-recovery-target-"));
+  const target = "https://chatgpt.com/c/target";
+  const record = {
+    requestId: "wgpt-target-reopen",
+    idempotencyKey: "target-reopen-key",
+    semanticSha256: "semantic",
+    state: "RECOVERY_REQUIRED",
+    projectId: "project-a",
+    role: "REQUIREMENT",
+    targetChatUrl: target,
+    chatUrl: target,
+    promptChars: 0,
+    promptSha256: createHash("sha256").update("", "utf8").digest("hex"),
+    baselineUserCount: 0,
+    baselineAssistantCount: 0,
+    sendStartedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    submittedAt: new Date().toISOString(),
+    completedAt: null,
+    resultPath: null,
+    resultSha256: null,
+    resultBytes: null,
+    lastKnownPageState: null,
+    error: { code: "WORKBENCH_RESTARTED", message: "recovery evidence" },
+  };
+  try {
+    await writeFile(join(directory, "requests.json"), JSON.stringify({ version: 2, requests: [record] }), "utf8");
+    const workspace = new FakeWorkspace();
+    workspace.mode = "AUTO_CONTROL";
+    workspace.openChatUrlSequence = ["https://chatgpt.com/", target];
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const recovered = await manager.reconcileRequest(record.requestId);
+    assert.equal(recovered.state, "COMPLETED");
+    assert.equal(recovered.targetChatUrl, target);
+    assert.equal(recovered.chatUrl, target);
+    assert.equal(workspace.openChatCount, 2);
+    assert.equal(workspace.submitCount, 0);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
