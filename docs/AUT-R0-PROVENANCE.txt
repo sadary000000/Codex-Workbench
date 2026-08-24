@@ -22,6 +22,16 @@ verification:
 - npm run test:real:webgpt:protocol: PASS; 0 new real prompts
 - live AUT-R0 Requirement provider smoke: NOT RUN
 
+review_submit:
+- fast CLI path attempted with submission_id=aut-r0-ae4eb95-7536f4b
+- initial state=USER_CONTROL_NO_SEND
+- control auto=PASS
+- send result=UNKNOWN_AFTER_SEND
+- reconcile-then-retry=UNKNOWN_AFTER_SEND
+- read-only target check=TARGET_CHAT_MISMATCH; current page returned to https://chatgpt.com/
+- confirmed SENT=NO
+- blind resend after UNKNOWN=NO
+
 packaged_outputs:
 - dist/package/Codex Workbench V1.exe
 - dist/package/Codex Workbench CLI.exe

@@ -20,7 +20,8 @@
   "realSmoke": {
     "webgptProtocol": "PASS_NO_REAL_PROMPTS",
     "autR0LiveRequirementProvider": "NOT_RUN",
-    "productionRequirementControlPlane": "PASS_CONTRACT_ONLY"
+    "productionRequirementControlPlane": "PASS_CONTRACT_ONLY",
+    "reviewPackageSubmit": "RECOVERY_REQUIRED_NOT_CONFIRMED"
   },
   "safety": {
     "rawPromptDurablePersistence": false,
@@ -33,4 +34,15 @@
     "roundActionAttemptPersistedBeforeSubmit": true
   },
   "reviewPackage": "dist/review/AUT-R0-REVIEW-PACKAGE.zip"
+  ,"reviewSubmission": {
+    "submissionId": "aut-r0-ae4eb95-7536f4b",
+    "target": "https://chatgpt.com/g/g-p-6a77f2b63f088191a97784ad4385c9b8-auto-agent/c/6a82e007-8eb0-83ee-b598-dff8598c9fac",
+    "controlAuto": "PASS",
+    "firstAttempt": "USER_CONTROL_NO_SEND",
+    "sendAttempt": "UNKNOWN_AFTER_SEND",
+    "reconcileThenRetry": "UNKNOWN_AFTER_SEND",
+    "confirmedSent": false,
+    "lastRead": "TARGET_CHAT_MISMATCH",
+    "finalAction": "STOPPED_NO_BLIND_RESEND"
+  }
 }

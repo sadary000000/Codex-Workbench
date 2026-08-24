@@ -81,6 +81,22 @@ protocol changes, V1 Frozen Core redesign, and old-donor changes.
   `npm audit --omit=dev` also PASS after the final code change.
 - Existing packaged WEB-6.6 Control Plane protocol smoke: PASS, 0 new real
   prompts. AUT-R0 live Requirement provider smoke: NOT RUN.
+
+## Review submission evidence
+
+The authorized fast `webgpt review-submit` path was attempted with the fixed
+submission id `aut-r0-ae4eb95-7536f4b`. The first call was correctly rejected
+before send because the runtime was in `USER_CONTROL`; the official
+`webgpt control auto` command then returned `AUTO_CONTROL`. The next attempt
+clicked send but returned `UNKNOWN_AFTER_SEND`, and a same-idempotency retry
+performed reconcile first before returning `UNKNOWN_AFTER_SEND` again. A
+read-only `webgpt.chat.latest` check then returned `TARGET_CHAT_MISMATCH` while
+the Workbench page was back at `https://chatgpt.com/`.
+
+No further send was attempted. `confirmedSent=false`; this is recorded as
+`RECOVERY_REQUIRED_NOT_CONFIRMED`, not as a false SENT/PASS. The package is
+ready for the user/GPT review, but automatic web submission is blocked by the
+current WebGPT target/session state.
 - Real App Server smoke: NOT RUN; no false PASS claim.
 
 ## Production entry contract
