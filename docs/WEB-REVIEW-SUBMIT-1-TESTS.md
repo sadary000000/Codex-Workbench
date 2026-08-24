@@ -37,6 +37,6 @@ C:\Users\sadar\AppData\Local\Temp\codex-workbench-web-review-submit-1-7770ccb3d8
 
 独立 Runner 已有真实网页证据，详见 `WEB-REVIEW-SUBMIT-1-BENCHMARK.md`。Workbench 的正向网页提交依赖其自身 WebGPT WebContentsView 的登录态和 AUTO_CONTROL，不能用 Codex 内置 Browser 或独立 Runner 代替。本轮隔离未登录 profile 的实际结果是 `CONTROL_NOT_AVAILABLE / WEBGPT_USER_CONTROL`，没有发送 Prompt；不应输入账号密码或继续发送。
 
-已启动实例的 packaged CLI lifecycle smoke 约 304 ms 返回，冷启动实例在 30 秒窗口内未就绪，均未发送 Prompt。
+修复后的 packaged CLI lifecycle smoke：冷启动 `webgpt status --json` 约 1,204 ms 返回；`webgpt open --json` 约 8,492 ms；warm `status` 约 241 ms；`close` 约 217 ms。均未发送 Prompt，关闭后没有留下目标 Workbench 进程。
 
 未执行 GPT 回复等待；本阶段只验证用户消息进入 ChatGPT 页面。

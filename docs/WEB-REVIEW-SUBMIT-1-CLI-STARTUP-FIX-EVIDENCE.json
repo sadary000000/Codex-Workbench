@@ -1,0 +1,68 @@
+{
+  "stage": "WEB-REVIEW-SUBMIT-1",
+  "evidence": "official-cli-cold-start-pipe-fix",
+  "date": "2026-08-24",
+  "package": {
+    "gui": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench V1.exe",
+    "cli": "D:\\办公\\AI\\Codex_Workbench_V1\\dist\\package\\Codex Workbench CLI.exe"
+  },
+  "rootCause": "The official C# launcher inherited standard handles into the Electron runtime process tree, allowing descendants to keep the execFile stdout/stderr pipes open after the CLI result was written.",
+  "fix": {
+    "officialCliCreateProcessInheritHandles": false,
+    "resultTransport": "explicit temporary stdout/stderr files",
+    "controlPlaneSpawn": "direct detached executable spawn with explicit NUL stdio and shell=false",
+    "guiWebGptOpenWarmsControlPlane": true
+  },
+  "smokes": [
+    {
+      "command": "webgpt status --json",
+      "mode": "cold packaged CLI auto-start",
+      "elapsedMs": 1204,
+      "exitCode": 0,
+      "callbackReturned": true,
+      "workbench": "READY",
+      "webgpt": "UNAVAILABLE",
+      "promptSent": 0
+    },
+    {
+      "command": "webgpt open --json",
+      "mode": "packaged control-plane open",
+      "elapsedMs": 8492,
+      "exitCode": 0,
+      "visible": true,
+      "composerFound": true,
+      "currentUrl": "https://chatgpt.com/",
+      "promptSent": 0
+    },
+    {
+      "command": "webgpt status --json",
+      "mode": "warm packaged CLI",
+      "elapsedMs": 241,
+      "exitCode": 0,
+      "callbackReturned": true,
+      "promptSent": 0
+    },
+    {
+      "command": "webgpt close --json",
+      "mode": "warm packaged CLI",
+      "elapsedMs": 217,
+      "exitCode": 0,
+      "closeMode": "GRACEFUL",
+      "promptSent": 0
+    }
+  ],
+  "postCloseTargetWorkbenchProcessCount": 0,
+  "automated": {
+    "check": "PASS",
+    "targetedTests": "25/25 PASS",
+    "fullTests": "406/406 PASS",
+    "packageWin": "PASS",
+    "audit": "0 vulnerabilities",
+    "diffCheck": "PASS",
+    "highConfidenceSecretScan": "PASS"
+  },
+  "limitations": [
+    "This evidence does not claim a positive logged-in WebGPT review submission.",
+    "No real Prompt was sent during these lifecycle tests."
+  ]
+}

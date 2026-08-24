@@ -33,9 +33,11 @@
       "promptSent": 0
     },
     "coldLifecycle": {
-      "observationWindowMs": 30000,
-      "result": "NOT_READY_WITHIN_WINDOW",
-      "promptSent": 0
+      "elapsedMs": 1204,
+      "result": "READY_WITH_WEBGPT_UNAVAILABLE",
+      "execFileCallbackReturned": true,
+      "promptSent": 0,
+      "supersedes": "NOT_READY_WITHIN_WINDOW baseline"
     }
   },
   "sensitiveData": {

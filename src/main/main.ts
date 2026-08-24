@@ -136,6 +136,7 @@ let pendingWebGptCommand: WebGptExternalCommand | null = null;
 let workbenchReady = false;
 let webGptControlServer: WebGptControlServer | null = null;
 let webGptControlDescriptorFile: string | null = null;
+let webGptControlPlaneStart: Promise<void> | null = null;
 let webGptRuntimeId: string | null = null;
 let webGptRequestManager: WebGptRequestManager | null = null;
 let webGptRoleRegistry: WebGptRoleSessionRegistry | null = null;
@@ -435,7 +436,9 @@ function forwardPendingWebGptCommand(): void {
 
 function requestWebGptCommand(command: WebGptExternalCommand): void {
   if (command.type === "control-plane") {
-    void startWebGptControlPlane();
+    void startWebGptControlPlane().catch((error) => {
+      logger.error("webgpt_control_plane_activation_failed", { error: errorInfo(error).message });
+    });
     return;
   }
   pendingWebGptCommand = command;
@@ -1752,17 +1755,24 @@ function registerIpc(): void {
     }
   });
   ipcMain.handle(IPC.webGptOpenWorkspace, (event) => webGptCall(event.sender, async () => {
+    // A normal GUI stays idle until WebGPT is actually opened. Once the
+    // workspace becomes user-visible, make the same Control Plane available
+    // to the official CLI so the next command reuses this warm instance
+    // instead of cold-starting another Workbench process.
+    await startWebGptControlPlane();
     const state = await getWebGptWorkspace().openWorkspace();
     await getWebGptRequestManager().userControl();
     return state;
   }));
   ipcMain.handle(IPC.webGptOpenHome, (event) => webGptCall(event.sender, async () => {
+    await startWebGptControlPlane();
     const state = await getWebGptWorkspace().openHome();
     await getWebGptRequestManager().userControl();
     return state;
   }));
   ipcMain.handle(IPC.webGptOpenChat, (event, url: unknown) => webGptCall(event.sender, async () => {
     if (typeof url !== "string") throw new Error("WebGPT Chat URL is required.");
+    await startWebGptControlPlane();
     const state = await getWebGptWorkspace().openChat(url);
     await getWebGptRequestManager().userControl();
     return state;
@@ -2127,6 +2137,17 @@ function createWindow(): void {
 }
 
 async function startWebGptControlPlane(): Promise<void> {
+  if (webGptControlServer) return;
+  if (webGptControlPlaneStart) return webGptControlPlaneStart;
+  webGptControlPlaneStart = startWebGptControlPlaneOnce();
+  try {
+    await webGptControlPlaneStart;
+  } finally {
+    webGptControlPlaneStart = null;
+  }
+}
+
+async function startWebGptControlPlaneOnce(): Promise<void> {
   const descriptor: WebGptControlDescriptor = createControlDescriptor(workbenchInstanceId, undefined, app.getVersion());
   const server = new WebGptControlServer({ handler: enqueueWebGptControlRequest, endpoint: descriptor.endpoint, authToken: descriptor.authToken, workbenchVersion: app.getVersion() });
   const descriptorFile = controlDescriptorPath(app.getPath("userData"));

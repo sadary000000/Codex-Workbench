@@ -43,6 +43,6 @@ verification
 | smoke | 结果 | elapsed | Prompt |
 | --- | --- | ---: | ---: |
 | warm packaged Workbench + CLI | `CONTROL_NOT_AVAILABLE / WEBGPT_USER_CONTROL` | 304 ms | 0 |
-| cold packaged CLI auto-start | 30 s 观察窗口内未得到可用 Control Plane 响应，主动停止 | >30 s | 0 |
+| cold packaged CLI auto-start（修复后） | `webgpt status --json` 返回 `READY / WEBGPT_UNAVAILABLE` | 1,204 ms | 0 |
 
 warm 结果说明 CLI 单次调用、Control Plane typed failure 和进程退出已收口；它不是正向网页提交。冷启动结果保留为边界证据，不能替代已运行 Workbench + 已登录 WebGPT 会话的正向 `SENT` smoke。

@@ -9,7 +9,12 @@ second_browser_session=NO
 old_donor_modified=NO
 real_workbench_positive_smoke=NOT_CLAIMED
 warm_packaged_lifecycle=304ms CONTROL_NOT_AVAILABLE/WEBGPT_USER_CONTROL promptSent=0
-cold_packaged_lifecycle=NOT_READY_WITHIN_30S promptSent=0
+cold_packaged_lifecycle_after_pipe_fix=1204ms READY/WEBGPT_UNAVAILABLE promptSent=0
+warm_open_after_pipe_fix=8492ms visible=true composerFound=true promptSent=0
+warm_status_after_pipe_fix=241ms callbackReturned=true promptSent=0
+warm_close_after_pipe_fix=217ms GRACEFUL promptSent=0
+post_close_target_workbench_process_count=0
+startup_fix_candidate=CreateProcess inheritHandles=false; explicit temp stdout/stderr files
 automated_check=PASS
 full_tests=406/406 PASS
 isolated_package=PASS

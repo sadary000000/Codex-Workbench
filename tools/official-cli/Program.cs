@@ -118,76 +118,32 @@ internal static class Program
 
     private static int RunRuntime(string runtimePath, string runtimeArguments)
     {
-        var security = new SecurityAttributes
+        // The runtime writes the public result to the explicit temp files above.
+        // Do not inherit the CLI process' stdout/stderr handles here: Electron
+        // creates a process tree, and an inherited execFile pipe can remain open
+        // after the command has already produced its result.
+        var startup = new StartupInfo
         {
-            Length = Marshal.SizeOf(typeof(SecurityAttributes)),
-            InheritHandle = 1,
+            Size = Marshal.SizeOf(typeof(StartupInfo)),
         };
-        var nulInput = CreateFile("NUL", GenericRead, FileShareRead | FileShareWrite, ref security, OpenExisting, 0, IntPtr.Zero);
-        var nulOutput = CreateFile("NUL", GenericWrite, FileShareRead | FileShareWrite, ref security, OpenExisting, 0, IntPtr.Zero);
-        var nulError = CreateFile("NUL", GenericWrite, FileShareRead | FileShareWrite, ref security, OpenExisting, 0, IntPtr.Zero);
-        if (IsInvalidHandle(nulInput) || IsInvalidHandle(nulOutput) || IsInvalidHandle(nulError))
+        var commandLine = new StringBuilder(Quote(runtimePath) + " " + runtimeArguments);
+        ProcessInformation process;
+        if (!CreateProcess(runtimePath, commandLine, IntPtr.Zero, IntPtr.Zero, false, CreateNoWindow, IntPtr.Zero, AppDomain.CurrentDomain.BaseDirectory, ref startup, out process))
         {
-            CloseHandle(nulInput);
-            CloseHandle(nulOutput);
-            CloseHandle(nulError);
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法打开 NUL 标准句柄。");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "官方 CLI 运行时启动失败。");
         }
-
         try
         {
-            DisableStandardHandleInheritance();
-            var startup = new StartupInfo
-            {
-                Size = Marshal.SizeOf(typeof(StartupInfo)),
-                Flags = StartfUseStdHandles,
-                StandardInput = nulInput,
-                StandardOutput = nulOutput,
-                StandardError = nulError,
-            };
-            var commandLine = new StringBuilder(Quote(runtimePath) + " " + runtimeArguments);
-            ProcessInformation process;
-            if (!CreateProcess(runtimePath, commandLine, IntPtr.Zero, IntPtr.Zero, true, CreateNoWindow, IntPtr.Zero, AppDomain.CurrentDomain.BaseDirectory, ref startup, out process))
-            {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "官方 CLI 运行时启动失败。");
-            }
-            try
-            {
-                WaitForSingleObject(process.ProcessHandle, Infinite);
-                uint exitCode;
-                if (!GetExitCodeProcess(process.ProcessHandle, out exitCode)) throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取官方 CLI 退出码。");
-                return unchecked((int)exitCode);
-            }
-            finally
-            {
-                CloseHandle(process.ThreadHandle);
-                CloseHandle(process.ProcessHandle);
-            }
+            WaitForSingleObject(process.ProcessHandle, Infinite);
+            uint exitCode;
+            if (!GetExitCodeProcess(process.ProcessHandle, out exitCode)) throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取官方 CLI 退出码。");
+            return unchecked((int)exitCode);
         }
         finally
         {
-            CloseHandle(nulInput);
-            CloseHandle(nulOutput);
-            CloseHandle(nulError);
+            CloseHandle(process.ThreadHandle);
+            CloseHandle(process.ProcessHandle);
         }
-    }
-
-    private static bool IsInvalidHandle(IntPtr handle) { return handle == IntPtr.Zero || handle == new IntPtr(-1); }
-
-    private static void DisableStandardHandleInheritance()
-    {
-        foreach (var handle in new[] { GetStdHandle(StandardInputHandle), GetStdHandle(StandardOutputHandle), GetStdHandle(StandardErrorHandle) })
-        {
-            if (!IsInvalidHandle(handle)) SetHandleInformation(handle, HandleFlagInherit, 0);
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct SecurityAttributes
-    {
-        public int Length;
-        public IntPtr SecurityDescriptor;
-        public int InheritHandle;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -222,21 +178,8 @@ internal static class Program
         public uint ThreadId;
     }
 
-    private const uint GenericRead = 0x80000000;
-    private const uint GenericWrite = 0x40000000;
-    private const uint FileShareRead = 0x00000001;
-    private const uint FileShareWrite = 0x00000002;
-    private const uint OpenExisting = 3;
-    private const int StartfUseStdHandles = 0x00000100;
     private const uint CreateNoWindow = 0x08000000;
     private const uint Infinite = 0xFFFFFFFF;
-    private const int StandardInputHandle = -10;
-    private const int StandardOutputHandle = -11;
-    private const int StandardErrorHandle = -12;
-    private const uint HandleFlagInherit = 0x00000001;
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr CreateFile(string name, uint desiredAccess, uint shareMode, ref SecurityAttributes securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CreateProcess(string applicationName, StringBuilder commandLine, IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles, uint creationFlags, IntPtr environment, string currentDirectory, ref StartupInfo startupInfo, out ProcessInformation processInformation);
@@ -249,12 +192,6 @@ internal static class Program
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr handle);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GetStdHandle(int standardHandle);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
 
     private static string Quote(string value)
     {

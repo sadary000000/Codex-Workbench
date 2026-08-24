@@ -13,7 +13,7 @@ automation_changed: NO
 
 本阶段已把 Review ZIP + 摘要的一次性 CLI 提交能力接入 Workbench 的既有 WebGPT 路径。接口、幂等、失败恢复和自动化回归已完成；独立 Runner 的真实网页基线已完成。Workbench 正向网页 smoke 仍必须在 Workbench 自身已登录 WebGPT 会话中执行，不能由其他浏览器会话代替。
 
-本轮新增的 packaged lifecycle smoke 使用隔离、未登录的 user-data-dir：已启动 Workbench 实例下 CLI 在约 304 ms 返回 `CONTROL_NOT_AVAILABLE / WEBGPT_USER_CONTROL`，没有发送 Prompt；因此它证明了单次调用和退出链路，不证明正向 `SENT`。冷启动隔离 smoke 在 30 秒观察窗口内未得到可用 Control Plane 响应，已停止并记录为启动边界，不把它写成成功。
+本轮新增的 packaged lifecycle smoke 使用隔离、未登录的 user-data-dir：已启动 Workbench 实例下 CLI 在约 304 ms 返回 `CONTROL_NOT_AVAILABLE / WEBGPT_USER_CONTROL`，没有发送 Prompt；因此它证明了单次调用和退出链路，不证明正向 `SENT`。随后修复了冷启动时 Electron 进程树继承 CLI 输出管道的问题；修复后冷启动 `webgpt status --json` 在约 1,204 ms 返回并正常结束，仍只得到未打开 WebGPT 的 typed 状态，不把它写成正向网页提交成功。
 
 ```yaml
 base_commit: f219398bdeb3b7d0e260d92e7106d8cb219356c7
@@ -34,12 +34,15 @@ review_package: dist/review/WEB-REVIEW-SUBMIT-1-REVIEW-PACKAGE.zip
 - `src/main/main.ts`
 - `src/main/webgpt-command.ts`
 - `src/main/webgpt-control.ts`
+- `tools/official-cli/Program.cs`
 - `src/shared/control-plane-errors.ts`
 - `src/shared/webgpt-control-plane-contract.ts`
 
 ### 测试与文档
 
 - `tests/webgpt-review-submission.test.ts`
+- `tests/official-cli-contract.test.ts`
+- `tests/webgpt-feature-contract.test.ts`
 - `docs/WEB-REVIEW-SUBMIT-1-REALITY-AUDIT.md`
 - `docs/WEB-REVIEW-SUBMIT-1-DESIGN.md`
 - `docs/WEB-REVIEW-SUBMIT-1-TESTS.md`
@@ -66,7 +69,7 @@ Control Plane 能力名为 `webgpt.review-submit`。它使用既有版本化初�
 | 独立 Runner 真实网页基线 | PASS WITH LIMIT | 10/10, duplicate 0, p90 <=15s |
 | Workbench 正向打包网页提交 | NOT CLAIMED | 隔离 smoke 未登录且为 `CONTROL_NOT_AVAILABLE / WEBGPT_USER_CONTROL`，没有伪造 `SENT` |
 | Workbench warm packaged lifecycle | PASS (NEGATIVE CONTROL) | 已启动 Workbench 实例，约 304 ms 返回 typed control-owner failure，Prompt=0 |
-| Workbench cold packaged lifecycle | BOUNDARY | 隔离 cold smoke 30 s 内未就绪，已停止；不影响“Workbench 已运行”目标，但未宣称 cold-start PASS |
+| Workbench cold packaged CLI lifecycle | PASS (PROCESS EXIT) | 修复后 `webgpt status --json` 约 1,204 ms 返回，`execFile` callback 正常结束，Prompt=0；WebGPT 页面仍未打开 |
 | V1 全量回归 | PASS | 406/406 |
 | V1 Frozen Core | PRESERVED | additive WebGPT integration |
 
@@ -76,7 +79,30 @@ Control Plane 能力名为 `webgpt.review-submit`。它使用既有版本化初�
 - Workbench 本阶段不等待 GPT 回复，不解析 GPT Gate，不自动推进下一阶段。
 - 不实现多账号、多会话或独立浏览器 profile 管理。
 - Workbench 正向 smoke 需要 Workbench 自身已登录且 AUTO_CONTROL 可用的 WebGPT 会话；本轮隔离 profile 返回了 `CONTROL_NOT_AVAILABLE / WEBGPT_USER_CONTROL`，未发送 Prompt。
-- 冷启动自动拉起路径仍受既有启动/页面就绪预算影响；本阶段性能目标限定为 Workbench 已运行且目标 Chat 可解析，不将冷启动计入 `SENT` benchmark。
+- 首次 `webgpt open` 仍包含页面加载，当前实测约 8,492 ms；后续 warm `status` 约 241 ms、`close` 约 217 ms。冷启动进程退出已收口，但本阶段仍不将冷启动或未登录状态计入正向 `SENT` benchmark。
+
+## 本轮冷启动返回修复
+
+### 根因
+
+官方 C# CLI 启动器原先使用 `CreateProcess(..., inheritHandles=true)` 并通过 NUL 标准句柄隔离输出。Workbench 是 Electron 进程树，子进程可能继续持有 CLI 调用方的 stdout/stderr 管道，导致 Node `execFile` 已经有业务结果后仍等待句柄关闭，表现为冷启动命令长时间不返回。
+
+### 修复
+
+- `tools/official-cli/Program.cs` 改为 `CreateProcess(..., inheritHandles=false)`；业务 stdout/stderr 继续通过显式临时文件回传。
+- 保留 `src/main/webgpt-control.ts` 的直接 `spawn`、显式 NUL stdio 和 `shell:false`，移除 `cmd.exe start` 边界。
+- 普通 GUI 打开 WebGPT 时预热同一个 Control Plane，避免下一次 CLI 再冷启动另一个 Workbench 进程。
+
+### 修复后真实 packaged smoke
+
+| 操作 | 结果 | elapsed | Prompt |
+| --- | --- | ---: | ---: |
+| 冷启动 `webgpt status --json` | `ok=true`, `workbench=READY`, `webgpt=UNAVAILABLE` | 1,204 ms | 0 |
+| `webgpt open --json` | `ok=true`, 页面可见且 composer 可见 | 8,492 ms | 0 |
+| warm `webgpt status --json` | `ok=true`, `execFile` 正常结束 | 241 ms | 0 |
+| `webgpt close --json` | `ok=true`, `GRACEFUL` | 217 ms | 0 |
+
+关闭后按精确 packaged EXE 路径检查，未留下 Workbench 进程。详细机器证据见 `WEB-REVIEW-SUBMIT-1-CLI-STARTUP-FIX-EVIDENCE.json`。
 
 ## 子代理结果
 

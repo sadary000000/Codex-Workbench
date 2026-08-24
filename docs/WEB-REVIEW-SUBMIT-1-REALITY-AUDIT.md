@@ -17,9 +17,9 @@
 | 独立 Runner p90 | 14,742 ms（达到 <=15 s 目标） |
 | Workbench 正向打包 GUI smoke | 未宣称；需使用已登录 Workbench WebGPT 会话，不以静态/负向结果冒充 PASS |
 | Workbench warm packaged lifecycle | 304 ms，`CONTROL_NOT_AVAILABLE / WEBGPT_USER_CONTROL`，Prompt=0 |
-| Workbench cold packaged lifecycle | 30 s 观察窗口未就绪，主动停止，Prompt=0 |
+| Workbench cold packaged CLI lifecycle（修复后） | 1,204 ms 返回，Prompt=0 |
 
-因此本报告将集成状态记为 `PASS_CANDIDATE_WITH_REAL_SMOKE_BOUNDARY`，不是宣称 Workbench 已完成真实正向网页提交 Gate。
+因此本报告将集成状态记为 `PASS_CANDIDATE_WITH_REAL_SMOKE_BOUNDARY`，不是宣称 Workbench 已完成真实正向网页提交 Gate。冷启动“进程不返回”问题已修复；剩余边界是未登录/未打开 WebGPT 时不会产生正向 `SENT`。
 
 ## 输入来源
 
@@ -33,6 +33,12 @@
 独立 Runner 已完成过真实网页验证：10 次均为 `SENT`，`duplicate_send_count=0`，median 为 13.436 秒、p90 为 14.742 秒、max 为 15.570 秒。随后一次单次提交为 10.644 秒，同一幂等输入再次调用返回 `ALREADY_SENT`，没有第二次浏览器发送。
 
 原始 median <=10 秒目标未达到；用户已确认当前水平暂时可接受。本阶段不通过重复真实 Prompt 来掩盖这个差异。
+
+## 冷启动返回修复证据
+
+官方 CLI 启动器原先让 Electron 运行时继承调用方的标准句柄。修复后使用 `CreateProcess(..., inheritHandles=false)`，结果仍通过显式临时文件回传，避免 Electron 子进程持有 Node `execFile` 管道。
+
+修复后 packaged CLI 实测：冷启动 `webgpt status --json` 约 1,204 ms 返回；`webgpt open --json` 约 8,492 ms 完成可见页面与 Composer 准备；随后 warm `status` 约 241 ms、`close` 约 217 ms。所有操作 Prompt=0，关闭后未留下目标 Workbench 进程。
 
 ## 安全与边界
 

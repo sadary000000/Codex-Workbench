@@ -682,22 +682,26 @@ function spawnWorkbench(executablePath: string, userDataDirectory: string): void
   // A CLI-launched Workbench is an explicit Control Plane activation. Ordinary
   // GUI startup remains idle under FIX-01, so the marker travels with the
   // spawned process instead of relying on an eager descriptor side effect.
-  const launchPath = executablePath;
-  const shell = process.env.ComSpec?.trim() || "cmd.exe";
-  const commandLine = `start "" /b "${launchPath.replace(/"/g, '""')}" "--user-data-dir=${userDataDirectory.replace(/"/g, '""')}" --webgpt-control`;
-  // Electron/Chromium descendants can retain the caller's stdout pipe on
-  // Windows. Use cmd's start boundary plus explicit NUL redirection so the
-  // long-lived Workbench host cannot inherit the CLI caller's pipes.
+  // Do not route this through `cmd.exe start`. On Windows the extra shell
+  // boundary can consume or mis-parse the activation marker, leaving an
+  // already-running GUI without a Control Plane while the CLI waits on a
+  // stale descriptor. Node's detached spawn already maps ignored stdio to
+  // NUL, so the long-lived Workbench host does not retain the CLI pipes.
   const nulDevice = "\\\\.\\NUL";
   const stdin = openSync(nulDevice, "r");
   const stdout = openSync(nulDevice, "w");
   const stderr = openSync(nulDevice, "w");
   try {
-    const child = spawn(shell, ["/d", "/s", "/c", commandLine], {
+    const child = spawn(executablePath, [`--user-data-dir=${userDataDirectory}`, "--webgpt-control"], {
       detached: true,
       stdio: [stdin, stdout, stderr],
       windowsHide: true,
+      shell: false,
     });
+    // A detached launch is intentionally observed through the descriptor. If
+    // the OS rejects the launch, the normal bounded timeout reports that state;
+    // keep the short-lived CLI from crashing on an unhandled child error.
+    child.once("error", () => undefined);
     child.unref();
   } finally {
     closeSync(stdin);
