@@ -1,6 +1,8 @@
 {
   "stage": "WEB-REVIEW-SUBMIT-1",
   "capability": "Workbench WebGPT Review Submission",
+  "baseCommit": "f219398bdeb3b7d0e260d92e7106d8cb219356c7",
+  "implementationCommit": "1f48136",
   "result": "PASS_CANDIDATE_WITH_REAL_SMOKE_BOUNDARY",
   "v1FrozenCoreChanged": false,
   "secondBrowserSession": false,

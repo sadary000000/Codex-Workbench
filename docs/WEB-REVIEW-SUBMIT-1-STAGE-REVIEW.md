@@ -15,6 +15,12 @@ automation_changed: NO
 
 本轮新增的 packaged lifecycle smoke 使用隔离、未登录的 user-data-dir：已启动 Workbench 实例下 CLI 在约 304 ms 返回 `CONTROL_NOT_AVAILABLE / WEBGPT_USER_CONTROL`，没有发送 Prompt；因此它证明了单次调用和退出链路，不证明正向 `SENT`。冷启动隔离 smoke 在 30 秒观察窗口内未得到可用 Control Plane 响应，已停止并记录为启动边界，不把它写成成功。
 
+```yaml
+base_commit: f219398bdeb3b7d0e260d92e7106d8cb219356c7
+implementation_commit: 1f48136
+review_package: dist/review/WEB-REVIEW-SUBMIT-1-REVIEW-PACKAGE.zip
+```
+
 ## 变更文件
 
 ### 产品代码
