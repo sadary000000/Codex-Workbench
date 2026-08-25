@@ -1,0 +1,33 @@
+STAGE-K0 — Automation Foundation — Re-authorized Mainline Review
+
+Review package: STAGE-K0-REAUTHORIZED-REVIEW-PACKAGE.zip
+Implementation commit: 8e72a02
+Freeze source commit: 8e72a02
+Git push target: origin/codex/workbench-v1
+
+Local result: PASS_CANDIDATE_PENDING_GPT
+Historical K0: HOLD / EXPERIMENTAL IMPLEMENTATION; reused only through the documented audit.
+
+Scope delivered:
+- provider-neutral Automation domain ownership and immutable Requirement versioning;
+- durable SQLite persistence, explicit migration, raw-source mapping evidence and rollback;
+- PolicyVersion-pinned ActionIntent/ActionAttempt/provider/Observation/Receipt/Reconcile contract;
+- atomic accepted-provider UNKNOWN recovery with no blind resend;
+- paused legacy WebGPT Bridge in production composition; provider-neutral Port is the live path.
+
+Validation:
+- targeted K0 tests: 74/74 PASS;
+- full npm test: 443/443 PASS;
+- npm audit --omit=dev: PASS, 0 vulnerabilities;
+- git diff --check: PASS;
+- donor TypeScript and equivalent build: PASS;
+- exact npm check/build/package scripts: environment-blocked because project-local node_modules is empty;
+- real business prompts: 0;
+- new business chats: 0;
+- subagents: started 4, completed 4, running 0.
+
+Please return exactly one explicit primary decision and a separate status:
+Gate: PASS | FIX_REQUIRED | BLOCKED | REDESIGN
+Status: <explicit independent status>
+
+Do not infer PASS from PASS_CANDIDATE, from an assistant reply existing, or from local tests alone.
