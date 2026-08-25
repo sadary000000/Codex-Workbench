@@ -1,6 +1,10 @@
 # STAGE-K0 Stage Review
 
-Local result: `PASS / FROZEN`
+Lifecycle: `HOLD / EXPERIMENTAL IMPLEMENTATION`
+Mainline status: `NOT_MAINLINE`
+Historical K0 result: `PASS / FROZEN`
+Scope recovery disposition: K0 implementation is retained in Git history and
+review evidence, but is reverted from the formal AUT-R0 mainline.
 Implementation commit: `ece5363`
 Review package: `D:\办公\AI\Codex_Workbench_V1\dist\review\STAGE-K0-REVIEW-PACKAGE.zip`
 Review package checksum: `dist/review/STAGE-K0-REVIEW-PACKAGE.sha256`

@@ -264,18 +264,12 @@ export class WebGptExternalActionBridge {
       try {
         observation = await this.provider.observe(providerRequest);
       } catch (error) {
-        // A provider adapter must not turn a local identity/correlation
-        // violation into an ordinary unknown outcome.  That would hide a
-        // split-brain attempt and make the recovery path look valid.
-        const correlationError = providerObservationCorrelationError(error);
-        if (correlationError) throw correlationError;
         observation = unknownObservation(providerRequest, error);
       }
       const finalized = await this.recordObservation(input, intent, attempt, resourceClaim, providerRequest, providerRequestRef, requestEvidence, observation, false);
       return finalized;
     } catch (error) {
-      const correlationError = providerObservationCorrelationError(error);
-      if (correlationError) throw correlationError;
+      if (isProviderObservationCorrelationError(error)) throw error;
       if (providerAccepted && providerRequest) {
         return this.recordAcceptedUnknown(input, intent, attempt, resourceClaim, providerRequest, error);
       }
@@ -506,8 +500,6 @@ export class WebGptExternalActionBridge {
   }
 
   private async createExternalRef(projectId: string, kind: "WEBGPT_PROVIDER_REQUEST" | "WEBGPT_PROVIDER_OBSERVATION" | "WEBGPT_RESOURCE_LEASE", opaqueId: string): Promise<string> {
-    const existing = (await this.store.snapshot()).externalRefs.find((ref) => ref.projectId === projectId && ref.kind === kind && ref.provider === WEBGPT_PROVIDER && ref.opaqueId === opaqueId);
-    if (existing) return existing.externalRefId;
     const ref = await this.store.createExternalRef({ projectId, kind, provider: WEBGPT_PROVIDER, opaqueId });
     return ref.externalRefId;
   }
@@ -529,20 +521,8 @@ export class WebGptExternalActionBridge {
   }
 }
 
-function providerObservationCorrelationError(error: unknown): WebGptExternalActionError | null {
-  if (error instanceof WebGptExternalActionError && error.code === "PROVIDER_OBSERVATION_CORRELATION_MISMATCH") return error;
-  if (!error || typeof error !== "object") return null;
-  const code = (error as { code?: unknown }).code;
-  const message = error instanceof Error ? error.message : "";
-  if (code !== "AUTOMATION_CONFLICT" || !/Provider(?:Request|Observation)|correlation/i.test(message)) return null;
-  const mismatches = /ProviderRequest ExternalRef/.test(message)
-    ? ["attemptExternalRef", "externalRefCorrelation"]
-    : ["externalRefCorrelation"];
-  return new WebGptExternalActionError(
-    "PROVIDER_OBSERVATION_CORRELATION_MISMATCH",
-    "Provider observation identity does not correlate to the dispatched ActionAttempt and ProviderRequest.",
-    { mismatches, causeCode: code },
-  );
+function isProviderObservationCorrelationError(error: unknown): error is WebGptExternalActionError {
+  return error instanceof WebGptExternalActionError && error.code === "PROVIDER_OBSERVATION_CORRELATION_MISMATCH";
 }
 
 function canonicalTarget(value: string | null | undefined): string | null {

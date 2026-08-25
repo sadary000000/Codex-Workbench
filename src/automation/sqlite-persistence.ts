@@ -11,7 +11,7 @@ import {
   type AuditEvent,
 } from "./types.ts";
 import { AutomationSchemaError, createEmptyAutomationDocument, migrateAutomationDocument, validateAutomationDocument } from "./schema.ts";
-import { assertMigrationDocumentEquivalent } from "./migration-identity.ts";
+import { assertMigrationIdentityPreserved } from "./migration-identity.ts";
 
 export const AUTOMATION_PERSISTENCE_SCHEMA_VERSION = 1 as const;
 export const AUTOMATION_PERSISTENCE_FORMAT = "sqlite-record-v1" as const;
@@ -19,7 +19,6 @@ export const AUTOMATION_WRITER_AUTHORITY = "Workbench Automation Host" as const;
 
 const TABLES: AutomationTableName[] = [
   "automationProjects",
-  "requirementOrigins",
   "requirementVersions",
   "requirementAlignmentSessions",
   "requirementAlignmentRounds",
@@ -46,7 +45,6 @@ const TABLES: AutomationTableName[] = [
 
 const ID_FIELDS: Record<AutomationTableName, string> = {
   automationProjects: "projectId",
-  requirementOrigins: "requirementOriginId",
   requirementVersions: "requirementVersionId",
   requirementAlignmentSessions: "alignmentSessionId",
   requirementAlignmentRounds: "alignmentRoundId",
@@ -234,7 +232,7 @@ async function migrationBackupFiles(filePath: string): Promise<string[]> {
   const directory = dirname(filePath);
   const prefix = `${basename(filePath)}.v2-backup-`;
   try {
-    const names = (await readdir(directory)).filter((name) => (name.startsWith(prefix) || name.startsWith(`${basename(filePath)}.v3-backup-`)) && name.endsWith(".json"));
+    const names = (await readdir(directory)).filter((name) => name.startsWith(prefix) && name.endsWith(".json"));
     const ordered = await Promise.all(names.map(async (name) => {
       const path = join(directory, name);
       try {
@@ -279,7 +277,7 @@ export async function recoverInterruptedMigration(filePath: string): Promise<voi
           continue;
         }
         try {
-          assertMigrationDocumentEquivalent(sourceBackup.document, inspection.document);
+          assertMigrationIdentityPreserved(sourceBackup.document, inspection.document);
         } catch (error) {
           firstFailure ??= { code: "AUTOMATION_MIGRATION_FAILED", message: `MIGRATION_IDENTITY_CHANGED: ${error instanceof Error ? error.message : String(error)}` };
           continue;
@@ -298,8 +296,7 @@ export async function recoverInterruptedMigration(filePath: string): Promise<voi
   }
   if (backupFiles.length) {
     if (sourceBackup) {
-      await rename(sourceBackup.path, filePath);
-      return;
+      throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration has a valid source backup but no comparable target candidate; refusing recovery without an identity assertion.");
     }
     throw new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Interrupted Automation migration found no valid JSON backup (invalid JSON backup); refusing to promote CORRUPT/MIGRATION_REQUIRED/UNSUPPORTED state.");
   }
@@ -348,7 +345,7 @@ export async function inspectExistingSqliteAutomationFile(filePath: string): Pro
   }
 }
 
-function readDocumentRows(database: DatabaseSync, validateDocument = true): AutomationDocument {
+function readDocumentRows(database: DatabaseSync): AutomationDocument {
   const document = createEmptyAutomationDocument();
   const rows = database.prepare("SELECT table_name, entity_id, project_id, payload FROM automation_records ORDER BY table_name, entity_id").all() as unknown as SqliteRow[];
   for (const row of rows) {
@@ -363,7 +360,7 @@ function readDocumentRows(database: DatabaseSync, validateDocument = true): Auto
     (document[row.table_name] as unknown as unknown[]).push(item);
   }
   document.auditEvents.sort((left, right) => left.sequence - right.sequence);
-  return validateDocument ? validateAutomationDocument(document) : document;
+  return validateAutomationDocument(document);
 }
 
 export class SqliteAutomationPersistence {
@@ -522,63 +519,24 @@ export class SqliteAutomationPersistence {
     const existingFormat = this.meta("format");
     if (existingFormat !== null && existingFormat !== AUTOMATION_PERSISTENCE_FORMAT) throw new AutomationPersistenceError("AUTOMATION_DB_VERSION_UNSUPPORTED", "Automation SQLite persistence format is unsupported.");
     const existingDocumentVersion = this.meta("document_schema_version");
-    if (existingDocumentVersion !== null && (!/^\d+$/.test(existingDocumentVersion) || Number(existingDocumentVersion) > AUTOMATION_SCHEMA_VERSION || (Number(existingDocumentVersion) < AUTOMATION_SCHEMA_VERSION && ![2, 3].includes(Number(existingDocumentVersion))))) {
+    if (existingDocumentVersion !== null && (!/^\d+$/.test(existingDocumentVersion) || Number(existingDocumentVersion) > AUTOMATION_SCHEMA_VERSION || (Number(existingDocumentVersion) < AUTOMATION_SCHEMA_VERSION && Number(existingDocumentVersion) !== 2))) {
       throw new AutomationPersistenceError("AUTOMATION_DB_VERSION_UNSUPPORTED", "Automation SQLite document schema is newer or has no supported migration path.");
     }
     let effectiveMigration = migration;
-    if (existingDocumentVersion === "2" || existingDocumentVersion === "3") {
+    if (existingDocumentVersion === "2") {
       const alreadyMigrated = this.meta("migration_source_schema_version") !== null;
       if (!alreadyMigrated) {
         const sourceBytes = readFileSync(this.filePath);
-        const sourceVersion = Number(existingDocumentVersion);
-        const backup = `${this.filePath}.v${sourceVersion}-backup-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}.sqlite`;
+        const backup = `${this.filePath}.v2-backup-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}.sqlite`;
         mkdirSync(dirname(backup), { recursive: true });
         if (!existsSync(backup)) copyFileSync(this.filePath, backup);
         effectiveMigration = {
-          sourceSchemaVersion: sourceVersion,
+          sourceSchemaVersion: 2,
           sourceSha256: sha256(sourceBytes),
           sourceBackupPath: backup,
           migratedAt: now(),
         };
       }
-    }
-    if (existingDocumentVersion === "2" || existingDocumentVersion === "3") {
-      const legacy = readDocumentRows(this.database, false) as unknown as Record<string, unknown>;
-      legacy.automationSchemaVersion = Number(existingDocumentVersion);
-      const migrated = migrateAutomationDocument(legacy).document;
-      try {
-        this.database.exec("BEGIN IMMEDIATE");
-        const upsert = this.database.prepare(`
-          INSERT INTO automation_records (table_name, entity_id, project_id, payload)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT(table_name, entity_id) DO UPDATE SET
-            project_id = excluded.project_id,
-            payload = excluded.payload
-        `);
-        for (const table of TABLES) {
-          for (const item of migrated[table] as unknown as unknown[]) {
-            const entityId = idFor(table, item);
-            assertPersistedBoundary(item, `${table}/${entityId}`);
-            upsert.run(table, entityId, projectIdFor(table, item), json(item));
-          }
-        }
-        assertMigrationDocumentEquivalent(migrated, readDocumentRows(this.database) as unknown as AutomationDocument);
-        if (effectiveMigration) {
-          this.setMeta("migration_source_schema_version", String(effectiveMigration.sourceSchemaVersion));
-          this.setMeta("migration_source_sha256", effectiveMigration.sourceSha256);
-          this.setMeta("migration_source_backup_path", effectiveMigration.sourceBackupPath);
-          this.setMeta("migration_at", effectiveMigration.migratedAt);
-        }
-        this.setMeta("format", AUTOMATION_PERSISTENCE_FORMAT);
-        this.setMeta("persistence_schema_version", String(AUTOMATION_PERSISTENCE_SCHEMA_VERSION));
-        this.setMeta("document_schema_version", String(AUTOMATION_SCHEMA_VERSION));
-        this.setMeta("writer_authority", AUTOMATION_WRITER_AUTHORITY);
-        this.database.exec("COMMIT");
-      } catch (error) {
-        try { this.database.exec("ROLLBACK"); } catch { /* preserve original error */ }
-        throw error instanceof AutomationPersistenceError ? error : new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Automation SQLite schema migration failed and was rolled back.", error);
-      }
-      return;
     }
     this.setMeta("format", AUTOMATION_PERSISTENCE_FORMAT);
     this.setMeta("persistence_schema_version", String(AUTOMATION_PERSISTENCE_SCHEMA_VERSION));
@@ -646,8 +604,6 @@ export async function migrateJsonSnapshotToSqlite(filePath: string, raw: string)
   const temporary = `${filePath}.migration-${migrationId}.sqlite`;
   const backup = `${filePath}.v2-backup-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}.json`;
   let persistence: SqliteAutomationPersistence | null = null;
-  let sourceBackedUp = false;
-  let promoted = false;
   try {
     persistence = new SqliteAutomationPersistence(temporary, {
       sourceSchemaVersion: migrated.migratedFrom ?? AUTOMATION_SCHEMA_VERSION,
@@ -657,20 +613,15 @@ export async function migrateJsonSnapshotToSqlite(filePath: string, raw: string)
     });
     persistence.replaceDocument(createEmptyAutomationDocument(), migrated.document);
     const written = persistence.loadDocument();
-    assertMigrationDocumentEquivalent(migrated.document, written);
+    assertMigrationIdentityPreserved(migrated.document, written);
     persistence.close();
     persistence = null;
     await rename(filePath, backup);
-    sourceBackedUp = true;
     await rename(temporary, filePath);
-    promoted = true;
     return new SqliteAutomationPersistence(filePath);
   } catch (error) {
     persistence?.close();
     await rm(temporary, { force: true }).catch(() => undefined);
-    if (sourceBackedUp && !promoted && (await fileKind(filePath)) === "missing") {
-      await rename(backup, filePath).catch(() => undefined);
-    }
     throw error instanceof AutomationPersistenceError ? error : new AutomationPersistenceError("AUTOMATION_MIGRATION_FAILED", "Automation JSON to SQLite migration failed.", error);
   }
 }

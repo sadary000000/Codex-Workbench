@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { WebGptLatestResponse, WebGptPageProbe, WebGptPageState, WebGptRequestRecord, WebGptRequestResult, WebGptRequestState, WebGptRequestStateEvent, WebGptRole, WebGptState } from "../types.ts";
 import { isTransientWebGptResponse, normalizeChatUrl } from "../adapter/webgpt-page-adapter.ts";
-import { normalizeRoleChatUrl, roleChatUrlsEquivalent } from "./webgpt-role-session-registry.ts";
+import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
 import { isWebGptInterruptionTestHookEnabled, waitForWebGptInterruptionTestHook, waitForWebGptSubmittedUserMessage } from "./webgpt-interruption-test-hook.ts";
 import type { WebGptWorkspace } from "./webgpt-workspace.ts";
 import type { WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
@@ -167,61 +167,16 @@ export class WebGptRequestManager {
       operationType: operationMetadata.operationType ?? "OPEN_CHAT",
     }, async () => {
       await this.workspace.openChatForAutomation(targetChatUrl);
-      await this.workspace.waitForTargetChatHistory(targetChatUrl);
-      const readinessWorkspace = this.workspace as WebGptWorkspace & {
-        getTargetReadiness?: (expectedChatUrl: string) => Promise<import("../types.ts").WebGptTargetReadiness>;
-      };
-      const readiness = await readinessWorkspace.getTargetReadiness?.(targetChatUrl);
-      if (readiness && readiness.state !== "READY") {
-        if (readiness.state === "TARGET_CHAT_MISMATCH") {
-          throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "浏览器页面已加载，但页面身份与指定目标不一致，已拒绝读取。", {
-            targetChatUrl,
-            actualChatUrl: readiness.pageChatUrl,
-            readinessState: readiness.state,
-            readinessReason: readiness.reason,
-            navigationReady: readiness.navigationReady,
-            identityReady: readiness.identityReady,
-            observerReady: readiness.observerReady,
-            historyReady: readiness.historyReady,
-            observationReady: readiness.observationReady,
-            observerExpectedChatUrl: readiness.observerExpectedChatUrl,
-            observerCandidateState: readiness.observerCandidateState,
-            phase: "post_history_readiness",
-          });
-        }
-        throw this.codedError("WAITING_IDENTITY_READY", "浏览器已到达目标页面，但 Chat 身份、历史或观察上下文尚未收敛，已拒绝读取。", {
-          targetChatUrl,
-          actualChatUrl: readiness.pageChatUrl,
-          readinessState: readiness.state,
-          readinessReason: readiness.reason,
-          navigationReady: readiness.navigationReady,
-          identityReady: readiness.identityReady,
-          observerReady: readiness.observerReady,
-          historyReady: readiness.historyReady,
-          observationReady: readiness.observationReady,
-          observerExpectedChatUrl: readiness.observerExpectedChatUrl,
-          observerCandidateState: readiness.observerCandidateState,
-          phase: "post_history_readiness",
-        });
-      }
       let actualChatUrl: string;
-      if (readiness?.pageChatUrl) {
-        // Reuse the same canonical page identity that passed the readiness
-        // gate.  A late SPA URL transition can briefly make getURL() empty or
-        // expose the pre-redirect route even though the bounded page probe has
-        // already confirmed the target.  Re-reading raw getURL() here caused
-        // a valid identity to be downgraded to a false TARGET_CHAT_MISMATCH.
-        actualChatUrl = readiness.pageChatUrl;
-      } else {
-        try { actualChatUrl = normalizeRoleChatUrl(normalizeChatUrl(await this.workspace.getCurrentUrl())); }
-        catch { throw this.codedError("WAITING_IDENTITY_READY", "指定 Chat 的 canonical identity 尚未稳定，已拒绝读取。", { targetChatUrl, phase: "target_identity_readback" }); }
-      }
-      if (!roleChatUrlsEquivalent(actualChatUrl, targetChatUrl)) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "浏览器当前 Chat 与指定目标不一致，已拒绝读取。", { targetChatUrl, actualChatUrl });
+      try { actualChatUrl = normalizeRoleChatUrl(normalizeChatUrl(await this.workspace.getCurrentUrl())); }
+      catch { throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "指定 Chat 未能在浏览器中确认。 "); }
+      if (actualChatUrl !== targetChatUrl) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "浏览器当前 Chat 与指定目标不一致，已拒绝读取。", { targetChatUrl, actualChatUrl });
+      await this.workspace.waitForTargetChatHistory(targetChatUrl);
       const latest = await this.workspace.readLatestResponse();
       let latestChatUrl: string;
       try { latestChatUrl = normalizeRoleChatUrl(normalizeChatUrl(typeof latest.chatUrl === "string" ? latest.chatUrl : "")); }
       catch { throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "读取结果未携带可确认的 Chat 身份，已拒绝返回。", { targetChatUrl, actualChatUrl: null }); }
-      if (!roleChatUrlsEquivalent(latestChatUrl, targetChatUrl)) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "读取结果的 Chat 身份与指定目标不一致，已拒绝返回。", { targetChatUrl, actualChatUrl: latestChatUrl });
+      if (latestChatUrl !== targetChatUrl) throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "读取结果的 Chat 身份与指定目标不一致，已拒绝返回。", { targetChatUrl, actualChatUrl: latestChatUrl });
       return { ...latest, chatUrl: latestChatUrl };
     });
     return result;
@@ -279,22 +234,13 @@ export class WebGptRequestManager {
     await this.ready();
     const key = normalizeIdempotencyKey(idempotencyKey);
     if (!key) return null;
-    const existing = this.findRecordByIdempotencyKey(key);
+    const existing = this.findByIdempotencyKey(key);
     if (!existing) return null;
     this.assertSameSemantic(existing, prompt, metadata);
     if (metadata.policyVersionId && existing.policyVersionId !== metadata.policyVersionId) {
       throw this.codedError("POLICY_PIN_MISMATCH", "相同 idempotency key 已绑定其它 PolicyVersion，已拒绝静默换 pin。", { requestId: existing.requestId });
     }
     return this.clone(existing);
-  }
-
-  /** Read-only lookup used to reattach an accepted request after a local crash. */
-  async findByIdempotencyKey(idempotencyKey: string): Promise<WebGptRequestRecord | null> {
-    await this.ready();
-    const key = normalizeIdempotencyKey(idempotencyKey);
-    if (!key) return null;
-    const record = [...this.records.values()].find((candidate) => candidate.idempotencyKey === key) ?? null;
-    return record ? this.clone(record) : null;
   }
 
   async submit(prompt: string, metadata: WebGptRequestMetadata = {}, idempotencyKey?: string): Promise<WebGptRequestRecord> {
@@ -306,7 +252,7 @@ export class WebGptRequestManager {
     const normalizedMetadata = { ...metadata, targetChatUrl: normalizeSemanticTarget(metadata) };
     const semanticSha256 = semanticHash(value, normalizedMetadata);
     if (key) {
-      const existing = this.findRecordByIdempotencyKey(key);
+      const existing = this.findByIdempotencyKey(key);
       if (existing) {
         if (existing.semanticSha256 !== semanticSha256) throw this.codedError("IDEMPOTENCY_CONFLICT", "相同 idempotency key 对应的请求语义不同，已拒绝覆盖或重发。");
         if (normalizedMetadata.policyVersionId && existing.policyVersionId !== normalizedMetadata.policyVersionId) {
@@ -483,12 +429,7 @@ export class WebGptRequestManager {
         record.lastKnownPageState = { ...probe.page };
         await this.persist();
         this.emit(record);
-        // Role targets use the stricter canonicalizer.  Reconcile must compare
-        // the same identity representation as the persisted binding, so a
-        // harmless www/query/trailing-slash variation cannot become a false
-        // TARGET_CHAT_CHANGED while a real home-page redirect still fails
-        // closed.
-        try { lastActualUrl = normalizeRoleChatUrl(probe.page.url); } catch { lastActualUrl = null; }
+        try { lastActualUrl = normalizeChatUrl(probe.page.url); } catch { lastActualUrl = null; }
         if (lastActualUrl === target) return probe;
       } catch (error) {
         const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "";
@@ -623,14 +564,14 @@ export class WebGptRequestManager {
       if (record.targetChatUrl) {
         let currentChatUrl = "";
         try { currentChatUrl = normalizeRoleChatUrl(probe.page.url); } catch { /* handled by exact target check below */ }
-        if (!roleChatUrlsEquivalent(currentChatUrl, record.targetChatUrl) || !probe.page.onChatPage || !probe.page.composerFound) {
+        if (currentChatUrl !== record.targetChatUrl || !probe.page.onChatPage || !probe.page.composerFound) {
           await this.workspace.openChatForAutomation(record.targetChatUrl);
           probe = await this.workspace.getPageProbe();
         }
         probe = await this.waitForTargetPageHydration(probe);
         let confirmedChatUrl = "";
         try { confirmedChatUrl = normalizeRoleChatUrl(probe.page.url); } catch { /* handled below */ }
-        if (!roleChatUrlsEquivalent(confirmedChatUrl, record.targetChatUrl)) throw this.codedError("ROLE_CHAT_MISMATCH", "当前页面不是请求指定的 Role Chat，已禁止发送。 ");
+        if (confirmedChatUrl !== record.targetChatUrl) throw this.codedError("ROLE_CHAT_MISMATCH", "当前页面不是请求指定的 Role Chat，已禁止发送。 ");
         if (!probe.page.onChatPage || !probe.page.composerFound) throw this.codedError("PAGE_ADAPTER_UNHEALTHY", "Role Chat Composer 尚未就绪，已禁止切换到替代 Chat。 ");
       } else if (!probe.page.onChatPage || !probe.page.composerFound) {
         newChatAdmission = await this.admitPolicy("NEW_CHAT", `webgpt:new-chat:${record.requestId}`, record.policyVersionId);
@@ -709,7 +650,7 @@ export class WebGptRequestManager {
       if (record.targetChatUrl) {
         let actual: string;
         try { actual = normalizeRoleChatUrl(record.chatUrl); } catch { throw this.codedError("ROLE_CHAT_MISMATCH", "发送后未能确认 Role Chat URL。"); }
-        if (!roleChatUrlsEquivalent(actual, record.targetChatUrl)) throw this.codedError("ROLE_CHAT_MISMATCH", "发送后的 Chat URL 与 Role 目标不一致，已拒绝继续。");
+        if (actual !== record.targetChatUrl) throw this.codedError("ROLE_CHAT_MISMATCH", "发送后的 Chat URL 与 Role 目标不一致，已拒绝继续。");
       }
       await this.complete(record, completed.response);
     } catch (error) {
@@ -798,7 +739,7 @@ export class WebGptRequestManager {
     catch { throw this.codedError("RECOVERY_TARGET_INVALID", "请求目标 Chat URL 无效，已禁止恢复操作。"); }
   }
 
-  private findRecordByIdempotencyKey(key: string): WebGptRequestRecord | null {
+  private findByIdempotencyKey(key: string): WebGptRequestRecord | null {
     return [...this.records.values()].find((record) => record.idempotencyKey === key) ?? null;
   }
 

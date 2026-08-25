@@ -1,7 +1,12 @@
 # STAGE-K0 Reality Check
 
 Date: `2026-08-25` (Asia/Shanghai)
-Status: `PASS / FROZEN`
+Historical K0 status: `PASS / FROZEN`
+Current lifecycle: `HOLD / EXPERIMENTAL IMPLEMENTATION`
+Mainline status: `NOT_MAINLINE`
+
+Scope recovery note: K0 implementation is retained for audit and future
+authorization, but is not part of the restored AUT-R0 mainline.
 
 ## Scope and source localization
 

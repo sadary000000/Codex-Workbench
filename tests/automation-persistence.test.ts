@@ -17,7 +17,6 @@ import {
   sha256Hex,
   validateAutomationDocument,
 } from "../src/automation/index.ts";
-import { policyVersionPayload } from "../src/automation/effective-policy.ts";
 import type { AutomationDocument, AuditEvent } from "../src/automation/index.ts";
 
 type Fixture = { root: string; path: string; store: AutomationStore };
@@ -39,19 +38,6 @@ async function dispose(value: Fixture): Promise<void> {
     // never a product path, so cleanup failure must not mask the gate result.
     if ((error as { code?: unknown })?.code !== "EBUSY") throw error;
   }
-}
-
-function policyPayload() {
-  return policyVersionPayload({
-    maxPromptDispatches: 4,
-    maxRepairDispatches: 2,
-    maxRetryDispatches: 2,
-    maxNewChatDispatches: 1,
-    allowedOperations: ["PROMPT", "REPAIR", "RETRY", "NEW_CHAT", "HUMAN_GATE", "VERIFY"],
-    requireHumanGateFor: [],
-    allowDataEgress: false,
-    allowSideEffects: false,
-  });
 }
 
 function runWorker(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -119,9 +105,7 @@ function scaleDocument(): AutomationDocument {
     const currentProject = { ...project(projectId), activeRequirementVersionId: requirementVersionId, activePlanVersionId: planVersionId };
     const canonicalPayload = canonicalizeJson(JSON.stringify({ goal: `scale-${projectIndex}`, source: "AUT-1.5" }), "scale.requirement");
     document.automationProjects.push(currentProject);
-    const requirementOriginId = `scale-origin-${projectIndex}`;
-    document.requirementOrigins.push({ requirementOriginId, projectId, originType: "INITIAL", source: "SYSTEM", sourceRef: null, createdAt: timestamp });
-    document.requirementVersions.push({ requirementVersionId, projectId, version: 1, status: "ACTIVE", originRef: requirementOriginId, contentRef: null, structuredPayloadRef: null, canonicalPayload, payloadSha256: sha256Hex(canonicalPayload), createdAt: timestamp, confirmedAt: null, supersedes: null });
+    document.requirementVersions.push({ requirementVersionId, projectId, version: 1, status: "ACTIVE", contentRef: null, structuredPayloadRef: null, canonicalPayload, payloadSha256: sha256Hex(canonicalPayload), createdAt: timestamp, confirmedAt: null, supersedes: null });
     document.planVersions.push({ planVersionId, projectId, requirementVersionId, version: 1, status: "ACTIVE", createdAt: timestamp, supersedes: null });
     for (let stageIndex = 0; stageIndex < 10; stageIndex += 1) {
       const stageSpecId = `scale-stage-${projectIndex}-${stageIndex}`;
@@ -154,8 +138,7 @@ test("migrates v2 JSON beside a rollback backup and preserves hashes and audit c
   const value = await fixture();
   try {
     const project = await value.store.createAutomationProject({ projectId: "p", name: "migration" });
-    await value.store.createPolicyVersion({ policyVersionId: "policy-v1", projectId: project.projectId, version: 1, preset: "test", payload: policyPayload(), supersedes: null });
-    const requirement = await value.store.createRequirementVersion({ projectId: project.projectId, version: 1, status: "ACTIVE", origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:migration" }, canonicalPayload: JSON.stringify({ goal: "stable" }) });
+    const requirement = await value.store.createRequirementVersion({ projectId: project.projectId, version: 1, status: "ACTIVE", canonicalPayload: JSON.stringify({ goal: "stable" }) });
     const intent = await value.store.createActionIntent({ projectId: project.projectId, actionType: "MIGRATION_TEST", targetRef: "opaque:target", sideEffectClass: "IDEMPOTENT", idempotencyRef: "migration-key" });
     const source = await value.store.snapshot();
     // The live store is now v3; explicitly downgrade only the serialized
@@ -187,7 +170,7 @@ test("migrates an existing v2 SQLite document in place without changing durable 
   let reopened: AutomationStore | null = null;
   try {
     const project = await value.store.createAutomationProject({ projectId: "sqlite-v2-project", name: "SQLite v2 migration" });
-    const requirement = await value.store.createRequirementVersion({ projectId: project.projectId, version: 1, status: "ACTIVE", origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:sqlite-v2" }, canonicalPayload: JSON.stringify({ goal: "preserve this" }) });
+    const requirement = await value.store.createRequirementVersion({ projectId: project.projectId, version: 1, status: "ACTIVE", canonicalPayload: JSON.stringify({ goal: "preserve this" }) });
     const auditHashes = (await value.store.list("auditEvents")).map((event) => event.hash);
     await value.store.close();
 
@@ -236,7 +219,6 @@ test("durable intent and receipt survive process exit without any external execu
   const value = await fixture();
   try {
     const project = await value.store.createAutomationProject({ projectId: "p", name: "dispatch" });
-    await value.store.createPolicyVersion({ policyVersionId: "policy-v1", projectId: project.projectId, version: 1, preset: "test", payload: policyPayload(), supersedes: null });
     const intent = await value.store.createActionIntent({ projectId: project.projectId, actionType: "NO_EXTERNAL_EXECUTION", targetRef: "opaque:target", sideEffectClass: "IDEMPOTENT", idempotencyRef: "key" });
     await value.store.close();
     const accepted = await runWorker(["after-intent", value.path, intent.intentId, "attempt-1"]);
@@ -396,7 +378,6 @@ test("UNKNOWN receipts stay recovery-required and each ActionAttempt has one rec
   const value = await fixture();
   try {
     const project = await value.store.createAutomationProject({ projectId: "receipt-project", name: "receipt" });
-    await value.store.createPolicyVersion({ policyVersionId: "policy-v1", projectId: project.projectId, version: 1, preset: "test", payload: policyPayload(), supersedes: null });
     const intent = await value.store.createActionIntent({ projectId: project.projectId, actionType: "RECEIPT_TEST", targetRef: "opaque:target", sideEffectClass: "RECONCILABLE" });
     await value.store.markActionIntentDispatchEligible(intent.intentId);
     const attempt = await value.store.createActionAttempt({ intentId: intent.intentId });
@@ -431,7 +412,7 @@ test("scale gate imports 100 projects, 1,000 stages, 10,000 steps, 50,000 audits
       return instance;
     })();
     const diagnostics = persistence.diagnostics();
-    assert.equal(diagnostics.recordCount, 91_400);
+    assert.equal(diagnostics.recordCount, 91_300);
     assert.equal(diagnostics.auditCount, 50_000);
   } finally {
     persistence?.close();

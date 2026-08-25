@@ -1,6 +1,9 @@
 STAGE-K0 provenance
 ===================
 
+lifecycle: HOLD / EXPERIMENTAL IMPLEMENTATION
+mainline_status: NOT_MAINLINE
+scope_recovery: AUT-R0 baseline restored by a later revert commit
 implementation_commit: ece5363
 implementation_commit_subject: feat: implement stage k0 automation foundation
 base_commit: 392b4f7a0fbf2f21befef40d5a4ecc47b0982e0f
