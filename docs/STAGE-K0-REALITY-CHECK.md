@@ -1,7 +1,7 @@
 # STAGE-K0 Reality Check
 
 Date: `2026-08-25` (Asia/Shanghai)
-Status: `IMPLEMENTATION_CLOSED_PENDING_FINAL_GATE`
+Status: `LOCAL_AUTOMATED_GATE_PASS_PENDING_GPT_GATE`
 
 ## Scope and source localization
 
@@ -64,7 +64,7 @@ No real business Prompt or new business Chat was used.
 ## Gate accounting
 
 The initial four-agent challenge found P0/P1 risks. Each is either closed by
-the K0 patch above or explicitly outside the K0 product boundary. The final
-gate must still be backed by the commands and package evidence recorded in
-`STAGE-K0-TESTS.md` and `STAGE-K0-STAGE-REVIEW.md`; this document is not a
-substitute for the final GPT Gate.
+the K0 patch above or explicitly outside the K0 product boundary. The local
+automated gate is now PASS; the package and GPT response are still required
+before K0 is called frozen. This document is not a substitute for the final
+GPT Gate.

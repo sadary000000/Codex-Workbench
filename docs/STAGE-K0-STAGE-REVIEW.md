@@ -1,5 +1,10 @@
 # STAGE-K0 Stage Review
 
+Local result: `PASS_CANDIDATE`
+Implementation commit: `ece5363`
+Review package: `D:\办公\AI\Codex_Workbench_V1\dist\review\STAGE-K0-REVIEW-PACKAGE.zip`
+Review package checksum: `dist/review/STAGE-K0-REVIEW-PACKAGE.sha256`
+
 ## Scope resolution
 
 ```yaml
@@ -41,13 +46,13 @@ new_business_chats: 0
 | accepted side-effect recovery | PASS / FAIL-CLOSED | provider correlation and reconcile tests |
 | direct reconcile seam | PASS | `AUTOMATION_RECONCILE_REQUIRED` contract |
 | V1 Frozen Core unchanged | PASS | scoped diff/provenance |
-| automated gate | PENDING FINAL RUN | final command matrix |
-| GPT review gate | PENDING | Submission Runner result |
+| automated gate | PASS | `STAGE-K0-TESTS.md` and provenance |
+| GPT review gate | PENDING | Submission Runner result; fixed target and explicit Gate/Status contract |
 
 ## Final review result
 
-This report is updated after the final test/package/submission loop. It must
-record an explicit:
+The local implementation/package loop is complete. The remaining external
+step is the fixed-target GPT review. It must record an explicit:
 
 ```yaml
 Gate: PASS | FIX_REQUIRED | BLOCKED | REDESIGN

@@ -1,0 +1,43 @@
+STAGE-K0 Review Package Manifest
+================================
+
+Stage: STAGE-K0 — Automation Foundation
+Result before GPT review: PASS_CANDIDATE
+Implementation commit: ece5363
+
+Included reports:
+- STAGE-K0-GPT-REVIEW-PROMPT.md
+- STAGE-K0-STAGE-REVIEW.md
+- STAGE-K0-REALITY-CHECK.md
+- STAGE-K0-AUTOMATION-FOUNDATION-CONTRACT.md
+- STAGE-K0-DOMAIN-VERSIONING.md
+- STAGE-K0-PERSISTENCE-MIGRATION.md
+- STAGE-K0-POLICY-ACTION-RECOVERY-CHECK.md
+- STAGE-K0-TESTS.md
+- STAGE-K0-DEFERRED-DEBT.md
+- STAGE-K0-SOURCE-EVIDENCE-INDEX.md
+- STAGE-K0-SUBAGENTS.md
+- STAGE-K0-PROVENANCE.txt
+
+Included evidence:
+- K0-scoped Automation source files
+- K0-scoped provider-boundary source files
+- K0 regression and targeted tests
+- package hash and command matrix
+
+Excluded:
+- cookies, tokens, passwords, browser profiles
+- user/private ChatGPT conversations
+- unrelated historical review packages
+- V1docs.zip, dist-stage-a, donor project, and unrelated dirty files
+
+Real operations:
+- real_business_prompts: 0
+- new_business_chats: 0
+
+Expected GPT response:
+Gate: PASS | FIX_REQUIRED | BLOCKED | REDESIGN
+Status: <independent status>
+
+The archive SHA-256 is recorded in the external
+`STAGE-K0-REVIEW-PACKAGE.sha256` sidecar to avoid a self-referential hash.

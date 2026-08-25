@@ -6,13 +6,13 @@ Date: `2026-08-25`
 
 | command | result | evidence |
 |---|---|---|
-| `npm run check` | PASS | typecheck and test typecheck completed before final package |
-| `npm test` | PASS | full suite: 438/438 before final K0-only test additions |
-| `npm audit --omit=dev` | PENDING FINAL RUN | recorded at final gate |
-| `git diff --check` | PASS | no whitespace errors; CRLF warnings only |
-| `npm run build` | PENDING FINAL RUN | recorded at final gate |
-| `npm run package:win` | PENDING FINAL RUN | recorded at final gate |
-| secret scan | PENDING FINAL RUN | only source/docs/package inputs; no credential material permitted |
+| `npm run check` | PASS | TypeScript production and test projects both passed |
+| `npm test` | PASS | `439/439` |
+| `npm audit --omit=dev` | PASS | `0 vulnerabilities` |
+| `git diff --check` | PASS | no whitespace errors; CRLF normalization warnings only |
+| `npm run build` | PASS | `CONTROL PLANE SCHEMA PASS`, `BUILD PASS` |
+| `npm run package:win` | PASS | GUI and CLI EXEs produced |
+| secret scan | PASS | no credential-pattern matches in scoped K0 inputs |
 
 ## Targeted coverage already exercised
 
@@ -28,9 +28,8 @@ Date: `2026-08-25`
 - generic reconcile fail-closed boundary;
 - AUT-R0 Requirement provider regression.
 
-The pre-documentation targeted run was `60/60 PASS`; the full suite was
-`438/438 PASS`. The final command matrix below is authoritative once the
-implementation commit and package are created.
+The final targeted K0 run was `51/51 PASS`; the final full suite was
+`439/439 PASS`.
 
 ## Real operations
 
@@ -42,6 +41,17 @@ new business chats: 0
 K0 is a foundation stage. No real Prompt is required or permitted by the
 stage scope. Existing contract, unit, persistence, and provider-boundary
 evidence is sufficient for this gate.
+
+## Build provenance
+
+```yaml
+implementation_commit: ece5363
+gui_package: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
+gui_sha256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
+cli_package: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
+cli_sha256: 5479FA1CCC75AAF32C6431D573F9EFB4A99255A355EA3A815F995ABD191DC9F4
+test_timestamp: 2026-08-25T17:35:14+08:00
+```
 
 ## Final gate record
 
