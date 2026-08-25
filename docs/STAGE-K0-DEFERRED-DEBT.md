@@ -1,19 +1,17 @@
 # STAGE-K0 Deferred Debt
 
-These items are deliberately not implemented in K0 and are not blockers for
-the K0 foundation contract when the current fail-closed boundaries hold.
+These items are deliberately outside the re-authorized Automation Foundation scope. They are not permission to weaken fail-closed behavior.
 
 | item | disposition |
 |---|---|
-| Planner / Executor / Reviewer / Scheduler | deferred; K0 must not create these components |
-| AUT-2 / AUT-3 orchestration | deferred; no stage transition is implied by K0 |
-| multi-project automation scheduling | deferred |
-| full external review-submit hardening | deferred to the Submission Runner scope; no K0 change |
-| browser/session UI work | deferred; no browser or WebGPT UI implementation |
-| raw Requirement content storage | intentionally not added; opaque InputRef/content ownership remains authoritative |
-| accepted provider side-effect after unresolvable correlation | fail-closed `RECOVERY_REQUIRED`; no blind retry |
-| human confirmation UX | deferred; K0 only preserves the domain boundary |
-| durable encrypted secret/session storage | deferred and outside K0; no credentials are stored |
+| Planner / Executor / Reviewer / Scheduler | deferred to later authorized stage |
+| AUT-2 / AUT-3 orchestration | deferred; no stage transition implied |
+| multi-project scheduling | deferred |
+| browser/session UI and WebGPT product behavior | deferred; no K0 implementation |
+| Submission Runner product changes | deferred and unchanged |
+| full encrypted secret/session storage | deferred; no credentials stored |
+| accepted provider side-effect with missing identity | `RECOVERY_REQUIRED`; never blind retry |
+| durable raw Requirement content | intentionally excluded; opaque InputRef remains the boundary |
+| generic reconcile policy expansion | deferred; current reconcile is fail-closed |
 
-No item in this list permits a wrong-thread send, silent identity replacement,
-duplicate Prompt, second Conversation truth, or deletion of user files.
+No deferred item permits wrong-thread sends, silent identity replacement, duplicate Prompt, a second Conversation truth, or destructive cleanup.

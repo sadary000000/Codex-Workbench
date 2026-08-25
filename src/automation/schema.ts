@@ -5,6 +5,8 @@ import {
   type AutomationProjectLifecycle,
   type BoundedMetadata,
   type ExternalRefKind,
+  type RequirementOriginSource,
+  type RequirementOriginType,
   type ResourceClaimMode,
   type ResourceClaimState,
   type ResourceType,
@@ -62,6 +64,8 @@ const MAX_GOAL = 8_192;
 const MAX_METADATA = 32;
 const STEP_RUNTIME_LIFECYCLES = new Set(["NOT_STARTED", "READY", "RUNNING", "VERIFYING", "REVIEWING", "TERMINAL"]);
 const STEP_RUNTIME_WAIT_REASONS = new Set(["NONE", "RESOURCE", "HUMAN", "EXTERNAL", "USER_CONTROL", "RATE_LIMIT"]);
+const REQUIREMENT_ORIGIN_TYPES = new Set<RequirementOriginType>(["INITIAL", "REVISION", "DISCOVERY", "RECOVERY", "IMPORT"]);
+const REQUIREMENT_ORIGIN_SOURCES = new Set<RequirementOriginSource>(["USER", "WEBGPT", "PROJECT_EVIDENCE", "SYSTEM", "IMPORT"]);
 
 export class AutomationSchemaError extends Error {
   readonly code: "AUTOMATION_SCHEMA_INVALID" | "AUTOMATION_SCHEMA_VERSION_UNSUPPORTED";
@@ -153,14 +157,40 @@ function validateProject(item: Record<string, unknown>, index: number): void {
 }
 
 function validateVersions(document: Record<string, unknown>): void {
+  const origins = array(document.requirementOrigins, "requirementOrigins");
+  validateUniqueIds(origins, "requirementOriginId", "requirementOrigins");
+  origins.forEach((value, index) => {
+    const item = record(value);
+    const field = `requirementOrigins[${index}]`;
+    string(item.requirementOriginId, `${field}.requirementOriginId`, 256);
+    string(item.projectId, `${field}.projectId`, 256);
+    enumValue(item.originType, `${field}.originType`, REQUIREMENT_ORIGIN_TYPES);
+    enumValue(item.source, `${field}.source`, REQUIREMENT_ORIGIN_SOURCES);
+    if (item.sourceRef !== null && item.sourceRef !== undefined) {
+      const sourceRef = string(item.sourceRef, `${field}.sourceRef`, 256);
+      if (/^https?:\/\//i.test(sourceRef)) throw new AutomationSchemaError(`${field}.sourceRef must be an opaque reference, not a URL.`);
+    }
+    timestamp(item.createdAt, `${field}.createdAt`);
+  });
+
   const requirements = array(document.requirementVersions, "requirementVersions");
   validateUniqueIds(requirements, "requirementVersionId", "requirementVersions");
+  const requirementVersionsByProject = new Set<string>();
+  const requirementRootByProject = new Set<string>();
   requirements.forEach((value, index) => {
     const item = record(value);
     string(item.requirementVersionId, `requirementVersions[${index}].requirementVersionId`, 256);
     string(item.projectId, `requirementVersions[${index}].projectId`, 256);
     integer(item.version, `requirementVersions[${index}].version`, 1);
+    const projectVersion = `${item.projectId}\u0000${item.version}`;
+    if (requirementVersionsByProject.has(projectVersion)) throw new AutomationSchemaError(`requirementVersions contains duplicate project/version ${projectVersion}.`);
+    requirementVersionsByProject.add(projectVersion);
+    if (item.version === 1) {
+      if (requirementRootByProject.has(item.projectId as string)) throw new AutomationSchemaError(`requirementVersions contains multiple version 1 roots for project ${item.projectId}.`);
+      requirementRootByProject.add(item.projectId as string);
+    }
     enumValue(item.status, `requirementVersions[${index}].status`, new Set(["DRAFT", "CONFIRMED", "ACTIVE", "SUPERSEDED"]));
+    string(item.originRef, `requirementVersions[${index}].originRef`, 256);
     optionalString(item.contentRef, `requirementVersions[${index}].contentRef`, 256);
     optionalString(item.structuredPayloadRef, `requirementVersions[${index}].structuredPayloadRef`, 256);
     let canonicalPayload: string;
@@ -299,6 +329,9 @@ function validateCommonTables(document: Record<string, unknown>): void {
     optionalString(item.targetRef, `actionIntents[${index}].targetRef`, 256);
     enumValue(item.sideEffectClass, `actionIntents[${index}].sideEffectClass`, new Set(["PURE", "IDEMPOTENT", "RECONCILABLE", "NON_REPEATABLE"]));
     optionalString(item.payloadRef, `actionIntents[${index}].payloadRef`, 256);
+    if (item.actionType === "REQUIREMENT_ALIGNMENT" && item.payloadRef !== null && item.payloadRef !== undefined && !/^automation-input-v1:[a-f0-9]{64}$/i.test(item.payloadRef as string)) {
+      throw new AutomationSchemaError(`actionIntents[${index}].payloadRef must be an opaque process-owned InputRef.`);
+    }
     optionalString(item.payloadHash, `actionIntents[${index}].payloadHash`, 128);
     const executionOptions = metadata(item.executionOptions, `actionIntents[${index}].executionOptions`);
     const semanticSha256 = string(item.semanticSha256, `actionIntents[${index}].semanticSha256`, 128);
@@ -561,6 +594,7 @@ function tableById(document: Record<string, unknown>, table: string, key: string
 
 function validateReferences(document: Record<string, unknown>): void {
   const projects = tableById(document, "automationProjects", "projectId");
+  const origins = tableById(document, "requirementOrigins", "requirementOriginId");
   const requirements = tableById(document, "requirementVersions", "requirementVersionId");
   const changeRequests = tableById(document, "requirementChangeRequests", "changeRequestId");
   const plans = tableById(document, "planVersions", "planVersionId");
@@ -577,6 +611,26 @@ function validateReferences(document: Record<string, unknown>): void {
   const artifacts = tableById(document, "artifactRefs", "artifactRefId");
   const snapshots = tableById(document, "workspaceSnapshots", "workspaceSnapshotId");
   const policies = tableById(document, "policyVersions", "policyVersionId");
+
+  const providerRequestOwners = new Map<string, string>();
+  const providerObservationOwners = new Map<string, string>();
+  for (const item of actionAttempts.values()) {
+    const owningIntent = intents.get(item.intentId as string);
+    if (!owningIntent) continue;
+    for (const [field, expectedKind, owners] of [
+      ["providerRequestRef", "WEBGPT_PROVIDER_REQUEST", providerRequestOwners],
+      ["providerObservationRef", "WEBGPT_PROVIDER_OBSERVATION", providerObservationOwners],
+    ] as const) {
+      const reference = item[field];
+      if (reference === null || reference === undefined) continue;
+      const ref = externals.get(reference as string);
+      if (!ref) throw new AutomationSchemaError(`actionAttempts.${field} references a missing ExternalRef.`);
+      if (ref.kind !== expectedKind || ref.projectId !== owningIntent.projectId) throw new AutomationSchemaError(`actionAttempts.${field} crosses a provider kind or project boundary.`);
+      const owner = owners.get(reference as string);
+      if (owner && owner !== item.actionAttemptId) throw new AutomationSchemaError(`A provider ExternalRef cannot be attached to multiple ActionAttempts.`);
+      owners.set(reference as string, item.actionAttemptId as string);
+    }
+  }
 
   const requireSameProject = (table: Map<string, Record<string, unknown>>, idValue: unknown, projectId: string, field: string): Record<string, unknown> | null => {
     if (idValue === null) return null;
@@ -642,15 +696,29 @@ function validateReferences(document: Record<string, unknown>): void {
     const plan = requireSameProject(plans, project.activePlanVersionId, projectId, `${projectId}.activePlanVersionId`);
     requireSameProject(policies, project.policyVersionId, projectId, `${projectId}.policyVersionId`);
     if (requirement && requirement.status === "SUPERSEDED") throw new AutomationSchemaError(`${projectId}.activeRequirementVersionId cannot point to a superseded version.`);
+    if (requirement && requirement.status !== "CONFIRMED" && requirement.status !== "ACTIVE") throw new AutomationSchemaError(`${projectId}.activeRequirementVersionId must point to a confirmed or active version.`);
     if (plan && plan.status === "SUPERSEDED") throw new AutomationSchemaError(`${projectId}.activePlanVersionId cannot point to a superseded version.`);
   }
   for (const item of policies.values()) {
     const superseded = requireSameProject(policies, item.supersedes, item.projectId as string, "policyVersions.supersedes");
-    if (superseded && Number(superseded.version) >= Number(item.version)) throw new AutomationSchemaError("policyVersions.supersedes must reference an older version in the same project.");
+    if (Number(item.version) === 1 && superseded !== null) throw new AutomationSchemaError("Policy version 1 cannot supersede a predecessor.");
+    if (Number(item.version) > 1 && superseded === null) throw new AutomationSchemaError("Policy versions after version 1 require an explicit predecessor.");
+    if (superseded && Number(superseded.version) !== Number(item.version) - 1) throw new AutomationSchemaError("PolicyVersion predecessor must be the immediately previous version in the same project.");
   }
+  const referencedOrigins = new Set<string>();
   for (const item of requirements.values()) {
     requireSameProject(projects, item.projectId, item.projectId as string, "requirementVersions.projectId");
+    requireSameProject(origins, item.originRef, item.projectId as string, "requirementVersions.originRef");
+    referencedOrigins.add(item.originRef as string);
     requireSameProject(requirements, item.supersedes, item.projectId as string, "requirementVersions.supersedes");
+    const predecessor = item.supersedes === null ? null : requirements.get(item.supersedes as string);
+    if (Number(item.version) === 1 && predecessor !== null) throw new AutomationSchemaError("Requirement version 1 cannot supersede a predecessor.");
+    if (Number(item.version) > 1 && predecessor === null) throw new AutomationSchemaError("Requirement versions after version 1 require an explicit predecessor.");
+    if (predecessor && Number(predecessor.version) !== Number(item.version) - 1) throw new AutomationSchemaError("RequirementVersion predecessor must be the immediately previous version.");
+  }
+  for (const origin of origins.values()) {
+    if (!projects.has(origin.projectId as string)) throw new AutomationSchemaError("requirementOrigins.projectId references a missing project.");
+    if (!referencedOrigins.has(origin.requirementOriginId as string)) throw new AutomationSchemaError("requirementOrigins contains an orphan origin.");
   }
   for (const item of changeRequests.values()) {
     const projectId = item.projectId as string;
@@ -663,7 +731,10 @@ function validateReferences(document: Record<string, unknown>): void {
     requireSameProject(projects, item.projectId, item.projectId as string, "planVersions.projectId");
     const requirement = requireSameProject(requirements, item.requirementVersionId, item.projectId as string, "planVersions.requirementVersionId");
     if (requirement?.status === "SUPERSEDED") throw new AutomationSchemaError("A plan cannot bind a superseded requirement version.");
-    requireSameProject(plans, item.supersedes, item.projectId as string, "planVersions.supersedes");
+    const superseded = requireSameProject(plans, item.supersedes, item.projectId as string, "planVersions.supersedes");
+    if (Number(item.version) === 1 && superseded !== null) throw new AutomationSchemaError("Plan version 1 cannot supersede a predecessor.");
+    if (Number(item.version) > 1 && superseded === null) throw new AutomationSchemaError("Plan versions after version 1 require an explicit predecessor.");
+    if (superseded && Number(superseded.version) !== Number(item.version) - 1) throw new AutomationSchemaError("PlanVersion predecessor must be the immediately previous version in the same project.");
   }
   for (const item of stages.values()) {
     const plan = plans.get(item.planVersionId as string);
@@ -712,6 +783,8 @@ function validateReferences(document: Record<string, unknown>): void {
     const intent = intents.get(attempt.intentId as string);
     if (!intent) throw new AutomationSchemaError("actionReceipts.actionAttemptId references an attempt with a missing intent.");
     for (const ref of item.externalRefs as string[]) requireSameProject(externals, ref, intent.projectId as string, "actionReceipts.externalRefs");
+    if (item.providerRequestRef !== null && item.providerRequestRef !== undefined && item.providerRequestRef !== attempt.providerRequestRef) throw new AutomationSchemaError("actionReceipts.providerRequestRef must match its ActionAttempt correlation.");
+    if (item.providerObservationRef !== null && item.providerObservationRef !== undefined && item.providerObservationRef !== attempt.providerObservationRef) throw new AutomationSchemaError("actionReceipts.providerObservationRef must match its ActionAttempt correlation.");
     for (const ref of (item.evidenceRefs ?? []) as string[]) requireSameEvidenceProject(ref, intent.projectId as string, "actionReceipts.evidenceRefs");
   }
   for (const item of claims.values()) {
@@ -762,6 +835,7 @@ export function createEmptyAutomationDocument(): AutomationDocument {
   return {
     automationSchemaVersion: AUTOMATION_SCHEMA_VERSION,
     automationProjects: [],
+    requirementOrigins: [],
     requirementVersions: [],
     requirementAlignmentSessions: [],
     requirementAlignmentRounds: [],
@@ -833,6 +907,7 @@ function migrateV0ToV3(value: Record<string, unknown>): AutomationDocument {
       revision: 0,
     };
   });
+  (document as unknown as Record<string, unknown>).automationSchemaVersion = 3;
   return document;
 }
 
@@ -932,7 +1007,7 @@ function migrateV1ToV3(value: Record<string, unknown>): AutomationDocument {
     previousHash = event.hash as string;
     return event;
   });
-  document.automationSchemaVersion = 3;
+  (document as unknown as Record<string, unknown>).automationSchemaVersion = 3;
   return document as unknown as AutomationDocument;
 }
 
@@ -951,6 +1026,38 @@ function migrateV2ToV3(value: Record<string, unknown>): AutomationDocument {
   return document as unknown as AutomationDocument;
 }
 
+function upgradeV3ToV4(value: AutomationDocument): AutomationDocument {
+  const document = structuredClone(value) as AutomationDocument;
+  const origins = Array.isArray(document.requirementOrigins) ? document.requirementOrigins : [];
+  const byId = new Map(origins.map((origin) => [origin.requirementOriginId, origin]));
+  for (const requirement of document.requirementVersions) {
+    const sourceOriginRef = typeof requirement.originRef === "string" && requirement.originRef.length > 0 && requirement.originRef.length <= 256 && !/^https?:\/\//i.test(requirement.originRef)
+      ? requirement.originRef
+      : null;
+    if (!sourceOriginRef || !byId.has(sourceOriginRef)) {
+      const requirementOriginId = sourceOriginRef ?? `legacy-origin:${requirement.projectId}:${requirement.requirementVersionId}`;
+      const origin = {
+        requirementOriginId,
+        projectId: requirement.projectId,
+        originType: "IMPORT" as const,
+        source: "SYSTEM" as const,
+        sourceRef: null,
+        createdAt: requirement.createdAt,
+      };
+      if (!byId.has(requirementOriginId)) {
+        origins.push(origin);
+        byId.set(requirementOriginId, origin);
+      }
+      requirement.originRef = requirementOriginId;
+    } else {
+      requirement.originRef = sourceOriginRef;
+    }
+  }
+  document.requirementOrigins = origins;
+  document.automationSchemaVersion = 4;
+  return document;
+}
+
 export function migrateAutomationDocument(value: unknown): { document: AutomationDocument; migratedFrom: number | null } {
   const input = record(value);
   const hasAutomationVersion = Object.prototype.hasOwnProperty.call(input, "automationSchemaVersion");
@@ -961,16 +1068,20 @@ export function migrateAutomationDocument(value: unknown): { document: Automatio
   if (typeof versionValue !== "number" || !Number.isSafeInteger(versionValue)) throw new AutomationSchemaError("Automation schema version is invalid.");
   if (versionValue > AUTOMATION_SCHEMA_VERSION) throw new AutomationSchemaError("Automation schema version is newer than this runtime.", "AUTOMATION_SCHEMA_VERSION_UNSUPPORTED");
   if (versionValue === 0) {
-    const migrated = migrateV0ToV3(input);
+    const migrated = upgradeV3ToV4(migrateV0ToV3(input));
     return { document: validateAutomationDocument(migrated), migratedFrom: 0 };
   }
   if (versionValue === 1) {
-    const migrated = migrateV1ToV3(input);
+    const migrated = upgradeV3ToV4(migrateV1ToV3(input));
     return { document: validateAutomationDocument(migrated), migratedFrom: 1 };
   }
   if (versionValue === 2) {
-    const migrated = migrateV2ToV3(input);
+    const migrated = upgradeV3ToV4(migrateV2ToV3(input));
     return { document: validateAutomationDocument(migrated), migratedFrom: 2 };
+  }
+  if (versionValue === 3) {
+    const migrated = upgradeV3ToV4(input as unknown as AutomationDocument);
+    return { document: validateAutomationDocument(migrated), migratedFrom: 3 };
   }
   const current = hasAutomationVersion ? input : { ...input, automationSchemaVersion: versionValue };
   return { document: validateAutomationDocument(current), migratedFrom: null };

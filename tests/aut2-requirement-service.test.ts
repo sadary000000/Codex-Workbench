@@ -302,6 +302,10 @@ test("requires explicit USER confirmation, rejects stale or non-user confirmatio
     const project = await value.store.get("automationProjects", value.projectId);
     assert.equal(project?.activeRequirementVersionId, confirmed.requirementVersionId);
     assert.equal(project?.lifecycle, "REQUIREMENTS_CONFIRMED");
+    const confirmedSession = await value.store.get("requirementAlignmentSessions", session.alignmentSessionId);
+    assert.equal(confirmedSession?.status, "CONFIRMED");
+    const confirmedRound = await value.store.get("requirementAlignmentRounds", session.currentRoundId!);
+    assert.equal(confirmedRound?.status, "CONFIRMED");
     const repeated = await worker.confirmRequirement({ projectId: value.projectId, requirementVersionId: confirmed.requirementVersionId, expectedPayloadSha256: confirmed.payloadSha256, actor: "USER" });
     assert.equal(repeated.requirementVersionId, confirmed.requirementVersionId);
   } finally {

@@ -46,6 +46,9 @@ export interface ProviderExecutionAuthorization {
 }
 
 export interface ProviderCorrelation {
+  /** Automation project scope used to resolve the pinned PolicyVersion. */
+  /** Required for executable provider operations; prevents cross-project pin reuse. */
+  readonly projectId: string;
   readonly actionIntentId: string | null;
   readonly actionAttemptId: string | null;
   readonly policyVersionId: string | null;
@@ -54,6 +57,8 @@ export interface ProviderCorrelation {
   readonly semanticRef: string | null;
   /** Provider-owned execution semantic, learned only after acceptance. */
   readonly providerSemanticRef?: string | null;
+  /** Opaque provider scope identity supplied by the domain and checked by the adapter. */
+  readonly providerScopeRef?: string | null;
 }
 
 /**
@@ -104,6 +109,8 @@ export interface ProviderObservation {
   readonly provider: AutomationProviderId;
   readonly providerRequestRef: ProviderRequestRef;
   readonly providerTargetRef: ProviderTargetRef;
+  /** Provider-owned execution semantic echoed from the accepted request. */
+  readonly semanticRef?: string | null;
   readonly state: ProviderRequestState;
   readonly outcomeCertainty: ProviderOutcomeCertainty;
   readonly resultRef: ProviderResultRef | null;
@@ -153,8 +160,10 @@ export interface AutomationProviderPort {
   resolveTarget(input: { workflowRole: string | null; providerTargetRef: ProviderTargetRef }): Promise<ProviderTargetResolution>;
   capabilities(): Promise<readonly ProviderCapabilityFact[]>;
   submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted>;
-  observe(input: { providerRequestRef: ProviderRequestRef }): Promise<ProviderObservation>;
+  observe(input: { providerRequestRef: ProviderRequestRef; correlation?: ProviderCorrelation }): Promise<ProviderObservation>;
   reconcile(input: { providerRequestRef: ProviderRequestRef; correlation: ProviderCorrelation }): Promise<ProviderObservation>;
+  /** Read-only crash recovery lookup; it may only resolve an existing request by idempotency. */
+  resolveRequestByCorrelation?(input: { idempotencyRef: string; correlation: ProviderCorrelation }): Promise<ProviderRequestRef | null>;
   /** Optional provider-owned result read; it never exposes provider internals. */
   readResult?(input: { providerRequestRef: ProviderRequestRef }): Promise<ProviderResult>;
   /** Optional bounded wait used by a synchronous domain operation. */
@@ -181,6 +190,10 @@ export function assertProviderExecutionAuthorization(input: {
     throw new Error("PROVIDER_POLICY_PIN_MISMATCH");
   }
   if (authorization.policyVersionId !== input.correlation.policyVersionId) throw new Error("PROVIDER_POLICY_CORRELATION_MISMATCH");
+  if (!input.correlation.projectId?.trim()) throw new Error("PROVIDER_PROJECT_SCOPE_REQUIRED");
+  if (effectivePolicy.projectId !== input.correlation.projectId || effectivePolicy.pin.projectId !== input.correlation.projectId) {
+    throw new Error("PROVIDER_PROJECT_SCOPE_MISMATCH");
+  }
   const correlationId = input.correlation.idempotencyRef ?? input.correlation.actionAttemptId ?? input.correlation.actionIntentId;
   if (effectivePolicy.pin.policyVersionId !== authorization.policyVersionId || effectivePolicy.pin.correlationId !== correlationId) {
     throw new Error("PROVIDER_POLICY_PIN_CORRELATION_MISMATCH");

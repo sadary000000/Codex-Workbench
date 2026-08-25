@@ -99,7 +99,7 @@ async function fixture(): Promise<{ root: string; store: AutomationStore; projec
   const root = await mkdtemp(join(process.env.TEMP ?? process.cwd(), "aut3-planner-"));
   const store = new AutomationStore(join(root, "automation.db"));
   const project = await store.createAutomationProject({ projectId: "aut3-project", name: "AUT-3 Planner" });
-  const requirement = await store.createRequirementVersion({ projectId: project.projectId, requirementVersionId: "requirement-confirmed", version: 1, status: "CONFIRMED", canonicalPayload: JSON.stringify({ goal: "Build a bounded plan" }) });
+  const requirement = await store.createRequirementVersion({ projectId: project.projectId, requirementVersionId: "requirement-confirmed", version: 1, status: "CONFIRMED", origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:aut3-planner" }, canonicalPayload: JSON.stringify({ goal: "Build a bounded plan" }) });
   return { root, store, projectId: project.projectId, requirementId: requirement.requirementVersionId };
 }
 

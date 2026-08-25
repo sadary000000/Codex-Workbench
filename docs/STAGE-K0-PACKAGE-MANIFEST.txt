@@ -1,35 +1,43 @@
-STAGE-K0 Review Package Manifest
-================================
+STAGE-K0 Re-authorized Review Package Manifest
+==============================================
 
 Stage: STAGE-K0 — Automation Foundation
-Result before GPT review: PASS_CANDIDATE
-Implementation commit: ece5363
+Local result before GPT review: VALIDATION_COMPLETE / PACKAGE_READY_PENDING_GPT
+Implementation status: REAUTHORIZED_MAINLINE
+Historical K0 status: HOLD / EXPERIMENTAL IMPLEMENTATION
 
-Included reports:
-- STAGE-K0-GPT-REVIEW-PROMPT.md
+Required included reports:
+- STAGE-K0-HOLD-REUSE-AUDIT.md
 - STAGE-K0-STAGE-REVIEW.md
 - STAGE-K0-REALITY-CHECK.md
 - STAGE-K0-AUTOMATION-FOUNDATION-CONTRACT.md
+- STAGE-K0-DOMAIN-OWNERSHIP.md
+- STAGE-K0-PERSISTENCE-BOUNDARY.md
+- STAGE-K0-ACTION-RECOVERY-CONTRACT.md
+- STAGE-K0-PROVIDER-BOUNDARY.md
 - STAGE-K0-DOMAIN-VERSIONING.md
 - STAGE-K0-PERSISTENCE-MIGRATION.md
 - STAGE-K0-POLICY-ACTION-RECOVERY-CHECK.md
 - STAGE-K0-TESTS.md
+- STAGE-K0-VALIDATION-EVIDENCE.txt
+- STAGE-K0-SOURCE-INVENTORY.txt
 - STAGE-K0-DEFERRED-DEBT.md
 - STAGE-K0-SOURCE-EVIDENCE-INDEX.md
 - STAGE-K0-SUBAGENTS.md
 - STAGE-K0-PROVENANCE.txt
 
-Included evidence:
-- K0-scoped Automation source files
-- K0-scoped provider-boundary source files
-- K0 regression and targeted tests
-- package hash and command matrix
+Required included evidence:
+- K0-scoped source/test inventory
+- exact command outputs and exit codes (`npm test 443/443`; exact build/check/package environment limitation recorded)
+- K0-D challenge result: PASS_WITH_FIXES, 4/4/0
+- package hash and provenance
+- explicit submission and GPT Gate/Status result
 
 Excluded:
 - cookies, tokens, passwords, browser profiles
 - user/private ChatGPT conversations
 - unrelated historical review packages
-- V1docs.zip, dist-stage-a, donor project, and unrelated dirty files
+- unrelated dirty files, donor worktrees, and build caches
 
 Real operations:
 - real_business_prompts: 0
@@ -39,5 +47,4 @@ Expected GPT response:
 Gate: PASS | FIX_REQUIRED | BLOCKED | REDESIGN
 Status: <independent status>
 
-The archive SHA-256 is recorded in the external
-`STAGE-K0-REVIEW-PACKAGE.sha256` sidecar to avoid a self-referential hash.
+The archive SHA-256 is recorded in a sidecar file to avoid a self-referential hash.

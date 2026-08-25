@@ -1,37 +1,33 @@
-STAGE-K0 provenance
-===================
+STAGE-K0 Re-authorized Mainline Provenance
+===========================================
 
-lifecycle: HOLD / EXPERIMENTAL IMPLEMENTATION
-mainline_status: NOT_MAINLINE
-scope_recovery: AUT-R0 baseline restored by a later revert commit
-implementation_commit: ece5363
-implementation_commit_subject: feat: implement stage k0 automation foundation
-base_commit: 392b4f7a0fbf2f21befef40d5a4ecc47b0982e0f
-branch_at_implementation: master
-timestamp: 2026-08-25T17:35:14+08:00
-
-GUI package:
-D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
-SHA256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
-
-CLI package:
-D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
-SHA256: 5479FA1CCC75AAF32C6431D573F9EFB4A99255A355EA3A815F995ABD191DC9F4
+date: 2026-08-26
+lifecycle: REAUTHORIZED_MAINLINE_VALIDATED_PENDING_GPT
+historical_k0_status: HOLD / EXPERIMENTAL IMPLEMENTATION
+base_mainline_commit: fad58d95b3a6b7925e8e9c66e4bda636b6981005
+historical_k0_commit: ece5363ddb13272678f25ad7f72e0e9c09ebcd45
+current_implementation_commit: PENDING_FREEZE_COMMIT
+branch: master
+push_target: origin/codex/workbench-v1
 
 Scope protection:
-- No Submission Runner file changed.
-- No V1 Frozen Core / Native Thread / Turn / Item file changed.
-- No real business Prompt or new business Chat used.
-- Existing unrelated dirty worktree files were not staged.
+- No Submission Runner file is modified.
+- No V1 Frozen Core / Native Thread / Turn / Item implementation is modified.
+- No real business Prompt or new business Chat is used.
+- Existing unrelated dirty worktree files are not staged.
+
+Current targeted evidence:
+- targeted tests: 74/74 PASS
+- donor TypeScript verification: PASS
+- full Node regression: 443/443 PASS
+- npm audit --omit=dev: 0 vulnerabilities
+- git diff --check: PASS
+- equivalent donor build: PASS_WITH_DONOR_TYPESCRIPT
+- exact check/build/package: ENVIRONMENT_BLOCKED (project-local node_modules is empty)
+- package hash: PENDING
+- K0-D: PASS_WITH_FIXES; subagents 4/4/0
 
 Review package:
-D:\办公\AI\Codex_Workbench_V1\dist\review\STAGE-K0-REVIEW-PACKAGE.zip
+D:\办公\AI\Codex_Workbench_V1\dist\review\STAGE-K0-REAUTHORIZED-REVIEW-PACKAGE.zip
 Checksum sidecar:
-D:\办公\AI\Codex_Workbench_V1\dist\review\STAGE-K0-REVIEW-PACKAGE.sha256
-
-GPT review:
-submissionId: 1ae2c2b68afbde61589874af97d7329422a897cd3fc82284c788e5891005f95f
-state: REVIEW_RECEIVED
-Gate: PASS
-Status: READY_FOR_NEXT_STAGE
-receivedAt: 2026-08-25T09:41:41.470Z
+D:\办公\AI\Codex_Workbench_V1\dist\review\STAGE-K0-REAUTHORIZED-REVIEW-PACKAGE.zip.sha256

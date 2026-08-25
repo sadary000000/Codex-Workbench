@@ -44,7 +44,7 @@ export interface WebGptPolicyAuthorizer {
   authorizePinned(operation: BudgetKind, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability): Promise<WebGptPolicyAdmission>;
   /** Evaluate a pinned operation without reserving a budget. Used by explicit
    * reconcile/cancel paths that still require policy authority. */
-  evaluatePinned(operation: PolicyOperation, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability): Promise<EffectivePolicyDecision>;
+  evaluatePinned(operation: PolicyOperation, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability, scopeProjectId?: string | null): Promise<EffectivePolicyDecision>;
 }
 
 export class WebGptPolicyAuthorityError extends Error {
@@ -101,12 +101,13 @@ export class WebGptPolicyAuthority implements WebGptPolicyAuthorizer {
     return Object.freeze({ operation, policyVersionId: decision.effectivePolicy.policyVersionId, pin: decision.effectivePolicy.pin, decision, reservation });
   }
 
-  async evaluatePinned(operation: PolicyOperation, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability): Promise<EffectivePolicyDecision> {
+  async evaluatePinned(operation: PolicyOperation, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability, scopeProjectId?: string | null): Promise<EffectivePolicyDecision> {
     const normalizedPolicyVersionId = policyVersionId.trim();
     if (!normalizedPolicyVersionId) throw new WebGptPolicyAuthorityError("POLICY_PIN_REQUIRED", "生产 WebGPT 操作缺少有效 PolicyVersion pin；只允许读取，已阻止副作用。", { operation });
     const record = await this.store.get("policyVersions", normalizedPolicyVersionId);
     if (!record) throw new WebGptPolicyAuthorityError("POLICY_PIN_INVALID", "请求引用的 PolicyVersion 不存在；未回退到当前版本，已 fail-closed。", { operation, policyVersionId: normalizedPolicyVersionId });
-    if (record.projectId !== this.projectId) throw new WebGptPolicyAuthorityError("POLICY_PIN_INVALID", "请求引用的 PolicyVersion 不属于 WebGPT 生产 authority；已 fail-closed。", { operation, policyVersionId: normalizedPolicyVersionId, projectId: record.projectId });
+    const expectedProjectId = scopeProjectId?.trim() || this.projectId;
+    if (record.projectId !== expectedProjectId) throw new WebGptPolicyAuthorityError("POLICY_PIN_INVALID", "请求引用的 PolicyVersion 不属于当前 Automation project scope；已 fail-closed。", { operation, policyVersionId: normalizedPolicyVersionId, projectId: record.projectId, expectedProjectId });
     try {
       const policy = policyVersionViewFromRecord(record);
       const pin = pinPolicyVersion(policy, correlationId);
@@ -262,7 +263,7 @@ export function createWebGptProviderPolicyAuthority(authority: WebGptPolicyAutho
       // RequestManager is the single budget owner for the actual browser
       // dispatch.  The provider port only validates the frozen decision here;
       // reserving again would double-charge PROMPT/RETRY budgets.
-      const decision = await authority.evaluatePinned(operation, correlationId, input.correlation.policyVersionId, runtimeCapability);
+      const decision = await authority.evaluatePinned(operation, correlationId, input.correlation.policyVersionId, runtimeCapability, input.correlation.projectId);
       return providerAuthorizationFromDecision(input.operation, capability, decision);
     },
   };

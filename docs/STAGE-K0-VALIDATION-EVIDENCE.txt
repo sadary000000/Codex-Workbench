@@ -1,0 +1,34 @@
+STAGE-K0 Re-authorized Validation Evidence
+===========================================
+
+Date: 2026-08-26
+Project: D:\办公\AI\Codex_Workbench_V1
+Real business prompts: 0
+New business chats: 0
+
+Targeted Node test command:
+node --experimental-strip-types --test tests/automation-foundation.test.ts tests/automation-persistence.test.ts tests/aut-r0-requirement-provider.test.ts tests/aut2-requirement-service.test.ts tests/arch-v2-4-external-action.test.ts tests/arch-v2-4-fix-round-1.test.ts tests/arch-v2-7-review-harness.test.ts tests/aut3-planner.test.ts
+Result: PASS, 74/74
+
+Full test command:
+npm test
+Result: PASS, 443/443
+
+npm audit --omit=dev
+Result: PASS, 0 vulnerabilities
+
+git diff --check
+Result: PASS, exit code 0; CRLF normalization warnings only
+
+Donor TypeScript verification:
+Result: PASS, production and test verification configs
+
+Equivalent build:
+Result: PASS, dist-k0-build emitted by donor TypeScript; control-plane schema generation PASS
+
+Exact npm run check / npm run build / npm run package:win:
+Result: ENVIRONMENT_BLOCKED, this checkout has no project-local TypeScript/Electron runtime under node_modules.
+
+K0-D challenge:
+Result: PASS_WITH_FIXES
+Blockers fixed: paused legacy Bridge; atomic accepted UNKNOWN marker; promoted migration rollback; raw migration mapping delta; current-policy pin for fresh side effects.

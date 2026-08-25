@@ -1,74 +1,69 @@
-# STAGE-K0 Reality Check
+# STAGE-K0 Reality Check — Re-authorized Mainline
 
-Date: `2026-08-25` (Asia/Shanghai)
-Historical K0 status: `PASS / FROZEN`
-Current lifecycle: `HOLD / EXPERIMENTAL IMPLEMENTATION`
-Mainline status: `NOT_MAINLINE`
+Date: `2026-08-26` (Asia/Shanghai)
 
-Scope recovery note: K0 implementation is retained for audit and future
-authorization, but is not part of the restored AUT-R0 mainline.
+## Scope state
 
-## Scope and source localization
+```yaml
+historical_k0: HOLD / EXPERIMENTAL IMPLEMENTATION
+current_k0: REAUTHORIZED_MAINLINE_VALIDATED_PENDING_GPT
+hold_reuse_audit: PASS_WITH_CONTROLLED_REUSE
+automation_schema_version: 4
+real_business_prompts: 0
+new_business_chats: 0
+```
 
-The current production Automation boundary is under `src/automation`. The
-relevant persistence and domain sources are:
+The historical K0 implementation is retained for audit and reuse decisions. It
+is not treated as a completed Gate. Only the explicit current Stage-K0
+authorization defines the current implementation scope.
 
-- `types.ts`, `schema.ts`, `store.ts`
-- `sqlite-persistence.ts`, `migration-contract.ts`, `migration-identity.ts`
-- `stable-identity.ts`, `composition-root.ts`
-- `effective-policy.ts`, `webgpt-policy-authority.ts`
-- `requirement-provider-dispatch.ts`, `evidence-correlation.ts`,
-  `recovery-intent.ts`
+## Current foundation boundaries
 
-The current Automation schema is version 4. The existing policy/action/recovery
-chain is already present and K0 extends its durable Requirement boundary; K0
-does not create another runtime or conversation truth.
+```yaml
+domain_ownership: IMPLEMENTED
+persistence_boundary: IMPLEMENTED
+action_recovery_contract: IMPLEMENTED
+provider_neutral_boundary: IMPLEMENTED
+targeted_tests: 74/74 PASS
+  full_node_tests: 443/443 PASS
+  audit: 0 vulnerabilities
+  diff_check: PASS
+  typecheck: PASS_WITH_DONOR_DEPENDENCY
+  equivalent_build: PASS_WITH_DONOR_TYPESCRIPT
+  exact_build_package: ENVIRONMENT_BLOCKED
+k0_challenge: PASS_WITH_FIVE_FIXES
+gpt_gate: PENDING
+```
 
-## Historical finding matrix
+## Closed risks
 
-| historical finding | current disposition | evidence |
-|---|---|---|
-| RequirementOrigin was not first-class | CLOSED IN K0 | `types.ts`, `schema.ts`, `store.ts`, `requirement-service.ts`; origin is a bounded persisted collection and every RequirementVersion has an explicit `originRef` |
-| Requirement immutability/version chain was incomplete | CLOSED IN K0 | immutable-field checks, duplicate/root checks, and immediate predecessor validation in `store.ts` and `schema.ts` |
-| migration rollback/interruption path was incomplete | CLOSED IN K0 | v3→v4 upgrade, full-document equivalence, source backup restoration, transactional SQLite rewrite, and JSON promotion rollback |
-| identity comparison did not include the new Requirement collection | CLOSED IN K0 | `migration-identity.ts` compares the complete canonical document, including version, supersedes, hashes, origins, and payload identity |
-| PolicyVersion scope/pin mismatch risk | CLOSED IN K0 | policy evaluation accepts the dispatch project scope; side-effect intents require a policy pin; no latest-policy fallback was added |
-| accepted side-effect correlation durability risk | CLOSED IN K0 AS FAIL-CLOSED RECOVERY | an accepted request can be reattached by the durable idempotency reference through `resolveRequestByCorrelation`; missing local correlation blocks resend and enters reconcile-only recovery |
-| direct reconcile seam bypass risk | CLOSED IN K0 | generic `webgpt.request.reconcile` is fail-closed; formal Requirement reconcile carries ActionAttempt and Provider correlation |
-| duplicate Requirement roots/orphan origins | CLOSED IN K0 | schema validation rejects duplicate `(projectId, version)`, multiple version-1 roots, orphan origins, and cross-project references |
+- Every new RequirementVersion receives explicit bounded origin provenance and
+  an immediate predecessor when applicable.
+- Active Requirement pointers cannot point to DRAFT or SUPERSEDED versions.
+- USER confirmation supersedes the prior active version and synchronizes the
+  associated alignment Session/Round.
+- Project-scoped PolicyVersion and provider correlation are required.
+- Accepted provider identity mismatch or local persistence failure becomes
+  durable UNKNOWN / RECOVERY_REQUIRED; no blind resend is permitted.
+- SQLite row identity and project identity are checked at load time.
+- Requirement alignment ActionIntent payloads accept only the opaque
+  `automation-input-v1:<sha256>` shape.
+- Legacy production Bridge execution is paused; the provider-neutral Port is
+  the only live composition path.
+- Accepted provider UNKNOWN recording is atomic and optional evidence/lease
+  writes cannot reopen a duplicate-send window.
+- Raw legacy migration collections are explicitly mapped or rejected; the
+  raw-source mapping delta is persisted as bounded migration metadata.
+- Fresh side-effect intents cannot pin an old PolicyVersion after a project
+  policy advance.
 
-## K0 implementation facts
+## Boundary protection
 
-1. `RequirementOrigin` is persisted, project-scoped, bounded, and referenced by
-   `RequirementVersion.originRef`.
-2. A version 1 Requirement has no predecessor; every later version must name
-   the immediately previous version and supersede it atomically.
-3. Legacy v0/v1/v2/v3 documents receive deterministic bounded origin records
-   during migration. Existing safe origin references are preserved when their
-   origin row is absent in a legacy source; new low-level Requirement callers
-   must provide an explicit origin and cannot trigger an implicit origin.
-4. SQLite v2/v3 migration writes the upgraded document in one transaction and
-   retains a source backup. Failure rolls back the canonical database. JSON
-   promotion restores the source backup if candidate promotion fails.
-5. The raw Requirement/Prompt remains outside the durable Automation document;
-   the existing opaque InputRef boundary is unchanged.
-6. Provider acceptance without a durable local request reference is not treated
-   as failure and is not retried blindly: the formal reconcile path resolves
-   the provider request by the already-persisted idempotency reference, then
-   persists the recovered correlation or returns `RECOVERY_REQUIRED`.
+No K0 implementation is allowed to modify Native Thread/Turn/Item truth, the
+Workbench UI, Submission Runner, browser profiles, cookies, tokens, or user
+chat content. No real business Prompt or new Chat was used.
 
-## Boundary result
-
-No V1 Frozen Core, Native Thread/Turn/Item, browser/conversation ownership, or
-Submission Runner file was changed for K0. The existing WebGPT adapter was
-changed only at the integration seam to carry project-scoped correlation,
-reattach an already accepted request, and fail-closed the generic reconcile
-entry point; this does not introduce a second runtime or conversation truth.
-No real business Prompt or new business Chat was used.
-
-## Gate accounting
-
-The initial four-agent challenge found P0/P1 risks. Each is either closed by
-the K0 patch above or explicitly outside the K0 product boundary. The local
-automated gate and fixed-target GPT Gate are PASS. K0 is frozen at its
-authorized scope; this does not authorize automatic entry into another stage.
+Final Gate remains open until the review package is built and the fixed
+Submission Runner returns explicit Gate and Status. Exact local build/package
+commands remain environment-blocked because this checkout's project
+`node_modules` is empty; equivalent donor typecheck/build output is recorded.

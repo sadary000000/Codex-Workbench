@@ -44,6 +44,7 @@ import type {
   RequirementAssumption,
   RequirementChangeRequest,
   RequirementImpactAnalysis,
+  RequirementOrigin,
   RequirementQuestion,
   RequirementReplanLevel,
   RequirementVersion,
@@ -663,6 +664,7 @@ export class RequirementAutomationService {
       try {
         dispatch = await this.providerDispatch!.submit({
           projectId: session.projectId,
+          providerScopeRef: providerProjectId!,
           providerTargetRef: providerTargetRef!,
           inputRef: inputRegistration!.inputRef,
           inputSha256: inputRegistration!.sha256,
@@ -740,7 +742,17 @@ export class RequirementAutomationService {
     const projectRef = session.webgptProjectRef ? snapshot.externalRefs.find((item) => item.externalRefId === session.webgptProjectRef) : null;
     const attempt = snapshot.actionAttempts.find((item) => item.actionAttemptId === round.providerActionAttemptRef);
     const intent = attempt ? snapshot.actionIntents.find((item) => item.intentId === attempt.intentId) : null;
-    if (!requestRef || requestRef.kind !== "WEBGPT_REQUEST" || !projectRef || !bindingRef || !attempt || !intent?.idempotencyRef) throw new RequirementServiceError("RECOVERY_REQUIRED", "Persisted Requirement recovery identity is incomplete.");
+    if (!requestRef || requestRef.kind !== "WEBGPT_REQUEST" || !projectRef || projectRef.kind !== "WORKBENCH_PROJECT" || projectRef.projectId !== session.projectId || !bindingRef || bindingRef.kind !== "WEBGPT_ROLE_BINDING" || bindingRef.projectId !== session.projectId || !attempt || !intent?.idempotencyRef) throw new RequirementServiceError("RECOVERY_REQUIRED", "Persisted Requirement recovery identity is incomplete.");
+    const providerRequestRef = attempt.providerRequestRef
+      ? snapshot.externalRefs.find((item) => item.externalRefId === attempt.providerRequestRef)
+      : null;
+    if (round.providerActionIntentRef !== attempt.intentId
+      || intent.expectedOutcomeRef !== requestRef.opaqueId
+      || !providerRequestRef
+      || providerRequestRef.kind !== "WEBGPT_PROVIDER_REQUEST"
+      || providerRequestRef.projectId !== session.projectId) {
+      throw new RequirementServiceError("RECOVERY_REQUIRED", "Persisted Requirement round, ActionAttempt, and provider request identities do not match.");
+    }
     const result = await this.providerDispatch.reconcile({ projectId: session.projectId, actionAttemptId: round.providerActionAttemptRef, waitTimeoutMs: input.waitTimeoutMs });
     if (result.state !== "COMPLETED" || result.response === null) throw new RequirementServiceError("RECOVERY_REQUIRED", "Requirement provider reconciliation did not produce a safe terminal result.");
     const semanticSha256 = round.providerSemanticHash ?? attempt.providerSemanticSha256;
@@ -890,8 +902,14 @@ export class RequirementAutomationService {
     const result = await this.store.transaction((tx) => {
       const { session, round } = getRound(tx, input.sessionId, input.roundId);
       const project = tx.require("automationProjects", session.projectId);
-      const version = Math.max(0, ...tx.table("requirementVersions").filter((item) => item.projectId === project.projectId).map((item) => item.version)) + 1;
-      const item: RequirementVersion = { requirementVersionId: this.makeId("requirement"), projectId: project.projectId, version, status: "DRAFT", contentRef: null, structuredPayloadRef: null, canonicalPayload: payload.canonical, payloadSha256: payload.sha256, createdAt: this.clock(), confirmedAt: null, supersedes: null };
+      const previousVersion = [...tx.table("requirementVersions")]
+        .filter((item) => item.projectId === project.projectId)
+        .sort((left, right) => right.version - left.version)[0] ?? null;
+      const version = (previousVersion?.version ?? 0) + 1;
+      const origin: RequirementOrigin = { requirementOriginId: this.makeId("requirement-origin"), projectId: project.projectId, originType: "DISCOVERY", source: "WEBGPT", sourceRef: input.responseContext.requestId, createdAt: this.clock() };
+      tx.insert("requirementOrigins", origin);
+      const item: RequirementVersion = { requirementVersionId: this.makeId("requirement"), projectId: project.projectId, version, status: "DRAFT", originRef: origin.requirementOriginId, contentRef: null, structuredPayloadRef: null, canonicalPayload: payload.canonical, payloadSha256: payload.sha256, createdAt: this.clock(), confirmedAt: null, supersedes: previousVersion?.requirementVersionId ?? null };
+      tx.appendAudit({ projectId: project.projectId, entityType: "RequirementOrigin", entityId: origin.requirementOriginId, eventType: "REQUIREMENT_ORIGIN_CREATED", actorType: "WEBGPT_RUNTIME", actorRef: null, boundedPayload: { originType: origin.originType, source: origin.source }, correlationId: session.alignmentSessionId, causationId: input.responseContext.requestId });
       tx.insert("requirementVersions", item);
       const timestamp = this.clock();
       const nextSession: RequirementAlignmentSession = { ...session, status: "RESOLVED", latestDraftVersionId: item.requirementVersionId, latestSemanticSha256: input.responseContext.semanticSha256, completedAt: timestamp, updatedAt: timestamp, revision: (session.revision ?? 0) + 1 };
@@ -933,9 +951,25 @@ export class RequirementAutomationService {
       if (version.payloadSha256 !== input.expectedPayloadSha256) throw new RequirementServiceError("STALE_CONFIRMATION", "The draft hash changed after the user reviewed it.", { expected: input.expectedPayloadSha256, actual: version.payloadSha256 });
       if (version.status === "CONFIRMED" && project.activeRequirementVersionId === version.requirementVersionId) return clone(version);
       if (version.status !== "DRAFT") throw new RequirementServiceError("ALREADY_CONFIRMED", "RequirementVersion is no longer a confirmable draft.");
-      const confirmed = { ...version, status: "CONFIRMED" as const, confirmedAt: this.clock() };
+      const timestamp = this.clock();
+      const previousActive = project.activeRequirementVersionId && project.activeRequirementVersionId !== version.requirementVersionId
+        ? tx.table("requirementVersions").find((item) => item.requirementVersionId === project.activeRequirementVersionId)
+        : null;
+      if (previousActive && previousActive.status !== "SUPERSEDED") {
+        tx.replace("requirementVersions", { ...previousActive, status: "SUPERSEDED" as const });
+      }
+      const confirmed = { ...version, status: "CONFIRMED" as const, confirmedAt: timestamp };
       tx.replace("requirementVersions", confirmed);
-      tx.replace("automationProjects", { ...project, lifecycle: "REQUIREMENTS_CONFIRMED", activeRequirementVersionId: version.requirementVersionId, updatedAt: this.clock(), revision: project.revision + 1 });
+      tx.replace("automationProjects", { ...project, lifecycle: "REQUIREMENTS_CONFIRMED", activeRequirementVersionId: version.requirementVersionId, updatedAt: timestamp, revision: project.revision + 1 });
+      const session = tx.table("requirementAlignmentSessions").find((item) => item.latestDraftVersionId === version.requirementVersionId);
+      if (session) {
+        const nextSession: RequirementAlignmentSession = { ...session, status: "CONFIRMED", confirmedAt: timestamp, completedAt: session.completedAt ?? timestamp, updatedAt: timestamp, revision: (session.revision ?? 0) + 1 };
+        tx.replace("requirementAlignmentSessions", nextSession);
+        if (session.currentRoundId) {
+          const round = tx.table("requirementAlignmentRounds").find((item) => item.alignmentRoundId === session.currentRoundId);
+          if (round && round.status === "RESOLVED") tx.replace("requirementAlignmentRounds", { ...round, status: "CONFIRMED" as const, completedAt: round.completedAt ?? timestamp });
+        }
+      }
       tx.appendAudit({ projectId: project.projectId, entityType: "RequirementVersion", entityId: version.requirementVersionId, eventType: "REQUIREMENT_USER_CONFIRMED", actorType: "USER", actorRef: "USER", boundedPayload: { payloadSha256: version.payloadSha256 }, correlationId: version.requirementVersionId, causationId: null });
       return clone(confirmed);
     });
@@ -971,7 +1005,10 @@ export class RequirementAutomationService {
     return this.store.transaction((tx) => {
       const request = tx.require("requirementChangeRequests", stored.changeRequestId);
       const project = tx.require("automationProjects", stored.projectId);
-      const candidate: RequirementVersion = { requirementVersionId: proposedSnapshot.versionId, projectId: stored.projectId, version: candidateVersion, status: "DRAFT", contentRef: null, structuredPayloadRef: null, canonicalPayload: normalized.canonical, payloadSha256: normalized.sha256, createdAt: this.clock(), confirmedAt: null, supersedes: base.requirementVersionId };
+      const origin: RequirementOrigin = { requirementOriginId: this.makeId("requirement-origin"), projectId: stored.projectId, originType: "REVISION", source: "SYSTEM", sourceRef: request.changeRequestId, createdAt: this.clock() };
+      tx.insert("requirementOrigins", origin);
+      const candidate: RequirementVersion = { requirementVersionId: proposedSnapshot.versionId, projectId: stored.projectId, version: candidateVersion, status: "DRAFT", originRef: origin.requirementOriginId, contentRef: null, structuredPayloadRef: null, canonicalPayload: normalized.canonical, payloadSha256: normalized.sha256, createdAt: this.clock(), confirmedAt: null, supersedes: base.requirementVersionId };
+      tx.appendAudit({ projectId: project.projectId, entityType: "RequirementOrigin", entityId: origin.requirementOriginId, eventType: "REQUIREMENT_ORIGIN_CREATED", actorType: "AUTOMATION", actorRef: null, boundedPayload: { originType: origin.originType, source: origin.source }, correlationId: request.changeRequestId, causationId: null });
       tx.insert("requirementVersions", candidate);
       const next: RequirementChangeRequest = { ...request, status: "WAITING_USER_CONFIRMATION", impactAnalysis: impact, candidateRequirementVersionId: candidate.requirementVersionId, candidatePayloadSha256: candidate.payloadSha256, updatedAt: this.clock(), revision: request.revision + 1 };
       tx.replace("requirementChangeRequests", next);

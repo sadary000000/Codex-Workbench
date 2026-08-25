@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   AUTOMATION_ID_FIELDS,
+  assertLegacyMigrationMapping,
   assertMigrationIdentityPreserved,
   createEmptyAutomationDocument,
   type AutomationDocument,
@@ -18,7 +19,7 @@ function identityDocument(): AutomationDocument {
 }
 
 test("FIX-05 covers every persisted collection identity, including alignment records", () => {
-  assert.equal(Object.keys(AUTOMATION_ID_FIELDS).length, 23);
+  assert.equal(Object.keys(AUTOMATION_ID_FIELDS).length, 24);
   for (const table of [
     "requirementAlignmentSessions",
     "requirementAlignmentRounds",
@@ -59,4 +60,17 @@ test("FIX-04 production composition materializes the provider bridge without ena
   assert.match(source, /new\s+WebGptExternalActionBridge/);
   assert.match(source, /createWebGptRequestManagerActionAdapter/);
   assert.match(source, /getWebGptExternalActionBridge/);
+  assert.match(source, /executionMode:\s*["']PAUSED["']/);
+});
+
+test("FIX-04 legacy bridge execution is explicitly paused in the production composition", async () => {
+  const source = await readFile("src/automation/webgpt-external-action.ts", "utf8");
+  assert.match(source, /LEGACY_PROVIDER_PATH_PAUSED/);
+  assert.match(source, /private assertExecutionEnabled/);
+});
+
+test("FIX-04 raw legacy migration mappings reject silently dropped collections", async () => {
+  const document = createEmptyAutomationDocument();
+  const legacy = { automationSchemaVersion: 0, projects: [], prompts: [{ id: "must-not-drop" }] };
+  assert.throws(() => assertLegacyMigrationMapping(legacy, document, 0), /MIGRATION_SOURCE_TABLE_UNMAPPED:prompts/);
 });

@@ -953,7 +953,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
       else response = controlOk(request.command, await getWebGptRequestManager().requestStatus(request.targetRequestId));
     } else if (request.command === "webgpt.request.reconcile") {
       if (!request.targetRequestId) response = controlFail(request.command, "REQUEST_ID_REQUIRED", "request reconcile 必须提供目标 requestId。");
-      else response = controlOk(request.command, await getWebGptRequestManager().reconcileRequest(request.targetRequestId));
+      else response = controlFail(request.command, "AUTOMATION_RECONCILE_REQUIRED", "通用 Request Journal reconcile 不作为 Automation 入口；必须通过带 ActionAttempt/Provider correlation 的正式 Requirement reconcile 边界执行。", { targetRequestId: request.targetRequestId });
     } else if (request.command === "webgpt.request.list") {
       if (request.active !== true) response = controlFail(request.command, "REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。");
       else response = controlOk(request.command, await getWebGptRequestManager().activeSummary());
@@ -1255,6 +1255,7 @@ function getWebGptExternalActionBridge(): WebGptExternalActionBridge {
   webGptExternalActionBridge = new WebGptExternalActionBridge(
     automationStore,
     createWebGptRequestManagerActionAdapter(getWebGptRequestManager()),
+    { executionMode: "PAUSED" },
   );
   return webGptExternalActionBridge;
 }

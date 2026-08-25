@@ -1,0 +1,34 @@
+STAGE-K0 Re-authorized K0-scoped Source/Test Inventory
+=======================================================
+
+Production source:
+src/automation/adapters.ts
+src/automation/migration-contract.ts
+src/automation/migration-identity.ts
+src/automation/requirement-provider-dispatch.ts
+src/automation/requirement-service.ts
+src/automation/schema.ts
+src/automation/sqlite-persistence.ts
+src/automation/stable-identity.ts
+src/automation/store.ts
+src/automation/types.ts
+src/automation/webgpt-external-action.ts
+src/automation/webgpt-policy-authority.ts
+src/features/webgpt/automation/webgpt-provider-port.ts
+src/main/main.ts
+
+Tests:
+tests/automation-foundation.test.ts
+tests/automation-persistence.test.ts
+tests/aut-r0-requirement-provider.test.ts
+tests/aut2-requirement-service.test.ts
+tests/arch-v2-4-external-action.test.ts
+tests/arch-v2-4-fix-round-1.test.ts
+tests/arch-v2-7-review-harness.test.ts
+tests/arch-v2-8-fix-round-3.test.ts
+tests/aut3-planner.test.ts
+
+Excluded from this inventory/package:
+cookies, tokens, passwords, browser profiles, raw prompts, transcripts,
+private ChatGPT content, unrelated historical packages, donor worktrees, and
+unrelated dirty files.

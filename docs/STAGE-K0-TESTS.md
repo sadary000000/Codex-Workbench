@@ -1,65 +1,44 @@
-# STAGE-K0 Test Contract and Results
+# STAGE-K0 Test Contract and Current Results
 
-Date: `2026-08-25`
+Date: `2026-08-26`
 
-## Required commands
+## Required gate commands
 
-| command | result | evidence |
+The final gate is not yet closed while full validation and packaging are in progress. Results below are current evidence, not a claim of completion.
+
+| command | result | evidence / limitation |
 |---|---|---|
-| `npm run check` | PASS | TypeScript production and test projects both passed |
-| `npm test` | PASS | `439/439` |
+| targeted Node test set | PASS | `74/74` after the re-authorized K0 changes and K0-D fixes |
+| `npm run check` | ENVIRONMENT_BLOCKED / TYPECHECK_PASS | exact script cannot find `tsc` because project `node_modules` is empty; donor TypeScript `5.7.3` passed both production and test configs with temporary verification configs |
+| `npm test` | PASS | `443/443` |
 | `npm audit --omit=dev` | PASS | `0 vulnerabilities` |
-| `git diff --check` | PASS | no whitespace errors; CRLF normalization warnings only |
-| `npm run build` | PASS | `CONTROL PLANE SCHEMA PASS`, `BUILD PASS` |
-| `npm run package:win` | PASS | GUI and CLI EXEs produced |
-| secret scan | PASS | no credential-pattern matches in scoped K0 inputs |
+| `git diff --check` | PASS | exit 0; CRLF normalization warnings only |
+| `npm run build` | ENVIRONMENT_BLOCKED | exact build requires project-local `node_modules/typescript`; donor typecheck is independent evidence |
+| `npm run package:win` | ENVIRONMENT_BLOCKED | exact script stops at the same missing project-local TypeScript dependency as `npm run build` |
+| equivalent donor build | PASS | donor TypeScript emitted `dist-k0-build`; control-plane schema generation passed |
+| secret scan | PASS | K0 package scope scan excludes cookies, tokens, browser profiles, prompts, and user chat content |
 
-## Targeted coverage already exercised
+## Targeted command
 
-- explicit RequirementOrigin and same-project origin validation;
-- immutable Requirement payload/hash and immediate predecessor chain;
-- duplicate version/root and orphan-origin rejection;
-- v0/v1/v2/v3 → v4 compatibility;
-- full migration document equivalence and interrupted migration recovery;
-- SQLite transaction rollback and JSON backup restoration;
-- policy pin/scope and ActionIntent/ActionAttempt correlation;
-- accepted-provider request reattachment by idempotency reference;
-- observation correlation and reconcile-only unknown outcomes;
-- generic reconcile fail-closed boundary;
-- AUT-R0 Requirement provider regression.
+```text
+node --experimental-strip-types --test \
+  tests/automation-foundation.test.ts \
+  tests/automation-persistence.test.ts \
+  tests/aut-r0-requirement-provider.test.ts \
+  tests/aut2-requirement-service.test.ts \
+  tests/arch-v2-4-external-action.test.ts \
+  tests/arch-v2-4-fix-round-1.test.ts \
+  tests/arch-v2-7-review-harness.test.ts \
+  tests/aut3-planner.test.ts
+```
 
-The final targeted K0 run was `51/51 PASS`; the final full suite was
-`439/439 PASS`.
+Coverage includes explicit Requirement origins and predecessor chains, privacy/InputRef shape, SQLite row identity, raw legacy migration mapping, promotion rollback, current PolicyVersion pinning, project scope, accepted-provider UNKNOWN recovery, observation/receipt correlation, paused legacy Bridge composition, and USER confirmation synchronization.
 
 ## Real operations
 
-```text
-real business prompts: 0
-new business chats: 0
-```
-
-K0 is a foundation stage. No real Prompt is required or permitted by the
-stage scope. Existing contract, unit, persistence, and provider-boundary
-evidence is sufficient for this gate.
-
-## Build provenance
-
 ```yaml
-implementation_commit: ece5363
-gui_package: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench V1.exe
-gui_sha256: 31A0176B7C1A81CF379E55E109C57A56493A4D4A9E9B0D2475A678FD7DF234DC
-cli_package: D:\办公\AI\Codex_Workbench_V1\dist\package\Codex Workbench CLI.exe
-cli_sha256: 5479FA1CCC75AAF32C6431D573F9EFB4A99255A355EA3A815F995ABD191DC9F4
-test_timestamp: 2026-08-25T17:35:14+08:00
-gpt_gate: PASS
-gpt_status: READY_FOR_NEXT_STAGE
-gpt_review_state: REVIEW_RECEIVED
-gpt_submission_id: 1ae2c2b68afbde61589874af97d7329422a897cd3fc82284c788e5891005f95f
-gpt_received_at: 2026-08-25T09:41:41.470Z
+real_business_prompts: 0
+new_business_chats: 0
 ```
 
-## Final gate record
-
-The final report must include exact exit codes, test counts, build/package
-paths, package hash, and secret-scan scope. A green unit suite alone cannot be
-reported as the K0 Gate.
+K0 does not require or authorize a real business Prompt. No browser or Submission Runner operation is evidence for the local implementation gate.

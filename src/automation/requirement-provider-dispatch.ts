@@ -25,6 +25,8 @@ export class RequirementProviderDispatchError extends Error {
 
 export interface RequirementProviderDispatchInput {
   readonly projectId: string;
+  /** Opaque provider project/scope identity; persisted for recovery correlation. */
+  readonly providerScopeRef: string;
   readonly providerTargetRef: string;
   readonly inputRef: string;
   readonly inputSha256: string;
@@ -109,7 +111,7 @@ export class RequirementProviderDispatch {
       sideEffectClass: "RECONCILABLE",
       payloadRef: input.inputRef,
       payloadHash: input.inputSha256,
-      executionOptions: { workflowRole: input.workflowRole, inputLength: input.inputLength },
+      executionOptions: { workflowRole: input.workflowRole, inputLength: input.inputLength, providerScopeRef: input.providerScopeRef },
       idempotencyRef: input.idempotencyRef,
       expectedOutcomeRef: input.requestId,
       policyVersionId: project.policyVersionId ?? null,
@@ -125,12 +127,14 @@ export class RequirementProviderDispatch {
       throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", `Requirement round correlation could not be persisted before provider dispatch: ${boundedErrorMessage(error)}`, error);
     }
     const correlation: ProviderCorrelation = {
+      projectId: input.projectId,
       actionIntentId: intent.intentId,
       actionAttemptId: attempt.actionAttemptId,
       policyVersionId: intent.policyVersionId,
       idempotencyRef: intent.idempotencyRef,
       semanticRef: input.semanticRef,
       providerSemanticRef: null,
+      providerScopeRef: input.providerScopeRef,
     };
 
     let accepted: Awaited<ReturnType<AutomationProviderPort["submit"]>>;
@@ -151,15 +155,39 @@ export class RequirementProviderDispatch {
       this.inputRefs.release(input.inputRef, input.requestId);
     }
     if (accepted.provider !== this.provider.provider || accepted.providerTargetRef !== input.providerTargetRef) {
-      await this.recordFailed(attempt.actionAttemptId, new Error("provider acceptance identity mismatch"));
-      throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_IDENTITY_MISMATCH", "Provider acceptance did not preserve target identity.");
+      try {
+        await this.store.recordAcceptedProviderUnknown({
+          projectId: input.projectId,
+          actionAttemptId: attempt.actionAttemptId,
+          provider: accepted.provider,
+          providerRequestRef: accepted.providerRequestRef,
+          providerSemanticSha256: accepted.semanticRef ?? null,
+          externalStatus: "ACCEPTED_IDENTITY_MISMATCH",
+        });
+      } catch (recoveryError) {
+        await this.store.transitionActionAttempt(attempt.actionAttemptId, "UNCERTAIN", { actorType: "AUTOMATION", correlationId: intent.intentId }).catch(() => undefined);
+        throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", `Provider acceptance identity mismatched and recovery marker persistence failed: ${boundedErrorMessage(recoveryError)}`, recoveryError);
+      }
+      throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", "Provider acceptance did not preserve target identity; the accepted side effect is recovery-only and must not be resent.");
     }
 
     let requestExternalRef: Awaited<ReturnType<AutomationStore["persistActionAttemptProviderRequest"]>>["externalRef"];
     try {
       requestExternalRef = (await this.store.persistActionAttemptProviderRequest({ projectId: input.projectId, actionAttemptId: attempt.actionAttemptId, provider: accepted.provider, providerRequestRef: accepted.providerRequestRef, providerSemanticSha256: accepted.semanticRef ?? null })).externalRef;
     } catch (error) {
-      await this.store.transitionActionAttempt(attempt.actionAttemptId, "UNCERTAIN", { actorType: "AUTOMATION", correlationId: intent.intentId }).catch(() => undefined);
+      try {
+        await this.store.recordAcceptedProviderUnknown({
+          projectId: input.projectId,
+          actionAttemptId: attempt.actionAttemptId,
+          provider: accepted.provider,
+          providerRequestRef: accepted.providerRequestRef,
+          providerSemanticSha256: accepted.semanticRef ?? null,
+          externalStatus: "ACCEPTED_LOCAL_PERSISTENCE_UNCERTAIN",
+        });
+      } catch (recoveryError) {
+        await this.store.transitionActionAttempt(attempt.actionAttemptId, "UNCERTAIN", { actorType: "AUTOMATION", correlationId: intent.intentId }).catch(() => undefined);
+        throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", `Provider accepted the request and recovery marker persistence also failed: ${boundedErrorMessage(recoveryError)}`, recoveryError);
+      }
       throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", `Provider accepted the request but durable correlation persistence failed: ${boundedErrorMessage(error)}`, error);
     }
     await this.store.transitionActionIntent(intent.intentId, "DISPATCHED", { actorType: "AUTOMATION", correlationId: intent.intentId });
@@ -172,24 +200,44 @@ export class RequirementProviderDispatch {
     const attempt = snapshot.actionAttempts.find((item) => item.actionAttemptId === input.actionAttemptId);
     if (!attempt) throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", "The persisted Requirement ActionAttempt was not found.");
     const intent = snapshot.actionIntents.find((item) => item.intentId === attempt.intentId);
-    if (!intent || intent.projectId !== input.projectId || !attempt.providerRequestRef || !intent.policyVersionId || !intent.idempotencyRef) throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", "The persisted Requirement provider correlation is incomplete.");
-    const requestExternal = snapshot.externalRefs.find((item) => item.externalRefId === attempt.providerRequestRef);
-    if (!requestExternal) throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", "The persisted Requirement provider request reference is missing.");
+    const providerScopeRef = typeof intent?.executionOptions?.providerScopeRef === "string" ? intent.executionOptions.providerScopeRef : null;
+    if (!intent || intent.projectId !== input.projectId || !intent.policyVersionId || !intent.idempotencyRef || !providerScopeRef) throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", "The persisted Requirement provider correlation is incomplete.");
     const correlation: ProviderCorrelation = {
+      projectId: input.projectId,
       actionIntentId: intent.intentId,
       actionAttemptId: attempt.actionAttemptId,
       policyVersionId: intent.policyVersionId,
       idempotencyRef: intent.idempotencyRef,
       semanticRef: intent.semanticSha256 ?? null,
       providerSemanticRef: attempt.providerSemanticSha256 ?? null,
+      providerScopeRef,
     };
+    let requestExternal = snapshot.externalRefs.find((item) => item.externalRefId === attempt.providerRequestRef) ?? null;
+    if (!requestExternal && this.provider.resolveRequestByCorrelation) {
+      const recoveredRequestRef = await this.provider.resolveRequestByCorrelation({ idempotencyRef: intent.idempotencyRef, correlation });
+      if (recoveredRequestRef) {
+        requestExternal = (await this.store.persistActionAttemptProviderRequest({
+          projectId: input.projectId,
+          actionAttemptId: attempt.actionAttemptId,
+          provider: this.provider.provider,
+          providerRequestRef: recoveredRequestRef,
+          providerSemanticSha256: attempt.providerSemanticSha256 ?? null,
+        })).externalRef;
+      }
+    }
+    if (!requestExternal) throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", "The persisted Requirement provider request reference is missing and no existing idempotent provider request could be reattached.");
     let observation: ProviderObservation;
     try {
       observation = await this.provider.reconcile({ providerRequestRef: requestExternal.opaqueId, correlation });
     } catch (error) {
       throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", `${errorCode(error)}: ${boundedErrorMessage(error)}`, error);
     }
-    await this.assertObservation(observation, requestExternal.opaqueId, intent.targetRef);
+    try {
+      await this.assertObservation(observation, requestExternal.opaqueId, intent.targetRef, attempt.providerSemanticSha256 ?? null);
+    } catch (error) {
+      await this.recordUnknown(attempt.actionAttemptId, requestExternal.externalRefId, null, observation.resultHash);
+      throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", `Provider observation correlation failed during reconcile: ${boundedErrorMessage(error)}`, error);
+    }
     let observationExternal: Awaited<ReturnType<AutomationStore["persistActionAttemptProviderObservation"]>>["externalRef"];
     try {
       observationExternal = (await this.store.persistActionAttemptProviderObservation({ projectId: input.projectId, actionAttemptId: attempt.actionAttemptId, provider: observation.provider, providerObservationRef: observation.providerRequestRef, providerRequestExternalRef: requestExternal.externalRefId, providerSemanticSha256: attempt.providerSemanticSha256 ?? null })).externalRef;
@@ -203,16 +251,21 @@ export class RequirementProviderDispatch {
   private async finishAccepted(input: { input: RequirementProviderDispatchInput; correlation: ProviderCorrelation; actionIntentId: string; actionAttemptId: string; requestExternalRef: string; providerRequestRef: string }): Promise<RequirementProviderDispatchResult> {
     let observation: ProviderObservation | null = null;
     try {
-      observation = await this.provider.observe({ providerRequestRef: input.providerRequestRef });
+      observation = await this.provider.observe({ providerRequestRef: input.providerRequestRef, correlation: input.correlation });
       if (observation.state !== "COMPLETED" && observation.state !== "FAILED" && this.provider.waitResult) {
         await this.provider.waitResult({ providerRequestRef: input.providerRequestRef, timeoutMs: input.input.waitTimeoutMs ?? 120_000 });
-        observation = await this.provider.observe({ providerRequestRef: input.providerRequestRef });
+        observation = await this.provider.observe({ providerRequestRef: input.providerRequestRef, correlation: input.correlation });
       }
     } catch (error) {
       await this.recordUnknown(input.actionAttemptId, input.requestExternalRef, null);
       return { actionIntentId: input.actionIntentId, actionAttemptId: input.actionAttemptId, providerRequestExternalRef: input.requestExternalRef, providerObservationExternalRef: null, providerRequestRef: input.providerRequestRef, state: "RECOVERY_REQUIRED", response: null, resultHash: null, observation: null };
     }
-    await this.assertObservation(observation, input.providerRequestRef, input.input.providerTargetRef);
+    try {
+      await this.assertObservation(observation, input.providerRequestRef, input.input.providerTargetRef, input.correlation.providerSemanticRef ?? null);
+    } catch (error) {
+      await this.recordUnknown(input.actionAttemptId, input.requestExternalRef, null, observation.resultHash);
+      throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_RECOVERY_REQUIRED", `Provider observation correlation failed after acceptance: ${boundedErrorMessage(error)}`, error);
+    }
     let observationExternal: Awaited<ReturnType<AutomationStore["persistActionAttemptProviderObservation"]>>["externalRef"];
     try {
       observationExternal = (await this.store.persistActionAttemptProviderObservation({ projectId: input.input.projectId, actionAttemptId: input.actionAttemptId, provider: observation.provider, providerObservationRef: observation.providerRequestRef, providerRequestExternalRef: input.requestExternalRef, providerSemanticSha256: input.correlation.providerSemanticRef ?? null })).externalRef;
@@ -255,9 +308,10 @@ export class RequirementProviderDispatch {
     return { actionIntentId: input.actionIntentId, actionAttemptId: input.actionAttemptId, providerRequestExternalRef: input.requestExternalRef, providerObservationExternalRef: input.observationExternalRef, providerRequestRef: input.providerRequestRef, state, response: state === "COMPLETED" ? result?.response ?? null : null, resultHash: result?.resultHash ?? input.observation.resultHash, observation: input.observation };
   }
 
-  private async assertObservation(observation: ProviderObservation, expectedRequestRef: string, expectedTargetRef?: string | null): Promise<void> {
+  private async assertObservation(observation: ProviderObservation, expectedRequestRef: string, expectedTargetRef?: string | null, expectedSemanticRef?: string | null): Promise<void> {
     if (observation.provider !== this.provider.provider || observation.providerRequestRef !== expectedRequestRef) throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_IDENTITY_MISMATCH", "Provider observation did not preserve request identity.");
     if (expectedTargetRef !== undefined && observation.providerTargetRef !== expectedTargetRef) throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_IDENTITY_MISMATCH", "Provider observation did not preserve target identity.");
+    if (expectedSemanticRef && observation.semanticRef !== expectedSemanticRef) throw new RequirementProviderDispatchError("REQUIREMENT_PROVIDER_IDENTITY_MISMATCH", "Provider observation did not preserve accepted provider semantic identity.");
   }
 
   private async recordFailed(actionAttemptId: string, error: unknown): Promise<void> {

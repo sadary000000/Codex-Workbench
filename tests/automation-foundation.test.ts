@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  AUTOMATION_SCHEMA_VERSION,
   AutomationSchemaError,
   AutomationStore,
   AutomationStoreError,
@@ -11,6 +12,7 @@ import {
   workspaceSnapshotsEqual,
 } from "../src/automation/index.ts";
 import type { INativeAutomationAdapter, IWebGPTAutomationAdapter } from "../src/automation/index.ts";
+import { policyVersionPayload } from "../src/automation/effective-policy.ts";
 
 type Fixture = { root: string; store: AutomationStore; stores: Set<AutomationStore> };
 
@@ -37,7 +39,24 @@ async function dispose(value: Fixture): Promise<void> {
 
 async function graph(store: AutomationStore) {
   const project = await store.createAutomationProject({ projectId: "project-1", name: "AUT-1 test" });
-  const requirement = await store.createRequirementVersion({ requirementVersionId: "requirement-1", projectId: project.projectId, version: 1, status: "ACTIVE", contentRef: "ref:requirement:1", canonicalPayload: requirementPayload("foundation") });
+  await store.createPolicyVersion({
+    policyVersionId: "policy-v1",
+    projectId: project.projectId,
+    version: 1,
+    preset: "test",
+    payload: policyVersionPayload({
+      maxPromptDispatches: 4,
+      maxRepairDispatches: 2,
+      maxRetryDispatches: 2,
+      maxNewChatDispatches: 1,
+      allowedOperations: ["PROMPT", "REPAIR", "RETRY", "NEW_CHAT", "HUMAN_GATE", "VERIFY"],
+      requireHumanGateFor: [],
+      allowDataEgress: false,
+      allowSideEffects: false,
+    }),
+    supersedes: null,
+  });
+  const requirement = await store.createRequirementVersion({ requirementVersionId: "requirement-1", projectId: project.projectId, version: 1, status: "ACTIVE", origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:foundation" }, contentRef: "ref:requirement:1", canonicalPayload: requirementPayload("foundation") });
   const plan = await store.createPlanVersion({ planVersionId: "plan-1", projectId: project.projectId, requirementVersionId: requirement.requirementVersionId, version: 1, status: "ACTIVE" });
   const stage = await store.createStageSpec({ stageSpecId: "stage-1", planVersionId: plan.planVersionId, stageKey: "AUT-1", specVersion: 1, status: "ACTIVE", ordinal: 1, goal: "foundation" });
   const step = await store.createStepSpec({ stepSpecId: "step-1", stageSpecId: stage.stageSpecId, stepKey: "store", specVersion: 1, kind: "SYSTEM_STEP", goal: "persist foundation", riskClass: "LOW", sideEffectClass: "PURE" });
@@ -51,10 +70,10 @@ test("creates an independent automation.db with schema version and survives reop
     assert.equal(project.projectId, "p");
     const inspection = await value.store.inspect();
     assert.equal(inspection.status, "valid");
-    assert.equal(inspection.document?.automationSchemaVersion, 3);
+    assert.equal(inspection.document?.automationSchemaVersion, AUTOMATION_SCHEMA_VERSION);
     const raw = await readFile(value.store.filePath);
     assert.equal(raw.subarray(0, 16).toString("ascii"), "SQLite format 3\0");
-    assert.equal((await value.store.persistenceDiagnostics()).documentSchemaVersion, 3);
+    assert.equal((await value.store.persistenceDiagnostics()).documentSchemaVersion, AUTOMATION_SCHEMA_VERSION);
     const reopened = trackedStore(value);
     assert.equal((await reopened.get("automationProjects", "p"))?.name, "independent");
   } finally {
@@ -122,14 +141,40 @@ test("RequirementVersion owns a canonical immutable payload and rejects drift", 
   const value = await fixture();
   try {
     const project = await value.store.createAutomationProject({ projectId: "p", name: "requirements" });
-    const requirement = await value.store.createRequirementVersion({ projectId: project.projectId, version: 1, status: "ACTIVE", canonicalPayload: requirementPayload("stable") });
+    const requirement = await value.store.createRequirementVersion({ projectId: project.projectId, version: 1, status: "ACTIVE", origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:stable" }, canonicalPayload: requirementPayload("stable") });
     assert.equal(requirement.payloadSha256.length, 64);
     const reopened = trackedStore(value);
     assert.deepEqual(await reopened.get("requirementVersions", requirement.requirementVersionId), requirement);
     await assert.rejects(value.store.transaction((tx) => tx.replace("requirementVersions", { ...requirement, canonicalPayload: requirementPayload("changed") })), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_CONFLICT");
-    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 2, status: "ACTIVE", canonicalPayload: JSON.stringify({ source: "test", goal: "stable" }) }), /canonical JSON/);
-    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 2, status: "ACTIVE", canonicalPayload: requirementPayload("stable"), payloadSha256: "0".repeat(64) }), /does not match/);
-    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 2, status: "ACTIVE", canonicalPayload: JSON.stringify({ token: "forbidden" }) }), /sensitive/);
+    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 2, supersedes: requirement.requirementVersionId, status: "ACTIVE", origin: { originType: "REVISION", source: "SYSTEM", sourceRef: "test:stable:invalid-json" }, canonicalPayload: JSON.stringify({ source: "test", goal: "stable" }) }), /canonical JSON/);
+    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 2, supersedes: requirement.requirementVersionId, status: "ACTIVE", origin: { originType: "REVISION", source: "SYSTEM", sourceRef: "test:stable:invalid-hash" }, canonicalPayload: requirementPayload("stable"), payloadSha256: "0".repeat(64) }), /does not match/);
+    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 2, supersedes: requirement.requirementVersionId, status: "ACTIVE", origin: { originType: "REVISION", source: "SYSTEM", sourceRef: "test:stable:sensitive" }, canonicalPayload: JSON.stringify({ token: "forbidden" }) }), /sensitive/);
+  } finally {
+    await dispose(value);
+  }
+});
+
+test("K0 requires explicit origin provenance and rejects duplicate roots, orphan origins, and leaked transaction mutations", async () => {
+  const value = await fixture();
+  try {
+    const project = await value.store.createAutomationProject({ projectId: "k0-project", name: "K0 invariants" });
+    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 1, status: "DRAFT", canonicalPayload: requirementPayload("implicit-origin") }), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_INVALID");
+    const root = await value.store.createRequirementVersion({ requirementVersionId: "k0-root", projectId: project.projectId, version: 1, status: "ACTIVE", origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:k0-root" }, canonicalPayload: requirementPayload("root") });
+    await assert.rejects(value.store.createRequirementVersion({ requirementVersionId: "k0-second-root", projectId: project.projectId, version: 1, status: "ACTIVE", origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:k0-second-root" }, canonicalPayload: requirementPayload("second-root") }), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_CONFLICT");
+    await assert.rejects(value.store.createRequirementVersion({ projectId: project.projectId, version: 3, status: "ACTIVE", supersedes: root.requirementVersionId, origin: { originType: "REVISION", source: "SYSTEM", sourceRef: "test:k0-gap" }, canonicalPayload: requirementPayload("gap") }), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_CONFLICT");
+
+    const leaked = await value.store.transaction((tx) => {
+      const projectRecord = tx.require("automationProjects", project.projectId);
+      projectRecord.name = "mutated outside transaction";
+      return projectRecord;
+    });
+    assert.equal(leaked.name, "mutated outside transaction");
+    assert.equal((await value.store.get("automationProjects", project.projectId))?.name, "K0 invariants");
+
+    const orphanOrigin = { requirementOriginId: "k0-orphan", projectId: project.projectId, originType: "IMPORT" as const, source: "IMPORT" as const, sourceRef: "test:k0-orphan", createdAt: new Date().toISOString() };
+    await assert.rejects(value.store.transaction((tx) => {
+      tx.insert("requirementOrigins", orphanOrigin);
+    }), (error: unknown) => error instanceof AutomationSchemaError || error instanceof AutomationStoreError);
   } finally {
     await dispose(value);
   }
@@ -155,8 +200,8 @@ test("versioned requirements remain immutable and attempts bind the exact StepSp
   const value = await fixture();
   try {
     const first = await value.store.createAutomationProject({ projectId: "p", name: "versions" });
-    const r1 = await value.store.createRequirementVersion({ requirementVersionId: "r1", projectId: first.projectId, version: 1, status: "ACTIVE", contentRef: "ref:r1", canonicalPayload: requirementPayload("r1") });
-    const r2 = await value.store.createRequirementVersion({ requirementVersionId: "r2", projectId: first.projectId, version: 2, status: "ACTIVE", contentRef: "ref:r2", canonicalPayload: requirementPayload("r2"), supersedes: r1.requirementVersionId });
+    const r1 = await value.store.createRequirementVersion({ requirementVersionId: "r1", projectId: first.projectId, version: 1, status: "ACTIVE", origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:r1" }, contentRef: "ref:r1", canonicalPayload: requirementPayload("r1") });
+    const r2 = await value.store.createRequirementVersion({ requirementVersionId: "r2", projectId: first.projectId, version: 2, status: "ACTIVE", origin: { originType: "REVISION", source: "SYSTEM", sourceRef: "test:r2" }, contentRef: "ref:r2", canonicalPayload: requirementPayload("r2"), supersedes: r1.requirementVersionId });
     assert.equal((await value.store.get("requirementVersions", "r1"))?.status, "SUPERSEDED");
     assert.equal((await value.store.get("automationProjects", "p"))?.activeRequirementVersionId, r2.requirementVersionId);
     const plan = await value.store.createPlanVersion({ planVersionId: "plan", projectId: first.projectId, requirementVersionId: r2.requirementVersionId, version: 1, status: "ACTIVE" });
@@ -254,10 +299,10 @@ test("migrates a v1 fixture to v2 and fails closed for future versions", async (
     const migrated = await trackedStore(value).inspect();
     assert.equal(migrated.status, "valid");
     assert.equal(migrated.migratedFrom, 1);
-    assert.equal(migrated.document?.automationSchemaVersion, 3);
+    assert.equal(migrated.document?.automationSchemaVersion, AUTOMATION_SCHEMA_VERSION);
     assert.equal(migrated.document?.stepRuntimes[0]?.currentAttemptId, attempt.attemptId);
     assert.equal(migrated.document?.requirementVersions[0]?.payloadSha256.length, 64);
-    await writeFile(value.store.filePath, JSON.stringify({ automationSchemaVersion: 4 }), "utf8");
+    await writeFile(value.store.filePath, JSON.stringify({ automationSchemaVersion: AUTOMATION_SCHEMA_VERSION + 1 }), "utf8");
     await assert.rejects(trackedStore(value).snapshot(), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_DB_VERSION_UNSUPPORTED");
   } finally {
     await dispose(value);
@@ -309,6 +354,38 @@ test("schema and store enforce privacy boundary and do not import V1/WebGPT adap
     const raw = await readFile(value.store.filePath, "utf8");
     assert.doesNotMatch(raw, /forbidden/);
     assert.doesNotMatch(raw, /transcript|cookie|authorization|raw.body/i);
+  } finally {
+    await dispose(value);
+  }
+});
+
+test("Requirement alignment ActionIntent accepts only opaque process-owned InputRefs", async () => {
+  const value = await fixture();
+  try {
+    const project = await value.store.createAutomationProject({ projectId: "input-ref-project", name: "input ref" });
+    await assert.rejects(
+      value.store.createActionIntent({ projectId: project.projectId, actionType: "REQUIREMENT_ALIGNMENT", targetRef: "provider-target", sideEffectClass: "PURE", payloadRef: "raw requirement text", idempotencyRef: "input-ref-invalid" }),
+      (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_PRIVACY_BOUNDARY",
+    );
+    const valid = await value.store.createActionIntent({ projectId: project.projectId, actionType: "REQUIREMENT_ALIGNMENT", targetRef: "provider-target", sideEffectClass: "PURE", payloadRef: `automation-input-v1:${"a".repeat(64)}`, idempotencyRef: "input-ref-valid" });
+    assert.equal(valid.payloadRef, `automation-input-v1:${"a".repeat(64)}`);
+  } finally {
+    await dispose(value);
+  }
+});
+
+test("fresh side-effect ActionIntents must pin the current project policy while existing old pins remain idempotent", async () => {
+  const value = await fixture();
+  try {
+    const { project } = await graph(value.store);
+    const existing = await value.store.createActionIntent({ projectId: project.projectId, actionType: "OLD_PIN_IN_FLIGHT", targetRef: "target", sideEffectClass: "IDEMPOTENT", policyVersionId: "policy-v1", idempotencyRef: "old-in-flight" });
+    await value.store.createPolicyVersion({ policyVersionId: "policy-v2", projectId: project.projectId, version: 2, preset: "test-v2", payload: policyVersionPayload({ maxPromptDispatches: 1, maxRepairDispatches: 1, maxRetryDispatches: 1, maxNewChatDispatches: 0, allowedOperations: ["VERIFY"], requireHumanGateFor: [], allowDataEgress: false, allowSideEffects: false }), supersedes: "policy-v1" });
+    const reattached = await value.store.createActionIntent({ projectId: project.projectId, actionType: existing.actionType, targetRef: existing.targetRef, sideEffectClass: existing.sideEffectClass, policyVersionId: "policy-v1", idempotencyRef: "old-in-flight" });
+    assert.equal(reattached.intentId, existing.intentId);
+    await assert.rejects(
+      value.store.createActionIntent({ projectId: project.projectId, actionType: "FRESH_OLD_PIN", targetRef: "target", sideEffectClass: "IDEMPOTENT", policyVersionId: "policy-v1", idempotencyRef: "fresh-old-pin" }),
+      (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_CONFLICT" && /current PolicyVersion/.test(error.message),
+    );
   } finally {
     await dispose(value);
   }

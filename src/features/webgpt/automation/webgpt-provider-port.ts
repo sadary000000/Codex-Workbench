@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { assertProviderExecutionAuthorization } from "../../../automation/adapters.ts";
 import { classifyRecoveryIntent, type RecoveryIntentInput } from "../../../automation/recovery-intent.ts";
 import { assertProviderCorrelationIdentity } from "../../../automation/stable-identity.ts";
@@ -18,7 +19,7 @@ import type {
   ProviderRuntimeCapability,
 } from "../../../automation/adapters.ts";
 import type { WebGptRole, WebGptRequestRecord, WebGptRequestState } from "../types.ts";
-import { normalizeWebGptRole } from "../runtime/webgpt-role-session-registry.ts";
+import { normalizeRoleChatUrl, normalizeWebGptRole } from "../runtime/webgpt-role-session-registry.ts";
 import type { WebGptRoleSessionService } from "../runtime/webgpt-role-session-service.ts";
 import type { WebGptRequestManager } from "../runtime/webgpt-request-manager.ts";
 
@@ -29,7 +30,7 @@ export interface WebGptProviderPortOptions {
     readonly status: WebGptRoleSessionService["status"];
     readonly submit: (projectId: string, role: WebGptRole, prompt: string, idempotencyKey?: string, policyVersionId?: string | null) => Promise<WebGptRequestRecord>;
   };
-  readonly requestManager: Pick<WebGptRequestManager, "requestStatus" | "reconcileRequest"> & Partial<Pick<WebGptRequestManager, "getResult" | "waitForRequest">>;
+  readonly requestManager: Pick<WebGptRequestManager, "requestStatus" | "reconcileRequest"> & Partial<Pick<WebGptRequestManager, "findByIdempotencyKey" | "getResult" | "waitForRequest">>;
   readonly resolveInputRef: (inputRef: string) => Promise<string>;
   readonly readRuntimeCapability: () => Promise<ProviderRuntimeCapability>;
   /** The composition root must provide the pinned policy authority. */
@@ -86,12 +87,14 @@ function policyProvenance(correlation: ProviderCorrelation, authorization: Provi
 }
 
 function assertRecordCorrelation(record: WebGptRequestRecord, correlation: ProviderCorrelation, target: { projectId: string; role: WebGptRole }): void {
+  if (correlation.projectId !== target.projectId) throw new Error("PROVIDER_PROJECT_SCOPE_MISMATCH");
   if (record.policyVersionId !== correlation.policyVersionId) throw new Error("PROVIDER_POLICY_PIN_MISMATCH");
   if (record.idempotencyKey !== correlation.idempotencyRef) throw new Error("PROVIDER_IDEMPOTENCY_MISMATCH");
   // Keep legacy callers strict while allowing the new Requirement path to
   // distinguish its domain semantic from the provider's execution semantic.
   const expectedProviderSemantic = correlation.providerSemanticRef === undefined ? correlation.semanticRef : correlation.providerSemanticRef;
   if (expectedProviderSemantic && record.semanticSha256 !== expectedProviderSemantic) throw new Error("PROVIDER_SEMANTIC_MISMATCH");
+  if (correlation.providerScopeRef !== undefined && correlation.providerScopeRef !== null && correlation.providerScopeRef !== target.projectId) throw new Error("PROVIDER_TARGET_SCOPE_MISMATCH");
   if (record.projectId !== target.projectId || record.role !== target.role) throw new Error("PROVIDER_TARGET_CORRELATION_MISMATCH");
   assertProviderCorrelationIdentity({
     actionIntentId: correlation.actionIntentId,
@@ -113,24 +116,53 @@ function assertRecordCorrelation(record: WebGptRequestRecord, correlation: Provi
 }
 
 function observation(record: WebGptRequestRecord, policy?: ProviderPolicyProvenance): ProviderObservation {
+  assertObservedTargetIdentity(record);
   const terminalSuccess = record.state === "COMPLETED";
   const terminalFailure = record.state === "FAILED" || record.state === "CANCELED";
   return {
     provider: "WEBGPT",
     providerRequestRef: record.requestId,
     providerTargetRef: targetRefFromRecord(record),
+    semanticRef: record.semanticSha256,
     state: providerState(record.state),
     outcomeCertainty: terminalSuccess ? "TERMINAL_CONFIRMED" : terminalFailure ? "TERMINAL_FAILED" : "ACCEPTED_UNKNOWN_RESULT",
     resultRef: record.resultSha256 ? `webgpt-result:${record.requestId}` : null,
     resultHash: record.resultSha256,
-    evidenceRefs: [`webgpt-request:${record.requestId}`],
+    evidenceRefs: [
+      `webgpt-request:${record.requestId}`,
+      ...(record.targetChatUrl ? [`webgpt-target-identity:${createHash("sha256").update(record.targetChatUrl, "utf8").digest("hex")}`] : []),
+    ],
     ...(policy ? { policy } : {}),
   };
+}
+
+/**
+ * The provider target is opaque to Automation, but the WebGPT adapter must
+ * still prove that its internal request record was last observed on the
+ * exact persisted Chat target.  A journal state of RECOVERY_REQUIRED is not
+ * allowed to become a seemingly correlated observation merely because its
+ * project/role target ref survived.
+ */
+function assertObservedTargetIdentity(record: WebGptRequestRecord): void {
+  if (!record.targetChatUrl || !record.lastKnownPageState?.url) throw new Error("WEBGPT_TARGET_CHAT_MISMATCH");
+  const expected = normalizeRoleChatUrl(record.targetChatUrl);
+  const observedRaw = record.lastKnownPageState.url;
+  let observed: string;
+  try {
+    observed = normalizeRoleChatUrl(observedRaw);
+  } catch {
+    throw new Error("WEBGPT_TARGET_CHAT_MISMATCH");
+  }
+  if (observed !== expected) throw new Error("WEBGPT_TARGET_CHAT_MISMATCH");
+  if (record.lastKnownPageState && (!record.lastKnownPageState.onChatPage || record.lastKnownPageState.loginRequired)) {
+    throw new Error("WEBGPT_TARGET_CHAT_MISMATCH");
+  }
 }
 
 function ensureCorrelation(input: ProviderCorrelation): void {
   if (!input.actionIntentId || !input.actionAttemptId || !input.idempotencyRef) throw new Error("PROVIDER_CORRELATION_REQUIRED");
   if (!input.policyVersionId) throw new Error("PROVIDER_POLICY_PIN_REQUIRED");
+  if (!input.projectId?.trim()) throw new Error("PROVIDER_PROJECT_SCOPE_REQUIRED");
 }
 
 function capabilityError(operation: "SUBMIT" | "RECONCILE", capability: ProviderRuntimeCapability): string | null {
@@ -193,17 +225,28 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
     assertLiveCapabilityProof(authorization, liveCapability);
     await this.validateActionAttempt?.(input.correlation);
     const target = parseTargetRef(input.providerTargetRef);
+    if (input.correlation.projectId !== target.projectId) throw new Error("PROVIDER_PROJECT_SCOPE_MISMATCH");
+    if (input.correlation.providerScopeRef !== undefined && input.correlation.providerScopeRef !== null && input.correlation.providerScopeRef !== target.projectId) throw new Error("PROVIDER_TARGET_SCOPE_MISMATCH");
     const resolved = await this.resolveTarget({ workflowRole: input.workflowRole, providerTargetRef: input.providerTargetRef });
     if (resolved.status !== "AVAILABLE") throw new Error(`WEBGPT_TARGET_UNAVAILABLE:${resolved.capability ?? "UNKNOWN"}`);
     if (!input.inputRef) throw new Error("PROVIDER_INPUT_REF_REQUIRED");
     const payload = await this.resolveInputRef(input.inputRef);
     const record = await this.roleSession.submit(target.projectId, target.role, payload, input.correlation.idempotencyRef ?? undefined, authorization.policyVersionId);
     assertRecordCorrelation(record, input.correlation, target);
+    await this.assertCurrentRoleTarget(record, target);
     return { provider: "WEBGPT", providerRequestRef: record.requestId, providerTargetRef: input.providerTargetRef, semanticRef: record.semanticSha256, policy: policyProvenance(input.correlation, authorization) };
   }
 
-  async observe(input: { providerRequestRef: string }): Promise<ProviderObservation> {
-    return observation(await this.requestManager.requestStatus(input.providerRequestRef, false));
+  async observe(input: { providerRequestRef: string; correlation?: ProviderCorrelation }): Promise<ProviderObservation> {
+    const record = await this.requestManager.requestStatus(input.providerRequestRef, false);
+    if (input.correlation) {
+      ensureCorrelation(input.correlation);
+      if (!record.projectId || !record.role) throw new Error("PROVIDER_TARGET_CORRELATION_MISSING");
+      const target = { projectId: record.projectId, role: normalizeWebGptRole(record.role) };
+      assertRecordCorrelation(record, input.correlation, target);
+      await this.assertCurrentRoleTarget(record, target);
+    }
+    return observation(record);
   }
 
   async reconcile(input: { providerRequestRef: string; correlation: ProviderCorrelation }): Promise<ProviderObservation> {
@@ -218,10 +261,32 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
     const target = before.projectId && before.role ? { projectId: before.projectId, role: normalizeWebGptRole(before.role) } : null;
     if (!target) throw new Error("PROVIDER_TARGET_CORRELATION_MISSING");
     assertRecordCorrelation(before, input.correlation, target);
+    await this.assertCurrentRoleTarget(before, target);
     await this.validateActionAttempt?.(input.correlation);
     const reconciled = await this.requestManager.reconcileRequest(input.providerRequestRef);
     assertRecordCorrelation(reconciled, input.correlation, target);
+    await this.assertCurrentRoleTarget(reconciled, target);
     return observation(reconciled, policyProvenance(input.correlation, authorization));
+  }
+
+  async resolveRequestByCorrelation(input: { idempotencyRef: string; correlation: ProviderCorrelation }): Promise<string | null> {
+    ensureCorrelation(input.correlation);
+    const findByIdempotencyKey = this.requestManager.findByIdempotencyKey;
+    if (!findByIdempotencyKey) return null;
+    const record = await findByIdempotencyKey.call(this.requestManager, input.idempotencyRef);
+    if (!record) return null;
+    if (!record.projectId || !record.role) throw new Error("PROVIDER_TARGET_CORRELATION_MISSING");
+    const target = { projectId: record.projectId, role: normalizeWebGptRole(record.role) };
+    assertRecordCorrelation(record, input.correlation, target);
+    await this.assertCurrentRoleTarget(record, target);
+    return record.requestId;
+  }
+
+  private async assertCurrentRoleTarget(record: Pick<WebGptRequestRecord, "projectId" | "role" | "targetChatUrl">, target: { projectId: string; role: WebGptRole }): Promise<void> {
+    const binding = await this.roleSession.status(target.projectId, target.role);
+    if (binding.status !== "BOUND" || !binding.chatUrl || !record.targetChatUrl || normalizeRoleChatUrl(binding.chatUrl) !== normalizeRoleChatUrl(record.targetChatUrl)) {
+      throw new Error("PROVIDER_TARGET_CORRELATION_MISMATCH");
+    }
   }
 
   async readResult(input: { providerRequestRef: string }): Promise<ProviderResult> {
@@ -258,7 +323,7 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
     const decision = classifyRecoveryIntent(input.recovery);
     if (decision.providerRequestRef !== input.providerRequestRef) throw new Error("PROVIDER_RECOVERY_CORRELATION_MISMATCH");
     if (decision.disposition === "TERMINAL") throw new Error("PROVIDER_RECOVERY_TERMINAL");
-    if (decision.disposition === "WAITING_EXTERNAL") return this.observe({ providerRequestRef: input.providerRequestRef });
+    if (decision.disposition === "WAITING_EXTERNAL") return this.observe({ providerRequestRef: input.providerRequestRef, correlation: input.correlation });
     if (decision.disposition !== "REATTACH_PROVIDER_REQUEST" && decision.disposition !== "RECONCILE_REQUIRED") {
       throw new Error(`PROVIDER_RECOVERY_BLOCKED:${decision.disposition}`);
     }

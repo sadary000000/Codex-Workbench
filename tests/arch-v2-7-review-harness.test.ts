@@ -176,7 +176,7 @@ test("fault injection before SQLite commit leaves canonical document and audit c
     assert.equal(child.code, 17, child.stderr);
     const reopened = new AutomationStore(harness.store.filePath);
     assert.deepEqual(await reopened.snapshot(), before);
-    assert.equal((await reopened.list("auditEvents")).length, 1);
+    assert.equal((await reopened.list("auditEvents")).length, 2);
     await reopened.close();
   } finally {
     await harness.close();

@@ -17,6 +17,8 @@ import { createEvidenceCorrelation } from "./evidence-correlation.ts";
 
 const WEBGPT_PROVIDER = "WEBGPT" as const;
 
+export type WebGptExternalActionExecutionMode = "ENABLED" | "PAUSED";
+
 export interface WebGptActionDispatchContext {
   runtimeReady: boolean;
   policyPreconditionSatisfied: boolean;
@@ -182,13 +184,16 @@ export class WebGptExternalActionError extends Error {
 export class WebGptExternalActionBridge {
   private readonly store: AutomationStore;
   private readonly provider: WebGptExternalActionAdapter;
+  private readonly executionMode: WebGptExternalActionExecutionMode;
 
-  constructor(store: AutomationStore, provider: WebGptExternalActionAdapter) {
+  constructor(store: AutomationStore, provider: WebGptExternalActionAdapter, options: { executionMode?: WebGptExternalActionExecutionMode } = {}) {
     this.store = store;
     this.provider = provider;
+    this.executionMode = options.executionMode ?? "ENABLED";
   }
 
   async dispatch(input: WebGptExternalActionInput): Promise<WebGptExternalActionResult> {
+    this.assertExecutionEnabled();
     const dispatchContext = input.dispatchFacts ? buildWebGptDispatchContext(input.dispatchFacts) : input.dispatchContext;
     if (!dispatchContext) throw new WebGptExternalActionError("DISPATCH_CONTEXT_REQUIRED", "Dispatch requires authoritative dispatchFacts; the legacy boolean context is test-only.");
     const decision = canDispatch(dispatchContext);
@@ -264,12 +269,18 @@ export class WebGptExternalActionBridge {
       try {
         observation = await this.provider.observe(providerRequest);
       } catch (error) {
+        // A provider adapter must not turn a local identity/correlation
+        // violation into an ordinary unknown outcome.  That would hide a
+        // split-brain attempt and make the recovery path look valid.
+        const correlationError = providerObservationCorrelationError(error);
+        if (correlationError) throw correlationError;
         observation = unknownObservation(providerRequest, error);
       }
       const finalized = await this.recordObservation(input, intent, attempt, resourceClaim, providerRequest, providerRequestRef, requestEvidence, observation, false);
       return finalized;
     } catch (error) {
-      if (isProviderObservationCorrelationError(error)) throw error;
+      const correlationError = providerObservationCorrelationError(error);
+      if (correlationError) throw correlationError;
       if (providerAccepted && providerRequest) {
         return this.recordAcceptedUnknown(input, intent, attempt, resourceClaim, providerRequest, error);
       }
@@ -347,6 +358,7 @@ export class WebGptExternalActionBridge {
   }
 
   async reconcile(input: { actionAttemptId: string; projectId: string; transition?: TransitionInput }): Promise<WebGptExternalActionResult> {
+    this.assertExecutionEnabled();
     const snapshot = await this.store.snapshot();
     const attempt = snapshot.actionAttempts.find((value) => value.actionAttemptId === input.actionAttemptId);
     if (!attempt) throw new WebGptExternalActionError("ACTION_ATTEMPT_NOT_FOUND", "The ActionAttempt to reconcile does not exist.");
@@ -468,38 +480,50 @@ export class WebGptExternalActionBridge {
    * redispatch the provider operation from this path.
    */
   private async recordAcceptedUnknown(input: WebGptExternalActionInput, intent: ActionIntent, attempt: ActionAttempt, resourceClaim: ResourceClaim, providerRequest: WebGptProviderRequest, persistenceError: unknown): Promise<WebGptExternalActionResult> {
-    const current = await this.store.snapshot();
-    const existing = current.actionReceipts.find((receipt) => receipt.actionAttemptId === attempt.actionAttemptId);
-    if (existing) {
-      return { intent: (await this.store.get("actionIntents", intent.intentId))!, attempt: (await this.store.get("actionAttempts", attempt.actionAttemptId))!, resourceClaim: (await this.store.get("resourceClaims", resourceClaim.resourceClaimId))!, providerRequest, observation: null, receipt: existing };
-    }
-    const providerRequestRef = await this.ensureExternalRef(input.projectId, "WEBGPT_PROVIDER_REQUEST", providerRequest.providerRequestId);
-    const requestEvidence = await this.ensureEvidence(input, attempt, "WEBGPT_PROVIDER_REQUEST", {
-      providerRequestId: providerRequest.providerRequestId,
-      providerState: providerRequest.state,
-      providerSemanticSha256: providerRequest.semanticSha256,
-      targetChatUrl: providerRequest.targetChatUrl,
-      localPersistenceError: errorCode(persistenceError),
-    }, { requestId: providerRequest.providerRequestId, resourceLeaseId: providerRequest.resourceLease?.leaseRef ?? null });
-    attempt = await this.store.attachActionAttemptProvider({ actionAttemptId: attempt.actionAttemptId, providerRequestRef, providerSemanticSha256: providerRequest.semanticSha256 });
-    if (providerRequest.resourceLease) {
-      const leaseRef = await this.ensureExternalRef(input.projectId, "WEBGPT_RESOURCE_LEASE", providerRequest.resourceLease.leaseRef);
-      await this.store.attachResourceClaimLease({ resourceClaimId: resourceClaim.resourceClaimId, resourceLeaseRef: leaseRef, leaseEpoch: providerRequest.resourceLease.leaseEpoch });
-    }
-    const receipt = await this.store.createActionReceipt({
+    // The first write after provider acceptance must be one atomic transaction.
+    // Evidence and lease decoration are optional; they must never be allowed to
+    // fail after this marker and reopen a duplicate-send window.
+    const durable = await this.store.recordAcceptedProviderUnknown({
+      projectId: input.projectId,
       actionAttemptId: attempt.actionAttemptId,
-      status: "UNKNOWN",
       provider: WEBGPT_PROVIDER,
+      providerRequestRef: providerRequest.providerRequestId,
+      providerSemanticSha256: providerRequest.semanticSha256,
       externalStatus: "ACCEPTED_UNKNOWN_RESULT",
-      providerRequestRef,
-      outcomeCertainty: "ACCEPTED_UNKNOWN_RESULT",
-      evidenceRefs: [requestEvidence],
-      reconcileState: "RECOVERY_REQUIRED",
     });
-    return { intent: (await this.store.get("actionIntents", intent.intentId))!, attempt: (await this.store.get("actionAttempts", attempt.actionAttemptId))!, resourceClaim: (await this.store.get("resourceClaims", resourceClaim.resourceClaimId))!, providerRequest, observation: null, receipt };
+    attempt = durable.attempt;
+    try {
+      await this.ensureEvidence(input, attempt, "WEBGPT_PROVIDER_REQUEST", {
+        providerRequestId: providerRequest.providerRequestId,
+        providerState: providerRequest.state,
+        providerSemanticSha256: providerRequest.semanticSha256,
+        targetChatUrl: providerRequest.targetChatUrl,
+        localPersistenceError: errorCode(persistenceError),
+      }, { requestId: providerRequest.providerRequestId, resourceLeaseId: providerRequest.resourceLease?.leaseRef ?? null });
+    } catch {
+      // The durable UNKNOWN marker is the recovery authority. Optional evidence
+      // is retried/reconciled later and cannot turn accepted work into FAILED.
+    }
+    if (providerRequest.resourceLease) {
+      try {
+        const leaseRef = await this.ensureExternalRef(input.projectId, "WEBGPT_RESOURCE_LEASE", providerRequest.resourceLease.leaseRef);
+        await this.store.attachResourceClaimLease({ resourceClaimId: resourceClaim.resourceClaimId, resourceLeaseRef: leaseRef, leaseEpoch: providerRequest.resourceLease.leaseEpoch });
+      } catch {
+        // Lease decoration is also best-effort after the accepted marker.
+      }
+    }
+    return { intent: (await this.store.get("actionIntents", intent.intentId))!, attempt: (await this.store.get("actionAttempts", attempt.actionAttemptId))!, resourceClaim: (await this.store.get("resourceClaims", resourceClaim.resourceClaimId))!, providerRequest, observation: null, receipt: durable.receipt };
+  }
+
+  private assertExecutionEnabled(): void {
+    if (this.executionMode === "PAUSED") {
+      throw new WebGptExternalActionError("LEGACY_PROVIDER_PATH_PAUSED", "The legacy WebGPT external-action bridge is paused in production; use the provider-neutral Automation Port.");
+    }
   }
 
   private async createExternalRef(projectId: string, kind: "WEBGPT_PROVIDER_REQUEST" | "WEBGPT_PROVIDER_OBSERVATION" | "WEBGPT_RESOURCE_LEASE", opaqueId: string): Promise<string> {
+    const existing = (await this.store.snapshot()).externalRefs.find((ref) => ref.projectId === projectId && ref.kind === kind && ref.provider === WEBGPT_PROVIDER && ref.opaqueId === opaqueId);
+    if (existing) return existing.externalRefId;
     const ref = await this.store.createExternalRef({ projectId, kind, provider: WEBGPT_PROVIDER, opaqueId });
     return ref.externalRefId;
   }
@@ -521,8 +545,20 @@ export class WebGptExternalActionBridge {
   }
 }
 
-function isProviderObservationCorrelationError(error: unknown): error is WebGptExternalActionError {
-  return error instanceof WebGptExternalActionError && error.code === "PROVIDER_OBSERVATION_CORRELATION_MISMATCH";
+function providerObservationCorrelationError(error: unknown): WebGptExternalActionError | null {
+  if (error instanceof WebGptExternalActionError && error.code === "PROVIDER_OBSERVATION_CORRELATION_MISMATCH") return error;
+  if (!error || typeof error !== "object") return null;
+  const code = (error as { code?: unknown }).code;
+  const message = error instanceof Error ? error.message : "";
+  if (code !== "AUTOMATION_CONFLICT" || !/Provider(?:Request|Observation)|correlation/i.test(message)) return null;
+  const mismatches = /ProviderRequest ExternalRef/.test(message)
+    ? ["attemptExternalRef", "externalRefCorrelation"]
+    : ["externalRefCorrelation"];
+  return new WebGptExternalActionError(
+    "PROVIDER_OBSERVATION_CORRELATION_MISMATCH",
+    "Provider observation identity does not correlate to the dispatched ActionAttempt and ProviderRequest.",
+    { mismatches, causeCode: code },
+  );
 }
 
 function canonicalTarget(value: string | null | undefined): string | null {
