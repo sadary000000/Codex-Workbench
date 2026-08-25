@@ -1,7 +1,7 @@
 # STAGE-K0 Reality Check
 
 Date: `2026-08-25` (Asia/Shanghai)
-Status: `LOCAL_AUTOMATED_GATE_PASS_PENDING_GPT_GATE`
+Status: `PASS / FROZEN`
 
 ## Scope and source localization
 
@@ -65,6 +65,5 @@ No real business Prompt or new business Chat was used.
 
 The initial four-agent challenge found P0/P1 risks. Each is either closed by
 the K0 patch above or explicitly outside the K0 product boundary. The local
-automated gate is now PASS; the package and GPT response are still required
-before K0 is called frozen. This document is not a substitute for the final
-GPT Gate.
+automated gate and fixed-target GPT Gate are PASS. K0 is frozen at its
+authorized scope; this does not authorize automatic entry into another stage.

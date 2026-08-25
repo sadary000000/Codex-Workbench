@@ -1,9 +1,10 @@
 # STAGE-K0 Stage Review
 
-Local result: `PASS_CANDIDATE`
+Local result: `PASS / FROZEN`
 Implementation commit: `ece5363`
 Review package: `D:\办公\AI\Codex_Workbench_V1\dist\review\STAGE-K0-REVIEW-PACKAGE.zip`
 Review package checksum: `dist/review/STAGE-K0-REVIEW-PACKAGE.sha256`
+GPT submissionId: `1ae2c2b68afbde61589874af97d7329422a897cd3fc82284c788e5891005f95f`
 
 ## Scope resolution
 
@@ -47,16 +48,24 @@ new_business_chats: 0
 | direct reconcile seam | PASS | `AUTOMATION_RECONCILE_REQUIRED` contract |
 | V1 Frozen Core unchanged | PASS | scoped diff/provenance |
 | automated gate | PASS | `STAGE-K0-TESTS.md` and provenance |
-| GPT review gate | PENDING | Submission Runner result; fixed target and explicit Gate/Status contract |
+| GPT review gate | PASS | `REVIEW_RECEIVED`; fixed target matched and explicit Gate/Status parsed |
 
 ## Final review result
 
-The local implementation/package loop is complete. The remaining external
-step is the fixed-target GPT review. It must record an explicit:
+The local implementation/package loop and fixed-target GPT review are complete.
+The recorded external result is:
 
 ```yaml
-Gate: PASS | FIX_REQUIRED | BLOCKED | REDESIGN
-Status: <independent status>
+Gate: PASS
+Status: READY_FOR_NEXT_STAGE
+replyReceived: true
+responseComplete: true
+gateExtraction: GATE_PARSED
+confidence: explicit
+subagents_started: 4
+subagents_completed: 4
+running_subagents: 0
 ```
 
-No next stage is entered automatically.
+No next stage is entered automatically; this turn stops at the completed K0
+scope and waits for a new explicit instruction.
