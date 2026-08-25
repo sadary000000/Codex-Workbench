@@ -56,6 +56,9 @@ import type {
   RecoveryState,
   RequirementVersion,
   RequirementVersionStatus,
+  RequirementOrigin,
+  RequirementOriginSource,
+  RequirementOriginType,
   ResourceClaim,
   ResourceClaimMode,
   ResourceClaimState,
@@ -126,12 +129,22 @@ export interface RequirementVersionInput {
   projectId: string;
   version: number;
   status?: RequirementVersionStatus;
+  originRef?: string | null;
+  origin?: RequirementOriginInput;
   contentRef?: string | null;
   structuredPayloadRef?: string | null;
   canonicalPayload: string;
   payloadSha256?: string;
   confirmedAt?: IsoTimestamp | null;
   supersedes?: string | null;
+}
+
+export interface RequirementOriginInput {
+  requirementOriginId?: string;
+  originType: RequirementOriginType;
+  source: RequirementOriginSource;
+  sourceRef?: string | null;
+  createdAt?: IsoTimestamp;
 }
 
 export interface PlanVersionInput {
@@ -274,6 +287,7 @@ export interface TransitionInput {
 
 const ID_FIELDS: Record<AutomationTableName, string> = {
   automationProjects: "projectId",
+  requirementOrigins: "requirementOriginId",
   requirementVersions: "requirementVersionId",
   requirementAlignmentSessions: "alignmentSessionId",
   requirementAlignmentRounds: "alignmentRoundId",
@@ -327,6 +341,21 @@ function list(value: string[] | undefined, field: string): string[] {
 
 function assertStoredProviderRefs(intent: ActionIntent, attempt: ActionAttempt, requestRef: ExternalRef | null, observationRef: ExternalRef | null): void {
   if (!requestRef && !observationRef) return;
+  if (requestRef && (requestRef.projectId !== intent.projectId || requestRef.kind !== "WEBGPT_PROVIDER_REQUEST")) {
+    throw new AutomationStoreError("AUTOMATION_CONFLICT", "ProviderRequest ExternalRef is outside the ActionIntent project or has the wrong kind.");
+  }
+  if (observationRef && (observationRef.projectId !== intent.projectId || observationRef.kind !== "WEBGPT_PROVIDER_OBSERVATION")) {
+    throw new AutomationStoreError("AUTOMATION_CONFLICT", "ProviderObservation ExternalRef is outside the ActionIntent project or has the wrong kind.");
+  }
+  if (requestRef && observationRef && requestRef.provider !== observationRef.provider) {
+    throw new AutomationStoreError("AUTOMATION_CONFLICT", "Provider request and observation references use different providers.");
+  }
+  if (attempt.providerRequestRef && requestRef && attempt.providerRequestRef !== requestRef.externalRefId) {
+    throw new AutomationStoreError("AUTOMATION_CONFLICT", "ProviderRequest ExternalRef does not match the ActionAttempt correlation.");
+  }
+  if (attempt.providerObservationRef && observationRef && attempt.providerObservationRef !== observationRef.externalRefId) {
+    throw new AutomationStoreError("AUTOMATION_CONFLICT", "ProviderObservation ExternalRef does not match the ActionAttempt correlation.");
+  }
   try {
     assertProviderCorrelationIdentity({
       actionIntentId: intent.intentId,
@@ -368,6 +397,19 @@ function ensureTimestamp(value: string | null | undefined, field: string): strin
 
 function id(value: string | undefined, field: string): string {
   return text(value ?? randomUUID(), field, 256);
+}
+
+function requirementOriginRecord(projectId: string, input: RequirementOriginInput): RequirementOrigin {
+  const sourceRef = optionalText(input.sourceRef, "requirementOrigin.sourceRef", 256);
+  if (sourceRef && /^https?:\/\//i.test(sourceRef)) throw new AutomationStoreError("AUTOMATION_PRIVACY_BOUNDARY", "RequirementOrigin.sourceRef must be an opaque reference, not a URL.");
+  return {
+    requirementOriginId: id(input.requirementOriginId, "requirementOriginId"),
+    projectId,
+    originType: input.originType,
+    source: input.source,
+    sourceRef,
+    createdAt: ensureTimestamp(input.createdAt, "requirementOrigin.createdAt") ?? now(),
+  };
 }
 
 function entityId(table: AutomationTableName, value: unknown): string {
@@ -480,12 +522,17 @@ export class AutomationTransaction {
     this.document = document;
   }
 
+  /** Read APIs return detached values; mutation must use explicit transaction methods. */
   table<K extends AutomationTableName>(name: K): AutomationTables[K][] {
+    return clone(this.document[name] as unknown as AutomationTables[K][]);
+  }
+
+  private mutableTable<K extends AutomationTableName>(name: K): AutomationTables[K][] {
     return this.document[name] as unknown as AutomationTables[K][];
   }
 
   find<K extends AutomationTableName>(name: K, entityIdValue: string): AutomationTables[K] | null {
-    return this.table(name).find((value) => entityId(name, value) === entityIdValue) ?? null;
+    return clone(this.mutableTable(name).find((value) => entityId(name, value) === entityIdValue) ?? null);
   }
 
   require<K extends AutomationTableName>(name: K, entityIdValue: string): AutomationTables[K] {
@@ -496,7 +543,7 @@ export class AutomationTransaction {
 
   insert<K extends AutomationTableName>(name: K, value: AutomationTables[K]): void {
     if (name === "auditEvents") throw new AutomationStoreError("AUTOMATION_CONFLICT", "Audit events are append-only; use appendAudit().");
-    const collection = this.table(name);
+    const collection = this.mutableTable(name);
     const valueId = entityId(name, value);
     if (collection.some((item) => entityId(name, item) === valueId)) throw new AutomationStoreError("AUTOMATION_DUPLICATE_ID", `${name} ${valueId} already exists.`);
     collection.push(value);
@@ -504,14 +551,19 @@ export class AutomationTransaction {
 
   replace<K extends AutomationTableName>(name: K, value: AutomationTables[K]): void {
     if (name === "auditEvents") throw new AutomationStoreError("AUTOMATION_CONFLICT", "Audit events are append-only and cannot be replaced.");
-    const collection = this.table(name);
+    const collection = this.mutableTable(name);
     const valueId = entityId(name, value);
     const index = collection.findIndex((item) => entityId(name, item) === valueId);
     if (index < 0) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", `${name} ${valueId} was not found.`);
     const previous = collection[index] as unknown as Record<string, unknown>;
     if (name === "requirementVersions") {
-      for (const key of ["requirementVersionId", "projectId", "version", "contentRef", "structuredPayloadRef", "canonicalPayload", "payloadSha256", "createdAt", "supersedes"]) {
+      for (const key of ["requirementVersionId", "projectId", "version", "originRef", "contentRef", "structuredPayloadRef", "canonicalPayload", "payloadSha256", "createdAt", "supersedes"]) {
         if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "RequirementVersion immutable payload cannot be replaced.");
+      }
+    }
+    if (name === "requirementOrigins") {
+      for (const key of ["requirementOriginId", "projectId", "originType", "source", "sourceRef", "createdAt"]) {
+        if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "RequirementOrigin is immutable and cannot be replaced.");
       }
     }
     if (name === "planVersions") {
@@ -533,7 +585,7 @@ export class AutomationTransaction {
   }
 
   appendAudit(input: Omit<AuditEventInput, "eventId" | "timestamp"> & Partial<Pick<AuditEventInput, "eventId" | "timestamp">>): AuditEvent {
-    const collection = this.table("auditEvents");
+    const collection = this.mutableTable("auditEvents");
     const previous = collection.at(-1) as AuditEvent | undefined;
     const sequence = (previous?.sequence ?? 0) + 1;
     const eventWithoutHash = {
@@ -664,6 +716,16 @@ export class AutomationStore {
     });
   }
 
+  async createRequirementOrigin(input: RequirementOriginInput & { projectId: string }): Promise<RequirementOrigin> {
+    return this.transaction((tx) => {
+      const project = tx.require("automationProjects", input.projectId);
+      const item = requirementOriginRecord(project.projectId, input);
+      tx.insert("requirementOrigins", item);
+      tx.appendAudit({ projectId: project.projectId, entityType: "RequirementOrigin", entityId: item.requirementOriginId, eventType: "REQUIREMENT_ORIGIN_CREATED", actorType: "SYSTEM", actorRef: null, boundedPayload: { originType: item.originType, source: item.source }, correlationId: item.requirementOriginId, causationId: null });
+      return clone(item);
+    });
+  }
+
   async createRequirementVersion(input: RequirementVersionInput): Promise<RequirementVersion> {
     return this.transaction((tx) => {
       const project = tx.require("automationProjects", input.projectId);
@@ -673,8 +735,10 @@ export class AutomationStore {
       if (supersedes) {
         const old = tx.require("requirementVersions", supersedes);
         if (old.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Requirement versions belong to different projects.");
-        tx.replace("requirementVersions", { ...old, status: "SUPERSEDED" });
+        if (old.version !== input.version - 1) throw new AutomationStoreError("AUTOMATION_CONFLICT", "RequirementVersion predecessor must be the immediately previous version.");
       }
+      if (input.version === 1 && supersedes) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Requirement version 1 cannot supersede a predecessor.");
+      if (input.version > 1 && !supersedes) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Requirement versions after version 1 require an explicit predecessor.");
       let canonicalPayload: string;
       try {
         canonicalPayload = canonicalizeJson(input.canonicalPayload, "requirement.canonicalPayload");
@@ -685,11 +749,27 @@ export class AutomationStore {
       if (input.payloadSha256 !== undefined && input.payloadSha256 !== payloadSha256) {
         throw new AutomationStoreError("AUTOMATION_CONFLICT", "Requirement payload SHA-256 does not match canonicalPayload.");
       }
+      if (input.originRef && input.origin) throw new AutomationStoreError("AUTOMATION_CONFLICT", "RequirementVersion cannot supply both originRef and a new origin.");
+      let originRef = optionalText(input.originRef, "requirement.originRef", 256);
+      if (!originRef && !input.origin) throw new AutomationStoreError("AUTOMATION_INVALID", "RequirementVersion requires an explicit RequirementOrigin or originRef.");
+      if (input.origin) {
+        const origin = requirementOriginRecord(project.projectId, input.origin);
+        tx.insert("requirementOrigins", origin);
+        originRef = origin.requirementOriginId;
+        tx.appendAudit({ projectId: project.projectId, entityType: "RequirementOrigin", entityId: origin.requirementOriginId, eventType: "REQUIREMENT_ORIGIN_CREATED", actorType: "SYSTEM", actorRef: null, boundedPayload: { originType: origin.originType, source: origin.source }, correlationId: origin.requirementOriginId, causationId: null });
+      }
+      if (!originRef) throw new AutomationStoreError("AUTOMATION_INVALID", "RequirementVersion origin resolution failed.");
+      if (originRef) {
+        const origin = tx.require("requirementOrigins", originRef);
+        if (origin.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "RequirementOrigin belongs to another project.");
+      }
+      if (supersedes) tx.replace("requirementVersions", { ...tx.require("requirementVersions", supersedes), status: "SUPERSEDED" });
       const item: RequirementVersion = {
         requirementVersionId: id(input.requirementVersionId, "requirementVersionId"),
         projectId: input.projectId,
         version: input.version,
         status: input.status ?? (supersedes ? "ACTIVE" : "DRAFT"),
+        originRef,
         contentRef: optionalText(input.contentRef, "requirement.contentRef", 256),
         structuredPayloadRef: optionalText(input.structuredPayloadRef, "requirement.structuredPayloadRef", 256),
         canonicalPayload,
@@ -715,8 +795,11 @@ export class AutomationStore {
       if (supersedes) {
         const old = tx.require("planVersions", supersedes);
         if (old.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Plan versions belong to different projects.");
+        if (old.version !== input.version - 1) throw new AutomationStoreError("AUTOMATION_CONFLICT", "PlanVersion predecessor must be the immediately previous version.");
         tx.replace("planVersions", { ...old, status: "SUPERSEDED" });
       }
+      if (input.version === 1 && supersedes) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Plan version 1 cannot supersede a predecessor.");
+      if (input.version > 1 && !supersedes) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Plan versions after version 1 require an explicit predecessor.");
       const item: PlanVersion = { planVersionId: id(input.planVersionId, "planVersionId"), projectId: input.projectId, requirementVersionId: input.requirementVersionId, version: input.version, status: input.status ?? (supersedes ? "ACTIVE" : "DRAFT"), createdAt: now(), supersedes };
       if (input.canonicalPayload !== undefined) {
         const canonicalPayload = canonicalizeJson(input.canonicalPayload, "plan.canonicalPayload");
@@ -893,6 +976,7 @@ export class AutomationStore {
       if (input.stepSpecId) tx.require("stepSpecs", input.stepSpecId);
       if (input.attemptId) tx.require("executionAttempts", input.attemptId);
       const policyVersionId = optionalText(input.policyVersionId ?? project.policyVersionId, "intent.policyVersionId", 256);
+      if (input.sideEffectClass !== "PURE" && !policyVersionId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Side-effect ActionIntent requires a pinned PolicyVersion.");
       if (policyVersionId) {
         const policy = tx.require("policyVersions", policyVersionId);
         if (policy.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "ActionIntent PolicyVersion belongs to another project.");
@@ -1364,7 +1448,7 @@ export class AutomationStore {
       if (input.version > 1 && !supersedes) throw new AutomationStoreError("AUTOMATION_INVALID", "A PolicyVersion after version 1 must explicitly supersede the previous version.");
       if (supersedes) {
         const previous = tx.require("policyVersions", supersedes);
-        if (previous.projectId !== project.projectId || previous.version >= input.version) throw new AutomationStoreError("AUTOMATION_CONFLICT", "PolicyVersion supersedes must reference an older version in the same project.");
+        if (previous.projectId !== project.projectId || previous.version !== input.version - 1) throw new AutomationStoreError("AUTOMATION_CONFLICT", "PolicyVersion predecessor must be the immediately previous version in the same project.");
       }
       const item: PolicyVersion = { policyVersionId: id(input.policyVersionId, "policyVersionId"), projectId: input.projectId, version: input.version, preset: optionalText(input.preset, "policy.preset", 256), payload: safeMetadata(input.payload, "policy.payload"), createdAt: input.createdAt ?? now(), supersedes };
       try {

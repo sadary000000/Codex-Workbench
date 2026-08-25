@@ -40,6 +40,7 @@ class FakeProvider implements AutomationProviderPort {
   readonly submitted: ProviderSubmitInput[] = [];
   state: ProviderObservation["state"] = "COMPLETED";
   resultRequestRefOverride: string | null = null;
+  observationSemanticOverride: string | null | undefined;
   beforeSubmit: ((input: ProviderSubmitInput) => Promise<void>) | null = null;
   response = JSON.stringify({
     requirementProtocolVersion: 1,
@@ -70,10 +71,15 @@ class FakeProvider implements AutomationProviderPort {
   }
 
   async observe(input: { providerRequestRef: string }): Promise<ProviderObservation> {
+    const accepted = this.submitted[Number(input.providerRequestRef.split("-").at(-1) ?? "0") - 1];
+    const semanticRef = this.observationSemanticOverride !== undefined
+      ? this.observationSemanticOverride
+      : accepted ? createHash("sha256").update(`provider:${accepted.correlation.semanticRef}`).digest("hex") : null;
     return {
       provider: this.provider,
       providerRequestRef: input.providerRequestRef,
       providerTargetRef: TEST_TARGET,
+      semanticRef,
       state: this.state,
       outcomeCertainty: this.state === "COMPLETED" ? "TERMINAL_CONFIRMED" : "ACCEPTED_UNKNOWN_RESULT",
       resultRef: this.state === "COMPLETED" ? `result:${input.providerRequestRef}` : null,
@@ -162,6 +168,22 @@ test("AUT-R0 rejects a ProviderResult whose identity does not match the accepted
   try {
     const service = new RequirementAutomationService({ store: value.store, provider, inputRefs: new InputRefRegistry() });
     const session = await service.startAlignment({ projectId: "aut-r0-automation", goal: "Reject mismatched result identity.", webgptProjectId: "workts", providerTargetRef: TEST_TARGET, questions: [] });
+    await assert.rejects(service.requestDraft({ sessionId: session.alignmentSessionId, providerTargetRef: TEST_TARGET }), (error: unknown) => error instanceof RequirementServiceError && error.code === "RECOVERY_REQUIRED");
+    const snapshot = await value.store.snapshot();
+    assert.equal(snapshot.actionReceipts[0]?.status, "UNKNOWN");
+    assert.equal(snapshot.actionReceipts[0]?.reconcileState, "RECOVERY_REQUIRED");
+  } finally {
+    await closeFixture(value);
+  }
+});
+
+test("AUT-R0 rejects an observation whose provider semantic differs from the accepted request", async () => {
+  const value = await fixture();
+  const provider = new FakeProvider();
+  provider.observationSemanticOverride = "provider-semantic-wrong";
+  try {
+    const service = new RequirementAutomationService({ store: value.store, provider, inputRefs: new InputRefRegistry() });
+    const session = await service.startAlignment({ projectId: "aut-r0-automation", goal: "Reject mismatched observation correlation.", webgptProjectId: "workts", providerTargetRef: TEST_TARGET, questions: [] });
     await assert.rejects(service.requestDraft({ sessionId: session.alignmentSessionId, providerTargetRef: TEST_TARGET }), (error: unknown) => error instanceof RequirementServiceError && error.code === "RECOVERY_REQUIRED");
     const snapshot = await value.store.snapshot();
     assert.equal(snapshot.actionReceipts[0]?.status, "UNKNOWN");

@@ -9,6 +9,7 @@ import {
   buildWebGptDispatchContext,
   canDispatch,
   createWebGptRequestManagerActionAdapter,
+  policyVersionPayload,
   type WebGptExternalActionAdapter,
   type WebGptProviderObservation,
   type WebGptProviderRequest,
@@ -68,6 +69,23 @@ async function storeFixture() {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-arch-v2-4-"));
   const store = new AutomationStore(join(root, "automation.db"));
   const project = await store.createAutomationProject({ projectId: "project-1", name: "ARCH-V2-4" });
+  await store.createPolicyVersion({
+    policyVersionId: "policy-v1",
+    projectId: project.projectId,
+    version: 1,
+    preset: "fixture",
+    payload: policyVersionPayload({
+      maxPromptDispatches: 4,
+      maxRepairDispatches: 2,
+      maxRetryDispatches: 2,
+      maxNewChatDispatches: 1,
+      allowedOperations: ["PROMPT", "REPAIR", "RETRY", "NEW_CHAT", "HUMAN_GATE", "VERIFY"],
+      requireHumanGateFor: [],
+      allowDataEgress: false,
+      allowSideEffects: false,
+    }),
+    supersedes: null,
+  });
   return { root, store, project };
 }
 

@@ -1,4 +1,4 @@
-export const AUTOMATION_SCHEMA_VERSION = 3 as const;
+export const AUTOMATION_SCHEMA_VERSION = 4 as const;
 
 export type AutomationSchemaVersion = typeof AUTOMATION_SCHEMA_VERSION;
 export type IsoTimestamp = string;
@@ -33,6 +33,8 @@ export type AutomationProjectLifecycle =
   | "CANCELLED";
 
 export type RequirementVersionStatus = "DRAFT" | "CONFIRMED" | "ACTIVE" | "SUPERSEDED";
+export type RequirementOriginType = "INITIAL" | "REVISION" | "DISCOVERY" | "RECOVERY" | "IMPORT";
+export type RequirementOriginSource = "USER" | "WEBGPT" | "PROJECT_EVIDENCE" | "SYSTEM" | "IMPORT";
 export type PlanVersionStatus = "DRAFT" | "ACTIVE" | "SUPERSEDED";
 export type VersionedSpecStatus = "DRAFT" | "ACTIVE" | "SUPERSEDED";
 export type StepSpecStatus = "ACTIVE" | "SUPERSEDED";
@@ -183,6 +185,20 @@ export interface RequirementAlignmentRound {
   completedAt: IsoTimestamp | null;
 }
 
+/**
+ * Durable provenance for a RequirementVersion.  This is metadata only: it
+ * never owns requirement content and it cannot contain a browser URL, DOM
+ * selector, session handle, prompt, or transcript.
+ */
+export interface RequirementOrigin {
+  requirementOriginId: string;
+  projectId: string;
+  originType: RequirementOriginType;
+  source: RequirementOriginSource;
+  sourceRef: string | null;
+  createdAt: IsoTimestamp;
+}
+
 export interface RequirementQuestion {
   questionId: string;
   alignmentRoundId: string;
@@ -282,6 +298,8 @@ export interface RequirementVersion {
   projectId: string;
   version: number;
   status: RequirementVersionStatus;
+  /** Immutable provenance relationship; the origin is not a content store. */
+  originRef: string;
   /** Optional provenance reference; it is never the requirement truth source. */
   contentRef: string | null;
   /** Optional provenance reference; it is never the requirement truth source. */
@@ -557,6 +575,7 @@ export interface PolicyVersion {
 export interface AutomationDocument {
   automationSchemaVersion: AutomationSchemaVersion;
   automationProjects: AutomationProject[];
+  requirementOrigins: RequirementOrigin[];
   requirementVersions: RequirementVersion[];
   requirementAlignmentSessions: RequirementAlignmentSession[];
   requirementAlignmentRounds: RequirementAlignmentRound[];
@@ -583,6 +602,7 @@ export interface AutomationDocument {
 
 export interface AutomationTables {
   automationProjects: AutomationProject;
+  requirementOrigins: RequirementOrigin;
   requirementVersions: RequirementVersion;
   requirementAlignmentSessions: RequirementAlignmentSession;
   requirementAlignmentRounds: RequirementAlignmentRound;

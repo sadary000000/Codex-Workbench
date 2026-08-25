@@ -1,7 +1,7 @@
 /** Shared identity and pin checks used at persistence and provider seams. */
 
 export const STABLE_IDENTITY_FIELDS = [
-  "projectId", "requirementVersionId", "planVersionId", "stageId", "stepId",
+  "projectId", "requirementVersionId", "requirementOriginRef", "planVersionId", "stageId", "stepId",
   "actionIntentId", "actionAttemptId", "nativeThreadId", "providerTargetRef",
   "providerRequestRef", "providerObservationRef", "idempotencyRef", "semanticRef", "policyVersionId",
 ] as const;
@@ -10,7 +10,7 @@ export type StableIdentityValue = string | null;
 export type StableIdentitySnapshot = Readonly<Partial<Record<StableIdentityField, StableIdentityValue>>>;
 
 const aliases: Readonly<Record<StableIdentityField, readonly string[]>> = {
-  projectId: ["projectId"], requirementVersionId: ["requirementVersionId"], planVersionId: ["planVersionId"],
+  projectId: ["projectId"], requirementVersionId: ["requirementVersionId"], requirementOriginRef: ["originRef", "requirementOriginRef"], planVersionId: ["planVersionId"],
   stageId: ["stageId", "stageSpecId"], stepId: ["stepId", "stepSpecId"],
   actionIntentId: ["actionIntentId", "intentId"], actionAttemptId: ["actionAttemptId"],
   nativeThreadId: ["nativeThreadId"], providerTargetRef: ["providerTargetRef"],
