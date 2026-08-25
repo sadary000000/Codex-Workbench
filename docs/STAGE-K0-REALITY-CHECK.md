@@ -6,7 +6,7 @@ Date: `2026-08-26` (Asia/Shanghai)
 
 ```yaml
 historical_k0: HOLD / EXPERIMENTAL IMPLEMENTATION
-current_k0: REAUTHORIZED_MAINLINE_VALIDATED_PENDING_GPT
+current_k0: REAUTHORIZED_MAINLINE_PACKAGE_READY_PENDING_GPT
 hold_reuse_audit: PASS_WITH_CONTROLLED_REUSE
 automation_schema_version: 4
 real_business_prompts: 0
@@ -32,6 +32,7 @@ targeted_tests: 74/74 PASS
   equivalent_build: PASS_WITH_DONOR_TYPESCRIPT
   exact_build_package: ENVIRONMENT_BLOCKED
 k0_challenge: PASS_WITH_FIVE_FIXES
+review_package: READY
 gpt_gate: PENDING
 ```
 

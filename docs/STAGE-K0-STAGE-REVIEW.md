@@ -7,7 +7,7 @@ Date: `2026-08-26`
 ```yaml
 stage: STAGE-K0
 official_name: Automation Foundation
-implementation_status: VALIDATION_COMPLETE_PACKAGE_PENDING_GPT
+implementation_status: PACKAGE_READY_PENDING_GPT
 hold_reuse_audit: PASS_WITH_CONTROLLED_REUSE
 real_business_prompts: 0
 new_business_chats: 0
@@ -39,6 +39,16 @@ Out of scope: Planner, Executor, Scheduler, Reviewer, Dashboard, K1, browser UI,
 | build / Windows package | EQUIVALENT_BUILD_PASS / EXACT_SCRIPT_ENVIRONMENT_BLOCKED | donor TypeScript emitted `dist-k0-build` and control-plane schema; project-local TypeScript/Electron runtime dependencies are absent for exact scripts |
 | K0-D challenge | PASS_WITH_FIXES | five independent blockers fixed and retested |
 | GPT Gate | PENDING | fixed Submission Runner step follows package creation |
+
+## Package ready
+
+```text
+D:\办公\AI\Codex_Workbench_V1\dist\review\STAGE-K0-REAUTHORIZED-REVIEW-PACKAGE.zip
+D:\办公\AI\Codex_Workbench_V1\dist\review\STAGE-K0-REAUTHORIZED-REVIEW-PACKAGE.zip.sha256
+```
+
+The archive checksum is intentionally kept in the external sidecar so the
+package does not contain a self-referential hash.
 
 ## Required final record
 

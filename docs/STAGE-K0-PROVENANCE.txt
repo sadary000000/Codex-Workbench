@@ -2,7 +2,7 @@ STAGE-K0 Re-authorized Mainline Provenance
 ===========================================
 
 date: 2026-08-26
-lifecycle: REAUTHORIZED_MAINLINE_VALIDATED_PENDING_GPT
+lifecycle: REAUTHORIZED_MAINLINE_PACKAGE_READY_PENDING_GPT
 historical_k0_status: HOLD / EXPERIMENTAL IMPLEMENTATION
 base_mainline_commit: fad58d95b3a6b7925e8e9c66e4bda636b6981005
 historical_k0_commit: ece5363ddb13272678f25ad7f72e0e9c09ebcd45
@@ -25,7 +25,7 @@ Current targeted evidence:
 - git diff --check: PASS
 - equivalent donor build: PASS_WITH_DONOR_TYPESCRIPT
 - exact check/build/package: ENVIRONMENT_BLOCKED (project-local node_modules is empty)
-- package hash: recorded in the checksum sidecar after assembly
+- package hash: recorded in the external checksum sidecar
 - K0-D: PASS_WITH_FIXES; subagents 4/4/0
 
 Review package:
