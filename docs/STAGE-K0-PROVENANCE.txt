@@ -6,7 +6,8 @@ lifecycle: REAUTHORIZED_MAINLINE_VALIDATED_PENDING_GPT
 historical_k0_status: HOLD / EXPERIMENTAL IMPLEMENTATION
 base_mainline_commit: fad58d95b3a6b7925e8e9c66e4bda636b6981005
 historical_k0_commit: ece5363ddb13272678f25ad7f72e0e9c09ebcd45
-current_implementation_commit: PENDING_FREEZE_COMMIT
+current_implementation_commit: 8e72a02
+freeze_commit: 8e72a02
 branch: master
 push_target: origin/codex/workbench-v1
 
@@ -24,7 +25,7 @@ Current targeted evidence:
 - git diff --check: PASS
 - equivalent donor build: PASS_WITH_DONOR_TYPESCRIPT
 - exact check/build/package: ENVIRONMENT_BLOCKED (project-local node_modules is empty)
-- package hash: PENDING
+- package hash: recorded in the checksum sidecar after assembly
 - K0-D: PASS_WITH_FIXES; subagents 4/4/0
 
 Review package:
