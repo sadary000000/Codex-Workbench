@@ -1,12 +1,13 @@
 STAGE-K1-A PROVENANCE
 
-implementation_commit: 58a090e
-base_commit: 01b3c0f
+implementation_commit: 7674d8b
+base_commit: 58a090e
 source_branch: master
 remote_push_target: origin/codex/workbench-v1
 working_tree_policy: unrelated pre-existing changes preserved
 review_package: dist/review/STAGE-K1-A-PLAN-DOMAIN-PERSISTENCE-REVIEW-PACKAGE.zip
 package_hash: generated after archive creation
+challenge_findings: absorbed within K1-A; subagents_started=3; subagents_completed=3; running_subagents=0
 real_planner_prompts: 0
 new_business_chats: 0
 executed_steps: 0

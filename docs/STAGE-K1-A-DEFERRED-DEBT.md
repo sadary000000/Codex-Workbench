@@ -8,6 +8,6 @@ The following items are intentionally outside this stage:
 - Executor, Step execution, Verifier, Review/Gate engine, Scheduler, Dashboard, and Automation.
 - Real WebGPT planner smoke, new business chats, Native Thread creation, and source snapshot/GitHub review schema.
 - A future schema version if additive fields later require a non-compatible change.
-- The historical AUT-3 Planner compatibility path, including its explicitly named predecessor-status compatibility helper; it is not the K1-A Plan create/query contract.
+- The historical AUT-3 Planner compatibility path, including its module-private predecessor-status compatibility capability; it is not the K1-A Plan create/query contract.
 
 These are recorded rather than silently implemented. They require separate stage authorization.

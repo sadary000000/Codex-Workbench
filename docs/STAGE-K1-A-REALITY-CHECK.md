@@ -13,7 +13,7 @@
 | `AutomationProject.activePlanVersionId` | 已存在，属于 Project 持久化文档 | KEEP；补充显式的 active-version command/query 与一致性测试 |
 | `PlanVersion` | 已存在，含 project、RequirementVersion、version、status、`supersedes` 等字段 | REUSE；将 `supersedes` 作为唯一前驱引用，保持精确 RequirementVersion 绑定 |
 | `StageSpec` | 已存在，但只有 key/goal/status/ordinal 等最小字段 | REWORK；增加 K1-A 的 name/objective/dependency/acceptance/detail/assumption/risk 数据 |
-| `StepSpec` | 已存在，但只有 kind/goal/risk/side-effect 等最小字段 | REWORK；增加 objective、inputs、expectedOutputs、acceptance、assumptions、constraints |
+| `StepSpec` | 已存在，但只有 kind/goal/risk/side-effect 等最小字段 | REWORK；增加稳定 ordinal、objective、inputs、expectedOutputs、acceptance、assumptions、constraints |
 | SQLite persistence | 已存在，使用文档快照、事务写入、审计追加与边界检查 | KEEP；只做兼容性增量和 K1-A 定向证据 |
 | v0/v1/v2/v3 → v4 migration | 已存在并带备份、回滚、恢复证据 | KEEP；不破坏 K0 migration contract |
 | `get/list/snapshot` | 已存在并通过 snapshot 读取 | KEEP；补充无写入/无副作用断言 |
@@ -24,8 +24,10 @@
 - StageSpec 的可持久化计划域字段：`name`、`objective`、`dependsOn`、`acceptanceCriteria`、`detailLevel`、`assumptions`、`risks`。
 - StepSpec 的可持久化计划域字段：`objective`、`inputs`、`expectedOutputs`、`acceptanceCriteria`、`assumptions`、`constraints`。
 - 新版本写入时的有界字段/数组约束和旧最小记录的兼容读取。
+- Plan provenance (`createdBy` / `origin`) 与 StepSpec 稳定 ordinal。
 - `setActivePlanVersion` 与 `getCurrentPlanVersion`，并确保 active pointer 是选择事实而不是可变版本实体的替代品。
-- 创建 Plan 时对项目、RequirementVersion、版本前驱和跨项目引用的 fail-closed 检查。
+- 创建和加载 Plan 时对项目、RequirementVersion、Requirement hash、活动状态、版本前驱和跨项目引用的 fail-closed 检查。
+- StageSpec/StepSpec 的重复版本、版本缺口、跨父实体前驱和定义冲突的 fail-closed 检查。
 - Plan v1 → v2 的不可变性、历史可读性、重启后恢复和迁移/回滚的 K1-A 定向测试。
 
 ## Existing Historical / Out of Scope
@@ -34,14 +36,14 @@
 
 ## Boundary Decision
 
-本轮采用兼容增量：不为仅增加字段而升级既有 automation document schema version；新记录写入完整 K1-A 字段，旧 v4 最小记录继续可读，并由验证层按兼容规则处理缺失的新增字段。若审计证明必须升级 schema，必须沿用既有 K0 migration/backup/rollback 合同，不能直接改数据库或重置历史。
+本轮采用兼容增量：不为仅增加字段而升级既有 automation document schema version；新记录写入完整 K1-A 字段，旧 v4 最小记录在读取时于内存中归一化，下一次显式写入才持久化补齐字段。旧 v0/v1/v2/v3 migration 会在明确 migration 证据下重建其 Requirement hash；当前 v4 的 hash 冲突仍然 fail-closed。若审计证明必须升级 schema，必须沿用既有 K0 migration/backup/rollback 合同，不能直接改数据库或重置历史。
 
 ## Safety Invariants
 
 ```text
 RequirementVersion.projectId == PlanVersion.projectId
 PlanVersion.requirementVersionId is exact (no latest/nearest substitution)
-activePlanVersionId points to a same-project, readable PlanVersion
+activePlanVersionId points to a same-project, ACTIVE PlanVersion bound to the current RequirementVersion and matching hash
 Plan/Stage/Step reads do not write or mutate persistence
 Plan v1 remains byte/value-equivalent after creating Plan v2
 K1-A performs no provider dispatch, native action, real prompt, or new business chat

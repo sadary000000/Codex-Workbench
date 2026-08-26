@@ -1,14 +1,15 @@
 {
   "stage": "STAGE-K1-A",
+  "implementationCommit": "7674d8b",
   "targeted": {
     "command": "node --experimental-strip-types --test tests/stage-k1-a-plan-domain.test.ts",
-    "passed": 3,
+    "passed": 4,
     "failed": 0,
     "cancelled": 0
   },
   "full": {
     "command": "npm test",
-    "passed": 446,
+    "passed": 447,
     "failed": 0,
     "cancelled": 0
   },
@@ -27,5 +28,11 @@
   "realPlannerPrompts": 0,
   "newBusinessChats": 0,
   "executedSteps": 0,
-  "newNativeThreads": 0
+  "newNativeThreads": 0,
+  "challengeFixes": [
+    "public legacy PlanVersion status escape hatch removed",
+    "active PlanVersion exact RequirementVersion/status/hash enforced",
+    "Plan/Stage/Step duplicate and predecessor gaps rejected",
+    "StepSpec ordinal and current-v4 read normalization covered"
+  ]
 }

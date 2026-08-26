@@ -1,5 +1,7 @@
 {
   "stage": "STAGE-K1-A — Plan Domain & Persistence",
+  "implementationCommit": "7674d8b",
+  "baseCommit": "58a090e",
   "entry": "K0 PASS",
   "scope": "additive PlanVersion/StageSpec/StepSpec persistence and active selection",
   "localResult": "PASS_CANDIDATE",
@@ -19,9 +21,10 @@
   "executedSteps": 0,
   "newNativeThreads": 0,
   "newBusinessChats": 0,
-  "targetedTests": { "passed": 3, "failed": 0 },
-  "fullTests": { "passed": 446, "failed": 0, "cancelled": 0 },
-  "subagents": { "started": 3, "completedAtLastUpdate": 2, "runningAtLastUpdate": 1 },
+  "targetedTests": { "passed": 4, "failed": 0 },
+  "fullTests": { "passed": 447, "failed": 0, "cancelled": 0 },
+  "challengeFindings": { "initialVerdict": "FIX_REQUIRED", "absorbedWithinK1A": true, "productionFilesModifiedBySubagents": 0 },
+  "subagents": { "started": 3, "completed": 3, "running": 0 },
   "requiredCommandResults": {
     "check": "BLOCKED_BY_ENVIRONMENT",
     "audit": "PASS",
@@ -32,6 +35,6 @@
   },
   "deferredGithubSourceReview": "RESERVED_NOT_IMPLEMENTED",
   "gate": "PENDING_GPT_REVIEW",
-  "status": "LOCAL_PASS_CANDIDATE",
+  "status": "LOCAL_PASS_CANDIDATE_WITH_CHALLENGE_FIXES",
   "sensitiveDataIncluded": false
 }

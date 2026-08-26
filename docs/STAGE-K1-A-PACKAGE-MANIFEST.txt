@@ -1,7 +1,8 @@
 STAGE-K1-A REVIEW PACKAGE MANIFEST
 
 stage: STAGE-K1-A — Plan Domain & Persistence
-implementation_commit: 58a090e
+implementation_commit: 7674d8b
+base_commit: 58a090e
 source_branch: master (push target remains origin/codex/workbench-v1)
 generated_by: Codex
 sensitive_data: none
@@ -24,8 +25,8 @@ included:
 - STAGE-K1-A-PROVENANCE.txt
 
 validation:
-- targeted K1-A tests: 3/3 PASS
-- npm test: 446/446 PASS
+- targeted K1-A tests: 4/4 PASS
+- npm test: 447/447 PASS
 - npm audit --omit=dev: PASS, 0 vulnerabilities
 - git diff --check: PASS (line-ending warnings only)
 - npm run check: BLOCKED_BY_ENVIRONMENT, local tsc missing

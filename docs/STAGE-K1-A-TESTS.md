@@ -8,13 +8,14 @@ Command:
 node --experimental-strip-types --test tests/stage-k1-a-plan-domain.test.ts
 ```
 
-Result: **3/3 passed**.
+Result: **4/4 passed**.
 
 Coverage:
 
 1. Complete Plan/Stage/Step fields round-trip through persistence and restart; current-plan query is pure.
 2. Plan v1 remains byte-for-byte equivalent after Plan v2 creation; active selection is a separate pointer; stale, cross-project, and draft Requirement bindings fail closed; generic Plan replacement is rejected.
-3. Legacy minimal v3 specs migrate to additive v4 fields; injected transaction failure preserves the canonical file hash.
+3. Low-level active-pointer/hash attacks, hidden legacy mutation surface, and PlanVersion immutability fail closed.
+4. Duplicate/gapped Stage/Step versions, objective/goal conflicts, stable Step ordinals, and current-v4 SQLite read normalization are covered.
 
 ## Full regression
 
@@ -24,7 +25,7 @@ Command:
 npm test
 ```
 
-Result: **446/446 passed**, 0 failed, 0 cancelled.
+Result: **447/447 passed**, 0 failed, 0 cancelled.
 
 The full run includes K0 persistence, migration, runtime-separation, policy, ledger, WebGPT boundary, and V1 regression tests. No real planner prompt, business chat, Step execution, or Native Thread was used by K1-A.
 
