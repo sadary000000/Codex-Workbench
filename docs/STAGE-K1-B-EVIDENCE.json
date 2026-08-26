@@ -1,6 +1,7 @@
 {
   "stage": "STAGE-K1-B — Validator & JIT Rules",
   "result": "IMPLEMENTED_PENDING_GPT_GATE",
+  "implementationCommit": "66444e6c25a91206092ac0073a1368029edf9078",
   "implementation": {
     "productionFiles": [
       "src/automation/planner-validator.ts",

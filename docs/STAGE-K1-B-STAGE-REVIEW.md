@@ -4,6 +4,7 @@
 
 ```yaml
 stage: STAGE-K1-B — Validator & JIT Rules
+implementation_commit: 66444e6c25a91206092ac0073a1368029edf9078
 implementation_status: IMPLEMENTED
 local_result: PASS_CANDIDATE_WITH_BUILD_ENVIRONMENT_BLOCKER
 v1_core_changed: NO

@@ -2,6 +2,7 @@
 
 ```yaml
 stage: STAGE-K1-B — Validator & JIT Rules
+implementation_commit: 66444e6c25a91206092ac0073a1368029edf9078
 scope: pure Candidate validation, dependency/JIT/ambiguity rules, deterministic tests
 real_planner_prompts: 0
 new_business_chats: 0

@@ -1,4 +1,5 @@
 STAGE-K1-B Validator & JIT Rules Review Package
+Implementation commit: 66444e6c25a91206092ac0073a1368029edf9078
 
 Included at ZIP root:
   STAGE-K1-B-REALITY-CHECK.md
