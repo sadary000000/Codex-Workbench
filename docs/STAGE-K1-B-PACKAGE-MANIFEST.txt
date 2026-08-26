@@ -18,6 +18,7 @@ Included at ZIP root:
   STAGE-K1-B-REVIEW-PROMPT.md
   STAGE-K1-B-STAGE-REVIEW.md
   STAGE-K1-B-GPT-SUBMISSION-SUMMARY.md
+  STAGE-K1-B-GPT-RESULT.md
   src-automation-planner-validator.ts
   src-automation-index.ts
   tests-stage-k1-b-validator-jit.test.ts
