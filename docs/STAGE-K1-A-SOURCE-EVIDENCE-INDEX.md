@@ -2,10 +2,10 @@
 
 ## Implementation
 
-- `src/automation/types.ts` — PlanVersion, StageSpec, StepSpec additive domain fields.
-- `src/automation/store.ts` — immutable replacement guards, exact Requirement correlation, Plan creation, active selection, Stage/Step persistence, pure current-plan query, bounded definition values.
-- `src/automation/schema.ts` — v4 validation, same-plan current-stage reference, additive legacy migration, bounded field checks.
-- `tests/stage-k1-a-plan-domain.test.ts` — targeted round-trip, immutability/pointer/correlation, migration/rollback/query-purity evidence.
+- `src/automation/types.ts:317-379` — PlanVersion, StageSpec, StepSpec additive domain fields.
+- `src/automation/store.ts:151-226,359-374,601-672,839-1061,1720-1726` — immutable replacement guards, exact Requirement correlation, Plan creation, active selection, Stage/Step persistence, pure current-plan query, bounded definition values.
+- `src/automation/schema.ts:65,232-291,620-911,1059-1123` — v4 validation, same-plan current-stage reference, additive legacy migration, bounded field checks.
+- `tests/stage-k1-a-plan-domain.test.ts:1-199` — targeted round-trip, immutability/pointer/correlation, migration/rollback/query-purity evidence.
 
 ## Reused baseline
 
@@ -13,4 +13,4 @@
 - Existing `tests/automation-persistence.test.ts`, `tests/automation-foundation.test.ts`, `tests/aut3-planner.test.ts` — regression coverage for persistence, runtime separation, and historical Planner compatibility.
 - `docs/STAGE-K1-A-REALITY-CHECK.md` — pre-change inventory and scope classification.
 
-Line numbers are generated into the final package manifest after the last source edit so the index remains tied to the frozen tree.
+Line numbers were captured after the final source edit and are tied to implementation commit `58a090e`.
