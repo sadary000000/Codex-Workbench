@@ -1,0 +1,16 @@
+STAGE-K1-A PROVENANCE
+
+implementation_commit: 58a090e
+base_commit: 01b3c0f
+source_branch: master
+remote_push_target: origin/codex/workbench-v1
+working_tree_policy: unrelated pre-existing changes preserved
+review_package: dist/review/STAGE-K1-A-PLAN-DOMAIN-PERSISTENCE-REVIEW-PACKAGE.zip
+package_hash: generated after archive creation
+real_planner_prompts: 0
+new_business_chats: 0
+executed_steps: 0
+new_native_threads: 0
+secrets_or_browser_data_included: no
+
+The independent GPT Gate and Status are not inferred from local tests.

@@ -1,0 +1,36 @@
+STAGE-K1-A REVIEW PACKAGE MANIFEST
+
+stage: STAGE-K1-A — Plan Domain & Persistence
+implementation_commit: 58a090e
+source_branch: master (push target remains origin/codex/workbench-v1)
+generated_by: Codex
+sensitive_data: none
+
+included:
+- STAGE-K1-A-REALITY-CHECK.md
+- STAGE-K1-A-PLAN-DOMAIN.md
+- STAGE-K1-A-PERSISTENCE.md
+- STAGE-K1-A-MIGRATION.md
+- STAGE-K1-A-QUERY-PURITY.md
+- STAGE-K1-A-TESTS.md
+- STAGE-K1-A-DEFERRED-DEBT.md
+- STAGE-K1-A-SUBAGENTS.md
+- STAGE-K1-A-SOURCE-EVIDENCE-INDEX.md
+- STAGE-K1-A-STAGE-REVIEW.md
+- STAGE-K1-A-EVIDENCE.json
+- STAGE-K1-A-TEST-SUMMARY.json
+- STAGE-K1-A-GPT-SUBMISSION-SUMMARY.md
+- STAGE-K1-A-PACKAGE-MANIFEST.txt
+- STAGE-K1-A-PROVENANCE.txt
+
+validation:
+- targeted K1-A tests: 3/3 PASS
+- npm test: 446/446 PASS
+- npm audit --omit=dev: PASS, 0 vulnerabilities
+- git diff --check: PASS (line-ending warnings only)
+- npm run check: BLOCKED_BY_ENVIRONMENT, local tsc missing
+- npm run build: BLOCKED_BY_ENVIRONMENT, local TypeScript compiler missing
+- npm run package:win: BLOCKED_BY_ENVIRONMENT, build stops before packaging
+- scoped K1-A typecheck with donor compiler: PASS
+
+review gate is supplied only by the independent Review Runner.
