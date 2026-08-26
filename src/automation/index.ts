@@ -21,3 +21,4 @@ export * from "./recovery-intent.ts";
 export * from "./stable-identity.ts";
 export * from "./migration-contract.ts";
 export * from "./composition-root.ts";
+export * from "./planner-validator.ts";

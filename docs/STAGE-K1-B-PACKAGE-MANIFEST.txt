@@ -1,0 +1,27 @@
+STAGE-K1-B Validator & JIT Rules Review Package
+
+Included at ZIP root:
+  STAGE-K1-B-REALITY-CHECK.md
+  STAGE-K1-B-VALIDATOR-CONTRACT.md
+  STAGE-K1-B-DEPENDENCY-VALIDATION.md
+  STAGE-K1-B-JIT-RULES.md
+  STAGE-K1-B-AMBIGUITY-RULES.md
+  STAGE-K1-B-QUERY-PURITY.md
+  STAGE-K1-B-TESTS.md
+  STAGE-K1-B-DEFERRED-DEBT.md
+  STAGE-K1-B-SUBAGENTS.md
+  STAGE-K1-B-SOURCE-EVIDENCE-INDEX.md
+  STAGE-K1-B-TEST-SUMMARY.md
+  STAGE-K1-B-EVIDENCE.json
+  STAGE-K1-B-PROVENANCE.txt
+  STAGE-K1-B-REVIEW-PROMPT.md
+  STAGE-K1-B-STAGE-REVIEW.md
+  STAGE-K1-B-GPT-SUBMISSION-SUMMARY.md
+  src-automation-planner-validator.ts
+  src-automation-index.ts
+  tests-stage-k1-b-validator-jit.test.ts
+
+The source/test filenames are flattened copies for review clarity. They are
+not executable package contents. This package contains no browser profile,
+Cookie, Token, password, raw transcript, private API response, or unrelated
+user-chat content.
