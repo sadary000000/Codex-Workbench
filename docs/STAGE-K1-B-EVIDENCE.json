@@ -1,7 +1,8 @@
 {
   "stage": "STAGE-K1-B — Validator & JIT Rules",
-  "result": "PASS",
+  "result": "IMPLEMENTED_PENDING_GPT_GATE",
   "implementationCommit": "66444e6c25a91206092ac0073a1368029edf9078",
+  "implementationFixCommit": "0a9df72108af475beb32f712c653ab0cc639826e",
   "review": {
     "submissionId": "46cb5f4283714d8f58f4745a37d8f8865df400f6592c0d3c9039f5a15d2de6d1",
     "receivedAt": "2026-08-26T14:40:16.777Z",
@@ -27,8 +28,9 @@
     "ambiguity": "PASS_WITH_TARGETED_TESTS",
     "queryPurity": "PASS_WITH_TARGETED_TESTS",
     "fullRegression": "PASS_458_OF_458",
-    "build": "FAIL_ENVIRONMENT_MISSING_TYPESCRIPT_MODULE",
-    "packageWin": "FAIL_ENVIRONMENT_MISSING_TYPESCRIPT_MODULE",
+    "build": "PASS",
+    "packageWin": "PASS",
+    "dependencyRestore": "PASS_NPM_CI_INCLUDE_DEV",
     "isolatedValidatorTypecheck": "PASS"
   },
   "scope": {
@@ -45,5 +47,5 @@
     "running": 0
   },
   "gate": "PENDING_GPT_REVIEW",
-  "status": "PASS_CANDIDATE_WITH_BUILD_ENVIRONMENT_BLOCKER"
+  "status": "READY_FOR_GPT_REVIEW_POST_DEPENDENCY_FIX"
 }

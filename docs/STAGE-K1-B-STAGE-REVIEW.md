@@ -5,10 +5,11 @@
 ```yaml
 stage: STAGE-K1-B — Validator & JIT Rules
 implementation_commit: 66444e6c25a91206092ac0073a1368029edf9078
-implementation_status: COMPLETE
-local_result: PASS_CANDIDATE_WITH_BUILD_ENVIRONMENT_BLOCKER
-review_result: PASS
-review_status: READY_FOR_NEXT_STAGE
+implementation_status: IMPLEMENTED_PENDING_POST_FIX_REVIEW
+local_result: PASS
+review_result: REVIEW_REQUIRED_FOR_POST_FIX_PACKAGE
+review_status: PENDING_GPT_REVIEW
+implementation_fix_commit: 0a9df72108af475beb32f712c653ab0cc639826e
 v1_core_changed: NO
 automation_execution_started: NO
 real_planner_prompts: 0
@@ -31,7 +32,7 @@ new_native_threads: 0
 | Ambiguity | separate blocking input and non-blocking assumptions statuses |
 | Plan transition | exact predecessor/version check; predecessor snapshot unchanged |
 | Query purity | candidate/context snapshots unchanged; no Store/Provider imports |
-| Full automated commands | `npm test` 458/458 PASS; check/build/package are blocked by missing local TypeScript executable/module; audit and diff-check pass |
+| Full automated commands | `npm test` 458/458 PASS; `npm run check`, `npm run build`, `npm run package:win`, audit, and diff-check pass after lockfile dependency restore |
 
 ## Boundary
 
@@ -54,14 +55,14 @@ Gate: PENDING_GPT_REVIEW
 Status: PASS_CANDIDATE_WITH_BUILD_ENVIRONMENT_BLOCKER
 ```
 
-The independent GPT review returned:
+The prior independent GPT review returned:
 
 ```yaml
 Gate: PASS
 Status: READY_FOR_NEXT_STAGE
 ```
 
-The local TypeScript environment blocker remains recorded as evidence and was
-not silently converted to a local build pass. GPT accepted the K1-B scope.
-The response's K1-C suggestion is not authorization to enter the next stage;
-this stage ends here pending a new user stage prompt.
+The prior review accepted the K1-B scope. The dependency restore and one-line
+type-contract fix happened afterward, so the post-fix package is being sent
+for a fresh confirmation. The response's K1-C suggestion is not authorization
+to enter the next stage.
