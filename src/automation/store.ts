@@ -64,6 +64,7 @@ import type {
   ResourceClaimState,
   ResourceType,
   SideEffectClass,
+  StageDetailLevel,
   StepKind,
   StepRuntime,
   StepRuntimeLifecycle,
@@ -160,6 +161,7 @@ export interface PlanVersionInput {
   planningMode?: "JIT";
   plannerRole?: "PLANNER";
   plannerChatRef?: string | null;
+  currentStageId?: string | null;
 }
 
 export interface PersistPlannerPlanInput {
@@ -185,10 +187,18 @@ export interface StageSpecInput {
   stageSpecId?: string;
   planVersionId: string;
   stageKey: string;
+  name?: string;
+  objective?: string;
+  dependsOn?: string[];
+  acceptanceCriteria?: string[];
+  detailLevel?: StageDetailLevel;
+  assumptions?: string[];
+  risks?: string[];
   specVersion: number;
   status?: VersionedSpecStatus;
   ordinal: number;
-  goal: string;
+  /** Legacy alias accepted for K0 callers. */
+  goal?: string;
   supersedes?: string | null;
 }
 
@@ -198,7 +208,14 @@ export interface StepSpecInput {
   stepKey: string;
   specVersion: number;
   kind: StepKind;
-  goal: string;
+  objective?: string;
+  inputs?: string[];
+  expectedOutputs?: string[];
+  acceptanceCriteria?: string[];
+  assumptions?: string[];
+  constraints?: string[];
+  /** Legacy alias accepted for K0 callers. */
+  goal?: string;
   riskClass: "LOW" | "MEDIUM" | "HIGH";
   sideEffectClass: SideEffectClass;
   specStatus?: StepSpecStatus;
@@ -337,6 +354,23 @@ function list(value: string[] | undefined, field: string): string[] {
     throw new AutomationStoreError("AUTOMATION_INVALID", `${field} must contain bounded references.`);
   }
   return [...new Set(value)];
+}
+
+function boundedDefinitionList(value: string[] | undefined, field: string): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 64) throw new AutomationStoreError("AUTOMATION_INVALID", `${field} must contain at most 64 bounded strings.`);
+  const normalized = value.map((item, index) => text(item, `${field}[${index}]`, 4_096));
+  return [...new Set(normalized)];
+}
+
+function definitionText(primary: string | undefined, legacy: string | undefined, field: string): string {
+  const primaryText = primary === undefined ? null : text(primary, field, 8_192);
+  const legacyText = legacy === undefined ? null : text(legacy, `${field}.legacyGoal`, 8_192);
+  if (primaryText !== null && legacyText !== null && primaryText !== legacyText) {
+    throw new AutomationStoreError("AUTOMATION_CONFLICT", `${field} and legacy goal must match.`);
+  }
+  if (primaryText !== null || legacyText !== null) return primaryText ?? legacyText!;
+  throw new AutomationStoreError("AUTOMATION_INVALID", `${field} must be bounded and non-empty.`);
 }
 
 function assertStoredProviderRefs(intent: ActionIntent, attempt: ActionAttempt, requestRef: ExternalRef | null, observationRef: ExternalRef | null): void {
@@ -567,12 +601,17 @@ export class AutomationTransaction {
       }
     }
     if (name === "planVersions") {
-      for (const key of ["planVersionId", "projectId", "requirementVersionId", "version", "canonicalPayload", "payloadSha256", "requirementPayloadSha256", "planningMode", "plannerRole", "plannerChatRef", "createdAt", "supersedes"]) {
+      for (const key of ["planVersionId", "projectId", "requirementVersionId", "version", "status", "canonicalPayload", "payloadSha256", "requirementPayloadSha256", "planningMode", "plannerRole", "plannerChatRef", "currentStageId", "createdAt", "supersedes"]) {
         if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "PlanVersion immutable definition cannot be replaced.");
       }
     }
+    if (name === "stageSpecs") {
+      for (const key of ["stageSpecId", "planVersionId", "stageKey", "name", "objective", "dependsOn", "acceptanceCriteria", "detailLevel", "assumptions", "risks", "specVersion", "ordinal", "goal", "createdAt", "supersedes"]) {
+        if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StageSpec immutable definition cannot be replaced.");
+      }
+    }
     if (name === "stepSpecs") {
-      for (const key of ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "goal", "riskClass", "sideEffectClass", "createdAt", "supersedes"]) {
+      for (const key of ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "objective", "inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints", "goal", "riskClass", "sideEffectClass", "createdAt", "supersedes"]) {
         if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StepSpec immutable definition cannot be replaced.");
       }
     }
@@ -616,6 +655,18 @@ export class AutomationTransaction {
   setState(name: "automationProjects" | "stepSpecs" | "executionAttempts" | "actionIntents", entityIdValue: string, field: "lifecycle" | "specStatus" | "state", value: string): void {
     const record = this.require(name, entityIdValue) as unknown as Record<string, unknown>;
     record[field] = value;
+  }
+
+  /**
+   * Historical Planner compatibility only. K1-A writes never use this
+   * escape hatch; ordinary PlanVersion replacement remains immutable.
+   */
+  replaceLegacyPlannerPlanStatus(planVersionId: string, status: PlanVersion["status"]): void {
+    const current = this.require("planVersions", planVersionId);
+    const collection = this.mutableTable("planVersions") as PlanVersion[];
+    const index = collection.findIndex((item) => item.planVersionId === planVersionId);
+    if (index < 0) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", `planVersions ${planVersionId} was not found.`);
+    collection[index] = { ...current, status };
   }
 }
 
@@ -789,18 +840,32 @@ export class AutomationStore {
     return this.transaction((tx) => {
       const project = tx.require("automationProjects", input.projectId);
       const requirement = tx.require("requirementVersions", input.requirementVersionId);
-      if (requirement.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Plan requirement belongs to another project.");
+      if (requirement.projectId !== project.projectId || project.activeRequirementVersionId !== requirement.requirementVersionId || !["CONFIRMED", "ACTIVE"].includes(requirement.status)) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", "PlanVersion must bind the exact confirmed active RequirementVersion.");
+      }
+      if (input.requirementPayloadSha256 !== undefined && input.requirementPayloadSha256 !== requirement.payloadSha256) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", "Plan requirement payload SHA-256 does not match the exact RequirementVersion.");
+      }
       if (tx.table("planVersions").some((item) => item.projectId === input.projectId && item.version === input.version)) throw new AutomationStoreError("AUTOMATION_CONFLICT", `Plan version ${input.version} already exists.`);
       const supersedes = input.supersedes ?? null;
       if (supersedes) {
         const old = tx.require("planVersions", supersedes);
         if (old.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Plan versions belong to different projects.");
         if (old.version !== input.version - 1) throw new AutomationStoreError("AUTOMATION_CONFLICT", "PlanVersion predecessor must be the immediately previous version.");
-        tx.replace("planVersions", { ...old, status: "SUPERSEDED" });
       }
       if (input.version === 1 && supersedes) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Plan version 1 cannot supersede a predecessor.");
       if (input.version > 1 && !supersedes) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Plan versions after version 1 require an explicit predecessor.");
-      const item: PlanVersion = { planVersionId: id(input.planVersionId, "planVersionId"), projectId: input.projectId, requirementVersionId: input.requirementVersionId, version: input.version, status: input.status ?? (supersedes ? "ACTIVE" : "DRAFT"), createdAt: now(), supersedes };
+      const item: PlanVersion = {
+        planVersionId: id(input.planVersionId, "planVersionId"),
+        projectId: input.projectId,
+        requirementVersionId: input.requirementVersionId,
+        version: input.version,
+        status: input.status ?? (supersedes ? "ACTIVE" : "DRAFT"),
+        requirementPayloadSha256: input.requirementPayloadSha256 ?? requirement.payloadSha256,
+        currentStageId: input.currentStageId ?? null,
+        createdAt: now(),
+        supersedes,
+      };
       if (input.canonicalPayload !== undefined) {
         const canonicalPayload = canonicalizeJson(input.canonicalPayload, "plan.canonicalPayload");
         const payloadSha256 = sha256Hex(canonicalPayload);
@@ -819,6 +884,24 @@ export class AutomationStore {
     });
   }
 
+  /** Select a persisted PlanVersion without mutating any PlanVersion row. */
+  async setActivePlanVersion(projectId: string, planVersionId: string): Promise<AutomationProject> {
+    return this.transaction((tx) => {
+      const project = tx.require("automationProjects", projectId);
+      const plan = tx.require("planVersions", planVersionId);
+      if (plan.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Active PlanVersion belongs to another project.");
+      if (plan.status !== "ACTIVE") throw new AutomationStoreError("AUTOMATION_CONFLICT", "Only an ACTIVE PlanVersion can be selected.");
+      const requirement = tx.require("requirementVersions", plan.requirementVersionId);
+      if (requirement.projectId !== project.projectId || project.activeRequirementVersionId !== requirement.requirementVersionId || !["CONFIRMED", "ACTIVE"].includes(requirement.status)) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", "Active PlanVersion has an invalid exact RequirementVersion binding.");
+      }
+      const updated = { ...project, activePlanVersionId: plan.planVersionId, updatedAt: now(), revision: project.revision + 1 };
+      tx.replace("automationProjects", updated);
+      tx.appendAudit({ projectId, entityType: "AutomationProject", entityId: projectId, eventType: "ACTIVE_PLAN_VERSION_SELECTED", actorType: "SYSTEM", actorRef: null, boundedPayload: { planVersionId: plan.planVersionId, version: plan.version }, correlationId: plan.planVersionId, causationId: null });
+      return clone(updated);
+    });
+  }
+
   async persistPlannerPlan(input: PersistPlannerPlanInput): Promise<PersistPlannerPlanResult> {
     return this.transaction((tx) => {
       const project = tx.require("automationProjects", input.projectId);
@@ -831,7 +914,7 @@ export class AutomationStore {
       const payloadSha256 = sha256Hex(canonicalPayload);
       if (payloadSha256 !== input.payloadSha256) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner payload SHA-256 does not match canonicalPayload.");
       const previous = project.activePlanVersionId ? tx.require("planVersions", project.activePlanVersionId) : null;
-      if (previous) tx.replace("planVersions", { ...previous, status: "SUPERSEDED" });
+      if (previous) tx.replaceLegacyPlannerPlanStatus(previous.planVersionId, "SUPERSEDED");
       const timestamp = now();
       const planVersion: PlanVersion = {
         planVersionId: id(input.planVersionId, "planVersionId"),
@@ -845,6 +928,7 @@ export class AutomationStore {
         planningMode: "JIT",
         plannerRole: "PLANNER",
         plannerChatRef: text(input.plannerChatRef, "plan.plannerChatRef", 2_000),
+        currentStageId: null,
         createdAt: timestamp,
         supersedes: previous?.planVersionId ?? null,
       };
@@ -856,6 +940,13 @@ export class AutomationStore {
           stageSpecId: id(undefined, "stageSpecId"),
           planVersionId: planVersion.planVersionId,
           stageKey: text(stage.stageKey, "stage.stageKey", 256),
+          name: text(stage.stageKey, "stage.name", 256),
+          objective: text(stage.goal, "stage.objective", 8_192),
+          dependsOn: [],
+          acceptanceCriteria: [],
+          detailLevel: "OUTLINE",
+          assumptions: [],
+          risks: [],
           specVersion: 1,
           status: "ACTIVE",
           ordinal: stage.ordinal,
@@ -873,6 +964,12 @@ export class AutomationStore {
             stepKey: text(step.stepKey, "step.stepKey", 256),
             specVersion: 1,
             kind: "PLANNER_STEP",
+            objective: text(step.goal, "step.objective", 8_192),
+            inputs: [],
+            expectedOutputs: [],
+            acceptanceCriteria: [],
+            assumptions: [],
+            constraints: [],
             goal: text(step.goal, "step.goal", 8_192),
             riskClass: step.riskClass,
             sideEffectClass: step.sideEffectClass,
@@ -900,9 +997,29 @@ export class AutomationStore {
       if (supersedes) {
         const old = tx.require("stageSpecs", supersedes);
         if (old.planVersionId !== plan.planVersionId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Stage versions belong to different plans.");
+        if (old.specVersion !== input.specVersion - 1) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StageSpec predecessor must be the immediately previous specification version.");
         tx.replace("stageSpecs", { ...old, status: "SUPERSEDED" });
       }
-      const item: StageSpec = { stageSpecId: id(input.stageSpecId, "stageSpecId"), planVersionId: input.planVersionId, stageKey: text(input.stageKey, "stage.stageKey", 256), specVersion: input.specVersion, status: input.status ?? (supersedes ? "ACTIVE" : "DRAFT"), ordinal: input.ordinal, goal: text(input.goal, "stage.goal", 8_192), createdAt: now(), supersedes };
+      const stageKey = text(input.stageKey, "stage.stageKey", 256);
+      const objective = definitionText(input.objective, input.goal, "stage.objective");
+      const item: StageSpec = {
+        stageSpecId: id(input.stageSpecId, "stageSpecId"),
+        planVersionId: input.planVersionId,
+        stageKey,
+        name: text(input.name ?? stageKey, "stage.name", 256),
+        objective,
+        dependsOn: boundedDefinitionList(input.dependsOn, "stage.dependsOn"),
+        acceptanceCriteria: boundedDefinitionList(input.acceptanceCriteria, "stage.acceptanceCriteria"),
+        detailLevel: input.detailLevel ?? "OUTLINE",
+        assumptions: boundedDefinitionList(input.assumptions, "stage.assumptions"),
+        risks: boundedDefinitionList(input.risks, "stage.risks"),
+        specVersion: input.specVersion,
+        status: input.status ?? (supersedes ? "ACTIVE" : "DRAFT"),
+        ordinal: input.ordinal,
+        goal: objective,
+        createdAt: now(),
+        supersedes,
+      };
       tx.insert("stageSpecs", item);
       tx.appendAudit({ projectId: plan.projectId, entityType: "StageSpec", entityId: item.stageSpecId, eventType: "STAGE_SPEC_CREATED", actorType: "SYSTEM", actorRef: null, boundedPayload: { stageKey: item.stageKey, version: item.specVersion }, correlationId: null, causationId: null });
       return clone(item);
@@ -917,10 +1034,30 @@ export class AutomationStore {
       if (supersedes) {
         const old = tx.require("stepSpecs", supersedes);
         if (old.stageSpecId !== stage.stageSpecId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Step versions belong to different stages.");
+        if (old.specVersion !== input.specVersion - 1) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StepSpec predecessor must be the immediately previous specification version.");
         tx.replace("stepSpecs", { ...old, specStatus: "SUPERSEDED" });
       }
       const timestamp = now();
-      const item: StepSpec = { stepSpecId: id(input.stepSpecId, "stepSpecId"), stageSpecId: input.stageSpecId, stepKey: text(input.stepKey, "step.stepKey", 256), specVersion: input.specVersion, kind: input.kind, goal: text(input.goal, "step.goal", 8_192), riskClass: input.riskClass, sideEffectClass: input.sideEffectClass, specStatus: input.specStatus ?? "ACTIVE", createdAt: timestamp, supersedes };
+      const objective = definitionText(input.objective, input.goal, "step.objective");
+      const item: StepSpec = {
+        stepSpecId: id(input.stepSpecId, "stepSpecId"),
+        stageSpecId: input.stageSpecId,
+        stepKey: text(input.stepKey, "step.stepKey", 256),
+        specVersion: input.specVersion,
+        kind: input.kind,
+        objective,
+        inputs: boundedDefinitionList(input.inputs, "step.inputs"),
+        expectedOutputs: boundedDefinitionList(input.expectedOutputs, "step.expectedOutputs"),
+        acceptanceCriteria: boundedDefinitionList(input.acceptanceCriteria, "step.acceptanceCriteria"),
+        assumptions: boundedDefinitionList(input.assumptions, "step.assumptions"),
+        constraints: boundedDefinitionList(input.constraints, "step.constraints"),
+        goal: objective,
+        riskClass: input.riskClass,
+        sideEffectClass: input.sideEffectClass,
+        specStatus: input.specStatus ?? "ACTIVE",
+        createdAt: timestamp,
+        supersedes,
+      };
       tx.insert("stepSpecs", item);
       const runtime: StepRuntime = { stepRuntimeId: `runtime:${item.stepSpecId}`, stepSpecId: item.stepSpecId, lifecycle: "NOT_STARTED", terminalResult: null, waitReason: "NONE", currentAttemptId: null, revision: 0, createdAt: timestamp, updatedAt: timestamp };
       tx.insert("stepRuntimes", runtime);
@@ -1577,6 +1714,14 @@ export class AutomationStore {
     const document = await this.snapshot();
     const collection = document[table] as unknown as AutomationTables[K][];
     return clone(collection.find((item) => entityId(table, item) === entityIdValue) ?? null);
+  }
+
+  /** Pure query for a Project's selected PlanVersion; it never reconciles or writes. */
+  async getCurrentPlanVersion(projectId: string): Promise<PlanVersion | null> {
+    const document = await this.snapshot();
+    const project = document.automationProjects.find((item) => item.projectId === projectId);
+    if (!project) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", `automationProjects ${projectId} was not found.`);
+    return clone(project.activePlanVersionId ? document.planVersions.find((item) => item.planVersionId === project.activePlanVersionId) ?? null : null);
   }
 
   async list<K extends AutomationTableName>(table: K): Promise<AutomationTables[K][]> {

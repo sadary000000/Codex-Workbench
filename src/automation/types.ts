@@ -38,6 +38,7 @@ export type RequirementOriginSource = "USER" | "WEBGPT" | "PROJECT_EVIDENCE" | "
 export type PlanVersionStatus = "DRAFT" | "ACTIVE" | "SUPERSEDED";
 export type VersionedSpecStatus = "DRAFT" | "ACTIVE" | "SUPERSEDED";
 export type StepSpecStatus = "ACTIVE" | "SUPERSEDED";
+export type StageDetailLevel = "OUTLINE" | "DETAILED";
 export type StepRuntimeLifecycle = "NOT_STARTED" | "READY" | "RUNNING" | "VERIFYING" | "REVIEWING" | "TERMINAL";
 export type StepRuntimeWaitReason = "NONE" | "RESOURCE" | "HUMAN" | "EXTERNAL" | "USER_CONTROL" | "RATE_LIMIT";
 export type StepTerminalResult = "COMPLETED" | "FAILED" | "BLOCKED" | "CANCELLED" | "SUPERSEDED" | "SKIPPED";
@@ -328,6 +329,8 @@ export interface PlanVersion {
   planningMode?: "JIT";
   plannerRole?: "PLANNER";
   plannerChatRef?: string | null;
+  /** Optional pointer to a persisted StageSpec in this plan. */
+  currentStageId?: string | null;
   createdAt: IsoTimestamp;
   supersedes: string | null;
 }
@@ -336,9 +339,19 @@ export interface StageSpec {
   stageSpecId: string;
   planVersionId: string;
   stageKey: string;
+  /** Human-readable name; legacy pre-v4 rows may omit additive fields. */
+  name?: string;
+  /** Canonical objective; goal is retained as a compatibility alias. */
+  objective?: string;
+  dependsOn?: string[];
+  acceptanceCriteria?: string[];
+  detailLevel?: StageDetailLevel;
+  assumptions?: string[];
+  risks?: string[];
   specVersion: number;
   status: VersionedSpecStatus;
   ordinal: number;
+  /** Legacy compatibility alias for objective; new writes keep it equal. */
   goal: string;
   createdAt: IsoTimestamp;
   supersedes: string | null;
@@ -350,6 +363,13 @@ export interface StepSpec {
   stepKey: string;
   specVersion: number;
   kind: StepKind;
+  /** Canonical objective; legacy pre-v4 rows may omit additive fields. */
+  objective?: string;
+  inputs?: string[];
+  expectedOutputs?: string[];
+  acceptanceCriteria?: string[];
+  assumptions?: string[];
+  constraints?: string[];
   goal: string;
   riskClass: RiskClass;
   sideEffectClass: SideEffectClass;

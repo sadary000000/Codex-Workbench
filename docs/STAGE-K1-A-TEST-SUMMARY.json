@@ -1,0 +1,31 @@
+{
+  "stage": "STAGE-K1-A",
+  "targeted": {
+    "command": "node --experimental-strip-types --test tests/stage-k1-a-plan-domain.test.ts",
+    "passed": 3,
+    "failed": 0,
+    "cancelled": 0
+  },
+  "full": {
+    "command": "npm test",
+    "passed": 446,
+    "failed": 0,
+    "cancelled": 0
+  },
+  "requiredCommands": {
+    "npm run check": { "result": "BLOCKED_BY_ENVIRONMENT", "exitCode": 1, "cause": "'tsc' is not recognized because the worktree has no local node_modules/typescript" },
+    "npm audit --omit=dev": { "result": "PASS", "exitCode": 0, "summary": "found 0 vulnerabilities" },
+    "git diff --check": { "result": "PASS", "exitCode": 0, "summary": "only existing LF/CRLF warnings" },
+    "npm run build": { "result": "BLOCKED_BY_ENVIRONMENT", "exitCode": 1, "cause": "Cannot find D:/办公/AI/Codex_Workbench_V1/node_modules/typescript/bin/tsc" },
+    "npm run package:win": { "result": "BLOCKED_BY_ENVIRONMENT", "exitCode": 1, "cause": "package script stops at the same missing TypeScript compiler before packaging" }
+  },
+  "equivalentScopedTypecheck": {
+    "result": "PASS",
+    "command": "donor TypeScript compiler with donor @types/node over src/automation/index.ts and tests/stage-k1-a-plan-domain.test.ts",
+    "note": "Full source typecheck remains unavailable without the worktree Electron dependency."
+  },
+  "realPlannerPrompts": 0,
+  "newBusinessChats": 0,
+  "executedSteps": 0,
+  "newNativeThreads": 0
+}

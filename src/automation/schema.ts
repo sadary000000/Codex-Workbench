@@ -62,6 +62,7 @@ const SENSITIVE_KEY = /(?:prompt|response|transcript|cookie|token|authorization|
 const MAX_STRING = 4_096;
 const MAX_GOAL = 8_192;
 const MAX_METADATA = 32;
+const STAGE_DETAIL_LEVELS = new Set(["OUTLINE", "DETAILED"]);
 const STEP_RUNTIME_LIFECYCLES = new Set(["NOT_STARTED", "READY", "RUNNING", "VERIFYING", "REVIEWING", "TERMINAL"]);
 const STEP_RUNTIME_WAIT_REASONS = new Set(["NONE", "RESOURCE", "HUMAN", "EXTERNAL", "USER_CONTROL", "RATE_LIMIT"]);
 const REQUIREMENT_ORIGIN_TYPES = new Set<RequirementOriginType>(["INITIAL", "REVISION", "DISCOVERY", "RECOVERY", "IMPORT"]);
@@ -231,6 +232,7 @@ function validateVersions(document: Record<string, unknown>): void {
     if (item.planningMode !== undefined && item.planningMode !== "JIT") throw new AutomationSchemaError(`planVersions[${index}].planningMode is unsupported.`);
     if (item.plannerRole !== undefined && item.plannerRole !== "PLANNER") throw new AutomationSchemaError(`planVersions[${index}].plannerRole is unsupported.`);
     if (item.plannerChatRef !== undefined && item.plannerChatRef !== null) string(item.plannerChatRef, `planVersions[${index}].plannerChatRef`, 2_000);
+    optionalString(item.currentStageId ?? null, `planVersions[${index}].currentStageId`, 256);
     timestamp(item.createdAt, `planVersions[${index}].createdAt`);
     optionalString(item.supersedes, `planVersions[${index}].supersedes`, 256);
   });
@@ -242,10 +244,25 @@ function validateVersions(document: Record<string, unknown>): void {
     string(item.stageSpecId, `stageSpecs[${index}].stageSpecId`, 256);
     string(item.planVersionId, `stageSpecs[${index}].planVersionId`, 256);
     string(item.stageKey, `stageSpecs[${index}].stageKey`, 256);
+    if (item.name !== undefined) string(item.name, `stageSpecs[${index}].name`, 256);
+    const objective = item.objective === undefined ? null : string(item.objective, `stageSpecs[${index}].objective`, MAX_GOAL);
     integer(item.specVersion, `stageSpecs[${index}].specVersion`, 1);
     enumValue(item.status, `stageSpecs[${index}].status`, new Set(["DRAFT", "ACTIVE", "SUPERSEDED"]));
     integer(item.ordinal, `stageSpecs[${index}].ordinal`, 0);
-    string(item.goal, `stageSpecs[${index}].goal`, MAX_GOAL);
+    const goal = string(item.goal, `stageSpecs[${index}].goal`, MAX_GOAL);
+    if (objective !== null && objective !== goal) throw new AutomationSchemaError(`stageSpecs[${index}].objective must match goal.`);
+    if (item.dependsOn !== undefined) {
+      const refs = array(item.dependsOn, `stageSpecs[${index}].dependsOn`);
+      if (refs.length > 64) throw new AutomationSchemaError(`stageSpecs[${index}].dependsOn has too many entries.`);
+      refs.forEach((ref, refIndex) => string(ref, `stageSpecs[${index}].dependsOn[${refIndex}]`, 4_096));
+    }
+    for (const field of ["acceptanceCriteria", "assumptions", "risks"]) {
+      if (item[field] === undefined) continue;
+      const values = array(item[field], `stageSpecs[${index}].${field}`);
+      if (values.length > 64) throw new AutomationSchemaError(`stageSpecs[${index}].${field} has too many entries.`);
+      values.forEach((entry, entryIndex) => string(entry, `stageSpecs[${index}].${field}[${entryIndex}]`, MAX_GOAL));
+    }
+    if (item.detailLevel !== undefined) enumValue(item.detailLevel, `stageSpecs[${index}].detailLevel`, STAGE_DETAIL_LEVELS);
     timestamp(item.createdAt, `stageSpecs[${index}].createdAt`);
     optionalString(item.supersedes, `stageSpecs[${index}].supersedes`, 256);
   });
@@ -259,7 +276,15 @@ function validateVersions(document: Record<string, unknown>): void {
     string(item.stepKey, `stepSpecs[${index}].stepKey`, 256);
     integer(item.specVersion, `stepSpecs[${index}].specVersion`, 1);
     enumValue(item.kind, `stepSpecs[${index}].kind`, STEP_KINDS);
-    string(item.goal, `stepSpecs[${index}].goal`, MAX_GOAL);
+    const objective = item.objective === undefined ? null : string(item.objective, `stepSpecs[${index}].objective`, MAX_GOAL);
+    const goal = string(item.goal, `stepSpecs[${index}].goal`, MAX_GOAL);
+    if (objective !== null && objective !== goal) throw new AutomationSchemaError(`stepSpecs[${index}].objective must match goal.`);
+    for (const field of ["inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints"]) {
+      if (item[field] === undefined) continue;
+      const values = array(item[field], `stepSpecs[${index}].${field}`);
+      if (values.length > 64) throw new AutomationSchemaError(`stepSpecs[${index}].${field} has too many entries.`);
+      values.forEach((entry, entryIndex) => string(entry, `stepSpecs[${index}].${field}[${entryIndex}]`, MAX_GOAL));
+    }
     enumValue(item.riskClass, `stepSpecs[${index}].riskClass`, new Set(["LOW", "MEDIUM", "HIGH"]));
     enumValue(item.sideEffectClass, `stepSpecs[${index}].sideEffectClass`, new Set(["PURE", "IDEMPOTENT", "RECONCILABLE", "NON_REPEATABLE"]));
     enumValue(item.specStatus, `stepSpecs[${index}].specStatus`, new Set(["ACTIVE", "SUPERSEDED"]));
@@ -735,6 +760,11 @@ function validateReferences(document: Record<string, unknown>): void {
     if (Number(item.version) === 1 && superseded !== null) throw new AutomationSchemaError("Plan version 1 cannot supersede a predecessor.");
     if (Number(item.version) > 1 && superseded === null) throw new AutomationSchemaError("Plan versions after version 1 require an explicit predecessor.");
     if (superseded && Number(superseded.version) !== Number(item.version) - 1) throw new AutomationSchemaError("PlanVersion predecessor must be the immediately previous version in the same project.");
+    if (item.currentStageId !== undefined && item.currentStageId !== null) {
+      const currentStage = stages.get(string(item.currentStageId, "planVersions.currentStageId", 256));
+      if (!currentStage) throw new AutomationSchemaError("planVersions.currentStageId references a missing StageSpec.");
+      if (currentStage.planVersionId !== item.planVersionId) throw new AutomationSchemaError("planVersions.currentStageId must belong to the same PlanVersion.");
+    }
   }
   for (const item of stages.values()) {
     const plan = plans.get(item.planVersionId as string);
@@ -1054,6 +1084,42 @@ function upgradeV3ToV4(value: AutomationDocument): AutomationDocument {
     }
   }
   document.requirementOrigins = origins;
+  // K1-A is an additive extension of the v4 document. Legacy stage/step
+  // rows are materialized with bounded defaults while their existing IDs,
+  // references, goals, and version lineage remain unchanged.
+  document.stageSpecs = document.stageSpecs.map((value) => {
+    const item = { ...(value as unknown as Record<string, unknown>) };
+    const objective = typeof item.objective === "string" && item.objective.length > 0
+      ? item.objective
+      : typeof item.goal === "string" && item.goal.length > 0
+        ? item.goal
+        : "legacy stage objective";
+    item.name = typeof item.name === "string" && item.name.length > 0 ? item.name : String(item.stageKey ?? item.stageSpecId);
+    item.objective = objective;
+    item.goal = objective;
+    item.dependsOn = Array.isArray(item.dependsOn) ? item.dependsOn : [];
+    item.acceptanceCriteria = Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria : [];
+    item.detailLevel = item.detailLevel === "DETAILED" ? "DETAILED" : "OUTLINE";
+    item.assumptions = Array.isArray(item.assumptions) ? item.assumptions : [];
+    item.risks = Array.isArray(item.risks) ? item.risks : [];
+    return item as unknown as AutomationDocument["stageSpecs"][number];
+  });
+  document.stepSpecs = document.stepSpecs.map((value) => {
+    const item = { ...(value as unknown as Record<string, unknown>) };
+    const objective = typeof item.objective === "string" && item.objective.length > 0
+      ? item.objective
+      : typeof item.goal === "string" && item.goal.length > 0
+        ? item.goal
+        : "legacy step objective";
+    item.objective = objective;
+    item.goal = objective;
+    item.inputs = Array.isArray(item.inputs) ? item.inputs : [];
+    item.expectedOutputs = Array.isArray(item.expectedOutputs) ? item.expectedOutputs : [];
+    item.acceptanceCriteria = Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria : [];
+    item.assumptions = Array.isArray(item.assumptions) ? item.assumptions : [];
+    item.constraints = Array.isArray(item.constraints) ? item.constraints : [];
+    return item as unknown as AutomationDocument["stepSpecs"][number];
+  });
   document.automationSchemaVersion = 4;
   return document;
 }
