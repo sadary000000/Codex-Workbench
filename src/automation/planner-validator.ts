@@ -457,7 +457,7 @@ function issue(code: PlanValidationIssueCode, path: string, message: string, sev
 /** Pure transition check. It does not change the predecessor or active pointer. */
 export function validatePlanVersionTransition(
   previous: Pick<PlanVersion, "planVersionId" | "projectId" | "requirementVersionId" | "version" | "status" | "requirementPayloadSha256"> | null,
-  candidate: Pick<PlanCandidate, "planVersionId" | "projectId" | "requirementVersionId" | "version" | "supersedes">,
+  candidate: Pick<PlanCandidate, "planVersionId" | "projectId" | "requirementVersionId" | "requirementPayloadSha256" | "version" | "supersedes">,
 ): readonly PlanValidationIssue[] {
   const issues: PlanValidationIssue[] = [];
   if (!previous) {
