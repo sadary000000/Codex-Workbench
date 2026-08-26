@@ -209,13 +209,19 @@ function validateVersions(document: Record<string, unknown>): void {
 
   const plans = array(document.planVersions, "planVersions");
   validateUniqueIds(plans, "planVersionId", "planVersions");
+  const planVersionsByProject = new Set<string>();
   plans.forEach((value, index) => {
     const item = record(value);
     string(item.planVersionId, `planVersions[${index}].planVersionId`, 256);
     string(item.projectId, `planVersions[${index}].projectId`, 256);
     string(item.requirementVersionId, `planVersions[${index}].requirementVersionId`, 256);
     integer(item.version, `planVersions[${index}].version`, 1);
+    const projectVersion = `${item.projectId}\u0000${item.version}`;
+    if (planVersionsByProject.has(projectVersion)) throw new AutomationSchemaError(`planVersions contains duplicate project/version ${projectVersion}.`);
+    planVersionsByProject.add(projectVersion);
     enumValue(item.status, `planVersions[${index}].status`, new Set(["DRAFT", "ACTIVE", "SUPERSEDED"]));
+    if (item.createdBy !== undefined) string(item.createdBy, `planVersions[${index}].createdBy`, 256);
+    if (item.origin !== undefined) string(item.origin, `planVersions[${index}].origin`, 256);
     if (item.canonicalPayload !== undefined) {
       let canonicalPayload: string;
       try {
@@ -276,6 +282,7 @@ function validateVersions(document: Record<string, unknown>): void {
     string(item.stepKey, `stepSpecs[${index}].stepKey`, 256);
     integer(item.specVersion, `stepSpecs[${index}].specVersion`, 1);
     enumValue(item.kind, `stepSpecs[${index}].kind`, STEP_KINDS);
+    if (item.ordinal !== undefined) integer(item.ordinal, `stepSpecs[${index}].ordinal`, 0);
     const objective = item.objective === undefined ? null : string(item.objective, `stepSpecs[${index}].objective`, MAX_GOAL);
     const goal = string(item.goal, `stepSpecs[${index}].goal`, MAX_GOAL);
     if (objective !== null && objective !== goal) throw new AutomationSchemaError(`stepSpecs[${index}].objective must match goal.`);
@@ -722,7 +729,15 @@ function validateReferences(document: Record<string, unknown>): void {
     requireSameProject(policies, project.policyVersionId, projectId, `${projectId}.policyVersionId`);
     if (requirement && requirement.status === "SUPERSEDED") throw new AutomationSchemaError(`${projectId}.activeRequirementVersionId cannot point to a superseded version.`);
     if (requirement && requirement.status !== "CONFIRMED" && requirement.status !== "ACTIVE") throw new AutomationSchemaError(`${projectId}.activeRequirementVersionId must point to a confirmed or active version.`);
-    if (plan && plan.status === "SUPERSEDED") throw new AutomationSchemaError(`${projectId}.activePlanVersionId cannot point to a superseded version.`);
+    if (plan && plan.status !== "ACTIVE") throw new AutomationSchemaError(`${projectId}.activePlanVersionId must point to an active PlanVersion.`);
+    if (plan) {
+      const boundRequirement = requirements.get(plan.requirementVersionId as string);
+      if (!boundRequirement) throw new AutomationSchemaError(`${projectId}.activePlanVersionId references a plan with a missing RequirementVersion.`);
+      if (boundRequirement.projectId !== projectId) throw new AutomationSchemaError(`${projectId}.activePlanVersionId references a plan bound to another project.`);
+      if (project.activeRequirementVersionId !== boundRequirement.requirementVersionId) throw new AutomationSchemaError(`${projectId}.activePlanVersionId must bind the current active RequirementVersion.`);
+      if (boundRequirement.status !== "ACTIVE" && boundRequirement.status !== "CONFIRMED") throw new AutomationSchemaError(`${projectId}.activePlanVersionId must bind an active or confirmed RequirementVersion.`);
+      if (plan.requirementPayloadSha256 !== undefined && plan.requirementPayloadSha256 !== null && plan.requirementPayloadSha256 !== boundRequirement.payloadSha256) throw new AutomationSchemaError(`${projectId}.activePlanVersionId plan requirement hash does not match its RequirementVersion.`);
+    }
   }
   for (const item of policies.values()) {
     const superseded = requireSameProject(policies, item.supersedes, item.projectId as string, "policyVersions.supersedes");
@@ -756,6 +771,7 @@ function validateReferences(document: Record<string, unknown>): void {
     requireSameProject(projects, item.projectId, item.projectId as string, "planVersions.projectId");
     const requirement = requireSameProject(requirements, item.requirementVersionId, item.projectId as string, "planVersions.requirementVersionId");
     if (requirement?.status === "SUPERSEDED") throw new AutomationSchemaError("A plan cannot bind a superseded requirement version.");
+    if (item.requirementPayloadSha256 !== undefined && item.requirementPayloadSha256 !== null && item.requirementPayloadSha256 !== requirement?.payloadSha256) throw new AutomationSchemaError("PlanVersion requirementPayloadSha256 does not match its RequirementVersion.");
     const superseded = requireSameProject(plans, item.supersedes, item.projectId as string, "planVersions.supersedes");
     if (Number(item.version) === 1 && superseded !== null) throw new AutomationSchemaError("Plan version 1 cannot supersede a predecessor.");
     if (Number(item.version) > 1 && superseded === null) throw new AutomationSchemaError("Plan versions after version 1 require an explicit predecessor.");
@@ -766,11 +782,38 @@ function validateReferences(document: Record<string, unknown>): void {
       if (currentStage.planVersionId !== item.planVersionId) throw new AutomationSchemaError("planVersions.currentStageId must belong to the same PlanVersion.");
     }
   }
+  const stagesForVersion = new Set<string>();
   for (const item of stages.values()) {
     const plan = plans.get(item.planVersionId as string);
     if (!plan) throw new AutomationSchemaError("stageSpecs.planVersionId references a missing plan.");
+    const stageKey = `${item.planVersionId}:${item.stageKey}:${item.specVersion}`;
+    if (stagesForVersion.has(stageKey)) throw new AutomationSchemaError("Duplicate StageSpec key/version in a PlanVersion.");
+    stagesForVersion.add(stageKey);
+    const predecessor = item.supersedes === null || item.supersedes === undefined
+      ? null
+      : stages.get(string(item.supersedes, "stageSpecs.supersedes", 256)) ?? null;
+    if (item.supersedes !== null && item.supersedes !== undefined && predecessor === null) throw new AutomationSchemaError("stageSpecs.supersedes references a missing StageSpec.");
+    if (predecessor && predecessor.planVersionId !== item.planVersionId) throw new AutomationSchemaError("stageSpecs.supersedes must remain within the same PlanVersion.");
+    if (Number(item.specVersion) === 1 && predecessor !== null) throw new AutomationSchemaError("StageSpec version 1 cannot supersede a predecessor.");
+    if (Number(item.specVersion) > 1 && predecessor === null) throw new AutomationSchemaError("StageSpec versions after version 1 require an explicit predecessor.");
+    if (predecessor && Number(predecessor.specVersion) !== Number(item.specVersion) - 1) throw new AutomationSchemaError("StageSpec predecessor must be the immediately previous version.");
   }
-  for (const item of steps.values()) if (!stages.has(item.stageSpecId as string)) throw new AutomationSchemaError("stepSpecs.stageSpecId references a missing stage.");
+  const stepsForVersion = new Set<string>();
+  for (const item of steps.values()) {
+    const stage = stages.get(item.stageSpecId as string);
+    if (!stage) throw new AutomationSchemaError("stepSpecs.stageSpecId references a missing stage.");
+    const stepKey = `${item.stageSpecId}:${item.stepKey}:${item.specVersion}`;
+    if (stepsForVersion.has(stepKey)) throw new AutomationSchemaError("Duplicate StepSpec key/version in a StageSpec.");
+    stepsForVersion.add(stepKey);
+    const predecessor = item.supersedes === null || item.supersedes === undefined
+      ? null
+      : steps.get(string(item.supersedes, "stepSpecs.supersedes", 256)) ?? null;
+    if (item.supersedes !== null && item.supersedes !== undefined && predecessor === null) throw new AutomationSchemaError("stepSpecs.supersedes references a missing StepSpec.");
+    if (predecessor && predecessor.stageSpecId !== item.stageSpecId) throw new AutomationSchemaError("stepSpecs.supersedes must remain within the same StageSpec.");
+    if (Number(item.specVersion) === 1 && predecessor !== null) throw new AutomationSchemaError("StepSpec version 1 cannot supersede a predecessor.");
+    if (Number(item.specVersion) > 1 && predecessor === null) throw new AutomationSchemaError("StepSpec versions after version 1 require an explicit predecessor.");
+    if (predecessor && Number(predecessor.specVersion) !== Number(item.specVersion) - 1) throw new AutomationSchemaError("StepSpec predecessor must be the immediately previous version.");
+  }
   for (const item of runtimes.values()) {
     const step = steps.get(item.stepSpecId as string);
     if (!step) throw new AutomationSchemaError("stepRuntimes.stepSpecId references a missing StepSpec.");
@@ -1056,7 +1099,7 @@ function migrateV2ToV3(value: Record<string, unknown>): AutomationDocument {
   return document as unknown as AutomationDocument;
 }
 
-function upgradeV3ToV4(value: AutomationDocument): AutomationDocument {
+function upgradeV3ToV4(value: AutomationDocument, repairLegacyPlanBindings = false): AutomationDocument {
   const document = structuredClone(value) as AutomationDocument;
   const origins = Array.isArray(document.requirementOrigins) ? document.requirementOrigins : [];
   const byId = new Map(origins.map((origin) => [origin.requirementOriginId, origin]));
@@ -1104,6 +1147,7 @@ function upgradeV3ToV4(value: AutomationDocument): AutomationDocument {
     item.risks = Array.isArray(item.risks) ? item.risks : [];
     return item as unknown as AutomationDocument["stageSpecs"][number];
   });
+  const nextStepOrdinalByStage = new Map<string, number>();
   document.stepSpecs = document.stepSpecs.map((value) => {
     const item = { ...(value as unknown as Record<string, unknown>) };
     const objective = typeof item.objective === "string" && item.objective.length > 0
@@ -1118,8 +1162,22 @@ function upgradeV3ToV4(value: AutomationDocument): AutomationDocument {
     item.acceptanceCriteria = Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria : [];
     item.assumptions = Array.isArray(item.assumptions) ? item.assumptions : [];
     item.constraints = Array.isArray(item.constraints) ? item.constraints : [];
+    const stageKey = String(item.stageSpecId ?? "legacy-stage");
+    if (item.ordinal === undefined) item.ordinal = (nextStepOrdinalByStage.get(stageKey) ?? 0) + 1;
+    if (typeof item.ordinal === "number" && Number.isSafeInteger(item.ordinal) && item.ordinal >= 0) {
+      nextStepOrdinalByStage.set(stageKey, Math.max(nextStepOrdinalByStage.get(stageKey) ?? 0, item.ordinal));
+    }
     return item as unknown as AutomationDocument["stepSpecs"][number];
   });
+  if (repairLegacyPlanBindings) {
+    const requirementsById = new Map(document.requirementVersions.map((requirement) => [requirement.requirementVersionId, requirement]));
+    document.planVersions = document.planVersions.map((value) => {
+      const item = { ...(value as unknown as Record<string, unknown>) };
+      const requirement = requirementsById.get(String(item.requirementVersionId));
+      if (requirement) item.requirementPayloadSha256 = requirement.payloadSha256;
+      return item as unknown as AutomationDocument["planVersions"][number];
+    });
+  }
   document.automationSchemaVersion = 4;
   return document;
 }
@@ -1134,23 +1192,26 @@ export function migrateAutomationDocument(value: unknown): { document: Automatio
   if (typeof versionValue !== "number" || !Number.isSafeInteger(versionValue)) throw new AutomationSchemaError("Automation schema version is invalid.");
   if (versionValue > AUTOMATION_SCHEMA_VERSION) throw new AutomationSchemaError("Automation schema version is newer than this runtime.", "AUTOMATION_SCHEMA_VERSION_UNSUPPORTED");
   if (versionValue === 0) {
-    const migrated = upgradeV3ToV4(migrateV0ToV3(input));
+    const migrated = upgradeV3ToV4(migrateV0ToV3(input), true);
     return { document: validateAutomationDocument(migrated), migratedFrom: 0 };
   }
   if (versionValue === 1) {
-    const migrated = upgradeV3ToV4(migrateV1ToV3(input));
+    const migrated = upgradeV3ToV4(migrateV1ToV3(input), true);
     return { document: validateAutomationDocument(migrated), migratedFrom: 1 };
   }
   if (versionValue === 2) {
-    const migrated = upgradeV3ToV4(migrateV2ToV3(input));
+    const migrated = upgradeV3ToV4(migrateV2ToV3(input), true);
     return { document: validateAutomationDocument(migrated), migratedFrom: 2 };
   }
   if (versionValue === 3) {
-    const migrated = upgradeV3ToV4(input as unknown as AutomationDocument);
+    const migrated = upgradeV3ToV4(input as unknown as AutomationDocument, true);
     return { document: validateAutomationDocument(migrated), migratedFrom: 3 };
   }
   const current = hasAutomationVersion ? input : { ...input, automationSchemaVersion: versionValue };
-  return { document: validateAutomationDocument(current), migratedFrom: null };
+  // Normalize additive K1-A fields for current-schema legacy rows as well.
+  // This is in-memory on reads; persistence only changes at an explicit write.
+  const normalized = upgradeV3ToV4(current as unknown as AutomationDocument);
+  return { document: validateAutomationDocument(normalized), migratedFrom: null };
 }
 
 export {

@@ -352,7 +352,8 @@ export async function inspectExistingSqliteAutomationFile(filePath: string): Pro
     if (persistenceVersion !== String(AUTOMATION_PERSISTENCE_SCHEMA_VERSION) || format !== AUTOMATION_PERSISTENCE_FORMAT || documentVersion !== String(AUTOMATION_SCHEMA_VERSION) || writerAuthority !== AUTOMATION_WRITER_AUTHORITY) {
       throw new AutomationPersistenceError("AUTOMATION_DB_VERSION_UNSUPPORTED", "Automation SQLite persistence schema is unsupported.");
     }
-    return { status: "valid", document: readDocumentRows(database), code: null, message: null, migratedFrom: null };
+    const current = readDocumentRows(database);
+    return { status: "valid", document: migrateAutomationDocument(current).document, code: null, message: null, migratedFrom: null };
   } catch (error) {
     const mapped = error instanceof AutomationPersistenceError ? error : mapSqliteError(error);
     return { status: "invalid", document: null, code: mapped.code, message: mapped.message, migratedFrom: null };
@@ -439,7 +440,7 @@ export class SqliteAutomationPersistence {
         (document[row.table_name] as unknown as unknown[]).push(item);
       }
       document.auditEvents.sort((left, right) => left.sequence - right.sequence);
-      return validateAutomationDocument(document);
+      return migrateAutomationDocument(document).document;
     } catch (error) {
       if (error instanceof AutomationPersistenceError) throw error;
       throw mapSqliteError(error);

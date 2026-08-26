@@ -320,6 +320,9 @@ export interface PlanVersion {
   requirementVersionId: string;
   version: number;
   status: PlanVersionStatus;
+  /** Bounded provenance for the immutable plan definition. */
+  createdBy?: string;
+  origin?: string;
   /** Optional AUT-3 structured plan payload; older AUT-1.5 records omit it. */
   canonicalPayload?: string;
   /** SHA-256 of the canonical structured plan payload. */
@@ -363,6 +366,8 @@ export interface StepSpec {
   stepKey: string;
   specVersion: number;
   kind: StepKind;
+  /** Stable execution order within the owning StageSpec. */
+  ordinal?: number;
   /** Canonical objective; legacy pre-v4 rows may omit additive fields. */
   objective?: string;
   inputs?: string[];

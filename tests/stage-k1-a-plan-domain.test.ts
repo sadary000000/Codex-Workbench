@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -83,6 +84,18 @@ test("K1-A persists the complete Plan/Stage/Step domain and reopens it unchanged
     assert.equal((await value.store.get("planVersions", plan.planVersionId))?.requirementVersionId, requirement.requirementVersionId);
     assert.deepEqual(await value.store.get("stageSpecs", stage.stageSpecId), stage);
     assert.deepEqual(await value.store.get("stepSpecs", step.stepSpecId), step);
+    assert.equal(step.ordinal, 1);
+    const secondStep = await value.store.createStepSpec({
+      stepSpecId: "step-k1-a:2",
+      stageSpecId: stage.stageSpecId,
+      stepKey: "VERIFY",
+      specVersion: 1,
+      kind: "SYSTEM_STEP",
+      objective: "Verify the immutable definition",
+      riskClass: "LOW",
+      sideEffectClass: "PURE",
+    });
+    assert.equal(secondStep.ordinal, 2);
 
     const beforeQuery = await fileHash(value.store.filePath);
     await value.store.getCurrentPlanVersion(project.projectId);
@@ -137,6 +150,21 @@ test("K1-A keeps Plan v1 immutable, separates active selection, and rejects inva
       tx.replace("planVersions", { ...current, status: "DRAFT" });
     }), (error: unknown) => error instanceof AutomationStoreError && error.code === "AUTOMATION_CONFLICT");
     assert.deepEqual(await value.store.get("planVersions", first.plan.planVersionId), v1Before);
+    await value.store.transaction((tx) => {
+      assert.equal(Object.getOwnPropertyNames(Object.getPrototypeOf(tx)).includes("replaceLegacyPlannerPlanStatus"), false);
+    });
+    await assert.rejects(value.store.transaction((tx) => {
+      const project = tx.require("automationProjects", first.project.projectId);
+      tx.replace("automationProjects", { ...project, activePlanVersionId: draft.planVersionId });
+    }), /active PlanVersion/);
+    assert.equal((await value.store.getCurrentPlanVersion(first.project.projectId))?.planVersionId, v2.planVersionId);
+    await assert.rejects(value.store.transaction((tx) => {
+      const current = tx.require("planVersions", v2.planVersionId);
+      const poisoned = { ...current, planVersionId: "project-k1-a-versions:plan:bad-hash", version: 4, status: "ACTIVE" as const, requirementPayloadSha256: "0".repeat(64), supersedes: draft.planVersionId };
+      tx.insert("planVersions", poisoned);
+      const project = tx.require("automationProjects", first.project.projectId);
+      tx.replace("automationProjects", { ...project, activePlanVersionId: poisoned.planVersionId });
+    }), /requirement hash|requirementPayloadSha256/);
 
     const other = await baseGraph(value.store, "project-k1-a-other", "requirement-k1-a-other");
     await assert.rejects(value.store.createPlanVersion({ projectId: first.project.projectId, requirementVersionId: other.requirement.requirementVersionId, version: 4, status: "ACTIVE", supersedes: draft.planVersionId }), /exact confirmed active RequirementVersion/);
@@ -150,8 +178,46 @@ test("K1-A keeps Plan v1 immutable, separates active selection, and rejects inva
     const draftProject = await value.store.createAutomationProject({ projectId: "project-k1-a-draft", name: "K1-A draft requirement" });
     const draftRequirement = await value.store.createRequirementVersion({ requirementVersionId: "requirement-k1-a-draft", projectId: draftProject.projectId, version: 1, status: "DRAFT", origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:draft" }, canonicalPayload: requirementPayload("draft") });
     await assert.rejects(value.store.createPlanVersion({ projectId: draftProject.projectId, requirementVersionId: draftRequirement.requirementVersionId, version: 1, status: "ACTIVE" }), /exact confirmed active RequirementVersion/);
+
   } finally {
     await dispose(value);
+  }
+});
+
+test("K1-A closes spec version gaps, duplicate definitions, conflicts, and normalizes current-schema SQLite rows on read", async () => {
+  const value = await fixture();
+  try {
+    const { plan } = await baseGraph(value.store, "project-k1-a-boundaries", "requirement-k1-a-boundaries");
+    const stage = await value.store.createStageSpec({ stageSpecId: "stage-k1-a-boundary", planVersionId: plan.planVersionId, stageKey: "BOUNDARY", specVersion: 1, status: "ACTIVE", ordinal: 1, goal: "boundary stage" });
+    await assert.rejects(value.store.createStageSpec({ planVersionId: plan.planVersionId, stageKey: "BOUNDARY", specVersion: 1, status: "ACTIVE", ordinal: 1, goal: "duplicate" }), /already exists/);
+    await assert.rejects(value.store.createStageSpec({ planVersionId: plan.planVersionId, stageKey: "BOUNDARY", specVersion: 2, status: "ACTIVE", ordinal: 1, goal: "missing predecessor" }), /predecessor/);
+    await assert.rejects(value.store.createStageSpec({ planVersionId: plan.planVersionId, stageKey: "CONFLICT", specVersion: 1, status: "ACTIVE", ordinal: 2, objective: "one", goal: "two" }), /must match|legacy goal/);
+    const step = await value.store.createStepSpec({ stepSpecId: "step-k1-a-boundary", stageSpecId: stage.stageSpecId, stepKey: "BOUNDARY", specVersion: 1, kind: "SYSTEM_STEP", goal: "boundary step", riskClass: "LOW", sideEffectClass: "PURE" });
+    await assert.rejects(value.store.createStepSpec({ stageSpecId: stage.stageSpecId, stepKey: "BOUNDARY", specVersion: 1, kind: "SYSTEM_STEP", goal: "duplicate", riskClass: "LOW", sideEffectClass: "PURE" }), /already exists/);
+    await assert.rejects(value.store.createStepSpec({ stageSpecId: stage.stageSpecId, stepKey: "BOUNDARY", specVersion: 2, kind: "SYSTEM_STEP", goal: "missing predecessor", riskClass: "LOW", sideEffectClass: "PURE" }), /predecessor/);
+
+    await value.store.close();
+    const database = new DatabaseSync(value.store.filePath);
+    for (const row of [
+      ["stageSpecs", stage.stageSpecId, ["name", "objective", "dependsOn", "acceptanceCriteria", "detailLevel", "assumptions", "risks"]],
+      ["stepSpecs", step.stepSpecId, ["ordinal", "objective", "inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints"]],
+    ] as const) {
+      const record = database.prepare("SELECT payload FROM automation_records WHERE table_name = ? AND entity_id = ?").get(row[0], row[1]) as { payload: string };
+      const legacy = JSON.parse(record.payload) as Record<string, unknown>;
+      for (const field of row[2]) delete legacy[field];
+      database.prepare("UPDATE automation_records SET payload = ? WHERE table_name = ? AND entity_id = ?").run(JSON.stringify(legacy), row[0], row[1]);
+    }
+    database.close();
+    const reopened = new AutomationStore(value.store.filePath);
+    const normalizedStage = await reopened.get("stageSpecs", stage.stageSpecId);
+    const normalizedStep = await reopened.get("stepSpecs", step.stepSpecId);
+    assert.equal(normalizedStage?.objective, stage.goal);
+    assert.deepEqual(normalizedStage?.acceptanceCriteria, []);
+    assert.equal(normalizedStep?.objective, step.goal);
+    assert.equal(normalizedStep?.ordinal, 1);
+    await reopened.close();
+  } finally {
+    await rm(value.root, { recursive: true, force: true }).catch(() => undefined);
   }
 });
 

@@ -154,6 +154,8 @@ export interface PlanVersionInput {
   requirementVersionId: string;
   version: number;
   status?: PlanVersionStatus;
+  createdBy?: string;
+  origin?: string;
   supersedes?: string | null;
   canonicalPayload?: string;
   payloadSha256?: string;
@@ -208,6 +210,7 @@ export interface StepSpecInput {
   stepKey: string;
   specVersion: number;
   kind: StepKind;
+  ordinal?: number;
   objective?: string;
   inputs?: string[];
   expectedOutputs?: string[];
@@ -372,6 +375,11 @@ function definitionText(primary: string | undefined, legacy: string | undefined,
   if (primaryText !== null || legacyText !== null) return primaryText ?? legacyText!;
   throw new AutomationStoreError("AUTOMATION_INVALID", `${field} must be bounded and non-empty.`);
 }
+
+// This symbol is intentionally module-private. It preserves the historical
+// Planner replan behavior without exposing a public transaction escape hatch
+// that can rewrite an immutable PlanVersion from arbitrary callers.
+const replaceHistoricalPlannerPlanStatus: unique symbol = Symbol("replaceHistoricalPlannerPlanStatus");
 
 function assertStoredProviderRefs(intent: ActionIntent, attempt: ActionAttempt, requestRef: ExternalRef | null, observationRef: ExternalRef | null): void {
   if (!requestRef && !observationRef) return;
@@ -601,7 +609,7 @@ export class AutomationTransaction {
       }
     }
     if (name === "planVersions") {
-      for (const key of ["planVersionId", "projectId", "requirementVersionId", "version", "status", "canonicalPayload", "payloadSha256", "requirementPayloadSha256", "planningMode", "plannerRole", "plannerChatRef", "currentStageId", "createdAt", "supersedes"]) {
+      for (const key of ["planVersionId", "projectId", "requirementVersionId", "version", "status", "createdBy", "origin", "canonicalPayload", "payloadSha256", "requirementPayloadSha256", "planningMode", "plannerRole", "plannerChatRef", "currentStageId", "createdAt", "supersedes"]) {
         if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "PlanVersion immutable definition cannot be replaced.");
       }
     }
@@ -611,7 +619,7 @@ export class AutomationTransaction {
       }
     }
     if (name === "stepSpecs") {
-      for (const key of ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "objective", "inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints", "goal", "riskClass", "sideEffectClass", "createdAt", "supersedes"]) {
+      for (const key of ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "ordinal", "objective", "inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints", "goal", "riskClass", "sideEffectClass", "createdAt", "supersedes"]) {
         if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StepSpec immutable definition cannot be replaced.");
       }
     }
@@ -657,11 +665,8 @@ export class AutomationTransaction {
     record[field] = value;
   }
 
-  /**
-   * Historical Planner compatibility only. K1-A writes never use this
-   * escape hatch; ordinary PlanVersion replacement remains immutable.
-   */
-  replaceLegacyPlannerPlanStatus(planVersionId: string, status: PlanVersion["status"]): void {
+  /** Historical Planner compatibility; the capability is not exported. */
+  [replaceHistoricalPlannerPlanStatus](planVersionId: string, status: PlanVersion["status"]): void {
     const current = this.require("planVersions", planVersionId);
     const collection = this.mutableTable("planVersions") as PlanVersion[];
     const index = collection.findIndex((item) => item.planVersionId === planVersionId);
@@ -861,6 +866,8 @@ export class AutomationStore {
         requirementVersionId: input.requirementVersionId,
         version: input.version,
         status: input.status ?? (supersedes ? "ACTIVE" : "DRAFT"),
+        createdBy: text(input.createdBy ?? "SYSTEM", "plan.createdBy", 256),
+        origin: text(input.origin ?? "LOCAL", "plan.origin", 256),
         requirementPayloadSha256: input.requirementPayloadSha256 ?? requirement.payloadSha256,
         currentStageId: input.currentStageId ?? null,
         createdAt: now(),
@@ -914,7 +921,7 @@ export class AutomationStore {
       const payloadSha256 = sha256Hex(canonicalPayload);
       if (payloadSha256 !== input.payloadSha256) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner payload SHA-256 does not match canonicalPayload.");
       const previous = project.activePlanVersionId ? tx.require("planVersions", project.activePlanVersionId) : null;
-      if (previous) tx.replaceLegacyPlannerPlanStatus(previous.planVersionId, "SUPERSEDED");
+      if (previous) tx[replaceHistoricalPlannerPlanStatus](previous.planVersionId, "SUPERSEDED");
       const timestamp = now();
       const planVersion: PlanVersion = {
         planVersionId: id(input.planVersionId, "planVersionId"),
@@ -922,6 +929,8 @@ export class AutomationStore {
         requirementVersionId: requirement.requirementVersionId,
         version: Math.max(0, ...tx.table("planVersions").filter((item) => item.projectId === project.projectId).map((item) => item.version)) + 1,
         status: "ACTIVE",
+        createdBy: "WEBGPT_RUNTIME",
+        origin: "WEBGPT",
         canonicalPayload,
         payloadSha256,
         requirementPayloadSha256: input.requirementPayloadSha256,
@@ -957,13 +966,14 @@ export class AutomationStore {
         tx.insert("stageSpecs", stageSpec);
         stageSpecs.push(stageSpec);
         if (stage.stageKey !== input.payload.currentStage.stageKey) continue;
-        for (const step of input.payload.currentStage.steps) {
+        for (const [stepIndex, step] of input.payload.currentStage.steps.entries()) {
           const stepSpec: StepSpec = {
             stepSpecId: id(undefined, "stepSpecId"),
             stageSpecId: stageSpec.stageSpecId,
             stepKey: text(step.stepKey, "step.stepKey", 256),
             specVersion: 1,
             kind: "PLANNER_STEP",
+            ordinal: stepIndex + 1,
             objective: text(step.goal, "step.objective", 8_192),
             inputs: [],
             expectedOutputs: [],
@@ -993,6 +1003,10 @@ export class AutomationStore {
   async createStageSpec(input: StageSpecInput): Promise<StageSpec> {
     return this.transaction((tx) => {
       const plan = tx.require("planVersions", input.planVersionId);
+      const stageKey = text(input.stageKey, "stage.stageKey", 256);
+      if (tx.table("stageSpecs").some((item) => item.planVersionId === plan.planVersionId && item.stageKey === stageKey && item.specVersion === input.specVersion)) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", `StageSpec ${stageKey} version ${input.specVersion} already exists in this PlanVersion.`);
+      }
       const supersedes = input.supersedes ?? null;
       if (supersedes) {
         const old = tx.require("stageSpecs", supersedes);
@@ -1000,7 +1014,6 @@ export class AutomationStore {
         if (old.specVersion !== input.specVersion - 1) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StageSpec predecessor must be the immediately previous specification version.");
         tx.replace("stageSpecs", { ...old, status: "SUPERSEDED" });
       }
-      const stageKey = text(input.stageKey, "stage.stageKey", 256);
       const objective = definitionText(input.objective, input.goal, "stage.objective");
       const item: StageSpec = {
         stageSpecId: id(input.stageSpecId, "stageSpecId"),
@@ -1030,6 +1043,10 @@ export class AutomationStore {
     return this.transaction((tx) => {
       const stage = tx.require("stageSpecs", input.stageSpecId);
       const plan = tx.require("planVersions", stage.planVersionId);
+      const stepKey = text(input.stepKey, "step.stepKey", 256);
+      if (tx.table("stepSpecs").some((item) => item.stageSpecId === stage.stageSpecId && item.stepKey === stepKey && item.specVersion === input.specVersion)) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", `StepSpec ${stepKey} version ${input.specVersion} already exists in this StageSpec.`);
+      }
       const supersedes = input.supersedes ?? null;
       if (supersedes) {
         const old = tx.require("stepSpecs", supersedes);
@@ -1039,12 +1056,16 @@ export class AutomationStore {
       }
       const timestamp = now();
       const objective = definitionText(input.objective, input.goal, "step.objective");
+      const existingOrdinals = tx.table("stepSpecs")
+        .filter((item) => item.stageSpecId === stage.stageSpecId)
+        .map((item) => item.ordinal ?? 0);
       const item: StepSpec = {
         stepSpecId: id(input.stepSpecId, "stepSpecId"),
         stageSpecId: input.stageSpecId,
-        stepKey: text(input.stepKey, "step.stepKey", 256),
+        stepKey,
         specVersion: input.specVersion,
         kind: input.kind,
+        ordinal: input.ordinal ?? Math.max(0, ...existingOrdinals) + 1,
         objective,
         inputs: boundedDefinitionList(input.inputs, "step.inputs"),
         expectedOutputs: boundedDefinitionList(input.expectedOutputs, "step.expectedOutputs"),
