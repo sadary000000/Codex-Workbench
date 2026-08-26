@@ -3,13 +3,15 @@ import { shell, WebContentsView, type BaseWindow, type Rectangle, type Session }
 import { resolve } from "node:path";
 import { buildWebGptCreateProjectChatScript, buildWebGptCreateProjectScript, buildWebGptInspectProjectScript, buildWebGptOpenProjectScript, buildWebGptProjectProbeScript, buildWebGptReviewSubmissionProbeScript, buildWebGptSetPromptScript, buildWebGptVerifyPromptScript, isTransientWebGptResponse, normalizeChatUrl, normalizePageProbe, normalizeWebGptUrl, WEBGPT_CREATE_CHAT_SCRIPT, WEBGPT_HOME_URL, WEBGPT_PAGE_PROBE_SCRIPT, WEBGPT_REVIEW_ATTACHMENT_PROBE_SCRIPT, WEBGPT_REVIEW_OPEN_ATTACHMENT_SCRIPT, WEBGPT_SUBMIT_PROMPT_SCRIPT, isAllowedWebGptNavigation } from "../adapter/webgpt-page-adapter.ts";
 import { createWebGptSession, webGptSessionPath } from "../session/webgpt-session.ts";
-import { normalizeRoleChatUrl } from "./webgpt-role-session-registry.ts";
+import { normalizeRoleChatUrl, roleChatUrlsEquivalent } from "./webgpt-role-session-registry.ts";
 import { projectOperationBudgetMs, type WebGptProjectClickResult, type WebGptProjectOperationCommand, type WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
 import { WebGptNetworkObserver } from "../network/network-observer.ts";
 import { WebGptCompletionProbeScheduler } from "../network/completion-scheduler.ts";
 import type { WebGptNetworkObservationContext, WebGptNetworkObserverDiagnostics, WebGptNetworkWaitDiagnostics } from "../network/network-types.ts";
+import { resolveWebGptTargetReadiness } from "./webgpt-target-readiness.ts";
 import { WebGptOperationArbiter } from "./webgpt-operation-arbiter.ts";
 import { normalizeWebGptProjectUrl, projectIdFromProjectUrl } from "./webgpt-project-registry.ts";
+import { isWebGptPromptSubmissionConfirmed } from "./webgpt-submission-confirmation.ts";
 import type {
   WebGptBounds,
   WebGptHealthStatus,
@@ -19,6 +21,7 @@ import type {
   WebGptPublicService,
   WebGptScreenshot,
   WebGptState,
+  WebGptTargetReadiness,
 } from "../types.ts";
 import type { ReviewSubmissionReconcileResult, ReviewSubmissionWorkspacePort, ReviewSubmissionWorkspaceRequest, ReviewSubmissionWorkspaceResult } from "../review-submission/review-submission-types.ts";
 
@@ -81,6 +84,7 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
   private closed = false;
   private controlEpoch = 0;
   private lastProjectOperationTimeline: WebGptProjectOperationTimeline | null = null;
+  private lastTargetReadiness: WebGptTargetReadiness | null = null;
 
   constructor(options: WebGptWorkspaceOptions) {
     this.mainWindow = options.mainWindow;
@@ -197,6 +201,7 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
   }
 
   private async load(url: string): Promise<void> {
+    this.lastTargetReadiness = null;
     this.patchState({ url, title: "", page: initialPage(url), ready: false, error: null });
     await this.view.webContents.loadURL(url);
     await this.refreshPageState();
@@ -298,7 +303,7 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
     if (!expectedTarget) return;
     let actualTarget = "";
     try { actualTarget = normalizeRoleChatUrl(this.view.webContents.getURL() || this.state.url); } catch { /* handled as mismatch */ }
-    if (actualTarget !== expectedTarget) throw this.codedError("TARGET_CHAT_CHANGED", "当前页面不是请求指定的 Role Chat。");
+    if (!roleChatUrlsEquivalent(actualTarget, expectedTarget)) throw this.codedError("TARGET_CHAT_CHANGED", "当前页面不是请求指定的 Role Chat。");
   }
 
   private prepareManualNavigation(): void {
@@ -379,11 +384,123 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
 
   async openChatForAutomation(url: string): Promise<WebGptState> {
     const epoch = this.requireAutomationEpoch();
+    const targetChatUrl = normalizeRoleChatUrl(normalizeChatUrl(url));
     this.setVisible(true);
+    this.networkObserver.prepareForTarget(targetChatUrl, "target_navigation_started");
     await this.load(normalizeChatUrl(url));
+    // Electron navigation events invalidate the previous observer epoch.  Set
+    // the explicit target boundary again after navigation so a stale previous
+    // candidate can never make the new page look ready or mismatched.
+    this.networkObserver.prepareForTarget(targetChatUrl, "target_navigation_settled");
+    await this.waitForTargetChatIdentity(targetChatUrl);
+    // The page can emit a late SPA/navigation invalidation after the route is
+    // already canonical.  That invalidation describes the previous network
+    // epoch, not the historical Chat identity we are about to read.  Start a
+    // fresh target epoch at the converged identity boundary so a stale
+    // observer candidate cannot block a valid historical read or be mistaken
+    // for evidence that the page is another Chat.
+    this.networkObserver.prepareForTarget(targetChatUrl, "target_identity_converged");
     await this.waitForComposer();
+    await this.assertTargetChatIdentity(targetChatUrl);
+    // A late SPA navigation notification may arrive after the route and
+    // Composer have already converged.  Establish the observer epoch as the
+    // final operation before returning so the next history read sees the
+    // current target context, never a prior request's STALE candidate.
+    this.networkObserver.prepareForTarget(targetChatUrl, "target_identity_converged");
     this.assertAutomationEpoch(epoch);
     return this.state;
+  }
+
+  private async readCanonicalChatIdentity(probe: WebGptPageProbe): Promise<string | null> {
+    try {
+      // During a ChatGPT SPA transition the bounded DOM probe can briefly
+      // report the previous route while Electron's navigation URL already
+      // identifies the requested target.  Prefer the browser navigation
+      // identity, then use the page probe as a fallback once the DOM catches
+      // up.  This does not make a page ready by itself: onChatPage,
+      // Composer, history, and observer readiness remain separate gates.
+      return normalizeRoleChatUrl(normalizeChatUrl(this.view.webContents.getURL() || probe.page.url || this.state.url));
+    } catch {
+      return null;
+    }
+  }
+
+  private readPageProbeChatIdentity(probe: WebGptPageProbe): string | null {
+    try {
+      return normalizeRoleChatUrl(normalizeChatUrl(probe.page.url));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * loadURL() can complete before ChatGPT's SPA has committed the requested
+   * /c/:id route.  Waiting for a generic composer is unsafe because the home
+   * page also exposes one.  Hold the operation at the target boundary until
+   * the canonical URL is observable, while still failing closed on a stable
+   * different Chat identity.
+   */
+  private async waitForTargetChatIdentity(expectedChatUrl: string, timeoutMs = 20_000): Promise<WebGptPageProbe> {
+    const target = normalizeRoleChatUrl(normalizeChatUrl(expectedChatUrl));
+    const deadline = Date.now() + timeoutMs;
+    const mismatchGraceMs = 3_000;
+    let differentChatSince: number | null = null;
+    let lastProbe: WebGptPageProbe | null = null;
+    let lastActualChatUrl: string | null = null;
+    let convergedSamples = 0;
+    while (Date.now() < deadline) {
+      lastProbe = await this.getPageProbe();
+      lastActualChatUrl = await this.readCanonicalChatIdentity(lastProbe);
+      const probeChatUrl = this.readPageProbeChatIdentity(lastProbe);
+      // Require both Electron's navigation URL and the page probe's own URL
+      // to agree for two consecutive samples.  This closes the brief SPA
+      // window where the browser has moved to the requested route but the DOM
+      // probe still describes the previous page.
+      if (roleChatUrlsEquivalent(lastActualChatUrl ?? "", target) && roleChatUrlsEquivalent(probeChatUrl ?? "", target) && lastProbe.page.onChatPage) {
+        convergedSamples += 1;
+        if (convergedSamples >= 2) return lastProbe;
+      } else {
+        convergedSamples = 0;
+      }
+
+      const loading = this.view.webContents.isLoading();
+      if (lastActualChatUrl && !roleChatUrlsEquivalent(lastActualChatUrl, target) && !loading) {
+        differentChatSince ??= Date.now();
+        if (Date.now() - differentChatSince >= mismatchGraceMs) {
+          throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "目标 Chat 导航已稳定落到另一个 Chat，已拒绝继续。", {
+            expectedChatUrl: target,
+            actualChatUrl: lastActualChatUrl,
+            phase: "target_navigation",
+          });
+        }
+      } else {
+        differentChatSince = null;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    const readiness = this.evaluateTargetReadiness(target, lastProbe ?? await this.getPageProbe());
+    throw this.codedError("WAITING_IDENTITY_READY", "目标 Chat 导航未在等待窗口内收敛，已拒绝使用首页或旧 Chat 继续。", {
+      expectedChatUrl: target,
+      actualChatUrl: lastActualChatUrl,
+      phase: "target_navigation",
+      readiness,
+    });
+  }
+
+  private async assertTargetChatIdentity(expectedChatUrl: string): Promise<void> {
+    const target = normalizeRoleChatUrl(normalizeChatUrl(expectedChatUrl));
+    const probe = await this.getPageProbe();
+    const actual = await this.readCanonicalChatIdentity(probe);
+    const probeChatUrl = this.readPageProbeChatIdentity(probe);
+    if (!roleChatUrlsEquivalent(actual ?? "", target) || !roleChatUrlsEquivalent(probeChatUrl ?? "", target) || !probe.page.onChatPage) {
+      throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "目标 Chat 身份未在 Composer 就绪后保持一致，已拒绝继续。", {
+        expectedChatUrl: target,
+        actualChatUrl: actual,
+        probeChatUrl,
+        phase: "target_composer_ready",
+      });
+    }
   }
 
   private async openProjectForAutomationWithin(name: string, operation: ProjectOperationContext): Promise<Record<string, unknown>> {
@@ -744,6 +861,38 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
     return probe;
   }
 
+  async getTargetReadiness(expectedChatUrl: string): Promise<WebGptTargetReadiness> {
+    const target = normalizeRoleChatUrl(normalizeChatUrl(expectedChatUrl));
+    const probe = await this.getPageProbe();
+    return this.evaluateTargetReadiness(target, probe);
+  }
+
+  private evaluateTargetReadiness(expectedChatUrl: string, probe: WebGptPageProbe): WebGptTargetReadiness {
+    let actualChatUrl: string | null = null;
+    try {
+      actualChatUrl = normalizeRoleChatUrl(normalizeChatUrl(this.view.webContents.getURL() || probe.page.url || this.state.url));
+    } catch {
+      actualChatUrl = null;
+    }
+    const observer = this.networkObserver.getDiagnostics();
+    const observerIdentityMatches = observer.expectedChatUrl !== null && roleChatUrlsEquivalent(observer.expectedChatUrl, expectedChatUrl);
+    const readiness = resolveWebGptTargetReadiness({
+      expectedChatUrl,
+      actualChatUrl,
+      navigationReady: this.state.ready && !this.view.webContents.isLoading(),
+      onChatPage: probe.page.onChatPage,
+      composerFound: probe.page.composerFound,
+      historyReady: probe.page.generating || probe.page.userCount > 0 || probe.page.assistantCount > 0,
+      observerExpectedChatUrl: observer.expectedChatUrl,
+      observerCandidateState: observer.candidateState,
+      identityMatches: actualChatUrl !== null && roleChatUrlsEquivalent(actualChatUrl, expectedChatUrl),
+      observerIdentityMatches,
+      observerReady: observerIdentityMatches && observer.candidateState !== "STALE" && observer.candidateState !== "AMBIGUOUS",
+    });
+    this.lastTargetReadiness = readiness;
+    return readiness;
+  }
+
   async beginNetworkObservation(context: WebGptNetworkObservationContext): Promise<WebGptNetworkObserverDiagnostics> {
     return this.networkObserver.begin(context);
   }
@@ -840,6 +989,7 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
       error: this.state.error,
       networkObserver: this.networkObserver.getDiagnostics(),
       networkWait: this.lastNetworkWaitDiagnostics ? { ...this.lastNetworkWaitDiagnostics } : undefined,
+      targetReadiness: this.lastTargetReadiness ? { ...this.lastTargetReadiness } : undefined,
       browserResource: this.operationArbiter.getDiagnostics(),
     };
   }
@@ -912,7 +1062,7 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
       if (probe.page.loginRequired) throw this.codedError("WEBGPT_LOGIN_REQUIRED", "ChatGPT 页面需要登录。");
       if (!probe.page.onChatPage || !probe.page.composerFound) throw this.codedError("WEBGPT_REVIEW_TARGET_NOT_READY", "当前 WebGPT 页面不是已就绪的 Chat 对话。", { operation: "review-submit" });
       const actualTarget = normalizeRoleChatUrl(normalizeChatUrl(probe.page.url || this.view.webContents.getURL() || this.state.url));
-      if (input.target !== "current" && actualTarget !== normalizeRoleChatUrl(normalizeChatUrl(input.target))) {
+      if (input.target !== "current" && !roleChatUrlsEquivalent(actualTarget, normalizeRoleChatUrl(normalizeChatUrl(input.target)))) {
         throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "当前页面不是指定的 Review 目标 Chat。", { operation: "review-submit" });
       }
       const targetReadyMs = Date.now() - targetStartedAt;
@@ -1030,11 +1180,7 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
       await new Promise((resolve) => setTimeout(resolve, 250));
       this.assertAutomationTarget(epoch, expectedTarget);
       const afterSubmit = await this.getPageProbe();
-      const enteredChat = /\/c\//.test(new URL(afterSubmit.page.url).pathname);
-      const userAdded = afterSubmit.page.userCount > baseline.page.userCount;
-      const generationStarted = afterSubmit.page.generating;
-      const draftCleared = !afterSubmit.page.composerHasDraft && afterSubmit.composerText.length === 0;
-      if (enteredChat || userAdded || generationStarted || draftCleared) {
+      if (isWebGptPromptSubmissionConfirmed(baseline, afterSubmit, value)) {
         confirmed = afterSubmit;
         break;
       }
@@ -1113,7 +1259,7 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
           // the same form while observing the page so harmless www/query/
           // trailing-slash redirects do not become false target changes.
           try { actualUrl = normalizeRoleChatUrl(normalizeChatUrl(probe.page.url)); } catch { /* handled as a target mismatch */ }
-          if (actualUrl !== expectedChatUrl) throw this.codedError("TARGET_CHAT_CHANGED", "等待回复期间当前页面已离开目标 Chat。");
+          if (!roleChatUrlsEquivalent(actualUrl, expectedChatUrl)) throw this.codedError("TARGET_CHAT_CHANGED", "等待回复期间当前页面已离开目标 Chat。");
         }
         const changed = probe.page.assistantCount > baseline.page.assistantCount || probe.latestAssistantText !== baseline.latestAssistantText;
         if (changed && probe.latestAssistantText.length > 0 && !isTransientWebGptResponse(probe.latestAssistantText)) sawResponse = true;
@@ -1187,7 +1333,7 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
       const nextChatUrl = resolveChatUrl(next);
       const nextText = next.latestAssistantText.trim();
       const nextGenerating = next.page.generating || isTransientWebGptResponse(nextText);
-      if (nextChatUrl !== chatUrl) throw this.codedError("WEBGPT_CHAT_CHANGED", "读取期间当前页面已切换到另一个 Chat，已拒绝返回不确定结果。", { chatUrl, actualChatUrl: nextChatUrl, assistantCount: next.page.assistantCount, generating: nextGenerating, assistantText: null, textLength: 0, textSha256: null });
+      if (!roleChatUrlsEquivalent(nextChatUrl, chatUrl)) throw this.codedError("WEBGPT_CHAT_CHANGED", "读取期间当前页面已切换到另一个 Chat，已拒绝返回不确定结果。", { chatUrl, actualChatUrl: nextChatUrl, assistantCount: next.page.assistantCount, generating: nextGenerating, assistantText: null, textLength: 0, textSha256: null });
       if (nextGenerating) throw this.codedError("WEBGPT_RESPONSE_IN_PROGRESS", "当前 Chat 的 Assistant 回复仍在生成，已拒绝读取部分结果。", details(true));
       if (nextText === assistantText && next.page.assistantCount === assistantCount) stableSamples += 1;
       else {
@@ -1209,21 +1355,37 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
   }
 
   async waitForTargetChatHistory(expectedChatUrl: string, timeoutMs = 12_000): Promise<void> {
+    const target = normalizeRoleChatUrl(normalizeChatUrl(expectedChatUrl));
     const deadline = Date.now() + timeoutMs;
     let lastAssistantCount = 0;
+    let lastReadiness: WebGptTargetReadiness | null = null;
     while (Date.now() < deadline) {
       const probe = await this.getPageProbe();
-      let actualChatUrl = "";
-      try { actualChatUrl = normalizeRoleChatUrl(normalizeChatUrl(probe.page.url || this.view.webContents.getURL() || this.state.url)); } catch { /* handled as target mismatch */ }
-      if (actualChatUrl !== expectedChatUrl) {
-        throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "等待目标 Chat 历史加载期间页面已切换，已拒绝读取。", { targetChatUrl: expectedChatUrl, actualChatUrl: actualChatUrl || null });
+      lastReadiness = this.evaluateTargetReadiness(target, probe);
+      if (lastReadiness.state === "TARGET_CHAT_MISMATCH") {
+        throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "等待目标 Chat 历史加载期间页面已切换，已拒绝读取。", {
+          targetChatUrl: target,
+          actualChatUrl: lastReadiness.pageChatUrl,
+          readinessState: lastReadiness.state,
+          readinessReason: lastReadiness.reason,
+          navigationReady: lastReadiness.navigationReady,
+          identityReady: lastReadiness.identityReady,
+          observerReady: lastReadiness.observerReady,
+          historyReady: lastReadiness.historyReady,
+          observationReady: lastReadiness.observationReady,
+          observerExpectedChatUrl: lastReadiness.observerExpectedChatUrl,
+          observerCandidateState: lastReadiness.observerCandidateState,
+        });
       }
       lastAssistantCount = probe.page.assistantCount;
-      if (probe.page.generating || probe.page.assistantCount > 0) return;
+      if (lastReadiness.state === "READY" && (probe.page.generating || probe.page.assistantCount > 0)) return;
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
+    if (lastReadiness?.state === "WAITING_IDENTITY_READY") {
+      throw this.codedError("WAITING_IDENTITY_READY", "目标 Chat 页面已到达，但 Chat 身份、历史或观察上下文尚未收敛，已拒绝误读。", { targetChatUrl: target, readiness: lastReadiness });
+    }
     throw this.codedError("NO_ASSISTANT_RESPONSE", "目标 Chat 历史加载完成，但尚无可读取的 Assistant 回复。", {
-      chatUrl: expectedChatUrl,
+      chatUrl: target,
       assistantCount: lastAssistantCount,
       generating: false,
       assistantText: null,

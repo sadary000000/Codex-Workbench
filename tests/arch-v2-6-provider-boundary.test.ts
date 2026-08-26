@@ -53,7 +53,17 @@ function requestRecord(state: WebGptRequestRecord["state"], policyVersionId = "p
     resultPath: null,
     resultSha256: null,
     resultBytes: null,
-    lastKnownPageState: null,
+    lastKnownPageState: {
+      url: "https://chatgpt.com/c/provider-owned-only",
+      title: "ChatGPT",
+      loginRequired: false,
+      onChatPage: true,
+      composerFound: true,
+      composerHasDraft: false,
+      generating: false,
+      userCount: 0,
+      assistantCount: 0,
+    },
     error: null,
   };
 }
@@ -77,13 +87,13 @@ function effectivePolicyDecision(decision: EffectivePolicyDecision["decision"], 
     decision,
     effectivePolicy: {
       policyVersionId: safePolicyVersionId,
-      projectId: "automation-test",
+      projectId: "project-arch-v2-6",
       policyVersion: 1,
       policySchemaVersion: 1,
       hardConstraintSchemaVersion: 1,
       runtimeCapabilityVersion: capability.capabilityVersion,
       runtimeId: capability.runtimeId,
-      pin: { policyVersionId: safePolicyVersionId, projectId: "automation-test", version: 1, correlationId: "idem-arch-v2-6", pinnedAt: "2026-08-23T00:00:00.000Z" },
+      pin: { policyVersionId: safePolicyVersionId, projectId: "project-arch-v2-6", version: 1, correlationId: "idem-arch-v2-6", pinnedAt: "2026-08-23T00:00:00.000Z" },
       budgets: { PROMPT: 12, REPAIR: 3, RETRY: 3, NEW_CHAT: 3 },
       allowedOperations: ["PROMPT", "RETRY", "VERIFY"],
       requireHumanGateFor: [],
@@ -246,7 +256,9 @@ test("WebGPT provider port keeps target opaque and separates observe from reconc
       actionAttemptId: "attempt-arch-v2-6",
       policyVersionId: "policy-arch-v2-6",
       idempotencyRef: "idem-arch-v2-6",
+      projectId: "project-arch-v2-6",
       semanticRef: "semantic-arch-v2-6",
+      providerScopeRef: "project-arch-v2-6",
     },
   });
   assert.equal(accepted.providerRequestRef, record.requestId);
@@ -254,7 +266,18 @@ test("WebGPT provider port keeps target opaque and separates observe from reconc
   assert.equal(calls.submit, 1);
   assert.equal(calls.resolveInput, 1);
 
-  const observed = await port.observe({ providerRequestRef: record.requestId });
+  const observed = await port.observe({
+    providerRequestRef: record.requestId,
+    correlation: {
+      actionIntentId: "intent-arch-v2-6",
+      actionAttemptId: "attempt-arch-v2-6",
+      policyVersionId: "policy-arch-v2-6",
+      idempotencyRef: "idem-arch-v2-6",
+      projectId: "project-arch-v2-6",
+      semanticRef: "semantic-arch-v2-6",
+      providerScopeRef: "project-arch-v2-6",
+    },
+  });
   assert.equal(observed.state, "RUNNING");
   assert.doesNotMatch(JSON.stringify(observed), /https?:\/\/|chatUrl|targetChatUrl/i);
   assert.equal(calls.status, 1);
@@ -267,13 +290,101 @@ test("WebGPT provider port keeps target opaque and separates observe from reconc
       actionAttemptId: "attempt-arch-v2-6",
       policyVersionId: "policy-arch-v2-6",
       idempotencyRef: "idem-arch-v2-6",
+      projectId: "project-arch-v2-6",
       semanticRef: "semantic-arch-v2-6",
+      providerScopeRef: "project-arch-v2-6",
     },
   });
   assert.equal(reconciled.state, "COMPLETED");
   assert.doesNotMatch(JSON.stringify(reconciled), /https?:\/\/|chatUrl|targetChatUrl/i);
   assert.equal(calls.reconcile, 1);
   assert.equal(calls.submit, 1, "observe/reconcile never redispatch the provider side effect");
+});
+
+test("WebGPT provider observation rejects a request journal last observed on another Chat", async () => {
+  const record = { ...requestRecord("RECOVERY_REQUIRED"), chatUrl: "https://chatgpt.com/", lastKnownPageState: {
+    url: "https://chatgpt.com/",
+    title: "ChatGPT",
+    loginRequired: false,
+    onChatPage: true,
+    composerFound: true,
+    composerHasDraft: false,
+    generating: false,
+    userCount: 0,
+    assistantCount: 0,
+  } };
+  const port = new WebGptAutomationProviderPort({
+    roleSession: { status: async () => ({ status: "BOUND", chatUrl: record.targetChatUrl }), submit: async () => record } as never,
+    requestManager: { requestStatus: async () => record, reconcileRequest: async () => record } as never,
+    resolveInputRef: async () => "unused",
+    readRuntimeCapability: async () => runtimeCapability(),
+    policyAuthority: policyAuthority(),
+  });
+  await assert.rejects(() => port.observe({ providerRequestRef: record.requestId }), /WEBGPT_TARGET_CHAT_MISMATCH/);
+});
+
+test("WebGPT provider observation fails closed when page identity evidence is absent", async () => {
+  const record = { ...requestRecord("RECOVERY_REQUIRED"), chatUrl: "", lastKnownPageState: null };
+  const port = new WebGptAutomationProviderPort({
+    roleSession: { status: async () => ({ status: "BOUND", chatUrl: record.targetChatUrl }), submit: async () => record } as never,
+    requestManager: { requestStatus: async () => record, reconcileRequest: async () => record } as never,
+    resolveInputRef: async () => "unused",
+    readRuntimeCapability: async () => runtimeCapability(),
+    policyAuthority: policyAuthority(),
+  });
+  await assert.rejects(() => port.observe({ providerRequestRef: record.requestId }), /WEBGPT_TARGET_CHAT_MISMATCH/);
+});
+
+test("WebGPT provider observation rejects a mismatched Action correlation", async () => {
+  const record = requestRecord("SUBMITTED");
+  const port = new WebGptAutomationProviderPort({
+    roleSession: { status: async () => ({ status: "BOUND", chatUrl: record.targetChatUrl }), submit: async () => record } as never,
+    requestManager: { requestStatus: async () => record, reconcileRequest: async () => record } as never,
+    resolveInputRef: async () => "unused",
+    readRuntimeCapability: async () => runtimeCapability(),
+    policyAuthority: policyAuthority(),
+  });
+  await assert.rejects(() => port.observe({
+    providerRequestRef: record.requestId,
+    correlation: {
+      actionIntentId: "intent-wrong",
+      actionAttemptId: "attempt-wrong",
+      policyVersionId: record.policyVersionId ?? null,
+      idempotencyRef: "wrong-idempotency",
+      projectId: record.projectId!,
+      semanticRef: record.semanticSha256,
+    },
+  }), /PROVIDER_IDENTITY_MISMATCH|PROVIDER_IDEMPOTENCY_MISMATCH/);
+});
+
+test("WebGPT provider rejects a target whose provider scope differs from the accepted correlation", async () => {
+  const record = requestRecord("SUBMITTED");
+  let resolvedInput = 0;
+  const port = new WebGptAutomationProviderPort({
+    roleSession: { status: async () => ({ status: "BOUND", chatUrl: record.targetChatUrl }), submit: async () => record } as never,
+    requestManager: { requestStatus: async () => record, reconcileRequest: async () => record } as never,
+    resolveInputRef: async () => { resolvedInput += 1; return "provider-input"; },
+    readRuntimeCapability: async () => runtimeCapability(),
+    policyAuthority: policyAuthority(),
+  });
+  await assert.rejects(() => port.submit({
+    provider: "WEBGPT",
+    operation: "PROMPT",
+    workflowRole: "PLANNER",
+    providerTargetRef: createWebGptRoleTargetRef(record.projectId!, "PLANNER"),
+    inputRef: "input:scope-mismatch",
+    payloadRef: null,
+    correlation: {
+      actionIntentId: "intent-scope-mismatch",
+      actionAttemptId: "attempt-scope-mismatch",
+      policyVersionId: record.policyVersionId ?? null,
+      idempotencyRef: record.idempotencyKey,
+      projectId: record.projectId!,
+      semanticRef: record.semanticSha256,
+      providerScopeRef: "different-provider-project",
+    },
+  }), /PROVIDER_TARGET_SCOPE_MISMATCH/);
+  assert.equal(resolvedInput, 0, "scope mismatch is rejected before input resolution or provider side effect");
 });
 
 test("production provider recovery runs the Recovery Intent classifier before reconcile and never resolves input", async () => {
@@ -284,6 +395,7 @@ test("production provider recovery runs the Recovery Intent classifier before re
     actionAttemptId: "attempt-recovery-port",
     policyVersionId: "policy-arch-v2-6",
     idempotencyRef: record.idempotencyKey!,
+    projectId: record.projectId!,
     semanticRef: record.semanticSha256,
   };
   const port = new WebGptAutomationProviderPort({
@@ -326,7 +438,7 @@ test("production provider recovery stops on a terminal receipt without provider 
   });
   await assert.rejects(() => port.recover({
     providerRequestRef: record.requestId,
-    correlation: { actionIntentId: "intent-terminal-recovery", actionAttemptId: "attempt-terminal-recovery", policyVersionId: "policy-arch-v2-6", idempotencyRef: "idem-terminal-recovery", semanticRef: record.semanticSha256 },
+    correlation: { actionIntentId: "intent-terminal-recovery", actionAttemptId: "attempt-terminal-recovery", policyVersionId: "policy-arch-v2-6", idempotencyRef: "idem-terminal-recovery", projectId: record.projectId!, semanticRef: record.semanticSha256 },
     recovery: {
       intent: { intentId: "intent-terminal-recovery", projectId: record.projectId, semanticSha256: record.semanticSha256, sideEffectClass: "RECONCILABLE", state: "COMPLETED", policyVersionId: "policy-arch-v2-6" } as never,
       attempt: { actionAttemptId: "attempt-terminal-recovery", intentId: "intent-terminal-recovery", state: "COMPLETED", recoveryState: "COMPLETED", providerRequestRef: record.requestId, policyVersionId: "policy-arch-v2-6" } as never,
@@ -349,7 +461,7 @@ test("provider input reference resolution remains fail-closed before role-sessio
   });
   await assert.rejects(() => port.submit({
     provider: "WEBGPT", operation: "PROMPT", workflowRole: "PLANNER", providerTargetRef: createWebGptRoleTargetRef(record.projectId!, "PLANNER"), inputRef: "input:unresolved", payloadRef: null,
-    correlation: { actionIntentId: "intent-input-fail-closed", actionAttemptId: "attempt-input-fail-closed", policyVersionId: "policy-arch-v2-6", idempotencyRef: record.idempotencyKey!, semanticRef: record.semanticSha256 },
+    correlation: { actionIntentId: "intent-input-fail-closed", actionAttemptId: "attempt-input-fail-closed", policyVersionId: "policy-arch-v2-6", idempotencyRef: record.idempotencyKey!, projectId: record.projectId!, semanticRef: record.semanticSha256 },
   }), /PROVIDER_INPUT_REF_UNRESOLVED/);
   assert.equal(submitCount, 0);
 });
@@ -382,6 +494,7 @@ test("provider capability denial is fail-closed and does not submit", async () =
       actionAttemptId: "attempt-arch-v2-6",
       policyVersionId: "policy-arch-v2-6",
       idempotencyRef: "idem-arch-v2-6",
+      projectId: "project-arch-v2-6",
       semanticRef: null,
     },
   }), /PROVIDER_CAPABILITY_MISSING|WEBGPT_PROVIDER_UNAVAILABLE:TARGET_UNREACHABLE/);
@@ -416,6 +529,7 @@ test("missing policy pin, denied policy, or missing capability fail closed befor
       actionAttemptId: "attempt-arch-v2-6",
       policyVersionId: "policy-arch-v2-6",
       idempotencyRef: "idem-arch-v2-6",
+      projectId: "project-arch-v2-6",
       semanticRef: null,
     },
   };
@@ -463,7 +577,7 @@ test("valid pinned policy plus available capability reaches the isolated provide
     providerTargetRef: createWebGptRoleTargetRef("project-arch-v2-6", "PLANNER"),
     inputRef: "input:valid-pinned-policy",
     payloadRef: null,
-    correlation: { actionIntentId: "intent-valid", actionAttemptId: "attempt-valid", policyVersionId: "policy-arch-v2-6", idempotencyRef: "idem-arch-v2-6", semanticRef: null },
+    correlation: { actionIntentId: "intent-valid", actionAttemptId: "attempt-valid", policyVersionId: "policy-arch-v2-6", idempotencyRef: "idem-arch-v2-6", projectId: "project-arch-v2-6", semanticRef: null },
   });
   assert.equal(accepted.providerRequestRef, record.requestId);
   assert.equal(accepted.policy.policyVersionId, "policy-arch-v2-6");
@@ -481,7 +595,7 @@ test("production provider port consumes the persisted WebGPT policy authority", 
   const store = new AutomationStore(join(root, "automation.db"));
   try {
     const persistedAuthority = await ensureWebGptRuntimePolicy(store);
-    const record = requestRecord("SUBMITTED", WEBGPT_RUNTIME_POLICY_VERSION_ID);
+    const record = { ...requestRecord("SUBMITTED", WEBGPT_RUNTIME_POLICY_VERSION_ID), projectId: "__webgpt_runtime_policy__" };
     let receivedPolicyVersionId: string | null = null;
     let receivedCapabilityVersion: string | null = null;
     const port = new WebGptAutomationProviderPort({
@@ -506,7 +620,7 @@ test("production provider port consumes the persisted WebGPT policy authority", 
       provider: "WEBGPT",
       operation: "PROMPT",
       workflowRole: "PLANNER",
-      providerTargetRef: createWebGptRoleTargetRef("project-arch-v2-6", "PLANNER"),
+      providerTargetRef: createWebGptRoleTargetRef("__webgpt_runtime_policy__", "PLANNER"),
       inputRef: "input:persisted-policy",
       payloadRef: null,
       correlation: {
@@ -514,6 +628,7 @@ test("production provider port consumes the persisted WebGPT policy authority", 
         actionAttemptId: "attempt-persisted-policy",
         policyVersionId: WEBGPT_RUNTIME_POLICY_VERSION_ID,
         idempotencyRef: "idem-arch-v2-6",
+        projectId: "__webgpt_runtime_policy__",
         semanticRef: "semantic-arch-v2-6",
       },
     });
@@ -546,6 +661,7 @@ test("provider policy authority evaluates submit and reconcile without owning th
     actionAttemptId: "attempt-authority",
     policyVersionId: "policy-arch-v2-6",
     idempotencyRef: "idem-authority",
+    projectId: "project-arch-v2-6",
     semanticRef: null,
   };
   const capability = runtimeCapability();
@@ -567,6 +683,7 @@ test("production policy authority emits a complete pinned proof", async () => {
       actionAttemptId: "attempt-production-proof",
       policyVersionId: WEBGPT_RUNTIME_POLICY_VERSION_ID,
       idempotencyRef: "idem-production-proof",
+      projectId: "__webgpt_runtime_policy__",
       semanticRef: null,
     };
     const proof = await providerAuthority.authorize({

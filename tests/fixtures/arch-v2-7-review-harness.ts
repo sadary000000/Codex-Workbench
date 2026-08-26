@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   AutomationStore,
   WebGptExternalActionBridge,
+  policyVersionPayload,
   type WebGptActionDispatchContext,
   type WebGptDispatchFacts,
   type WebGptExternalActionAdapter,
@@ -91,6 +92,23 @@ export async function createArchV27ReviewHarness(): Promise<ArchV27ReviewHarness
   const store = new AutomationStore(join(root, "automation.db"));
   const projectId = "arch-v2-7-isolated-project";
   await store.createAutomationProject({ projectId, name: "ARCH-V2-7 isolated fixture" });
+  await store.createPolicyVersion({
+    policyVersionId: "policy-v1",
+    projectId,
+    version: 1,
+    preset: "fixture",
+    payload: policyVersionPayload({
+      maxPromptDispatches: 4,
+      maxRepairDispatches: 2,
+      maxRetryDispatches: 2,
+      maxNewChatDispatches: 1,
+      allowedOperations: ["PROMPT", "REPAIR", "RETRY", "NEW_CHAT", "HUMAN_GATE", "VERIFY"],
+      requireHumanGateFor: [],
+      allowDataEgress: false,
+      allowSideEffects: false,
+    }),
+    supersedes: null,
+  });
   const provider = new ArchV27ProviderFixture();
   const bridge = new WebGptExternalActionBridge(store, provider);
   const arbiter = new WebGptOperationArbiter({ maxQueueSize: 2 });

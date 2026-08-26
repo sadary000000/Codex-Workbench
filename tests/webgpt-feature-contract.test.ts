@@ -74,6 +74,15 @@ test("WebGPT CLI automation gives a zero-layout view a usable viewport", () => {
   assert.match(source, /this\.ensureUsableBounds\(\);/);
 });
 
+test("WebGPT Browser Pane keeps the native view stretched to the workspace bottom", () => {
+  const html = readFileSync(join(root, "src", "renderer", "index.html"), "utf8");
+  const renderer = readFileSync(join(root, "src", "renderer", "renderer.ts"), "utf8");
+  assert.match(html, /\.webgpt-workspace \{[^}]*display: flex;[^}]*height: 100%/);
+  assert.match(html, /\.webgpt-browser-host \{[^}]*flex: 1 1 auto;[^}]*height: 0/);
+  assert.match(renderer, /const workspaceRect = webGptWorkspaceElement\.getBoundingClientRect\(\)/);
+  assert.match(renderer, /Math\.max\(rect\.bottom, workspaceRect\.bottom\)/);
+});
+
 test("Project CLI actions are scoped to the hovered Project row and preserve context evidence", () => {
   const adapter = readFileSync(join(root, "src", "features", "webgpt", "adapter", "webgpt-page-adapter.ts"), "utf8");
   const workspace = readFileSync(join(root, "src", "features", "webgpt", "runtime", "webgpt-workspace.ts"), "utf8");

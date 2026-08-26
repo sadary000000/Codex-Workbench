@@ -153,6 +153,7 @@ const LEGACY_CODE_MAP: Record<string, ControlPlaneErrorCode> = {
   WEBGPT_REVIEW_UNKNOWN_AFTER_SEND: "RECOVERY_REQUIRED",
   WEBGPT_REVIEW_CONTROL_NOT_AVAILABLE: "USER_CONTROL",
   WEBGPT_RESPONSE_UNSTABLE: "RECOVERY_REQUIRED",
+  WAITING_IDENTITY_READY: "RECOVERY_REQUIRED",
   WEBGPT_CLOSED: "RECOVERY_REQUIRED",
   WEBGPT_UNAVAILABLE: "RECOVERY_REQUIRED",
   WORKBENCH_NOT_READY: "RECOVERY_REQUIRED",
@@ -185,7 +186,7 @@ const LEGACY_CODE_MAP: Record<string, ControlPlaneErrorCode> = {
   ROLE_REGISTRY_INVALID: "INTERNAL_ERROR",
 };
 
-const SAFE_DETAIL_KEYS = /^(?:legacyCode|layer|reason|field|operation|state|queueDepth|queueLimit|activeOperationType|supportedVersion|requestedVersion|capability|requiredCommand|compatibilityUntil|retryAfterMs)$/;
+const SAFE_DETAIL_KEYS = /^(?:legacyCode|layer|reason|field|operation|state|queueDepth|queueLimit|activeOperationType|supportedVersion|requestedVersion|capability|requiredCommand|compatibilityUntil|retryAfterMs|expectedChatUrl|actualChatUrl|probeChatUrl|readinessState|readinessReason|navigationReady|identityReady|observerReady|historyReady|observationReady|observerExpectedChatUrl|observerCandidateState|phase)$/;
 
 export function sanitizeControlPlaneErrorDetails(value: unknown): ControlPlaneErrorDetails | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;

@@ -1,6 +1,6 @@
 import { normalizeWebGptUrl, WEBGPT_HOME_URL } from "../adapter/webgpt-page-adapter.ts";
 import type { WebGptLatestResponse, WebGptPageState, WebGptRequestRecord, WebGptRole, WebGptRoleBinding, WebGptState } from "../types.ts";
-import { normalizeRoleChatUrl, normalizeWebGptRole, WebGptRoleSessionRegistry } from "./webgpt-role-session-registry.ts";
+import { normalizeRoleChatUrl, normalizeWebGptRole, roleChatUrlsEquivalent, WebGptRoleSessionRegistry } from "./webgpt-role-session-registry.ts";
 import type { WebGptRequestManager } from "./webgpt-request-manager.ts";
 import type { WebGptWorkspace } from "./webgpt-workspace.ts";
 
@@ -86,6 +86,15 @@ export class WebGptRoleSessionService {
       role: normalizedRole,
       operationType: "ROLE_OPEN",
     });
+    const current = await this.registry.get(id, normalizedRole);
+    if (
+      current.status !== "BOUND"
+      || !current.chatUrl
+      || current.updatedAt !== binding.updatedAt
+      || !roleChatUrlsEquivalent(current.chatUrl, binding.chatUrl)
+    ) {
+      throw codedError("ROLE_BINDING_CHANGED", "Role 绑定在读取期间发生变化，已拒绝返回旧目标结果。");
+    }
     return { ...latest, projectId: id, role: normalizedRole };
   }
 
@@ -112,7 +121,7 @@ export class WebGptRoleSessionService {
       const binding = await this.registry.get(record.projectId, record.role);
       if (binding.status === "PENDING_CHAT_URL") {
         await this.registry.markBound(record.projectId, record.role, actualUrl);
-      } else if (binding.status === "BOUND" && binding.chatUrl !== actualUrl) {
+      } else if (binding.status === "BOUND" && !roleChatUrlsEquivalent(binding.chatUrl, actualUrl)) {
         await this.registry.markInvalid(record.projectId, record.role);
       } else if (binding.status === "BOUND") {
         await this.registry.touch(record.projectId, record.role);

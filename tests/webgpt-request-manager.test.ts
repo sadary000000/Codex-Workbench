@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebGptRequestManager } from "../src/features/webgpt/runtime/webgpt-request-manager.ts";
 import { WebGptOperationArbiter } from "../src/features/webgpt/runtime/webgpt-operation-arbiter.ts";
-import type { WebGptPageProbe, WebGptState } from "../src/features/webgpt/types.ts";
+import type { WebGptPageProbe, WebGptState, WebGptTargetReadiness } from "../src/features/webgpt/types.ts";
 
 function pageProbe(onChatPage = false, assistantCount = 0, latestAssistantText = ""): WebGptPageProbe {
   return {
@@ -83,6 +83,26 @@ class FakeWorkspace {
   }
 }
 
+class ReadinessFakeWorkspace extends FakeWorkspace {
+  readiness: WebGptTargetReadiness = {
+    expectedChatUrl: "https://chatgpt.com/c/test",
+    pageChatUrl: "https://chatgpt.com/c/test",
+    navigationReady: true,
+    identityReady: false,
+    observerReady: false,
+    historyReady: false,
+    observationReady: false,
+    state: "WAITING_IDENTITY_READY",
+    reason: "observer_stale",
+    observerExpectedChatUrl: "https://chatgpt.com/c/test",
+    observerCandidateState: "STALE",
+  };
+
+  async getTargetReadiness(_expectedChatUrl: string): Promise<WebGptTargetReadiness> {
+    return this.readiness;
+  }
+}
+
 test("WebGPT Request Manager owns async request state and persists the result", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-request-"));
   const workspace = new FakeWorkspace();
@@ -132,6 +152,19 @@ test("WebGPT targeted latest reads are page-based, fail closed, and preserve Cha
     const canonicalRedirect = await manager.readLatestChat("https://chatgpt.com/c/test/?source=bound#fragment");
     assert.equal(canonicalRedirect.assistantText, "WEBGPT_TEST_OK");
     await assert.rejects(() => manager.readLatestChat("https://chatgpt.com/settings"), { code: "CHAT_URL_INVALID" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("targeted latest surfaces WAITING_IDENTITY_READY when the page is correct but the observer epoch is stale", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-latest-readiness-"));
+  try {
+    const workspace = new ReadinessFakeWorkspace();
+    workspace.mode = "AUTO_CONTROL";
+    workspace.probe = pageProbe(true, 1, "LATEST_TEST_OK");
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    await assert.rejects(() => manager.readLatestChat("https://chatgpt.com/c/test"), { code: "WAITING_IDENTITY_READY" });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -387,6 +420,93 @@ test("WebGPT recovery reopens the exact persisted target after one transient hom
     assert.equal(recovered.chatUrl, target);
     assert.equal(workspace.openChatCount, 2);
     assert.equal(workspace.submitCount, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT recovery accepts a canonical-equivalent target URL without changing identity", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-recovery-canonical-target-"));
+  const target = "https://chatgpt.com/c/target";
+  const record = {
+    requestId: "wgpt-canonical-target",
+    idempotencyKey: "canonical-target-key",
+    semanticSha256: "semantic",
+    state: "RECOVERY_REQUIRED",
+    projectId: "project-a",
+    role: "REQUIREMENT",
+    targetChatUrl: target,
+    chatUrl: target,
+    promptChars: 0,
+    promptSha256: createHash("sha256").update("", "utf8").digest("hex"),
+    baselineUserCount: 0,
+    baselineAssistantCount: 0,
+    sendStartedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    submittedAt: new Date().toISOString(),
+    completedAt: null,
+    resultPath: null,
+    resultSha256: null,
+    resultBytes: null,
+    lastKnownPageState: null,
+    error: { code: "WORKBENCH_RESTARTED", message: "recovery evidence" },
+  };
+  try {
+    await writeFile(join(directory, "requests.json"), JSON.stringify({ version: 2, requests: [record] }), "utf8");
+    const workspace = new FakeWorkspace();
+    workspace.mode = "AUTO_CONTROL";
+    workspace.openChatUrlSequence = ["https://www.chatgpt.com/c/target/?source=recovery"];
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const recovered = await manager.reconcileRequest(record.requestId);
+    assert.equal(recovered.state, "COMPLETED");
+    assert.equal(recovered.targetChatUrl, target);
+    assert.equal(recovered.chatUrl, "https://www.chatgpt.com/c/target/?source=recovery");
+    assert.equal(workspace.openChatCount, 1);
+    assert.equal(workspace.submitCount, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT recovery stays recovery-required when the exact target keeps resolving to home", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-recovery-home-loop-"));
+  const target = "https://chatgpt.com/c/target";
+  const record = {
+    requestId: "wgpt-home-loop",
+    idempotencyKey: "home-loop-key",
+    semanticSha256: "semantic",
+    state: "RECOVERY_REQUIRED",
+    projectId: "project-a",
+    role: "REQUIREMENT",
+    targetChatUrl: target,
+    chatUrl: target,
+    promptChars: 0,
+    promptSha256: createHash("sha256").update("", "utf8").digest("hex"),
+    baselineUserCount: 0,
+    baselineAssistantCount: 0,
+    sendStartedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    submittedAt: new Date().toISOString(),
+    completedAt: null,
+    resultPath: null,
+    resultSha256: null,
+    resultBytes: null,
+    lastKnownPageState: null,
+    error: { code: "WORKBENCH_RESTARTED", message: "recovery evidence" },
+  };
+  try {
+    await writeFile(join(directory, "requests.json"), JSON.stringify({ version: 2, requests: [record] }), "utf8");
+    const workspace = new FakeWorkspace();
+    workspace.mode = "AUTO_CONTROL";
+    workspace.openChatUrlSequence = ["https://chatgpt.com/", "https://chatgpt.com/"];
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const recovered = await manager.reconcileRequest(record.requestId);
+    assert.equal(recovered.state, "RECOVERY_REQUIRED");
+    assert.equal(recovered.error?.code, "TARGET_CHAT_CHANGED");
+    assert.equal(recovered.targetChatUrl, target);
+    assert.equal(workspace.openChatCount, 2);
+    assert.equal(workspace.submitCount, 0);
+    assert.equal(workspace.createChatCount, 0);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

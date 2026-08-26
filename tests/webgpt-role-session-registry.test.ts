@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { normalizeRoleChatUrl, WebGptRoleSessionRegistry } from "../src/features/webgpt/runtime/webgpt-role-session-registry.ts";
+import { normalizeRoleChatUrl, roleChatUrlsEquivalent, WebGptRoleSessionRegistry } from "../src/features/webgpt/runtime/webgpt-role-session-registry.ts";
 
 test("Role Registry keeps three project-scoped roles and persists only safe metadata", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-role-registry-"));
@@ -44,8 +44,26 @@ test("Role Registry strictly validates Chat URLs, collisions, and explicit repla
       "https://chatgpt.com/c//x",
       "https://chatgpt.com/g/gpt//c/x",
     ]) assert.throws(() => normalizeRoleChatUrl(value), { code: "ROLE_CHAT_URL_INVALID" });
-    assert.equal(normalizeRoleChatUrl("https://www.chatgpt.com/c/shared/?from=redirect#hash"), "https://chatgpt.com/c/shared");
-    assert.equal(normalizeRoleChatUrl("https://chatgpt.com/g/gpt/c/shared/"), "https://chatgpt.com/g/gpt/c/shared");
+  assert.equal(normalizeRoleChatUrl("https://www.chatgpt.com/c/shared/?from=redirect#hash"), "https://chatgpt.com/c/shared");
+  assert.equal(normalizeRoleChatUrl("https://chatgpt.com/g/gpt/c/shared/"), "https://chatgpt.com/g/gpt/c/shared");
+  assert.equal(
+    normalizeRoleChatUrl("https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315-workts/c/shared"),
+    "https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workts/c/shared",
+  );
+  assert.equal(
+    roleChatUrlsEquivalent(
+      "https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workts/c/shared",
+      "https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315/c/shared",
+    ),
+    true,
+  );
+  assert.equal(
+    roleChatUrlsEquivalent(
+      "https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workts/c/shared",
+      "https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315/c/other",
+    ),
+    false,
+  );
     const registry = new WebGptRoleSessionRegistry({ storageDirectory: directory });
     await registry.bind("project-a", "PLANNER", "https://chatgpt.com/c/shared");
     await assert.rejects(() => registry.bind("project-a", "PLANNER", "https://chatgpt.com/c/other"), { code: "ROLE_ALREADY_BOUND" });

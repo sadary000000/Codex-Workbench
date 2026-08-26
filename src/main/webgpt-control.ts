@@ -30,6 +30,8 @@ export const WEBGPT_CONTROL_PROTOCOL_VERSION = CONTROL_PLANE_WIRE_VERSION;
 export const WEBGPT_CONTROL_PROTOCOL_VERSION_TEXT = CONTROL_PLANE_PROTOCOL_VERSION;
 export const WEBGPT_CONTROL_DESCRIPTOR_RELATIVE = join("webgpt", "control-plane.json");
 export const WEBGPT_CONTROL_TIMEOUT_MS = 15_000;
+/** Targeted reads may need to wait for a cold ChatGPT SPA route and history hydration. */
+export const WEBGPT_TARGET_READ_CLI_TIMEOUT_MS = 60_000;
 const WEBGPT_CONTROL_SOCKET_TIMEOUT_MS = 320_000;
 const WEBGPT_CONTROL_MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 
@@ -400,7 +402,7 @@ function isSafeErrorDetails(value: unknown): boolean {
   if (value === undefined) return true;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const entries = Object.entries(value as Record<string, unknown>);
-  const allowed = /^(?:legacyCode|layer|reason|field|operation|state|queueDepth|queueLimit|activeOperationType|supportedVersion|requestedVersion|capability|requiredCommand|compatibilityUntil|retryAfterMs)$/;
+  const allowed = /^(?:legacyCode|layer|reason|field|operation|state|queueDepth|queueLimit|activeOperationType|supportedVersion|requestedVersion|capability|requiredCommand|compatibilityUntil|retryAfterMs|expectedChatUrl|actualChatUrl|probeChatUrl|readinessState|readinessReason|navigationReady|identityReady|observerReady|historyReady|observationReady|observerExpectedChatUrl|observerCandidateState|phase)$/;
   return entries.length <= 16 && entries.every(([key, item]) => allowed.test(key)
     && (typeof item === "string" ? item.length <= 256 : typeof item === "number" || typeof item === "boolean" || item === null));
 }
@@ -858,6 +860,8 @@ export async function runWebGptCli(
     ? Math.max(timeoutMs, WEBGPT_REQUIREMENT_CLI_TIMEOUT_MS)
     : projectCommand
     ? Math.max(timeoutMs, projectCliTimeoutMs(projectCommand))
+    : command.name === "webgpt.latest" || command.name === "webgpt.chat.latest" || command.name === "webgpt.role.latest"
+    ? Math.max(timeoutMs, WEBGPT_TARGET_READ_CLI_TIMEOUT_MS)
     : command.name === "webgpt.wait"
     ? Math.min(320_000, Math.max(timeoutMs, (command.timeoutMs ?? 120_000) + 5_000))
     : timeoutMs;

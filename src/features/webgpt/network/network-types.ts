@@ -70,6 +70,7 @@ export interface WebGptNetworkObserverDiagnostics {
   attached: boolean;
   activeRequestId: string | null;
   activeOperationId: string | null;
+  expectedChatUrl: string | null;
   candidateState: WebGptNetworkCandidateState;
   candidateUnique: boolean;
   candidateEmitted: boolean;

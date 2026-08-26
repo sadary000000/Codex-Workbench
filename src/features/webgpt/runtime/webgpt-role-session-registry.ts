@@ -53,12 +53,48 @@ export function normalizeRoleChatUrl(value: string): string {
     throw codedError("ROLE_CHAT_URL_INVALID", "Role 必须绑定真实的 /c/<chat-id> 或 /g/<gpt-id>/c/<chat-id> Chat URL。");
   }
   url.hostname = "chatgpt.com";
+  // ChatGPT currently emits both `/g/g-<id>/c/<chat>` and
+  // `/g/g-p-<id>/c/<chat>` for the same GPT-scoped conversation.  Treat only
+  // this observed, bounded prefix variant as one canonical identity; the GPT
+  // id suffix and the Chat id must still match exactly.
+  const scopedGptId = gptScopedMatch?.[1];
+  const canonicalScopedGptId = scopedGptId?.startsWith("g-p-")
+    ? `g-${scopedGptId.slice("g-p-".length)}`
+    : scopedGptId;
   url.pathname = standardMatch
     ? `/c/${standardMatch[1]}`
-    : `/g/${gptScopedMatch![1]}/c/${gptScopedMatch![2]}`;
+    : `/g/${canonicalScopedGptId}/c/${gptScopedMatch![2]}`;
   url.search = "";
   url.hash = "";
   return url.toString();
+}
+
+interface ComparableChatIdentity {
+  scope: "CHAT" | "GPT";
+  chatId: string;
+  gptId?: string;
+}
+
+function comparableChatIdentity(value: string): ComparableChatIdentity | null {
+  let url: URL;
+  try { url = new URL(normalizeRoleChatUrl(value)); } catch { return null; }
+  const standard = /^\/c\/([^/]+)$/.exec(url.pathname);
+  if (standard) return { scope: "CHAT", chatId: standard[1] };
+  const scoped = /^\/g\/(g-p-([0-9a-f]{32})|g-([0-9a-f]{32})(?:-[^/]+)?)\/c\/([^/]+)$/.exec(url.pathname);
+  if (!scoped) return null;
+  // ChatGPT exposes the same GPT-scoped Chat through both the human-readable
+  // `/g/g-<id>-<slug>/c/<chat>` route and the internal `/g/g-p-<id>/c/<chat>`
+  // route. The 32-hex GPT id and Chat id are the bounded identity components;
+  // the optional slug is presentation only.
+  return { scope: "GPT", gptId: scoped[2] ?? scoped[3], chatId: scoped[4] };
+}
+
+/** Compare Chat identities while accepting only the observed GPT route alias. */
+export function roleChatUrlsEquivalent(left: string, right: string): boolean {
+  const a = comparableChatIdentity(left);
+  const b = comparableChatIdentity(right);
+  if (!a || !b || a.scope !== b.scope || a.chatId !== b.chatId) return false;
+  return a.scope === "CHAT" || a.gptId === b.gptId;
 }
 
 function codedError(code: string, message: string): Error & { code: string } {

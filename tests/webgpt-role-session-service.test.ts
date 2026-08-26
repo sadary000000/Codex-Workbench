@@ -51,6 +51,7 @@ class FakeManager {
   createUrl = "https://chatgpt.com/";
   openReady = true;
   latestReads: string[] = [];
+  onLatestRead: (() => Promise<void>) | null = null;
   constructor(workspace: FakeWorkspace) { this.workspace = workspace; }
   async createChat(): Promise<Record<string, unknown>> {
     this.workspace.currentUrl = this.createUrl;
@@ -63,6 +64,7 @@ class FakeManager {
   }
   async readLatestChat(url: string): Promise<Record<string, unknown>> {
     this.latestReads.push(url);
+    await this.onLatestRead?.();
     this.workspace.currentUrl = url;
     return { chatUrl: url, assistantCount: 1, generating: false, assistantText: "ROLE_LATEST_OK", textLength: 14, textSha256: "role-hash" };
   }
@@ -143,6 +145,32 @@ test("Role latest reads the exact bound Chat without rebinding or touching the b
     assert.equal(after.chatUrl, before.chatUrl);
     assert.equal(after.updatedAt, before.updatedAt);
     assert.equal(after.lastUsedAt, before.lastUsedAt);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Role latest rejects a binding revision change during read", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-role-latest-revision-"));
+  const workspace = new FakeWorkspace();
+  const manager = new FakeManager(workspace);
+  let tick = 0;
+  const registry = new WebGptRoleSessionRegistry({
+    storageDirectory: directory,
+    now: () => new Date(tick++ * 1_000).toISOString(),
+  });
+  const service = new WebGptRoleSessionService({
+    registry,
+    requestManager: manager as never,
+    workspace: workspace as never,
+    getProject: async (projectId) => projectId === "project-a" ? { projectId } : null,
+  });
+  try {
+    await service.bind("project-a", "PLANNER", "https://chatgpt.com/c/planner");
+    manager.onLatestRead = async () => {
+      await registry.bind("project-a", "PLANNER", "https://chatgpt.com/c/replaced", null, true);
+    };
+    await assert.rejects(() => service.latest("project-a", "PLANNER"), { code: "ROLE_BINDING_CHANGED" });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -375,11 +375,18 @@ function syncWebGptBounds(): void {
     webGptBoundsFrame = 0;
     if (!webGptOpen || webGptWorkspaceElement.hidden) return;
     const rect = webGptBrowserHostElement.getBoundingClientRect();
+    const workspaceRect = webGptWorkspaceElement.getBoundingClientRect();
+    // WebContentsView is a native sibling layered above the renderer. During
+    // the first frame after the overlay is revealed, a flex/grid reflow can
+    // briefly report a collapsed host height even though the workspace still
+    // occupies the full main pane. Use the workspace bottom as a safe lower
+    // bound so the native page cannot get stuck at a one-line viewport.
+    const bottom = Math.max(rect.bottom, workspaceRect.bottom);
     void webGptApi.setWebGptBounds({
       x: Math.max(0, Math.round(rect.left)),
       y: Math.max(0, Math.round(rect.top)),
       width: Math.max(0, Math.round(rect.width)),
-      height: Math.max(0, Math.round(rect.height)),
+      height: Math.max(0, Math.round(bottom - rect.top)),
     });
   });
 }

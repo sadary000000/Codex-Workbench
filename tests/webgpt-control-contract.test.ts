@@ -14,6 +14,7 @@ import {
   runWebGptCli,
   sendWebGptControlRequest,
   WEBGPT_CONTROL_PROTOCOL_VERSION,
+  WEBGPT_TARGET_READ_CLI_TIMEOUT_MS,
   WebGptControlServer,
 } from "../src/main/webgpt-control.ts";
 import {
@@ -225,6 +226,7 @@ test("Project navigation budgets leave a transport margin over bounded server wo
   assert.equal(WEBGPT_PROJECT_OPEN_CLI_TIMEOUT_MS > WEBGPT_PROJECT_OPEN_OPERATION_TIMEOUT_MS, true);
   assert.equal(WEBGPT_PROJECT_NEW_CHAT_CLI_TIMEOUT_MS > WEBGPT_PROJECT_NEW_CHAT_OPERATION_TIMEOUT_MS, true);
   assert.equal(WEBGPT_PROJECT_CREATE_CLI_TIMEOUT_MS > WEBGPT_PROJECT_CREATE_OPERATION_TIMEOUT_MS, true);
+  assert.equal(WEBGPT_TARGET_READ_CLI_TIMEOUT_MS >= 45_000, true);
 });
 
 test("webgpt close does not cold-start a Workbench when no instance is running", async () => {
@@ -281,6 +283,57 @@ test("WebGPT Control Plane uses a published per-instance descriptor and authenti
     assert.equal(response.requestId, "req-authenticated");
     assert.equal("authToken" in response, false);
     assert.equal((await readFile(descriptorFile, "utf8")).includes(descriptor.authToken), true);
+  } finally {
+    await server.close();
+    await removeControlDescriptor(descriptorFile);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Control Plane accepts bounded target-readiness error details without turning them into a transport timeout", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-control-readiness-error-"));
+  const descriptorFile = controlDescriptorPath(directory);
+  const descriptor = createControlDescriptor("workbench-readiness-error-instance");
+  const server = new WebGptControlServer({
+    endpoint: descriptor.endpoint,
+    authToken: descriptor.authToken,
+    handler: async (request) => ({
+      version: WEBGPT_CONTROL_PROTOCOL_VERSION,
+      requestId: request.requestId,
+      ok: false,
+      command: request.command,
+      error: {
+        code: "RECOVERY_REQUIRED",
+        message: "目标页面的身份或观察上下文尚未收敛。",
+        retryable: false,
+        userAction: "reconcile_request",
+        details: {
+          expectedChatUrl: "https://chatgpt.com/g/example/c/target",
+          actualChatUrl: "https://chatgpt.com/g-p/example/c/target",
+          readinessState: "WAITING_IDENTITY_READY",
+          readinessReason: "observer_stale",
+          navigationReady: true,
+          identityReady: false,
+          observerReady: false,
+          historyReady: false,
+          observationReady: false,
+          observerExpectedChatUrl: "https://chatgpt.com/g/example/c/target",
+          observerCandidateState: "STALE",
+          phase: "post_history_readiness",
+          legacyCode: "WAITING_IDENTITY_READY",
+        },
+      },
+    }),
+  });
+  try {
+    await server.start();
+    await publishControlDescriptor(descriptorFile, descriptor);
+    const response = await runWebGptCli({ name: "webgpt.chat.latest", json: true, url: "https://chatgpt.com/g/example/c/target" }, process.execPath, descriptorFile, 1_000);
+    assert.equal(response.ok, false);
+    assert.equal(response.error?.code, "RECOVERY_REQUIRED");
+    assert.equal(response.error?.details?.readinessState, "WAITING_IDENTITY_READY");
+    assert.equal(response.error?.details?.observerCandidateState, "STALE");
+    assert.equal(response.error?.details?.phase, "post_history_readiness");
   } finally {
     await server.close();
     await removeControlDescriptor(descriptorFile);

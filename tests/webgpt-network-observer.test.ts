@@ -168,6 +168,33 @@ test("navigation invalidation makes delayed old events stale", async () => {
   assert.equal(observer.getDiagnostics().candidateState, "STALE");
 });
 
+test("explicit target preparation clears a stale candidate epoch without weakening fail-closed navigation", async () => {
+  const debuggerInstance = new FakeDebugger();
+  const observer = new WebGptNetworkObserver({ debugger: debuggerInstance });
+  const context = { requestId: "wgpt-target-epoch", idempotencyKey: null, expectedChatUrl: "https://chatgpt.com/c/old", captureStartedAt: Date.now() };
+  await observer.begin(context);
+  strongRequest(debuggerInstance, "old-network");
+  observer.invalidate("navigation");
+  observer.prepareForTarget("https://chatgpt.com/c/fresh", "target_navigation_settled");
+  const diagnostics = observer.getDiagnostics();
+  assert.equal(diagnostics.expectedChatUrl, "https://chatgpt.com/c/fresh");
+  assert.equal(diagnostics.candidateState, "NO_CANDIDATE");
+  assert.equal(diagnostics.candidateEmitted, false);
+  assert.equal(diagnostics.lastReason, "target_navigation_settled");
+});
+
+test("navigation after a fresh target preparation keeps a bound observer epoch without retaining candidates", async () => {
+  const debuggerInstance = new FakeDebugger();
+  const observer = new WebGptNetworkObserver({ debugger: debuggerInstance });
+  observer.prepareForTarget("https://chatgpt.com/c/fresh", "target_identity_converged");
+  observer.invalidate("in_page_navigation");
+  const diagnostics = observer.getDiagnostics();
+  assert.equal(diagnostics.expectedChatUrl, "https://chatgpt.com/c/fresh");
+  assert.equal(diagnostics.candidateState, "NO_CANDIDATE");
+  assert.equal(diagnostics.candidateEmitted, false);
+  assert.equal(diagnostics.lastReason, "in_page_navigation");
+});
+
 test("candidate completion reduces regular reconciliation probes while preserving confirmation probes", () => {
   const network = new WebGptCompletionProbeScheduler(true, 0);
   network.acceptCandidate({

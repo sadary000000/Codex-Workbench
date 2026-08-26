@@ -18,4 +18,6 @@ export type {
   WebGptRole,
   WebGptRoleBinding,
   WebGptRoleBindingStatus,
+  WebGptTargetReadiness,
+  WebGptTargetReadinessState,
 } from "./types.ts";

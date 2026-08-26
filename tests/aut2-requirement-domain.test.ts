@@ -108,9 +108,9 @@ function validDocument(): AutomationDocument {
   return document;
 }
 
-test("schema v3 validates a batched round with blocking and explicit assumption resolution", () => {
+test("current schema validates a batched round with blocking and explicit assumption resolution", () => {
   const document = validDocument();
-  assert.equal(document.automationSchemaVersion, 3);
+  assert.equal(document.automationSchemaVersion, AUTOMATION_SCHEMA_VERSION);
   assert.equal(validateAutomationDocument(document), document);
   assert.equal(document.requirementAlignmentRounds[0]?.questionIds.length, 2);
 });
@@ -131,6 +131,7 @@ test("v2 migration adds pure Requirement alignment collections without touching 
   assert.deepEqual(migrated.document.requirementQuestions, []);
   assert.deepEqual(migrated.document.requirementAssumptions, []);
   assert.deepEqual(Object.keys(migrated.document).filter((key) => key.includes("requirement")), [
+    "requirementOrigins",
     "requirementVersions",
     "requirementChangeRequests",
     "requirementAlignmentSessions",

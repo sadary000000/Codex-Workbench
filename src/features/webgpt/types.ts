@@ -38,6 +38,27 @@ export interface WebGptPageProbe {
   sendAvailable: boolean;
 }
 
+export type WebGptTargetReadinessState = "READY" | "WAITING_IDENTITY_READY" | "TARGET_CHAT_MISMATCH";
+
+/**
+ * Explicit readiness for a predeclared WebGPT Chat target.  `ready` on the
+ * Electron page only means that a document loaded; it does not prove that
+ * the page identity, hydrated history, and observation context converged.
+ */
+export interface WebGptTargetReadiness {
+  expectedChatUrl: string;
+  pageChatUrl: string | null;
+  navigationReady: boolean;
+  identityReady: boolean;
+  observerReady: boolean;
+  historyReady: boolean;
+  observationReady: boolean;
+  state: WebGptTargetReadinessState;
+  reason: string;
+  observerExpectedChatUrl: string | null;
+  observerCandidateState: "NO_CANDIDATE" | "TRACKING" | "AMBIGUOUS" | "COMPLETION_CANDIDATE" | "STALE";
+}
+
 export interface WebGptLatestResponse {
   chatUrl: string;
   assistantCount: number;
@@ -86,6 +107,7 @@ export interface WebGptHealthStatus {
   error: string | null;
   networkObserver?: WebGptNetworkObserverDiagnostics;
   networkWait?: WebGptNetworkWaitDiagnostics;
+  targetReadiness?: WebGptTargetReadiness;
   browserResource?: WebGptBrowserResourceDiagnostics;
 }
 

@@ -59,7 +59,7 @@ function expectedHostOf(context: WebGptNetworkObservationContext): string | null
 
 export class WebGptNetworkObserver {
   private readonly target: WebContentsDebuggerTarget;
-  private readonly correlator = new WebGptRequestCorrelator();
+  private correlator = new WebGptRequestCorrelator();
   private readonly onMessageBound = this.onMessage.bind(this);
   private readonly onDetachBound = this.onDetach.bind(this);
   private readonly waiters = new Set<PendingCandidateWaiter>();
@@ -71,6 +71,8 @@ export class WebGptNetworkObserver {
   private eventCounts = { requestWillBeSent: 0, responseReceived: 0, dataReceived: 0, loadingFinished: 0, loadingFailed: 0 };
   private lastSnapshot: WebGptNetworkObserverDiagnostics | null = null;
   private lastCandidate: WebGptNetworkCompletionCandidate | null = null;
+  private expectedChatUrl: string | null = null;
+  private targetEpochPrepared = false;
 
   constructor(target: WebContentsDebuggerTarget) {
     this.target = target;
@@ -78,8 +80,10 @@ export class WebGptNetworkObserver {
 
   async begin(context: WebGptNetworkObservationContext): Promise<WebGptNetworkObserverDiagnostics> {
     this.invalidate("new_request", false);
+    this.targetEpochPrepared = false;
     this.activeOperationId = context.operationId ?? null;
     this.activeRequestId = context.requestId;
+    this.expectedChatUrl = context.expectedChatUrl ?? null;
     this.lastCandidate = null;
     this.eventCounts = { requestWillBeSent: 0, responseReceived: 0, dataReceived: 0, loadingFinished: 0, loadingFailed: 0 };
     this.correlator.begin({ ...context, expectedHost: expectedHostOf(context) });
@@ -114,16 +118,53 @@ export class WebGptNetworkObserver {
 
   invalidate(reason: string, detach = true): void {
     const hadActiveRequest = this.activeRequestId !== null;
+    const clearsTarget = reason === "manual_navigation" || reason === "user_control" || reason === "automation_paused" || reason === "workspace_closed";
+    const preserveFreshTargetEpoch = !hadActiveRequest && !clearsTarget && this.targetEpochPrepared && this.expectedChatUrl !== null;
     this.resolveWaiters(null);
     this.correlator.invalidate(reason);
     this.lastReason = reason;
     this.activeRequestId = null;
     this.activeOperationId = null;
+    if (clearsTarget) {
+      this.expectedChatUrl = null;
+      this.targetEpochPrepared = false;
+    }
+    if (preserveFreshTargetEpoch) {
+      // A navigation notification after an explicit target preparation is a
+      // normal SPA transition, not evidence that the new target is wrong.
+      // Drop the old correlator/candidate completely and retain only the
+      // declared target identity.  Active request invalidation above still
+      // produces STALE, so completion candidates cannot be reused.
+      this.correlator = new WebGptRequestCorrelator();
+      this.lastCandidate = null;
+      this.lastSnapshot = this.snapshot();
+    }
     // Preserve the last completed candidate as historical diagnostics after
     // the page performs a follow-up navigation. Active-request invalidation
     // still replaces it with STALE, so stale candidates cannot be reused.
-    if (hadActiveRequest || !this.lastSnapshot?.candidateEmitted) this.lastSnapshot = this.snapshot();
+    if (!preserveFreshTargetEpoch && (hadActiveRequest || !this.lastSnapshot?.candidateEmitted)) this.lastSnapshot = this.snapshot();
     if (detach) this.detachOwnedDebugger();
+  }
+
+  /**
+   * Start a new target identity epoch.  Navigation invalidation intentionally
+   * remains STALE for active-request diagnostics, but a later read of a newly
+   * opened target must never inherit that old candidate.  This reset is only
+   * used at an explicit target boundary and does not relax candidate checks.
+   */
+  prepareForTarget(expectedChatUrl: string, reason = "target_open"): void {
+    this.resolveWaiters(null);
+    this.activeRequestId = null;
+    this.activeOperationId = null;
+    this.detachOwnedDebugger();
+    this.correlator = new WebGptRequestCorrelator();
+    this.expectedChatUrl = expectedChatUrl;
+    this.targetEpochPrepared = true;
+    this.lastSnapshot = null;
+    this.lastCandidate = null;
+    this.eventCounts = { requestWillBeSent: 0, responseReceived: 0, dataReceived: 0, loadingFinished: 0, loadingFailed: 0 };
+    this.health = "UNAVAILABLE";
+    this.lastReason = reason;
   }
 
   getDiagnostics(): WebGptNetworkObserverDiagnostics {
@@ -247,6 +288,7 @@ export class WebGptNetworkObserver {
       attached: this.attached,
       activeRequestId: this.activeRequestId,
       activeOperationId: this.activeOperationId,
+      expectedChatUrl: this.expectedChatUrl,
       candidateState: correlation.state,
       candidateUnique: correlation.candidateUnique,
       candidateEmitted: correlation.candidateEmitted,
