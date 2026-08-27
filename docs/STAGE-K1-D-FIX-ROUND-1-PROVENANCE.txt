@@ -1,0 +1,47 @@
+STAGE-K1-D FIX ROUND 1 Provenance
+
+Captured: 2026-08-27T10:48:20+08:00 Asia/Shanghai
+Repository: Codex_Workbench_V1
+Worktree: D:\办公\AI\Codex_Workbench_V1
+Intended branch: codex/workbench-v1
+Base implementation ancestry: 7ed720d80528b923082fc9a3b2848b7b08716a83
+Implementation commit: 47e3abc5cdcacdb1adc406832bac9d02af66ff17
+Review package commit: RECORDED_AFTER_PACKAGE_PREPARATION
+
+The worktree contains pre-existing user-owned changes and historical artifact
+deletions. They were preserved. No reset, revert, broad cleanup, or unrelated
+line-ending normalization was performed.
+
+Scope facts:
+real Planner prompts: 0
+duplicate Planner prompts: 0
+blind resend: false
+executed steps: 0
+new Native Threads: 0
+Verifier: NOT_STARTED
+Scheduler: NOT_STARTED
+raw requirement/prompt logged: false
+raw response logged: false
+
+Real smoke classification:
+resolver: AVAILABLE
+page/observer identity: NOT_READY
+request state: RECOVERY_REQUIRED
+request error: WAITING_IDENTITY_READY
+submittedAt: null
+sendStartedAt: null
+receipt external status: NOT_DISPATCHED
+provider error: WEBGPT_REQUEST_NOT_DISPATCHED
+
+Frozen boundaries:
+V1 Frozen Core: NOT_INTENTIONALLY_CHANGED
+Submission Runner: NOT_CHANGED
+Workbench UI: NOT_CHANGED
+WebGPT page logic: NOT_CHANGED
+Automation Foundation/K2: NOT_CHANGED
+
+External review target:
+https://chatgpt.com/g/g-p-6a77f2b63f088191a97784ad4385c9b8-auto-agent/c/6a8f1c24-f7c8-83e8-b43a-68618aa6e7e5
+
+Package hash: emitted beside the ZIP.
+Included-file hashes: emitted in the package contents manifest.

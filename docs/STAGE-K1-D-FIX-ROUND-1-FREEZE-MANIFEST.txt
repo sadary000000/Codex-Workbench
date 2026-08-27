@@ -1,0 +1,34 @@
+STAGE-K1-D FIX ROUND 1 Freeze Manifest
+
+Implementation boundary:
+- WebGPT page identity revision and stale-probe rejection
+- bounded navigation/page-probe/lease/pre-dispatch waits
+- explicit pre-dispatch Request Manager state
+- known no-send provider and receipt classification
+- sanitized K1-D real-smoke evidence fields
+
+Explicitly not changed by this round:
+- V1 Frozen Core contract
+- WebGPT page behavior or private API
+- Submission Runner product code
+- Workbench UI
+- Provider Port architecture
+- Policy Authority
+- InputRef architecture
+- Automation Foundation/K2
+- Planner positive business execution
+
+Positive-real-path status:
+- real Planner prompts: 0
+- target identity convergence: not proven
+- plan persistence/promotion: not reached
+- Gate: pending GPT review
+- Status: PARTIAL_NOT_FROZEN
+
+Safety invariants:
+- no new Chat
+- no duplicate Planner prompt
+- no blind resend
+- no raw prompt/response in evidence
+- no credential/cookie/token capture
+

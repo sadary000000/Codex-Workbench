@@ -1,0 +1,123 @@
+{
+  "stage": "STAGE-K1-D",
+  "result": "FIX_REQUIRED",
+  "startedAt": "2026-08-27T02:47:58.842Z",
+  "completedAt": "2026-08-27T02:48:20.366Z",
+  "providerProjectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+  "automationProjectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+  "plannerTarget": {
+    "providerTargetRef": "webgpt-role-v1:371c3fb8-30ac-4943-9584-1915045ea34d:PLANNER",
+    "workflowRole": "PLANNER",
+    "resolution": {
+      "provider": "WEBGPT",
+      "status": "AVAILABLE",
+      "capability": "AVAILABLE"
+    },
+    "capabilities": [
+      {
+        "provider": "WEBGPT",
+        "code": "AVAILABLE",
+        "detail": null
+      }
+    ],
+    "boundChatUrlSha256": "552ae380de83dcfa4157a3583588847bef2a39a280ddd15f993bf65abc94e5b9"
+  },
+  "requirement": {
+    "requirementVersionId": "stage-k1-d-requirement-v1",
+    "payloadSha256": "ca5ccd45b959c75daed1037dd9282c3772406f47e95d4237f73f2f41a7b5e004",
+    "status": "CONFIRMED",
+    "canonicalPayloadLogged": false
+  },
+  "plannerRequest": {
+    "operation": "PLAN_REQUIREMENT",
+    "idempotencyRef": "k1-c:planner:45dceb4a759eae8e74320cef9790e78b9dd1049181bd8bf14be141f14094234c",
+    "inputRef": "automation-input-v1:d3ab7c3028a853a586387bdbc6a44cd336842b232b0104de697638cd39b25292",
+    "inputSha256": "d3ab7c3028a853a586387bdbc6a44cd336842b232b0104de697638cd39b25292",
+    "promptChars": 1471,
+    "requestBefore": null,
+    "requestAfter": {
+      "requestId": "wgpt-d5a85e06-f899-41bd-a219-9237999f25ad",
+      "state": "RECOVERY_REQUIRED",
+      "projectId": "371c3fb8-30ac-4943-9584-1915045ea34d",
+      "role": "PLANNER",
+      "policyVersionId": "stage-k1-d-policy-v1",
+      "idempotencyKey": "k1-c:planner:45dceb4a759eae8e74320cef9790e78b9dd1049181bd8bf14be141f14094234c",
+      "promptChars": 1471,
+      "promptSha256": "d3ab7c3028a853a586387bdbc6a44cd336842b232b0104de697638cd39b25292",
+      "targetIdentitySha256": "552ae380de83dcfa4157a3583588847bef2a39a280ddd15f993bf65abc94e5b9",
+      "currentPageIdentitySha256": null,
+      "lastKnownPageUrlSha256": null,
+      "submittedAt": null,
+      "completedAt": null,
+      "lastKnownPageState": null,
+      "errorCode": "WAITING_IDENTITY_READY"
+    },
+    "realPlannerPrompts": 0,
+    "existingProviderRequestReused": false,
+    "duplicatePlannerPrompt": 0,
+    "blindResend": false
+  },
+  "actionCorrelation": {
+    "actionIntentId": "95d0949e-b2f9-4cad-a69a-9a6cd35e587e",
+    "actionAttemptId": "e8fbbe4a-b584-4906-8370-e537ad9c84fe",
+    "policyVersionId": "stage-k1-d-policy-v1",
+    "idempotencyRef": "k1-c:planner:45dceb4a759eae8e74320cef9790e78b9dd1049181bd8bf14be141f14094234c",
+    "providerTargetRef": "webgpt-role-v1:371c3fb8-30ac-4943-9584-1915045ea34d:PLANNER",
+    "providerRequestRef": null,
+    "providerRequestExternalRef": null,
+    "providerObservationExternalRef": null,
+    "receiptId": "95e6e64d-1ca4-4712-a019-858dc02aaaed",
+    "receiptStatus": "FAILED",
+    "receiptOutcomeCertainty": "TERMINAL_FAILED",
+    "receiptExternalStatus": "NOT_DISPATCHED",
+    "receiptReconcileState": "NOT_REQUIRED",
+    "requestErrorCode": "WAITING_IDENTITY_READY",
+    "requirementVersionId": "stage-k1-d-requirement-v1",
+    "requirementPayloadSha256": "ca5ccd45b959c75daed1037dd9282c3772406f47e95d4237f73f2f41a7b5e004",
+    "targetIdentityMatch": false,
+    "providerRequestIdentityMatch": false,
+    "providerObservationIdentityMatch": false
+  },
+  "providerResult": {
+    "status": "PROVIDER_FAILED",
+    "errorCode": "WEBGPT_REQUEST_NOT_DISPATCHED",
+    "errorMessage": "Request Manager 已明确结束在浏览器发送之前，Provider 不报告为已接受。",
+    "providerRequestRef": null,
+    "receiptId": null,
+    "planVersionId": null,
+    "planVersion": null,
+    "validation": {
+      "status": null,
+      "valid": false,
+      "errorCodes": []
+    },
+    "statusQuery": {
+      "actionIntentId": "95d0949e-b2f9-4cad-a69a-9a6cd35e587e",
+      "actionAttemptId": "e8fbbe4a-b584-4906-8370-e537ad9c84fe",
+      "state": "FAILED",
+      "attemptState": "FAILED",
+      "recoveryState": "FAILED",
+      "receiptStatus": "FAILED",
+      "planVersionId": null
+    },
+    "resultQuery": {
+      "actionIntentId": "95d0949e-b2f9-4cad-a69a-9a6cd35e587e",
+      "actionAttemptId": "e8fbbe4a-b584-4906-8370-e537ad9c84fe",
+      "receiptStatus": "FAILED",
+      "planVersionId": null
+    }
+  },
+  "persistence": {
+    "attempted": false,
+    "reopened": false
+  },
+  "safety": {
+    "executedSteps": false,
+    "newNativeThreads": 0,
+    "verifierStarted": false,
+    "schedulerStarted": false,
+    "rawPromptLogged": false,
+    "rawResponseLogged": false
+  },
+  "error": null
+}

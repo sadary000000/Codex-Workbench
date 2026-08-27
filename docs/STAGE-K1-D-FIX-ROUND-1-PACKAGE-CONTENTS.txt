@@ -1,0 +1,28 @@
+STAGE-K1-D FIX ROUND 1 Review Package Contents
+
+Stage: STAGE-K1-D FIX ROUND 1 — Target Identity / Pre-dispatch Recovery
+Captured: 2026-08-27
+
+Included:
+- STAGE-K1-D-FIX-ROUND-1-STAGE-REVIEW.md
+- STAGE-K1-D-FIX-ROUND-1-REVIEW-SUMMARY.md
+- STAGE-K1-D-FIX-ROUND-1-TEST-SUMMARY.json
+- STAGE-K1-D-FIX-ROUND-1-SOURCE-EVIDENCE-INDEX.md
+- STAGE-K1-D-FIX-ROUND-1-PROVENANCE.txt
+- STAGE-K1-D-FIX-ROUND-1-SUBAGENTS.md
+- STAGE-K1-D-FIX-ROUND-1-FREEZE-MANIFEST.txt
+- STAGE-K1-D-REAL-PLANNER-EVIDENCE.json
+- STAGE-K1-D-FIX-ROUND-1-HASHES.txt
+
+Excluded:
+- cookies, tokens, credentials, passwords, browser profile data
+- raw requirement payload, raw Planner prompt, raw assistant response
+- private ChatGPT transcript or unrelated logs
+- Automation database files and user data
+- Workbench binaries and node_modules
+- historical review packages
+- Submission Runner state
+
+The archive SHA-256 is emitted next to the ZIP as
+STAGE-K1-D-FIX-ROUND-1-REVIEW-PACKAGE.zip.sha256.
+Included-file hashes are emitted in STAGE-K1-D-FIX-ROUND-1-HASHES.txt.

@@ -1,0 +1,41 @@
+{
+  "stage": "STAGE-K1-D FIX ROUND 1",
+  "capturedAt": "2026-08-27T10:48:20+08:00",
+  "commands": {
+    "npm run check": { "result": "PASS" },
+    "npm test": { "result": "PASS", "passed": 473, "failed": 0 },
+    "npm audit --omit=dev": { "result": "PASS", "vulnerabilities": 0 },
+    "npm run build": { "result": "PASS" },
+    "npm run package:win": { "result": "PASS" },
+    "git diff --check": {
+      "result": "PRE_EXISTING_WORKTREE_LINE_ENDING_NOISE",
+      "strict": "not normalized",
+      "tolerant_cr_at_eol": "PASS"
+    }
+  },
+  "realSmoke": {
+    "result": "FIX_REQUIRED",
+    "requestState": "RECOVERY_REQUIRED",
+    "requestError": "WAITING_IDENTITY_READY",
+    "realPlannerPrompts": 0,
+    "duplicatePlannerPrompt": 0,
+    "blindResend": false,
+    "targetIdentityMatch": false,
+    "providerRequestIdentityMatch": false,
+    "providerObservationIdentityMatch": false,
+    "receiptStatus": "FAILED",
+    "receiptExternalStatus": "NOT_DISPATCHED",
+    "receiptOutcomeCertainty": "TERMINAL_FAILED",
+    "providerStatus": "PROVIDER_FAILED",
+    "providerError": "WEBGPT_REQUEST_NOT_DISPATCHED",
+    "submittedAt": null,
+    "sendStartedAt": null,
+    "executedSteps": false,
+    "newNativeThreads": 0
+  },
+  "subagents": {
+    "started": 4,
+    "completed": 4,
+    "running": 0
+  }
+}
