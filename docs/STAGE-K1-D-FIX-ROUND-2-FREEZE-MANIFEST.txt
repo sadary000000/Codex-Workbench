@@ -1,0 +1,10 @@
+manifest=STAGE-K1-D-FIX-ROUND-2
+implementation_commit=62e8cbb9691c04a6f2a7e64c59bdf1fa458fb0aa
+review_freeze_base_commit=62e8cbb9691c04a6f2a7e64c59bdf1fa458fb0aa
+source_sha256=0ce4df4035c77e4f0e5b758c1c00a75f7b06822b04f0dd2a273d7ab1a678a712  src/features/webgpt/runtime/webgpt-workspace.ts
+source_sha256=6c49f80521b0379344835ac6df44cc6ccbe4355fa31da47518e68feeee52f5cb  src/features/webgpt/runtime/webgpt-request-manager.ts
+source_sha256=e9134fc62fb51f731642d22f0106bc59bd013cc725e317d156500b04c42d5093  src/automation/stage-k1-d-real-planner-smoke.ts
+evidence_sha256=55bf261b5bf39c16a4af4288f41bf757c8a3072b444f593ca0de35e5eb092ee3  docs/STAGE-K1-D-REAL-PLANNER-EVIDENCE.json
+target_lifecycle_trace=bounded_sanitized_hashes_only
+dispatch_boundary_crossed=NO
+
