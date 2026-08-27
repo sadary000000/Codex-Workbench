@@ -5,6 +5,7 @@ stage: STAGE-K1-D FIX ROUND 2
 implementation_commit: 62e8cbb9691c04a6f2a7e64c59bdf1fa458fb0aa
 review_freeze_base_commit: 62e8cbb9691c04a6f2a7e64c59bdf1fa458fb0aa
 review_package_source_commit: 62e8cbb9691c04a6f2a7e64c59bdf1fa458fb0aa
+review_documentation_base_commit: aa98bbb
 local_result: BLOCKED_EXTERNAL_TARGET
 smoke_result: BLOCKED
 gate: PENDING_GPT_REVIEW
