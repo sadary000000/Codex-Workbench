@@ -1,0 +1,35 @@
+{
+  "stage": "STAGE-K1-D",
+  "recoveryMethod": "EXISTING_REQUEST_ONLY",
+  "noNewPlannerPrompt": true,
+  "sourceRequest": {
+    "requestId": "wgpt-3f72b4b7-cd05-4594-b14b-34f537e58960",
+    "state": "COMPLETED",
+    "resultSha256": "c8b345ed237f28ee7bc69c35adfea28c1946cb5dddca26733729b42421955bb4",
+    "resultPathPresent": true,
+    "resultIsJsonCandidate": false,
+    "realPlannerPrompts": 1
+  },
+  "identity": {
+    "expectedTargetUrl": "https://chatgpt.com/g/g-6a828d1e98c8819198acf3b3e250ba2f-workbench/c/6a8fb869-e130-83e8-a7d3-a4d1364ff7f2",
+    "recordedTargetUrl": "https://chatgpt.com/g/g-6a828d1e98c8819198acf3b3e250ba2f-workbench/c/6a8fb869-e130-83e8-a7d3-a4d1364ff7f2",
+    "recordedPageUrl": "https://chatgpt.com/g/g-6a828d1e98c8819198acf3b3e250ba2f/c/6a8fb869-e130-83e8-a7d3-a4d1364ff7f2",
+    "equivalent": true
+  },
+  "originalCorrelation": {
+    "actionIntentId": "f4a70e74-6ae8-4a2b-9e3a-1d59d84f62a3",
+    "actionAttemptId": "c87a55e9-11df-4eed-8251-2db1f8dbfc81",
+    "providerRequestRef": "wgpt-3f72b4b7-cd05-4594-b14b-34f537e58960",
+    "providerSemanticSha256": "aa7a1e7d9f1f7c957f48fbad64f197ad6373769259370c8fb1a0d151b561675d"
+  },
+  "reconstructedLedger": {
+    "databasePath": "D:\\办公\\AI\\Codex_Workbench_V1\\dist-review-k1-d-resumed-20260827\\recovery-automation-fix1.db",
+    "providerRequestExternalRef": "829a78ca-6cd0-4460-92a2-8ab9b38da8cb",
+    "receiptId": "c8d1960c-d28a-4c50-8b01-2a06c1c78bfa",
+    "receiptStatus": "UNKNOWN",
+    "receiptOutcomeCertainty": "ACCEPTED_UNKNOWN_RESULT",
+    "receiptReconcileState": "RECOVERY_REQUIRED"
+  },
+  "requirementPayloadSha256": "ca5ccd45b959c75daed1037dd9282c3772406f47e95d4237f73f2f41a7b5e004",
+  "requestSemanticSha256": "f1674233769ecbbfb198a9ddba8cfb1f43e6b178c5357cc45329e540ebb69524"
+}

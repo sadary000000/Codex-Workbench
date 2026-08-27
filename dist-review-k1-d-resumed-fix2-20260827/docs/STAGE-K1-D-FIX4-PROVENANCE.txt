@@ -1,0 +1,19 @@
+STAGE-K1-D FIX ROUND 4 PROVENANCE
+
+Date: 2026-08-27
+Branch: codex/workbench-v1
+Base commit: 62e8cbb9691c04a6f2a7e64c59bdf1fa458fb0aa
+Repository HEAD at round start: 23e070a87ec10721c81fc94154752090baa5c610
+Implementation commit: dfe57ae84f8ccb21e4c22f65a499fd258fd47f6b
+Freeze/review source commit: PENDING_FREEZE_COMMIT
+
+Execution source: current source after implementation commit, verified by npm run check/npm test, then built into the official Windows package.
+Package source: the files copied into the Fix Round 4 staging directory.
+Immutable review source: the staging directory frozen by the freeze/review source commit and accompanying ZIP SHA-256 sidecar.
+
+The repository had unrelated pre-existing dirty changes. Only the K1-D implementation files were included in the implementation commit; only the Fix Round 4 staging/evidence files are included in the freeze/review source commit. No unrelated worktree change is claimed as part of this round.
+
+Planner dispatches: original 1; Fix Round 4 additional 0.
+Existing result: NON_JSON_ERROR_TEXT; JSON fence count 0; K1-B NOT_REACHED; Plan promotion NOT_ATTEMPTED.
+Build checks: npm run check PASS; npm test PASS (478/478); npm run package:win PASS.
+Review ZIP SHA-256: recorded in the external .sha256 sidecar after the freeze source is finalized.

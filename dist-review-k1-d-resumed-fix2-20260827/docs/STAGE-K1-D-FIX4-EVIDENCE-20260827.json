@@ -1,0 +1,87 @@
+{
+  "stage": "STAGE-K1-D",
+  "round": "FIX4",
+  "result": "FIX_REQUIRED",
+  "recoveryMethod": "EXISTING_REQUEST_ONLY",
+  "noNewPlannerPrompt": true,
+  "priorReview": {
+    "submissionId": "bfe71670ad50d2a25c662bb66169d25e5ba8a255a478705afdaa73e16db7fcde",
+    "result": "FIX_REQUIRED",
+    "status": "PARTIAL_NOT_FROZEN"
+  },
+  "sourceRequest": {
+    "requestId": "wgpt-3f72b4b7-cd05-4594-b14b-34f537e58960",
+    "state": "COMPLETED",
+    "requestJournalSha256": "ce25afc2c331fa1ed0507c78cb5db3637e90b3b5f50f34cb4c6342f997ad199f",
+    "resultSha256": "c8b345ed237f28ee7bc69c35adfea28c1946cb5dddca26733729b42421955bb4",
+    "resultBytes": 144,
+    "realPlannerPrompts": 1,
+    "duplicatePlannerPrompt": 0,
+    "blindResend": false
+  },
+  "transportClassification": {
+    "responseCategory": "NON_JSON_ERROR_TEXT",
+    "jsonFenceCount": 0,
+    "jsonParseable": false,
+    "normalization": "NOT_ALLOWED",
+    "reason": "The existing response is a generation-failure message, not a single complete JSON fence.",
+    "k1bValidation": "NOT_REACHED",
+    "planPromotion": "NOT_ATTEMPTED"
+  },
+  "audits": [
+    {
+      "agent": "Chandrasekhar",
+      "agentId": "01a041e9-dbf5-7e30-80d8-32b19eb1d69e",
+      "scope": "transport-result classification",
+      "conclusion": "HOLD",
+      "finding": "No JSON fence; malformed non-JSON error text. Do not unwrap, extract, repair, or resend."
+    },
+    {
+      "agent": "Boole",
+      "agentId": "01a041e9-dc9d-7ea2-9424-d1fefe8488f8",
+      "scope": "identity/recovery",
+      "conclusion": "HOLD_BEFORE_REPAIR",
+      "finding": "Found a semantic/idempotency alias gap and a conditional legacy REQUIREMENT URL comparison gap; both were repaired in this round."
+    },
+    {
+      "agent": "Singer",
+      "agentId": "01a041e9-dd77-7d83-91ae-f4984f10930a",
+      "scope": "Git/freeze provenance",
+      "conclusion": "HOLD",
+      "finding": "The prior package was a dirty-worktree snapshot without implementation/freeze commits; this round records explicit commits and artifact hashes."
+    }
+  ],
+  "implementation": {
+    "identityContract": "src/shared/chat-url-identity.ts",
+    "stableSemanticTarget": "conversation:<conversation-id>",
+    "legacySemanticHashCompatibility": true,
+    "opaqueRequirementChatRefPreserved": true,
+    "newAliasTests": [
+      "WebGPT Request Manager treats GPT route aliases as one idempotent target",
+      "accepts equivalent URL aliases while keeping opaque REQUIREMENT refs exact"
+    ]
+  },
+  "validation": {
+    "npmRunCheck": "PASS",
+    "npmTest": { "status": "PASS", "tests": 478, "passed": 478, "failed": 0 },
+    "npmRunPackageWin": "PASS"
+  },
+  "provenance": {
+    "baseCommit": "62e8cbb9691c04a6f2a7e64c59bdf1fa458fb0aa",
+    "repositoryHeadAtRoundStart": "23e070a87ec10721c81fc94154752090baa5c610",
+    "implementationCommit": "dfe57ae84f8ccb21e4c22f65a499fd258fd47f6b",
+    "freezeOrReviewCommit": "PENDING_FREEZE_COMMIT",
+    "branch": "codex/workbench-v1",
+    "dirtyWorktreeAtRoundStart": true
+  },
+  "safety": {
+    "newPlannerPrompts": 0,
+    "newReviewSubmission": 0,
+    "executedSteps": false,
+    "newNativeThreads": 0,
+    "verifierStarted": false,
+    "schedulerStarted": false,
+    "rawPromptLogged": false,
+    "rawResponseLogged": false
+  }
+}
