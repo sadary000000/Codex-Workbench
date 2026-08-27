@@ -80,6 +80,8 @@ export const PROVIDER_SEAM_CLASSIFICATION: Readonly<Record<string, ProviderSeamF
   "store.ts": fieldEntry(PAUSED, ["plannerChatRef"]),
   "types.ts": fieldEntry(PAUSED, ["plannerChatRef"]),
   "webgpt-external-action.ts": fieldEntry(TEST_ONLY, ["targetChatUrl"]),
+  "stage-k1-d-real-planner-smoke.ts": fieldEntry(TEST_ONLY, ["chatUrl", "targetChatUrl"]),
+  "stage-k1-d-reconcile-only.ts": fieldEntry(READ_ONLY, ["chatUrl", "targetChatUrl"]),
   "webgpt-action-readiness.ts": fieldEntry(READ_ONLY, ["chatUrl", "targetChatUrl"]),
 });
 

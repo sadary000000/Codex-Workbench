@@ -309,7 +309,7 @@ test("WebGPT Request Manager marks unfinished persisted work indeterminate after
   }
 });
 
-test("WebGPT read-only restart classification does not rewrite a v2 Journal", async () => {
+test("WebGPT read-only restart classification preserves an existing v2 recovery error", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-readonly-journal-"));
   const record = {
     requestId: "wgpt-readonly",
@@ -340,7 +340,7 @@ test("WebGPT read-only restart classification does not rewrite a v2 Journal", as
     const manager = new WebGptRequestManager({ workspace: new FakeWorkspace() as never, storageDirectory: directory });
     const recovered = await manager.requestStatus("wgpt-readonly");
     assert.equal(recovered.state, "RECOVERY_REQUIRED");
-    assert.equal(recovered.error?.code, "WORKBENCH_RESTARTED");
+    assert.equal(recovered.error?.code, "WEBGPT_RESPONSE_TIMEOUT");
     assert.equal(await readFile(join(directory, "requests.json"), "utf8"), original);
   } finally {
     await rm(directory, { recursive: true, force: true });

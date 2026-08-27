@@ -1,0 +1,11 @@
+{
+  "generatedAt": "2026-08-27T15:41:17.883Z",
+  "files": {
+    "dist/package/Codex Workbench V1.exe": "31a0176b7c1a81cf379e55e109c57a56493a4d4a9e9b0d2475a678fd7df234dc",
+    "dist/package/Codex Workbench CLI.exe": "643a076dc8fd5953e5b21014a3096a9d3912ff64cedf81a8c8a0b8f5f0e1288f",
+    "scripts/stage-k1-d-real-planner-smoke.ts": "980422055036ce4594d0b2d35660d5f246dacc7482f5edd4871842b4076b7228"
+  },
+  "source": "Get-FileHash -Algorithm SHA256 after npm run package:win",
+  "rawPlannerPromptIncluded": false,
+  "rawProviderResponseIncluded": false
+}

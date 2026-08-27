@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "stage": "STAGE-K1-D",
+  "round": "FIX-ROUND-4",
+  "main_repository": {
+    "branch": "codex/workbench-v1",
+    "base_commit": "c19059b625807dff3c77b100585821476a88bf87",
+    "worktree_state": "dirty",
+    "worktree_status_lines": 310,
+    "worktree_status_sha256": "0ace39c797be37b5bbd627c8eb6f68b681c1ec84afc393db239bbebf416bc423",
+    "main_commit_created": false,
+    "reason": "The shared worktree contains unrelated user-owned changes; review provenance uses the bounded isolated snapshot below and does not commit the main worktree."
+  },
+  "isolated_review_snapshot": {
+    "implementation_commit": "a39d77e27d258c463dba051cbcab37233ae2442d",
+    "review_freeze_commit": "2bb0cc3151193bf62dd2786cfd926d4a6426e82e",
+    "bundle_path": "artifacts/STAGE-K1-D-FR4-REVIEW-SOURCE.bundle",
+    "bundle_sha256": "348f3b5ef55517c50f081b757495a3cf0e33b2bd78857c775d3c00e1f7778472",
+    "description": "A separate temporary Git repository contains only the bounded current-round implementation, supporting context, and review inputs. The bundle is included for independent verification."
+  },
+  "build_and_package": {
+    "source_tree_sha256": "f79a58f3cf82923e9c9c0ba6c2b355c97b1c2abfc586d982b77a3c7fbd9740e7",
+    "build_timestamp": "2026-08-27T15:41:17.079Z",
+    "package_timestamp": "2026-08-27T15:41:17.883Z",
+    "runner_script": "scripts/stage-k1-d-real-planner-smoke.ts",
+    "runner_script_sha256": "980422055036ce4594d0b2d35660d5f246dacc7482f5edd4871842b4076b7228",
+    "workbench_executable": "dist/package/Codex Workbench V1.exe",
+    "workbench_executable_sha256": "31a0176b7c1a81cf379e55e109c57a56493a4d4a9e9b0d2475a678fd7df234dc",
+    "cli_executable": "dist/package/Codex Workbench CLI.exe",
+    "cli_executable_sha256": "643a076dc8fd5953e5b21014a3096a9d3912ff64cedf81a8c8a0b8f5f0e1288f",
+    "package_archive_sha256": "EXTERNAL_SIDECAR_AFTER_FREEZE"
+  },
+  "real_reconcile_evidence": {
+    "evidence_path": "docs/STAGE-K1-D-FR4-RECONCILE-EVIDENCE.json",
+    "evidence_sha256": "37073a1d735c4a22536c06ee5ad201605d89e50afdb5e3d5b2ca91404725cf6f",
+    "request_journal_sha256_before": "1d8b7bfc6f0bb2dde096e0577847fe1d50c0bc813e0eeb2776e526c1a357c075",
+    "request_journal_sha256_after": "1d8b7bfc6f0bb2dde096e0577847fe1d50c0bc813e0eeb2776e526c1a357c075",
+    "result": "BLOCKED",
+    "disposition": "BLOCKED_MISSING_CORRELATION",
+    "package_provenance_manifest_verified": true
+  },
+  "changed_file_sha256": {
+    "src/automation/index.ts": "31a2eacf093219a9742ad3824d0263f1fb997281edabaddd122dab949aaa5c77",
+    "src/automation/provider-seam-classification.ts": "f22a4c34b4a6774bd2984a0990ca5a099086646ebec52c77c805bd52f240d51a",
+    "src/automation/stage-k1-d-reconcile-only.ts": "cbfc0d3e994342dd1cbe26fd50d4e80cbbb9b5aca75fc26070ed0344689b45aa",
+    "src/main/main.ts": "2694414a39fa3d047268e8397947ec15ad1b1a9b599433f3418d19f2f2e77230",
+    "src/main/startup-policy.ts": "accffc879624cf5067048442a6a44beca34198b57751a8123026fdac67568896",
+    "src/features/webgpt/runtime/webgpt-request-manager.ts": "69830b6ea1a9741097d3a0cdb41c40cec4a6a3d1c8eb5ea9edf4f11dad3d7f11",
+    "scripts/stage-k1-d-real-planner-smoke.ts": "980422055036ce4594d0b2d35660d5f246dacc7482f5edd4871842b4076b7228",
+    "tests/stage-k1-d-fix-round-4.test.ts": "aa011eff0480583ed6a60cb20f2825204812bf33320cebcaf347ba4bea10e922",
+    "tests/webgpt-request-manager.test.ts": "7a096e6c00078e8fb4c2345bb70387054fbe95053e00e96c09f0ec277367d905"
+  },
+  "privacy": {
+    "raw_planner_prompt_included": false,
+    "raw_provider_response_included": false,
+    "credentials_or_browser_profile_included": false
+  }
+}

@@ -1,7 +1,9 @@
 import { execFile as execFileCallback, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
@@ -10,9 +12,15 @@ const guiExecutable = process.env.WEBGPT_GUI_EXECUTABLE?.trim() || join(root, "d
 const cliExecutable = process.env.WEBGPT_CLI_EXECUTABLE?.trim() || join(root, "dist", "package", "Codex Workbench CLI.exe");
 const providerProjectId = process.env.K1D_WEBGPT_PROJECT_ID?.trim() || "371c3fb8-30ac-4943-9584-1915045ea34d";
 const automationProjectId = process.env.K1D_AUTOMATION_PROJECT_ID?.trim() || providerProjectId;
-const outputPath = resolve(process.env.STAGE_K1_D_REAL_PLANNER_SMOKE_OUTPUT?.trim() || join(root, "docs", "STAGE-K1-D-REAL-PLANNER-EVIDENCE.json"));
-const timeoutMs = Math.max(5_000, Math.min(Number(process.env.STAGE_K1_D_REAL_PLANNER_SMOKE_TIMEOUT_MS ?? 300_000), 300_000));
+const reconcileOnly = process.env.STAGE_K1_D_RECONCILE_ONLY === "1";
+const outputPath = resolve(reconcileOnly
+  ? process.env.STAGE_K1_D_RECONCILE_ONLY_OUTPUT?.trim() || join(root, "docs", "STAGE-K1-D-FR4-RECONCILE-EVIDENCE.json")
+  : process.env.STAGE_K1_D_REAL_PLANNER_SMOKE_OUTPUT?.trim() || join(root, "docs", "STAGE-K1-D-REAL-PLANNER-EVIDENCE.json"));
+const timeoutMs = Math.max(5_000, Math.min(Number(reconcileOnly
+  ? process.env.STAGE_K1_D_RECONCILE_ONLY_TIMEOUT_MS ?? 300_000
+  : process.env.STAGE_K1_D_REAL_PLANNER_SMOKE_TIMEOUT_MS ?? 300_000), 300_000));
 const idempotencyLabel = process.env.K1D_IDEMPOTENCY_LABEL?.trim() || `stage-k1-d-real-planner-smoke-${Date.now()}`;
+const runnerScriptSha256 = createHash("sha256").update(await readFile(fileURLToPath(import.meta.url))).digest("hex");
 
 interface Invocation {
   readonly ok: boolean;
@@ -90,27 +98,52 @@ async function waitForEvidence(child: ReturnType<typeof spawn>): Promise<Record<
 let tempRoot: string | null = null;
 let child: ReturnType<typeof spawn> | null = null;
 try {
-  tempRoot = await mkdtemp(join(tmpdir(), "codex-workbench-stage-k1-d-"));
+  if (!reconcileOnly) tempRoot = await mkdtemp(join(tmpdir(), "codex-workbench-stage-k1-d-"));
   await rm(outputPath, { force: true });
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;
-  environment.STAGE_K1_D_REAL_PLANNER_SMOKE = "1";
-  environment.STAGE_K1_D_REAL_PLANNER_SMOKE_OUTPUT = outputPath;
-  environment.STAGE_K1_D_REAL_PLANNER_SMOKE_TIMEOUT_MS = String(timeoutMs);
-  environment.AUT3_AUTOMATION_DB = join(tempRoot, "automation.db");
-  delete environment.AUT2_AUTOMATION_DB;
-  delete environment.AUT3_WEBGPT_REQUESTS_DIR;
-  delete environment.AUT2_WEBGPT_REQUESTS_DIR;
+  if (reconcileOnly) {
+    environment.STAGE_K1_D_RECONCILE_ONLY = "1";
+    environment.STAGE_K1_D_RECONCILE_ONLY_OUTPUT = outputPath;
+    environment.STAGE_K1_D_RECONCILE_ONLY_TIMEOUT_MS = String(timeoutMs);
+    // Reconciliation must load the existing Workbench Request Journal and
+    // Automation database. A temporary database would hide a missing exact
+    // ActionAttempt correlation and could turn recovery into reconstruction.
+    delete environment.AUT3_AUTOMATION_DB;
+    delete environment.AUT2_AUTOMATION_DB;
+    delete environment.AUT3_WEBGPT_REQUESTS_DIR;
+    delete environment.AUT2_WEBGPT_REQUESTS_DIR;
+    environment.K1D_POSITIVE_RETRY_AUTHORIZED = "0";
+    delete environment.K1D_POSITIVE_RETRY_SMOKE;
+  } else {
+    environment.STAGE_K1_D_REAL_PLANNER_SMOKE = "1";
+    environment.STAGE_K1_D_REAL_PLANNER_SMOKE_OUTPUT = outputPath;
+    environment.STAGE_K1_D_REAL_PLANNER_SMOKE_TIMEOUT_MS = String(timeoutMs);
+    environment.AUT3_AUTOMATION_DB = join(tempRoot!, "automation.db");
+    delete environment.AUT2_AUTOMATION_DB;
+    delete environment.AUT3_WEBGPT_REQUESTS_DIR;
+    delete environment.AUT2_WEBGPT_REQUESTS_DIR;
+  }
   environment.K1D_WEBGPT_PROJECT_ID = providerProjectId;
   environment.K1D_AUTOMATION_PROJECT_ID = automationProjectId;
   environment.K1D_IDEMPOTENCY_LABEL = idempotencyLabel;
+  if (!reconcileOnly) {
+    // The redesign runner is the default, but its real Attempt #2 remains
+    // dormant until an explicit later authorization is supplied.
+    environment.K1D_POSITIVE_RETRY_SMOKE = process.env.K1D_POSITIVE_RETRY_SMOKE?.trim() || "1";
+    environment.K1D_POSITIVE_RETRY_AUTHORIZED = process.env.K1D_POSITIVE_RETRY_AUTHORIZED?.trim() || "0";
+  }
+  environment.K1D_RUNNER_SCRIPT_SHA256 = runnerScriptSha256;
   child = spawn(guiExecutable, [], { cwd: root, env: environment, windowsHide: false, stdio: "ignore" });
   await waitForWorkbench(child);
-  const control = await invoke(["control", "auto"]);
-  if (!control.ok) throw new Error(`K1D_CONTROL_AUTO_FAILED:${errorText(control)}`);
+  if (!reconcileOnly) {
+    const control = await invoke(["control", "auto"]);
+    if (!control.ok) throw new Error(`K1D_CONTROL_AUTO_FAILED:${errorText(control)}`);
+  }
   const evidence = await waitForEvidence(child);
   console.log(JSON.stringify({
     stage: evidence.stage ?? "STAGE-K1-D",
+    mode: reconcileOnly ? "WORKBENCH_OWNED_RECONCILE_ONLY" : "REAL_PLANNER_SMOKE",
     result: evidence.result ?? null,
     evidencePath: outputPath,
     providerProjectId,

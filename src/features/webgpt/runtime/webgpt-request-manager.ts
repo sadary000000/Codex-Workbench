@@ -21,6 +21,7 @@ const WAIT_SETTLED_STATES = new Set<WebGptRequestState>(["COMPLETED", "FAILED", 
 const TARGET_PAGE_HYDRATION_TIMEOUT_MS = 10_000;
 const TARGET_REOPEN_ATTEMPTS = 2;
 const TARGET_REOPEN_DELAY_MS = 250;
+const RECOVERY_STABILITY_DELAY_MS = 50;
 const REQUEST_LEASE_ADMISSION_TIMEOUT_MS = 60_000;
 // The whole preparation path (lease, target navigation, hydration and final
 // identity check) must have a ceiling of its own. A renderer/API Promise can
@@ -465,7 +466,36 @@ export class WebGptRequestManager {
       if (expectedAssistantCount !== null && probe.page.assistantCount !== expectedAssistantCount) {
         throw this.codedError("RESPONSE_NOT_VERIFIABLE", "目标 Chat 的 Assistant 消息数量无法与该 Request 唯一对应。");
       }
-      const response = probe.latestAssistantText.trim();
+      const stableProbe = await this.readStableRecoveryProbe(probe);
+      // Re-check the target and submission proof after the stability window.
+      // ChatGPT's SPA can redirect or update history between the first probe
+      // and the final stable sample; a stable observation of the wrong Chat
+      // must never be promoted as this Request's result.
+      if (!stableProbe.page.onChatPage || !stableProbe.page.composerFound || stableProbe.page.loginRequired) {
+        throw this.codedError("PAGE_ADAPTER_UNHEALTHY", "恢复稳定采样时目标 Chat 页面尚未保持可观察。");
+      }
+      let stableActualTarget: string;
+      try {
+        stableActualTarget = record.targetChatUrl
+          ? normalizeRoleChatUrl(stableProbe.page.url)
+          : normalizeChatUrl(stableProbe.page.url);
+      } catch {
+        throw this.codedError("TARGET_CHAT_CHANGED", "恢复稳定采样时未能确认目标 Chat 身份。");
+      }
+      if (!roleChatUrlsEquivalent(stableActualTarget, this.recoveryTarget(record))) {
+        throw this.codedError("TARGET_CHAT_CHANGED", "恢复稳定采样时当前页面已不是请求记录的目标 Chat。", {
+          targetChatUrl: this.recoveryTarget(record),
+          actualChatUrl: stableActualTarget,
+        });
+      }
+      const stableUserConfirmed = (record.baselineUserCount === null || stableProbe.page.userCount > record.baselineUserCount)
+        && promptHash(stableProbe.latestUserText) === record.promptSha256;
+      if (!stableUserConfirmed) throw this.codedError("REQUEST_NOT_VERIFIABLE", "稳定采样未能再次证明该 Prompt 属于目标 Chat。");
+      if (expectedAssistantCount !== null && stableProbe.page.assistantCount !== expectedAssistantCount) {
+        throw this.codedError("RESPONSE_NOT_VERIFIABLE", "稳定采样的 Assistant 消息数量无法与该 Request 唯一对应。");
+      }
+      if (stableProbe.page.generating) throw this.codedError("RECOVERY_GENERATING", "稳定采样时目标 Chat 仍在生成，当前无法安全判定最终结果。");
+      const response = stableProbe.latestAssistantText;
       if (!response || isTransientWebGptResponse(response)) throw this.codedError("RESPONSE_NOT_VERIFIABLE", "目标 Chat 尚未提供可确认的稳定 Assistant 回复。");
       await this.complete(record, response);
     } catch (error) {
@@ -508,6 +538,27 @@ export class WebGptRequestManager {
       if (attempt < TARGET_REOPEN_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, TARGET_REOPEN_DELAY_MS));
     }
     throw this.codedError("TARGET_CHAT_CHANGED", "恢复时当前页面不是请求记录的目标 Chat。", { targetChatUrl: target, actualChatUrl: lastActualUrl, reopenAttempts: TARGET_REOPEN_ATTEMPTS });
+  }
+
+  /** Recovery must use the same stable-result rule as the normal wait path. */
+  private async readStableRecoveryProbe(initial: WebGptPageProbe): Promise<WebGptPageProbe> {
+    const equivalent = (left: WebGptPageProbe, right: WebGptPageProbe): boolean => left.page.url === right.page.url
+      && left.page.userCount === right.page.userCount
+      && left.page.assistantCount === right.page.assistantCount
+      && left.page.generating === right.page.generating
+      && left.page.composerFound === right.page.composerFound
+      && left.composerText === right.composerText
+      && left.latestAssistantText === right.latestAssistantText;
+    let previous = initial;
+    let stableSamples = 1;
+    while (stableSamples < 3) {
+      await new Promise((resolve) => setTimeout(resolve, RECOVERY_STABILITY_DELAY_MS));
+      const next = await this.workspace.getPageProbe();
+      if (equivalent(previous, next)) stableSamples += 1;
+      else stableSamples = 1;
+      previous = next;
+    }
+    return previous;
   }
 
   async userControl(): Promise<void> {
@@ -733,9 +784,14 @@ export class WebGptRequestManager {
         // without searching history, changing targets, or resending anything.
         const targetAwareWorkspace = this.workspace as WebGptWorkspace & {
           waitForTargetChatIdentity?: (expectedChatUrl: string, timeoutMs?: number) => Promise<WebGptPageProbe>;
+          confirmTargetForDispatch?: (expectedChatUrl: string, operationId?: string | null) => Promise<{ probe: WebGptPageProbe }>;
         };
         if (typeof targetAwareWorkspace.waitForTargetChatIdentity === "function") {
           probe = await targetAwareWorkspace.waitForTargetChatIdentity(record.targetChatUrl, 5_000);
+        }
+        if (typeof targetAwareWorkspace.confirmTargetForDispatch === "function") {
+          const dispatchSnapshot = await targetAwareWorkspace.confirmTargetForDispatch(record.targetChatUrl);
+          probe = dispatchSnapshot.probe;
         }
         let confirmedChatUrl = "";
         try { confirmedChatUrl = normalizeRoleChatUrl(probe.page.url); } catch { /* handled below */ }
@@ -848,7 +904,7 @@ export class WebGptRequestManager {
         // attempt recovery-only; never turn a possible side effect into a
         // terminal FAILED record that a caller could replay.
         await this.markRecovery(record, code, message);
-      } else if (code === "WEBGPT_RESPONSE_TIMEOUT" || code === "PROMPT_NOT_SUBMITTED" || code === "TARGET_CHAT_CHANGED" || code === "ROLE_CHAT_MISMATCH" || code === "WEBGPT_TARGET_CHAT_MISMATCH" || code === "ROLE_TARGET_IDENTITY_MISMATCH" || code === "WAITING_IDENTITY_READY" || code === "WEBGPT_NAVIGATION_TIMEOUT" || code === "WEBGPT_PAGE_PROBE_TIMEOUT" || code === "WEBGPT_PRE_DISPATCH_TIMEOUT" || code === "WEBGPT_OPERATION_ADMISSION_TIMEOUT" || code === "PAGE_ADAPTER_UNHEALTHY" || code === "COMPOSER_NOT_READY" || code === "WEBGPT_LOGIN_REQUIRED" || code === "WEBGPT_USER_CONTROL" || code === "WEBGPT_OPERATION_NOT_ALLOWED" || code === "WEBGPT_OPERATION_DEGRADED") {
+      } else if (code === "WEBGPT_RESPONSE_TIMEOUT" || code === "PROMPT_NOT_SUBMITTED" || code === "TARGET_CHAT_CHANGED" || code === "ROLE_CHAT_MISMATCH" || code === "WEBGPT_TARGET_CHAT_MISMATCH" || code === "ROLE_TARGET_IDENTITY_MISMATCH" || code === "WAITING_IDENTITY_READY" || code === "WEBGPT_NAVIGATION_TIMEOUT" || code === "WEBGPT_PAGE_PROBE_TIMEOUT" || code === "WEBGPT_PAGE_PROBE_STALE" || code === "WEBGPT_TARGET_EPOCH_STALE" || code === "WEBGPT_PRE_DISPATCH_TIMEOUT" || code === "WEBGPT_OPERATION_ADMISSION_TIMEOUT" || code === "PAGE_ADAPTER_UNHEALTHY" || code === "COMPOSER_NOT_READY" || code === "WEBGPT_LOGIN_REQUIRED" || code === "WEBGPT_USER_CONTROL" || code === "WEBGPT_OPERATION_NOT_ALLOWED" || code === "WEBGPT_OPERATION_DEGRADED") {
         await this.markRecovery(record, code, message);
       } else {
         await this.fail(record, code, message);
@@ -918,7 +974,9 @@ export class WebGptRequestManager {
     record.error = null;
     this.prompts.delete(record.requestId);
     await this.persist();
-    this.emit(record, response);
+    // The result is private provider output. Persist only its controlled file
+    // reference/hash; state events must not carry a response preview.
+    this.emit(record);
     await this.notifyTerminal(record);
   }
 
@@ -1093,9 +1151,17 @@ export class WebGptRequestManager {
       if (this.records.has(record.requestId)) throw this.codedError("WEBGPT_REQUEST_JOURNAL_INVALID", "Request Journal 包含重复 requestId。 ");
       if (record.idempotencyKey && seenIdempotencyKeys.has(record.idempotencyKey)) throw this.codedError("WEBGPT_REQUEST_JOURNAL_INVALID", "Request Journal 包含重复 idempotencyKey。 ");
       if (record.idempotencyKey) seenIdempotencyKeys.add(record.idempotencyKey);
-      if (RECOVERY_STATES.has(record.state) || ((record.state === "QUEUED" || record.state === "PAUSED_FOR_USER") && !record.idempotencyKey)) {
+      const loadedRecoveryState = RECOVERY_STATES.has(record.state);
+      if (loadedRecoveryState || ((record.state === "QUEUED" || record.state === "PAUSED_FOR_USER") && !record.idempotencyKey)) {
         record.state = "RECOVERY_REQUIRED";
-        record.error = { code: "WORKBENCH_RESTARTED", message: "Workbench 重启后无法盲目重放未完成网页请求；请用同一 idempotency key 重新连接，或显式执行恢复校验。" };
+        // Preserve an existing bounded recovery error.  Replacing an already
+        // recorded REQUEST_NOT_VERIFIABLE / target-identity failure with the
+        // generic restart marker would erase the causal evidence that the
+        // reconcile-only K1-D gate must review.  Only records that had no
+        // prior recovery classification receive the restart marker.
+        if (!loadedRecoveryState || !record.error) {
+          record.error = { code: "WORKBENCH_RESTARTED", message: "Workbench 重启后无法盲目重放未完成网页请求；请用同一 idempotency key 重新连接，或显式执行恢复校验。" };
+        }
         record.completedAt = null;
       }
       this.records.set(record.requestId, record);

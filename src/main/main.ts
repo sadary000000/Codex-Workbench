@@ -43,7 +43,9 @@ import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority, createWebGptProviderP
 import { assertProviderSeamExecutable } from "../automation/provider-seam-classification.ts";
 import { InputRefRegistry } from "../automation/input-ref.ts";
 import { createPlannerProviderIntegrationService, type PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
-import { runStageK1DRealPlannerSmoke } from "../automation/stage-k1-d-real-planner-smoke.ts";
+import { runStageK1DPositiveRetrySmoke, runStageK1DRealPlannerSmoke, type StageK1DProvenance } from "../automation/stage-k1-d-real-planner-smoke.ts";
+import { runStageK1DReconcileOnly } from "../automation/stage-k1-d-reconcile-only.ts";
+import { assessStageK1DProvenance } from "../automation/stage-k1-d-provenance.ts";
 import { createWebGptRoleTargetRef, WebGptAutomationProviderPort } from "../features/webgpt/automation/webgpt-provider-port.ts";
 import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../automation/aut2-real-webgpt-gate.ts";
 import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
@@ -275,6 +277,37 @@ async function startAut3RealPlannerGate(): Promise<void> {
   setTimeout(() => app.quit(), 50);
 }
 
+async function readStageK1DProvenance(): Promise<StageK1DProvenance> {
+  const manifestPaths = [
+    join(app.getAppPath(), "k1d-package-provenance.json"),
+    join(dirname(process.execPath), "k1d-package-provenance.json"),
+  ];
+  let manifest: Record<string, unknown> | null = null;
+  for (const manifestPath of manifestPaths) {
+    try {
+      const value = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        manifest = value as Record<string, unknown>;
+        break;
+      }
+    } catch {
+      // The un-packaged development build intentionally has no package
+      // manifest; it must be reported as unproven rather than guessed.
+    }
+  }
+  let executableSha256: string | null = null;
+  try {
+    executableSha256 = createHash("sha256").update(await readFile(process.execPath)).digest("hex");
+  } catch { /* the pure assessor records EXECUTABLE_HASH_UNAVAILABLE */ }
+  const runnerScriptSha256 = process.env.K1D_RUNNER_SCRIPT_SHA256?.trim() || null;
+  return assessStageK1DProvenance({
+    manifest,
+    executablePath: process.execPath,
+    executableSha256,
+    runnerScriptSha256,
+  });
+}
+
 async function startStageK1DRealPlannerSmoke(): Promise<void> {
   if (process.env.STAGE_K1_D_REAL_PLANNER_SMOKE !== "1") return;
   if (!automationStore) throw new Error("STAGE-K1-D requires the Automation Store.");
@@ -283,10 +316,16 @@ async function startStageK1DRealPlannerSmoke(): Promise<void> {
   if (!providerProjectId || !automationProjectId) throw new Error("K1D_WEBGPT_PROJECT_ID is required for the real Planner smoke.");
   const outputPath = process.env.STAGE_K1_D_REAL_PLANNER_SMOKE_OUTPUT?.trim()
     || join(app.getPath("userData"), "stage-k1-d-real-planner-evidence.json");
-  const evidence = await runStageK1DRealPlannerSmoke({
+  const provenance = await readStageK1DProvenance();
+  const requestManager = getWebGptRequestManager();
+  const smokeOptions = {
     store: automationStore,
     provider: getWebGptProviderPort(),
-    requestManager: getWebGptRequestManager(),
+    requestManager: {
+      findByIdempotencyKey: requestManager.findByIdempotencyKey.bind(requestManager),
+      getRequestById: (requestId: string) => requestManager.requestStatus(requestId, false),
+      waitForRequest: requestManager.waitForRequest.bind(requestManager),
+    },
     inputRefs: automationInputRefs,
     providerTargetRef: createWebGptRoleTargetRef(providerProjectId, "PLANNER"),
     providerProjectId,
@@ -301,12 +340,17 @@ async function startStageK1DRealPlannerSmoke(): Promise<void> {
     },
     openWorkspace: () => getWebGptRequestManager().openWorkspace(),
     openPlannerTarget: () => getWebGptRoleService().open(providerProjectId, "PLANNER"),
-    recordTargetBinding: (expectedChatUrl, details) => getWebGptWorkspace().recordTargetBinding(expectedChatUrl, details),
+    recordTargetBinding: (expectedChatUrl: string | null, details?: Readonly<Record<string, string | number | boolean | null>>) => getWebGptWorkspace().recordTargetBinding(expectedChatUrl, details),
     getTargetIdentityTrace: () => getWebGptWorkspace().getTargetIdentityTrace().map((event): Readonly<Record<string, unknown>> => ({
       ...event,
       details: { ...event.details },
     })),
-  });
+    authorizePositiveRetry: process.env.K1D_POSITIVE_RETRY_AUTHORIZED === "1",
+    provenance,
+  } as const;
+  const evidence = process.env.K1D_POSITIVE_RETRY_SMOKE === "1"
+    ? await runStageK1DPositiveRetrySmoke(smokeOptions)
+    : await runStageK1DRealPlannerSmoke(smokeOptions);
   logger.info("stage_k1_d_real_planner_smoke_finished", {
     result: evidence.result,
     outputPath,
@@ -314,6 +358,67 @@ async function startStageK1DRealPlannerSmoke(): Promise<void> {
     duplicatePlannerPrompt: evidence.plannerRequest.duplicatePlannerPrompt,
   });
   if (evidence.result !== "PASS_REAL") process.exitCode = 1;
+  setTimeout(() => app.quit(), 50);
+}
+
+async function startStageK1DReconcileOnly(): Promise<void> {
+  if (process.env.STAGE_K1_D_RECONCILE_ONLY !== "1") return;
+  if (process.env.STAGE_K1_D_REAL_PLANNER_SMOKE === "1") throw new Error("K1D_RECONCILE_ONLY_CANNOT_COMBINE_WITH_PLANNER_SMOKE");
+  if (!automationStore) throw new Error("STAGE-K1-D reconcile-only requires the Automation Store.");
+  const outputPath = process.env.STAGE_K1_D_RECONCILE_ONLY_OUTPUT?.trim()
+    || join(app.getPath("userData"), "stage-k1-d-fix-round-4-reconcile-evidence.json");
+  const requestManager = getWebGptRequestManager();
+  const store = automationStore;
+  const evidence = await runStageK1DReconcileOnly({
+    store,
+    requestManager: {
+      requestStatus: requestManager.requestStatus.bind(requestManager),
+      reconcileRequest: requestManager.reconcileRequest.bind(requestManager),
+    },
+    roleReader: {
+      status: getWebGptRoleService().status.bind(getWebGptRoleService()),
+    },
+    // Only Workbench may acquire browser control.  Deliberately do not call
+    // WebGptRequestManager.automationControl(), which could drain unrelated
+    // queued requests; this entry reconciles one exact existing Request.
+    acquireAutomationControl: () => getWebGptWorkspace().returnAutomationControl(),
+    reconcilePlannerRequest: (input) => getPlannerProviderIntegrationService().reconcilePlannerRequest(input),
+    plannerStatus: (input) => getPlannerProviderIntegrationService().plannerStatus(input),
+    plannerResult: (input) => getPlannerProviderIntegrationService().plannerResult(input),
+    restartAndRead: async (input) => {
+      const databasePath = store.filePath;
+      await store.close();
+      const reopened = new AutomationStore(databasePath);
+      try {
+        const project = await reopened.get("automationProjects", input.projectId);
+        const plan = await reopened.getCurrentPlanVersion(input.projectId);
+        return {
+          reopened: true,
+          activePlanVersionId: project?.activePlanVersionId ?? null,
+          planVersionId: plan?.planVersionId ?? null,
+          activePointerMatches: project?.activePlanVersionId === input.planVersionId,
+          planSurvivedRestart: plan?.planVersionId === input.planVersionId,
+        };
+      } finally {
+        await reopened.close();
+      }
+    },
+    outputPath,
+    provenance: await readStageK1DProvenance(),
+    positiveRetryAuthorization: process.env.K1D_POSITIVE_RETRY_AUTHORIZED === "1",
+    targetIdentityTrace: () => getWebGptWorkspace().getTargetIdentityTrace().map((event): Readonly<Record<string, unknown>> => ({
+      ...event,
+      details: { ...event.details },
+    })),
+  });
+  logger.info("stage_k1_d_reconcile_only_finished", {
+    result: evidence.result,
+    disposition: evidence.disposition,
+    outputPath,
+    providerAttempts: evidence.counters.provider_attempts,
+    newPlannerPrompts: evidence.counters.new_planner_prompts_in_fix_round,
+  });
+  if (evidence.result !== "PASS_CANDIDATE") process.exitCode = 1;
   setTimeout(() => app.quit(), 50);
 }
 
@@ -987,6 +1092,16 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "webgpt.planner.reconcile") {
       if (!request.projectId || !request.actionAttemptId) response = controlFail(request.command, "PLANNER_RECONCILE_REQUIRED", "planner reconcile 必须提供 Project ID 和 ActionAttempt ID。");
       else response = controlOk(request.command, await getPlannerProviderIntegrationService().reconcilePlannerRequest({ projectId: request.projectId, actionAttemptId: request.actionAttemptId }));
+    } else if (request.command === "webgpt.planner.retry") {
+      if (!request.projectId || (!request.actionIntentId && !request.logicalPlannerRequestId) || (request.actionIntentId !== undefined && request.logicalPlannerRequestId !== undefined)) response = controlFail(request.command, "PLANNER_RETRY_REQUIRED", "planner retry 必须提供 Project ID 和恰好一个 Planner logical request identity。");
+      else response = controlOk(request.command, await getPlannerProviderIntegrationService().retryPlannerRequest({
+        projectId: request.projectId,
+        ...(request.actionIntentId ? { actionIntentId: request.actionIntentId } : {}),
+        ...(request.logicalPlannerRequestId ? { logicalPlannerRequestId: request.logicalPlannerRequestId } : {}),
+        ...(request.requirementVersionId ? { requirementVersionId: request.requirementVersionId } : {}),
+        ...(request.plannerRequirementPayloadSha256 ? { requirementPayloadSha256: request.plannerRequirementPayloadSha256 } : {}),
+        ...(request.policyVersionId ? { policyVersionId: request.policyVersionId } : {}),
+      }));
     } else if (request.command === "webgpt.planner.status") {
       if (!request.projectId || !request.actionIntentId) response = controlFail(request.command, "PLANNER_QUERY_REQUIRED", "planner status 必须提供 Project ID 和 ActionIntent ID。");
       else response = controlOk(request.command, await getPlannerProviderIntegrationService().plannerStatus({ projectId: request.projectId, actionIntentId: request.actionIntentId }));
@@ -2350,7 +2465,13 @@ if (officialCliMode) {
           getWebGptProviderPort();
           logger.info("webgpt_provider_port_ready", { provider: "WEBGPT", submit: true, reconcile: true, cancel: false });
           await startWebGptControlPlane();
-          if (process.env.STAGE_K1_D_REAL_PLANNER_SMOKE === "1") {
+          if (process.env.STAGE_K1_D_RECONCILE_ONLY === "1") {
+            void startStageK1DReconcileOnly().catch((error) => {
+              logError(logger, "stage_k1_d_reconcile_only_failed", error);
+              process.exitCode = 1;
+              setTimeout(() => app.quit(), 50);
+            });
+          } else if (process.env.STAGE_K1_D_REAL_PLANNER_SMOKE === "1") {
             void startStageK1DRealPlannerSmoke().catch((error) => {
               logError(logger, "stage_k1_d_real_planner_smoke_failed", error);
               process.exitCode = 1;

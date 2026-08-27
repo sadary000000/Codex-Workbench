@@ -7,6 +7,8 @@ const AUTOMATION_GATE_FLAGS = [
   "AUT2_REAL_WEBGPT_GATE",
   "AUT3_REAL_PLANNER_GATE",
   "AUT2_AUT3_FIX10_REAL_GATE",
+  "STAGE_K1_D_RECONCILE_ONLY",
+  "STAGE_K1_D_REAL_PLANNER_SMOKE",
 ] as const;
 
 export type StartupPlan = Readonly<{

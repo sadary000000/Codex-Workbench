@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "source_commit": "c19059b625807dff3c77b100585821476a88bf87",
+  "worktree_state": "dirty",
+  "worktree_state_sha256": "79a661a5e90e9268124abf1a387e4b3b083c35e76d9977b2cc49fb404906d3a1",
+  "source_tree_sha256": "f79a58f3cf82923e9c9c0ba6c2b355c97b1c2abfc586d982b77a3c7fbd9740e7",
+  "build_timestamp": "2026-08-27T15:41:17.079Z",
+  "runner_script_sha256": "980422055036ce4594d0b2d35660d5f246dacc7482f5edd4871842b4076b7228",
+  "runner_script_path": "scripts/stage-k1-d-real-planner-smoke.ts",
+  "build_tool": "scripts/build.mjs",
+  "package_timestamp": "2026-08-27T15:41:17.883Z",
+  "package_root": "dist/package",
+  "app_manifest_sha256": "1bea3d35305d3499cbdc1d7f2b17fe03ff2a9f51978c080c8c925fb18c1b385f",
+  "executable_path": "dist/package/Codex Workbench V1.exe",
+  "executable_sha256": "31a0176b7c1a81cf379e55e109c57a56493a4d4a9e9b0d2475a678fd7df234dc",
+  "cli_executable_path": "dist/package/Codex Workbench CLI.exe",
+  "cli_executable_sha256": "643a076dc8fd5953e5b21014a3096a9d3912ff64cedf81a8c8a0b8f5f0e1288f"
+}

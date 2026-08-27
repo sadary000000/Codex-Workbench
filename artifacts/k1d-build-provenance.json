@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "source_commit": "c19059b625807dff3c77b100585821476a88bf87",
+  "worktree_state": "dirty",
+  "worktree_state_sha256": "79a661a5e90e9268124abf1a387e4b3b083c35e76d9977b2cc49fb404906d3a1",
+  "source_tree_sha256": "f79a58f3cf82923e9c9c0ba6c2b355c97b1c2abfc586d982b77a3c7fbd9740e7",
+  "build_timestamp": "2026-08-27T15:41:17.079Z",
+  "runner_script_sha256": "980422055036ce4594d0b2d35660d5f246dacc7482f5edd4871842b4076b7228",
+  "runner_script_path": "scripts/stage-k1-d-real-planner-smoke.ts",
+  "build_tool": "scripts/build.mjs"
+}

@@ -1,0 +1,53 @@
+{
+  "stage": "STAGE-K1-D",
+  "round": "FIX-ROUND-4",
+  "scope": "WORKBENCH_OWNED_RECONCILE_ONLY",
+  "typecheck": {
+    "command": "npm run check",
+    "status": "PASS"
+  },
+  "fullTests": {
+    "command": "npm test",
+    "tests": 499,
+    "passed": 499,
+    "failed": 0,
+    "status": "PASS"
+  },
+  "targetedTests": {
+    "command": "node --experimental-strip-types --test tests/arch-v2-6-provider-boundary.test.ts tests/arch-v2-7-review-harness.test.ts tests/stage-k1-d-fix-round-4.test.ts tests/webgpt-request-manager.test.ts",
+    "tests": 61,
+    "passed": 61,
+    "failed": 0,
+    "status": "PASS"
+  },
+  "dependencyAudit": {
+    "command": "npm audit --omit=dev",
+    "vulnerabilities": 0,
+    "status": "PASS"
+  },
+  "diffCheck": {
+    "command": "git diff --check",
+    "status": "PASS"
+  },
+  "build": {
+    "command": "npm run build",
+    "status": "PASS"
+  },
+  "windowsPackage": {
+    "command": "npm run package:win",
+    "status": "PASS"
+  },
+  "realReconcileOnlyRun": {
+    "command": "node --experimental-strip-types scripts/stage-k1-d-real-planner-smoke.ts",
+    "mode": "WORKBENCH_OWNED_RECONCILE_ONLY",
+    "result": "BLOCKED",
+    "disposition": "BLOCKED_MISSING_CORRELATION",
+    "runnerExitCode": 1,
+    "expectedExitCode": 1,
+    "requestJournalChanged": false,
+    "newPlannerPrompts": 0,
+    "newProviderAttempts": 0,
+    "attempt3Created": 0,
+    "status": "PASS_EXPECTED_FAIL_CLOSED"
+  }
+}
