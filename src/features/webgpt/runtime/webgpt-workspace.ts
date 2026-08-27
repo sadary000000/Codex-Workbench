@@ -26,6 +26,15 @@ import type {
 import type { ReviewSubmissionReconcileResult, ReviewSubmissionWorkspacePort, ReviewSubmissionWorkspaceRequest, ReviewSubmissionWorkspaceResult } from "../review-submission/review-submission-types.ts";
 
 const ZERO_BOUNDS: Rectangle = { x: 0, y: 0, width: 0, height: 0 };
+// Electron's loadURL() can remain pending while ChatGPT's SPA is resolving a
+// route or a stalled resource. Keep navigation bounded so the Request
+// Manager can persist a pre-dispatch recovery result instead of leaving a
+// durable request in QUEUED until the host process exits.
+const WEBGPT_NAVIGATION_TIMEOUT_MS = 60_000;
+// executeJavaScript() can remain pending when the remote SPA has a stalled
+// renderer or is still resolving a route.  Bound the probe independently of
+// navigation so a pre-dispatch Request cannot remain SUBMITTING forever.
+const WEBGPT_PAGE_PROBE_TIMEOUT_MS = 15_000;
 
 type ProjectOperationContext = {
   epoch: number;
@@ -63,6 +72,23 @@ function validBounds(value: unknown): Rectangle {
   };
 }
 
+function sameWebGptUrl(left: string, right: string): boolean {
+  try {
+    if (normalizeWebGptUrl(left) === normalizeWebGptUrl(right)) return true;
+  } catch {
+    // The role-chat comparison below handles the canonical /g/<gpt>/c/<id>
+    // versus /c/<id> representation used by ChatGPT's SPA.
+  }
+  try {
+    return roleChatUrlsEquivalent(
+      normalizeRoleChatUrl(normalizeChatUrl(left)),
+      normalizeRoleChatUrl(normalizeChatUrl(right)),
+    );
+  } catch {
+    return left === right;
+  }
+}
+
 export interface WebGptWorkspaceOptions {
   mainWindow: BaseWindow;
   userDataDirectory: string;
@@ -83,6 +109,12 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
   private attached = false;
   private closed = false;
   private controlEpoch = 0;
+  /**
+   * Monotonic page-probe generation.  Navigation callbacks start probes
+   * asynchronously; a probe from an older navigation must never overwrite
+   * the state of a newer target route when it resolves later.
+   */
+  private pageStateRevision = 0;
   private lastProjectOperationTimeline: WebGptProjectOperationTimeline | null = null;
   private lastTargetReadiness: WebGptTargetReadiness | null = null;
 
@@ -141,23 +173,28 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
     });
     contents.on("did-navigate", (_event, url) => {
       this.networkObserver.invalidate("navigation");
+      const revision = ++this.pageStateRevision;
       this.patchState({ url, error: null, ready: false });
-      void this.refreshPageState();
+      void this.refreshPageState(revision, url);
     });
     contents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
       if (!isMainFrame) return;
       this.networkObserver.invalidate("in_page_navigation");
+      const revision = ++this.pageStateRevision;
       this.patchState({ url, error: null });
-      void this.refreshPageState();
+      void this.refreshPageState(revision, url);
     });
     contents.on("page-title-updated", (_event, title) => this.patchState({ title }));
     contents.on("did-finish-load", () => {
+      const revision = ++this.pageStateRevision;
+      const navigationUrl = contents.getURL() || this.state.url;
       this.patchState({ ready: true, error: null });
-      void this.refreshPageState();
+      void this.refreshPageState(revision, navigationUrl);
     });
     contents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return;
       this.networkObserver.invalidate("page_load_failed");
+      ++this.pageStateRevision;
       this.patchState({ ready: false, url: validatedURL || this.state.url, error: `${errorDescription} (${errorCode})` });
     });
   }
@@ -202,15 +239,34 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
 
   private async load(url: string): Promise<void> {
     this.lastTargetReadiness = null;
+    ++this.pageStateRevision;
     this.patchState({ url, title: "", page: initialPage(url), ready: false, error: null });
-    await this.view.webContents.loadURL(url);
-    await this.refreshPageState();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const navigation = this.view.webContents.loadURL(url);
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        ++this.pageStateRevision;
+        this.networkObserver.invalidate("navigation_timeout");
+        try { this.view.webContents.stop(); } catch { /* best effort */ }
+        reject(this.codedError("WEBGPT_NAVIGATION_TIMEOUT", `WebGPT 导航超过 ${WEBGPT_NAVIGATION_TIMEOUT_MS}ms，已停止后续发送动作。`, {
+          targetUrl: url,
+          timeoutMs: WEBGPT_NAVIGATION_TIMEOUT_MS,
+        }));
+      }, WEBGPT_NAVIGATION_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([navigation, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    await this.refreshPageState(this.pageStateRevision, url);
   }
 
-  private async refreshPageState(): Promise<WebGptPageState> {
+  private async refreshPageState(revision = this.pageStateRevision, expectedNavigationUrl?: string): Promise<WebGptPageState> {
     if (this.closed || this.view.webContents.isDestroyed()) return this.state.page;
     try {
       const probe = await this.readPageProbe();
+      if (!this.isCurrentPageProbe(revision, expectedNavigationUrl, probe)) return this.state.page;
       this.applyPageProbe(probe);
       return probe.page;
     } catch (error) {
@@ -221,8 +277,24 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
 
   private async readPageProbe(): Promise<WebGptPageProbe> {
     if (this.closed || this.view.webContents.isDestroyed()) throw this.codedError("WEBGPT_CLOSED", "WebGPT Workspace 已关闭。");
-    const value = await this.view.webContents.executeJavaScript(WEBGPT_PAGE_PROBE_SCRIPT);
-    return normalizePageProbe(value, this.view.webContents.getURL() || this.state.url);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const probe = this.view.webContents.executeJavaScript(WEBGPT_PAGE_PROBE_SCRIPT);
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        ++this.pageStateRevision;
+        this.networkObserver.invalidate("page_probe_timeout");
+        reject(this.codedError("WEBGPT_PAGE_PROBE_TIMEOUT", "WebGPT 页面探针超过等待上限，已拒绝继续发送或读取。", {
+          timeoutMs: WEBGPT_PAGE_PROBE_TIMEOUT_MS,
+          url: this.view.webContents.getURL() || this.state.url,
+        }));
+      }, WEBGPT_PAGE_PROBE_TIMEOUT_MS);
+    });
+    try {
+      const value = await Promise.race([probe, timeout]);
+      return normalizePageProbe(value, this.view.webContents.getURL() || this.state.url);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private applyPageProbe(probe: WebGptPageProbe): void {
@@ -232,6 +304,14 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
     } else {
       this.patchState({ page, url: page.url || this.view.webContents.getURL(), title: page.title || this.state.title, ready: true, error: null });
     }
+  }
+
+  private isCurrentPageProbe(revision: number, expectedNavigationUrl: string | undefined, probe: WebGptPageProbe): boolean {
+    if (revision !== this.pageStateRevision || this.closed || this.view.webContents.isDestroyed()) return false;
+    const currentUrl = this.view.webContents.getURL() || this.state.url;
+    if (expectedNavigationUrl && currentUrl && !sameWebGptUrl(currentUrl, expectedNavigationUrl)) return false;
+    if (currentUrl && probe.page.url && !sameWebGptUrl(currentUrl, probe.page.url)) return false;
+    return true;
   }
 
   private codedError(code: string, message: string, details?: unknown): Error & { code: string; details?: unknown } {
@@ -402,6 +482,11 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
     this.networkObserver.prepareForTarget(targetChatUrl, "target_identity_converged");
     await this.waitForComposer();
     await this.assertTargetChatIdentity(targetChatUrl);
+    // ChatGPT can emit a transient canonical /c/:id route and then redirect
+    // back to the home composer after the SPA finishes resolving the Chat.
+    // Require a second bounded identity window after Composer readiness so the
+    // caller never treats that transient route as a sendable target.
+    await this.waitForTargetChatIdentity(targetChatUrl, 10_000);
     // A late SPA navigation notification may arrive after the route and
     // Composer have already converged.  Establish the observer epoch as the
     // final operation before returning so the next history read sees the
@@ -440,14 +525,20 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
    * the canonical URL is observable, while still failing closed on a stable
    * different Chat identity.
    */
-  private async waitForTargetChatIdentity(expectedChatUrl: string, timeoutMs = 20_000): Promise<WebGptPageProbe> {
+  /**
+   * Wait for a target Chat identity to remain converged across consecutive
+   * probes.  This is intentionally public so the Request Manager can perform
+   * one final identity check immediately before the irreversible send.
+   */
+  async waitForTargetChatIdentity(expectedChatUrl: string, timeoutMs = 20_000): Promise<WebGptPageProbe> {
     const target = normalizeRoleChatUrl(normalizeChatUrl(expectedChatUrl));
     const deadline = Date.now() + timeoutMs;
     const mismatchGraceMs = 3_000;
+    const identityQuietMs = 1_000;
     let differentChatSince: number | null = null;
     let lastProbe: WebGptPageProbe | null = null;
     let lastActualChatUrl: string | null = null;
-    let convergedSamples = 0;
+    let convergedSince: number | null = null;
     while (Date.now() < deadline) {
       lastProbe = await this.getPageProbe();
       lastActualChatUrl = await this.readCanonicalChatIdentity(lastProbe);
@@ -457,10 +548,22 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
       // window where the browser has moved to the requested route but the DOM
       // probe still describes the previous page.
       if (roleChatUrlsEquivalent(lastActualChatUrl ?? "", target) && roleChatUrlsEquivalent(probeChatUrl ?? "", target) && lastProbe.page.onChatPage) {
-        convergedSamples += 1;
-        if (convergedSamples >= 2) return lastProbe;
+        convergedSince ??= Date.now();
+        // Do not return at the first two matching samples.  ChatGPT can emit
+        // a transient /c/:id route and then settle back to the home composer;
+        // the quiet window makes the returned probe a real navigation boundary
+        // rather than a lucky snapshot in that redirect gap.
+        if (Date.now() - convergedSince >= identityQuietMs) {
+          const finalProbe = await this.getPageProbe();
+          const finalActual = await this.readCanonicalChatIdentity(finalProbe);
+          const finalProbeUrl = this.readPageProbeChatIdentity(finalProbe);
+          if (roleChatUrlsEquivalent(finalActual ?? "", target)
+            && roleChatUrlsEquivalent(finalProbeUrl ?? "", target)
+            && finalProbe.page.onChatPage) return finalProbe;
+          convergedSince = null;
+        }
       } else {
-        convergedSamples = 0;
+        convergedSince = null;
       }
 
       const loading = this.view.webContents.isLoading();
@@ -856,8 +959,10 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
   }
 
   async getPageProbe(): Promise<WebGptPageProbe> {
+    const revision = this.pageStateRevision;
+    const navigationUrl = this.view.webContents.getURL() || this.state.url;
     const probe = await this.readPageProbe();
-    this.applyPageProbe(probe);
+    if (this.isCurrentPageProbe(revision, navigationUrl, probe)) this.applyPageProbe(probe);
     return probe;
   }
 

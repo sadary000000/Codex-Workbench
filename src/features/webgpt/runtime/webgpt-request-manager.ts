@@ -21,6 +21,13 @@ const WAIT_SETTLED_STATES = new Set<WebGptRequestState>(["COMPLETED", "FAILED", 
 const TARGET_PAGE_HYDRATION_TIMEOUT_MS = 10_000;
 const TARGET_REOPEN_ATTEMPTS = 2;
 const TARGET_REOPEN_DELAY_MS = 250;
+const REQUEST_LEASE_ADMISSION_TIMEOUT_MS = 60_000;
+// The whole preparation path (lease, target navigation, hydration and final
+// identity check) must have a ceiling of its own. A renderer/API Promise can
+// outlive an individual sub-step; this timer makes the durable Request settle
+// before the Provider's admission wait expires, while the guard below blocks
+// any late continuation from crossing the send boundary.
+const REQUEST_PRE_DISPATCH_TIMEOUT_MS = 90_000;
 
 interface StoredDocument {
   version: 2;
@@ -112,9 +119,13 @@ export class WebGptRequestManager {
   async openChat(url: string, operationMetadata: { projectId?: string | null; role?: WebGptRole | null; operationType?: WebGptOperationType } = {}): Promise<Record<string, unknown>> {
     await this.ready();
     await this.ensureAutomationControl();
-    const result = await this.withBrowserLease({ source: "CLI", ownerKey: operationMetadata.role ? `${operationMetadata.projectId ?? "project"}:${operationMetadata.role}` : "control-plane", projectId: operationMetadata.projectId, role: operationMetadata.role, targetChatUrl: url, operationType: operationMetadata.operationType ?? "OPEN_CHAT" }, async () => {
-      const state = await this.workspace.openChatForAutomation(url);
-      return { chatUrl: state.url, page: state.page, mode: state.mode };
+    let targetChatUrl: string;
+    try { targetChatUrl = normalizeRoleChatUrl(normalizeChatUrl(url)); }
+    catch { throw this.codedError("CHAT_URL_INVALID", "open chat 只允许真实的 ChatGPT /c/<chat-id> 或 /g/<gpt-id>/c/<chat-id> Chat URL。"); }
+    const result = await this.withBrowserLease({ source: "CLI", ownerKey: operationMetadata.role ? `${operationMetadata.projectId ?? "project"}:${operationMetadata.role}` : "control-plane", projectId: operationMetadata.projectId, role: operationMetadata.role, targetChatUrl, operationType: operationMetadata.operationType ?? "OPEN_CHAT" }, async () => {
+      const state = await this.workspace.openChatForAutomation(targetChatUrl);
+      this.assertOpenedTarget(state, targetChatUrl);
+      return { chatUrl: targetChatUrl, page: state.page, mode: state.mode };
     });
     return { ...result, browserResource: this.getOperationArbiter()?.getDiagnostics() ?? null };
   }
@@ -542,9 +553,33 @@ export class WebGptRequestManager {
       if (lease) return lease;
       const record = this.records.get(requestId);
       if (!record || TERMINAL_STATES.has(record.state) || record.state === "RECOVERY_REQUIRED" || record.state === "INDETERMINATE") return null;
+      // submit() intentionally returns at the durable QUEUED boundary.  A
+      // control hand-off can race the fire-and-forget drain() call and leave a
+      // safe pre-dispatch record queued while the arbiter is already back in
+      // AUTO_CONTROL.  Re-arm the manager-owned pump here; this never creates
+      // a second Request and never replays a send that crossed sendStartedAt.
+      if (record.state === "QUEUED" && this.workspace.getControlMode() === "AUTO_CONTROL") {
+        arbiter.resumeQueue();
+        if (!this.drainRunning) void this.drain();
+      }
       if (Date.now() >= deadline) return null;
       await new Promise<void>((resolve) => setTimeout(resolve, 5));
     }
+  }
+
+  /**
+   * Explicitly wake a queued Request after a control-plane hand-off.  This is
+   * a dispatch-pump operation only: it does not change the Request state,
+   * consume policy budget, navigate, attach a Prompt, or click Send.
+   */
+  async ensureDispatchPump(requestId: string): Promise<WebGptRequestRecord> {
+    await this.ready();
+    const record = this.requireRecord(requestId);
+    if (record.state === "QUEUED" && this.prompts.has(requestId) && this.workspace.getControlMode() === "AUTO_CONTROL") {
+      this.getOperationArbiter()?.resumeQueue();
+      if (!this.drainRunning) void this.drain();
+    }
+    return this.clone(record);
   }
 
   async activeSummary(): Promise<Array<{ requestId: string; state: WebGptRequestState; chatUrl: string; idempotencyKey: string | null }>> {
@@ -581,7 +616,11 @@ export class WebGptRequestManager {
           await this.userControl();
           return;
         }
-        if (this.workspace.getControlMode() === "PAUSED") return;
+        if (this.workspace.getControlMode() === "PAUSED") {
+          const queued = [...this.records.values()].find((candidate) => candidate.state === "QUEUED" && this.prompts.has(candidate.requestId));
+          if (queued) await this.pauseBeforeSubmit(queued, "WEBGPT_AUTOMATION_PAUSED", "自动化当前已暂停；交还 AUTO_CONTROL 后可继续该 Request。");
+          return;
+        }
         const record = [...this.records.values()].find((candidate) => candidate.state === "QUEUED" && this.prompts.has(candidate.requestId));
         if (!record) return;
         await this.process(record);
@@ -606,18 +645,72 @@ export class WebGptRequestManager {
     let promptCommitted = false;
     let newChatAdmission: WebGptPolicyAdmission | null = null;
     let newChatCommitted = false;
+    let submitInvocationStarted = false;
+    let preDispatchTimedOut = false;
+    let preDispatchTimer: ReturnType<typeof setTimeout> | null = null;
     try {
-      promptAdmission = await this.admitPolicy("PROMPT", `webgpt:prompt:${record.requestId}`, record.policyVersionId);
+      promptAdmission = await this.admitPolicy("PROMPT", `webgpt:prompt:${record.requestId}`, record.policyVersionId, false, record.projectId);
       await this.attachPolicy(record, promptAdmission);
-      lease = await this.getOperationArbiter()?.acquire({
-        source: "INTERNAL",
-        ownerKey: record.projectId && record.role ? `${record.projectId}:${record.role}` : "request-manager",
-        projectId: record.projectId,
-        role: record.role,
-        targetChatUrl: record.targetChatUrl,
-        requestId: record.requestId,
-        operationType: "SEND",
-      });
+      // The request is now in the bounded submission path. Persist this
+      // pre-dispatch state before waiting for a Browser lease or navigating
+      // the target so a slow/stalled target can never remain opaque QUEUED.
+      record.state = "SUBMITTING";
+      record.sendStartedAt = null;
+      await this.persist();
+      this.emit(record);
+      preDispatchTimer = setTimeout(() => {
+        if (record.sendStartedAt !== null || record.state !== "SUBMITTING") return;
+        preDispatchTimedOut = true;
+        void this.markRecovery(record, "WEBGPT_PRE_DISPATCH_TIMEOUT", "WebGPT 发送前准备超过总等待上限；已确认未进入发送边界，禁止迟到操作继续发送。");
+      }, REQUEST_PRE_DISPATCH_TIMEOUT_MS);
+      const arbiter = this.getOperationArbiter();
+      if (arbiter) {
+        let timedOut = false;
+        const leasePromise = arbiter.acquire({
+          source: "INTERNAL",
+          ownerKey: record.projectId && record.role ? `${record.projectId}:${record.role}` : "request-manager",
+          projectId: record.projectId,
+          role: record.role,
+          targetChatUrl: record.targetChatUrl,
+          requestId: record.requestId,
+          operationType: "SEND",
+        }).then((admitted) => {
+          // WebGptOperationArbiter has no cancellation token. If admission
+          // resolves after the bounded wait, release the late lease instead
+          // of allowing a timed-out Request to retain browser ownership.
+          if (timedOut) {
+            admitted.release("RECOVERY_REQUIRED");
+            throw this.codedError("WEBGPT_OPERATION_ADMISSION_TIMEOUT", "WebGPT Browser Lease 在发送前未能及时获得；已释放迟到的 Lease。", {
+              timeoutMs: REQUEST_LEASE_ADMISSION_TIMEOUT_MS,
+            });
+          }
+          return admitted;
+        }, (error) => {
+          // The admission Promise has no cancellation primitive.  Once the
+          // bounded timeout has won, a later queue rejection is no longer
+          // actionable and must not surface as an unhandled rejection.
+          if (timedOut) return null;
+          throw error;
+        });
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const timeout = new Promise<WebGptOperationLease | null>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            timedOut = true;
+            reject(this.codedError("WEBGPT_OPERATION_ADMISSION_TIMEOUT", "WebGPT Browser Lease 在发送前未能及时获得；已拒绝继续发送。", {
+              timeoutMs: REQUEST_LEASE_ADMISSION_TIMEOUT_MS,
+            }));
+          }, REQUEST_LEASE_ADMISSION_TIMEOUT_MS);
+        });
+        try {
+          const admitted = await Promise.race([leasePromise, timeout]);
+          if (!admitted) throw this.codedError("WEBGPT_OPERATION_ADMISSION_TIMEOUT", "WebGPT Browser Lease 在发送前未能及时获得；已拒绝继续发送。", {
+            timeoutMs: REQUEST_LEASE_ADMISSION_TIMEOUT_MS,
+          });
+          lease = admitted;
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }
       await this.validateTarget?.(this.clone(record));
       let probe = await this.workspace.getPageProbe();
       if (record.targetChatUrl) {
@@ -628,28 +721,45 @@ export class WebGptRequestManager {
           probe = await this.workspace.getPageProbe();
         }
         probe = await this.waitForTargetPageHydration(probe);
+        // Revalidate the exact target immediately before persisting the
+        // SUBMITTING state.  `openChatForAutomation` already performs this
+        // check, but ChatGPT's SPA may redirect after that method returns.
+        // This second bounded window closes the last gap before submitPrompt
+        // without searching history, changing targets, or resending anything.
+        const targetAwareWorkspace = this.workspace as WebGptWorkspace & {
+          waitForTargetChatIdentity?: (expectedChatUrl: string, timeoutMs?: number) => Promise<WebGptPageProbe>;
+        };
+        if (typeof targetAwareWorkspace.waitForTargetChatIdentity === "function") {
+          probe = await targetAwareWorkspace.waitForTargetChatIdentity(record.targetChatUrl, 5_000);
+        }
         let confirmedChatUrl = "";
         try { confirmedChatUrl = normalizeRoleChatUrl(probe.page.url); } catch { /* handled below */ }
         if (!roleChatUrlsEquivalent(confirmedChatUrl, record.targetChatUrl)) throw this.codedError("ROLE_CHAT_MISMATCH", "当前页面不是请求指定的 Role Chat，已禁止发送。 ");
         if (!probe.page.onChatPage || !probe.page.composerFound) throw this.codedError("PAGE_ADAPTER_UNHEALTHY", "Role Chat Composer 尚未就绪，已禁止切换到替代 Chat。 ");
       } else if (!probe.page.onChatPage || !probe.page.composerFound) {
-        newChatAdmission = await this.admitPolicy("NEW_CHAT", `webgpt:new-chat:${record.requestId}`, record.policyVersionId);
+        newChatAdmission = await this.admitPolicy("NEW_CHAT", `webgpt:new-chat:${record.requestId}`, record.policyVersionId, false, record.projectId);
         await this.attachPolicy(record, newChatAdmission);
         newChatAdmission?.reservation.commit();
         newChatCommitted = newChatAdmission !== null;
         await this.workspace.createChat();
         probe = await this.workspace.getPageProbe();
       }
+      if (preDispatchTimedOut || record.state !== "SUBMITTING" || record.sendStartedAt !== null) {
+        throw this.codedError("WEBGPT_PRE_DISPATCH_TIMEOUT", "WebGPT 发送前准备已失效；已拒绝迟到的浏览器操作。", {
+          timeoutMs: REQUEST_PRE_DISPATCH_TIMEOUT_MS,
+        });
+      }
       record.chatUrl = safeChatUrl(probe.page.url);
       record.baselineUserCount = probe.page.userCount;
       record.baselineAssistantCount = probe.page.assistantCount;
       record.lastKnownPageState = { ...probe.page };
-      record.state = "SUBMITTING";
-      record.sendStartedAt = new Date().toISOString();
-      await this.persist();
-      this.emit(record);
       if (this.workspace.getControlMode() !== "AUTO_CONTROL") throw this.codedError("WEBGPT_USER_CONTROL", "用户已在 Prompt 提交前接管 WebGPT。");
       await this.validateTarget?.(this.clone(record));
+      if (preDispatchTimedOut || record.state !== "SUBMITTING" || record.sendStartedAt !== null) {
+        throw this.codedError("WEBGPT_PRE_DISPATCH_TIMEOUT", "WebGPT 发送前身份确认已失效；已拒绝迟到的浏览器操作。", {
+          timeoutMs: REQUEST_PRE_DISPATCH_TIMEOUT_MS,
+        });
+      }
       try {
         await this.workspace.beginNetworkObservation({
           operationId: lease?.operation.operationId ?? null,
@@ -663,8 +773,18 @@ export class WebGptRequestManager {
         // Network observation is an acceleration layer. Any debugger or
         // observer failure must leave the legacy Page Probe path available.
       }
+      if (preDispatchTimer) {
+        clearTimeout(preDispatchTimer);
+        preDispatchTimer = null;
+      }
       promptAdmission?.reservation.commit();
       promptCommitted = promptAdmission !== null;
+      record.sendStartedAt = new Date().toISOString();
+      submitInvocationStarted = true;
+      // The state is already SUBMITTING.  Persist the dispatch boundary
+      // immediately, but do not emit a duplicate state event: observers
+      // consume transitions, while requestStatus still sees the timestamp.
+      await this.persist();
       const submitted = await this.workspace.submitPrompt(prompt, record.targetChatUrl ?? undefined);
       record.chatUrl = safeChatUrl(submitted.chatUrl) || submitted.chatUrl;
       const submittedAt = new Date().toISOString();
@@ -715,14 +835,21 @@ export class WebGptRequestManager {
     } catch (error) {
       const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "WEBGPT_REQUEST_FAILED";
       const message = error instanceof Error ? error.message : String(error);
-      if (code === "WEBGPT_USER_CONTROL" && record.state === "SUBMITTING" && record.submittedAt === null) {
+      if (code === "WEBGPT_USER_CONTROL" && record.state === "SUBMITTING" && record.submittedAt === null && !submitInvocationStarted) {
         await this.pauseBeforeSubmit(record);
-      } else if (code === "WEBGPT_RESPONSE_TIMEOUT" || code === "PROMPT_NOT_SUBMITTED" || code === "TARGET_CHAT_CHANGED" || code === "ROLE_CHAT_MISMATCH" || code === "PAGE_ADAPTER_UNHEALTHY" || code === "COMPOSER_NOT_READY" || code === "WEBGPT_LOGIN_REQUIRED" || code === "WEBGPT_USER_CONTROL" || code === "WEBGPT_OPERATION_NOT_ALLOWED" || code === "WEBGPT_OPERATION_DEGRADED") {
+      } else if (submitInvocationStarted || record.sendStartedAt !== null) {
+        // Once the browser submit invocation has started, a local exception
+        // cannot prove that ChatGPT did not accept the Prompt.  Keep this
+        // attempt recovery-only; never turn a possible side effect into a
+        // terminal FAILED record that a caller could replay.
+        await this.markRecovery(record, code, message);
+      } else if (code === "WEBGPT_RESPONSE_TIMEOUT" || code === "PROMPT_NOT_SUBMITTED" || code === "TARGET_CHAT_CHANGED" || code === "ROLE_CHAT_MISMATCH" || code === "WEBGPT_TARGET_CHAT_MISMATCH" || code === "ROLE_TARGET_IDENTITY_MISMATCH" || code === "WAITING_IDENTITY_READY" || code === "WEBGPT_NAVIGATION_TIMEOUT" || code === "WEBGPT_PAGE_PROBE_TIMEOUT" || code === "WEBGPT_PRE_DISPATCH_TIMEOUT" || code === "WEBGPT_OPERATION_ADMISSION_TIMEOUT" || code === "PAGE_ADAPTER_UNHEALTHY" || code === "COMPOSER_NOT_READY" || code === "WEBGPT_LOGIN_REQUIRED" || code === "WEBGPT_USER_CONTROL" || code === "WEBGPT_OPERATION_NOT_ALLOWED" || code === "WEBGPT_OPERATION_DEGRADED") {
         await this.markRecovery(record, code, message);
       } else {
         await this.fail(record, code, message);
       }
     } finally {
+      if (preDispatchTimer) clearTimeout(preDispatchTimer);
       if (promptAdmission && !promptCommitted) promptAdmission.reservation.release();
       if (newChatAdmission && !newChatCommitted) newChatAdmission.reservation.release();
       lease?.release(record.state);
@@ -741,10 +868,10 @@ export class WebGptRequestManager {
     return probe;
   }
 
-  private async pauseBeforeSubmit(record: WebGptRequestRecord): Promise<void> {
+  private async pauseBeforeSubmit(record: WebGptRequestRecord, errorCode: string | null = null, errorMessage: string | null = null): Promise<void> {
     record.state = "PAUSED_FOR_USER";
     record.sendStartedAt = null;
-    record.error = null;
+    record.error = errorCode && errorMessage ? { code: errorCode, message: errorMessage } : null;
     await this.persist();
     this.emit(record);
   }
@@ -798,6 +925,30 @@ export class WebGptRequestManager {
     catch { throw this.codedError("RECOVERY_TARGET_INVALID", "请求目标 Chat URL 无效，已禁止恢复操作。"); }
   }
 
+  private assertOpenedTarget(state: WebGptState, expectedChatUrl: string): void {
+    const pageUrl = safeRoleChatUrl(state.page?.url ?? "");
+    const stateUrl = safeRoleChatUrl(state.url ?? "");
+    if (!pageUrl || !stateUrl
+      || !roleChatUrlsEquivalent(pageUrl, expectedChatUrl)
+      || !roleChatUrlsEquivalent(stateUrl, expectedChatUrl)) {
+      throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "open chat 返回的页面身份与指定目标不一致，已拒绝交给 Role 或 Provider。", {
+        expectedChatUrl,
+        stateChatUrl: stateUrl || null,
+        pageChatUrl: pageUrl || null,
+        phase: "open_chat_return",
+      });
+    }
+    if (!state.page.onChatPage || !state.page.composerFound || state.page.loginRequired) {
+      throw this.codedError("WAITING_IDENTITY_READY", "指定 Chat 尚未同时满足页面身份、Chat 页面和 Composer 就绪条件。", {
+        expectedChatUrl,
+        phase: "open_chat_return",
+        onChatPage: state.page.onChatPage,
+        composerFound: state.page.composerFound,
+        loginRequired: state.page.loginRequired,
+      });
+    }
+  }
+
   private findRecordByIdempotencyKey(key: string): WebGptRequestRecord | null {
     return [...this.records.values()].find((record) => record.idempotencyKey === key) ?? null;
   }
@@ -820,7 +971,7 @@ export class WebGptRequestManager {
     if (mode === "PAUSED") throw this.codedError("WEBGPT_AUTOMATION_PAUSED", "自动化当前已暂停，请先显式交还 AUTO_CONTROL。");
   }
 
-  private async admitPolicy(operation: "PROMPT" | "RETRY" | "NEW_CHAT", correlationId: string, policyVersionId: string | null = null, allowCurrentPolicy = false): Promise<WebGptPolicyAdmission | null> {
+  private async admitPolicy(operation: "PROMPT" | "RETRY" | "NEW_CHAT", correlationId: string, policyVersionId: string | null = null, allowCurrentPolicy = false, scopeProjectId: string | null = null): Promise<WebGptPolicyAdmission | null> {
     if (!this.policyAuthority) {
       if (this.requirePolicyAuthority) throw this.codedError("POLICY_AUTHORITY_REQUIRED", "生产 WebGPT Host 未注入统一 Policy authority；已拒绝副作用。");
       return null;
@@ -830,7 +981,7 @@ export class WebGptRequestManager {
     }
     const capability = webGptRuntimeCapability(this.workspace.getControlMode());
     return policyVersionId
-      ? this.policyAuthority.authorizePinned(operation, correlationId, policyVersionId, capability)
+      ? this.policyAuthority.authorizePinned(operation, correlationId, policyVersionId, capability, scopeProjectId)
       : this.policyAuthority.authorize(operation, correlationId, capability);
   }
 

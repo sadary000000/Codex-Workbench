@@ -67,6 +67,22 @@ export class WebGptRoleSessionService {
     this.assertBound(binding);
     const state = await this.requestManager.openChat(binding.chatUrl, { projectId: id, role: normalizedRole, operationType: "ROLE_OPEN" });
     const page = pageOf(state);
+    const expectedChatUrl = normalizeRoleChatUrl(binding.chatUrl);
+    const returnedChatUrl = stableChatUrlFrom(state);
+    const pageChatUrl = stableChatUrlFrom(page?.url ?? "");
+    if (!returnedChatUrl || !pageChatUrl
+      || !roleChatUrlsEquivalent(returnedChatUrl, expectedChatUrl)
+      || !roleChatUrlsEquivalent(pageChatUrl, expectedChatUrl)) {
+      // A transient home-page redirect is a target-readiness failure, not
+      // proof that the persisted Role binding is permanently invalid.  Keep
+      // the binding intact so the caller can reconcile/retry the same target;
+      // never silently rebind it to whichever Chat is currently visible.
+      throw codedError("ROLE_TARGET_IDENTITY_MISMATCH", "Role open 返回的页面身份与绑定 Chat 不一致，已拒绝继续且未改写绑定。", {
+        expectedChatUrl,
+        returnedChatUrl,
+        pageChatUrl,
+      });
+    }
     if (page?.loginRequired) throw codedError("WEBGPT_LOGIN_REQUIRED", "ChatGPT 页面需要登录。");
     if (state.error || !page?.onChatPage || !page.composerFound) {
       const invalid = await this.registry.markInvalid(id, normalizedRole);
@@ -184,8 +200,9 @@ function isHomeUrl(value: string): boolean {
   try { return normalizeWebGptUrl(value) === WEBGPT_HOME_URL; } catch { return false; }
 }
 
-function codedError(code: string, message: string): Error & { code: string } {
-  const error = new Error(message) as Error & { code: string };
+function codedError(code: string, message: string, details?: unknown): Error & { code: string; details?: unknown } {
+  const error = new Error(message) as Error & { code: string; details?: unknown };
   error.code = code;
+  if (details !== undefined) error.details = details;
   return error;
 }

@@ -24,13 +24,20 @@ import type { WebGptRoleSessionService } from "../runtime/webgpt-role-session-se
 import type { WebGptRequestManager } from "../runtime/webgpt-request-manager.ts";
 
 const TARGET_PREFIX = "webgpt-role-v1:";
+// Target navigation includes bounded page hydration and identity convergence
+// before the Request Manager can stamp sendStartedAt.  Thirty seconds was
+// shorter than that valid pre-dispatch path on a cold persistent session and
+// could turn a still-running, safe admission into a false unknown result.
+// Keep the wait bounded, but leave enough room for the manager's 10s hydration
+// plus target-readiness windows without ever allowing a blind resend.
+const DISPATCH_ADMISSION_TIMEOUT_MS = 120_000;
 
 export interface WebGptProviderPortOptions {
   readonly roleSession: {
     readonly status: WebGptRoleSessionService["status"];
     readonly submit: (projectId: string, role: WebGptRole, prompt: string, idempotencyKey?: string, policyVersionId?: string | null) => Promise<WebGptRequestRecord>;
   };
-  readonly requestManager: Pick<WebGptRequestManager, "requestStatus" | "reconcileRequest"> & Partial<Pick<WebGptRequestManager, "findByIdempotencyKey" | "getResult" | "waitForRequest">>;
+  readonly requestManager: Pick<WebGptRequestManager, "requestStatus" | "reconcileRequest"> & Partial<Pick<WebGptRequestManager, "findByIdempotencyKey" | "getResult" | "waitForRequest" | "waitForActiveOperationLease" | "ensureDispatchPump">>;
   readonly resolveInputRef: (inputRef: string) => Promise<string>;
   readonly readRuntimeCapability: () => Promise<ProviderRuntimeCapability>;
   /** The composition root must provide the pinned policy authority. */
@@ -94,7 +101,14 @@ function assertRecordCorrelation(record: WebGptRequestRecord, correlation: Provi
   // distinguish its domain semantic from the provider's execution semantic.
   const expectedProviderSemantic = correlation.providerSemanticRef === undefined ? correlation.semanticRef : correlation.providerSemanticRef;
   if (expectedProviderSemantic && record.semanticSha256 !== expectedProviderSemantic) throw new Error("PROVIDER_SEMANTIC_MISMATCH");
-  if (correlation.providerScopeRef !== undefined && correlation.providerScopeRef !== null && correlation.providerScopeRef !== target.projectId) throw new Error("PROVIDER_TARGET_SCOPE_MISMATCH");
+  const expectedProviderTargetRef = targetRefFromRecord(record);
+  if (correlation.providerScopeRef !== undefined
+    && correlation.providerScopeRef !== null
+    && correlation.providerScopeRef !== expectedProviderTargetRef
+    // Requirement's pre-existing provider contract used the provider project
+    // scope here. Keep that compatibility form for PROMPT callers; Planner
+    // requests are checked against the opaque target ref before dispatch.
+    && correlation.providerScopeRef !== target.projectId) throw new Error("PROVIDER_TARGET_SCOPE_MISMATCH");
   if (record.projectId !== target.projectId || record.role !== target.role) throw new Error("PROVIDER_TARGET_CORRELATION_MISMATCH");
   assertProviderCorrelationIdentity({
     actionIntentId: correlation.actionIntentId,
@@ -104,10 +118,10 @@ function assertRecordCorrelation(record: WebGptRequestRecord, correlation: Provi
     // The provider request's semantic is not the Requirement/domain semantic;
     // it is verified against the persisted WebGPT record itself.
     semanticRef: record.semanticSha256,
-    providerTargetRef: targetRefFromRecord(record),
+    providerTargetRef: expectedProviderTargetRef,
     providerRequest: {
       providerRequestRef: record.requestId,
-      providerTargetRef: targetRefFromRecord(record),
+      providerTargetRef: expectedProviderTargetRef,
       idempotencyRef: record.idempotencyKey,
       semanticRef: record.semanticSha256,
       policyVersionId: record.policyVersionId,
@@ -179,6 +193,39 @@ function assertLiveCapabilityProof(authorization: ProviderExecutionAuthorization
   }
 }
 
+function isDispatchPending(record: Pick<WebGptRequestRecord, "state" | "sendStartedAt">): boolean {
+  return !record.sendStartedAt
+    && (record.state === "QUEUED" || record.state === "PAUSED_FOR_USER" || record.state === "SUBMITTING");
+}
+
+function isKnownNoDispatch(record: Pick<WebGptRequestRecord, "state" | "sendStartedAt" | "error">): boolean {
+  if (record.sendStartedAt) return false;
+  if (record.state === "FAILED" || record.state === "CANCELED" || record.state === "PAUSED_FOR_USER") return true;
+  if (record.state !== "RECOVERY_REQUIRED" && record.state !== "INDETERMINATE") return false;
+  return new Set([
+    "TARGET_CHAT_CHANGED",
+    "ROLE_CHAT_MISMATCH",
+    "WEBGPT_TARGET_CHAT_MISMATCH",
+    "ROLE_TARGET_IDENTITY_MISMATCH",
+    "WAITING_IDENTITY_READY",
+    "WEBGPT_NAVIGATION_TIMEOUT",
+    "WEBGPT_PAGE_PROBE_TIMEOUT",
+    "WEBGPT_PRE_DISPATCH_TIMEOUT",
+    "WEBGPT_OPERATION_ADMISSION_TIMEOUT",
+    "PAGE_ADAPTER_UNHEALTHY",
+    "COMPOSER_NOT_READY",
+    "WEBGPT_LOGIN_REQUIRED",
+    "ROLE_BINDING_CHANGED",
+  ]).has(record.error?.code ?? "");
+}
+
+function codedError(code: string, message: string, details?: Record<string, unknown>): Error & { code: string; details?: Record<string, unknown> } {
+  const error = new Error(message) as Error & { code: string; details?: Record<string, unknown> };
+  error.code = code;
+  if (details) error.details = details;
+  return error;
+}
+
 export class WebGptAutomationProviderPort implements AutomationProviderPort {
   readonly provider = "WEBGPT" as const;
   private readonly roleSession: WebGptProviderPortOptions["roleSession"];
@@ -216,7 +263,8 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
   async submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted> {
     ensureCorrelation(input.correlation);
     if (input.provider !== this.provider) throw new Error("PROVIDER_ID_MISMATCH");
-    if (input.operation !== "PROMPT" && input.operation !== "SUBMIT") throw new Error("PROVIDER_OPERATION_UNSUPPORTED");
+    const isPlannerOperation = input.operation === "PLAN_REQUIREMENT" || input.operation === "DETAIL_STAGE";
+    if (input.operation !== "PROMPT" && input.operation !== "SUBMIT" && !isPlannerOperation) throw new Error("PROVIDER_OPERATION_UNSUPPORTED");
     const liveCapability = await this.readRuntimeCapability();
     const unavailable = capabilityError("SUBMIT", liveCapability);
     if (unavailable) throw new Error(unavailable);
@@ -226,15 +274,31 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
     await this.validateActionAttempt?.(input.correlation);
     const target = parseTargetRef(input.providerTargetRef);
     if (input.correlation.projectId !== target.projectId) throw new Error("PROVIDER_PROJECT_SCOPE_MISMATCH");
-    if (input.correlation.providerScopeRef !== undefined && input.correlation.providerScopeRef !== null && input.correlation.providerScopeRef !== target.projectId) throw new Error("PROVIDER_TARGET_SCOPE_MISMATCH");
+    if (input.correlation.providerScopeRef !== undefined
+      && input.correlation.providerScopeRef !== null
+      && input.correlation.providerScopeRef !== input.providerTargetRef
+      && (isPlannerOperation || input.correlation.providerScopeRef !== target.projectId)) throw new Error("PROVIDER_TARGET_SCOPE_MISMATCH");
+    if (isPlannerOperation) {
+      const plannerRequest = input.plannerRequest;
+      if (!plannerRequest
+        || plannerRequest.operation !== input.operation
+        || plannerRequest.projectId !== target.projectId
+        || plannerRequest.providerTargetRef !== input.providerTargetRef
+        || input.workflowRole !== "PLANNER"
+        || plannerRequest.inputRefs.length !== 1
+        || plannerRequest.inputRefs[0] !== input.inputRef) {
+        throw new Error("PROVIDER_PLANNER_CORRELATION_MISMATCH");
+      }
+    }
     const resolved = await this.resolveTarget({ workflowRole: input.workflowRole, providerTargetRef: input.providerTargetRef });
     if (resolved.status !== "AVAILABLE") throw new Error(`WEBGPT_TARGET_UNAVAILABLE:${resolved.capability ?? "UNKNOWN"}`);
     if (!input.inputRef) throw new Error("PROVIDER_INPUT_REF_REQUIRED");
     const payload = await this.resolveInputRef(input.inputRef);
     const record = await this.roleSession.submit(target.projectId, target.role, payload, input.correlation.idempotencyRef ?? undefined, authorization.policyVersionId);
-    assertRecordCorrelation(record, input.correlation, target);
-    await this.assertCurrentRoleTarget(record, target);
-    return { provider: "WEBGPT", providerRequestRef: record.requestId, providerTargetRef: input.providerTargetRef, semanticRef: record.semanticSha256, policy: policyProvenance(input.correlation, authorization) };
+    const admitted = await this.awaitDispatchAdmission(record.requestId);
+    assertRecordCorrelation(admitted, input.correlation, target);
+    await this.assertCurrentRoleTarget(admitted, target);
+    return { provider: "WEBGPT", providerRequestRef: admitted.requestId, providerTargetRef: input.providerTargetRef, semanticRef: admitted.semanticSha256, policy: policyProvenance(input.correlation, authorization) };
   }
 
   async observe(input: { providerRequestRef: string; correlation?: ProviderCorrelation }): Promise<ProviderObservation> {
@@ -287,6 +351,55 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
     if (binding.status !== "BOUND" || !binding.chatUrl || !record.targetChatUrl || normalizeRoleChatUrl(binding.chatUrl) !== normalizeRoleChatUrl(record.targetChatUrl)) {
       throw new Error("PROVIDER_TARGET_CORRELATION_MISMATCH");
     }
+  }
+
+  /**
+   * RoleSession.submit() creates the durable Request before its asynchronous
+   * Request Manager drain reaches the browser.  Provider acceptance must not
+   * be emitted during that admission gap: otherwise a known pre-dispatch
+   * target failure is recorded as ACCEPTED_UNKNOWN_RESULT.  Production
+   * composition supplies waitForActiveOperationLease; older isolated test
+   * doubles may omit it and retain their synchronous compatibility behavior.
+   */
+  private async awaitDispatchAdmission(requestId: string): Promise<WebGptRequestRecord> {
+    const waitForActive = this.requestManager.waitForActiveOperationLease;
+    if (!waitForActive) return this.requestManager.requestStatus(requestId, false);
+    const ensureDispatchPump = this.requestManager.ensureDispatchPump;
+    if (ensureDispatchPump) await ensureDispatchPump.call(this.requestManager, requestId);
+    const deadline = Date.now() + DISPATCH_ADMISSION_TIMEOUT_MS;
+    let record = await this.requestManager.requestStatus(requestId, false);
+    while (isDispatchPending(record)) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw codedError("WEBGPT_DISPATCH_ADMISSION_TIMEOUT", "WebGPT Request 尚未进入可证明的发送阶段；结果保持未知，禁止盲目重发。", {
+          requestId,
+          state: record.state,
+          sendStartedAt: record.sendStartedAt,
+        });
+      }
+      await waitForActive.call(this.requestManager, requestId, Math.min(1_000, remaining));
+      if (ensureDispatchPump) await ensureDispatchPump.call(this.requestManager, requestId);
+      record = await this.requestManager.requestStatus(requestId, false);
+      // waitForActiveOperationLease() legitimately resolves immediately while
+      // this Request owns the live Browser lease.  Yield to the timer queue so
+      // Request Manager's pre-dispatch deadline and renderer recovery timers
+      // can run; a tight microtask loop would starve them and misclassify a
+      // known pre-send timeout as SUBMIT_OUTCOME_UNKNOWN.
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    if (record.sendStartedAt) return record;
+    if (isKnownNoDispatch(record)) {
+      throw codedError("WEBGPT_REQUEST_NOT_DISPATCHED", "Request Manager 已明确结束在浏览器发送之前，Provider 不报告为已接受。", {
+        requestId,
+        state: record.state,
+        errorCode: record.error?.code ?? null,
+      });
+    }
+    throw codedError("WEBGPT_DISPATCH_ADMISSION_UNKNOWN", "Request Manager 尚未提供可证明的发送结论；结果保持未知，禁止盲目重发。", {
+      requestId,
+      state: record.state,
+      errorCode: record.error?.code ?? null,
+    });
   }
 
   async readResult(input: { providerRequestRef: string }): Promise<ProviderResult> {

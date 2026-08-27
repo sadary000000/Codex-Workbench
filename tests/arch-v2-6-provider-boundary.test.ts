@@ -280,7 +280,10 @@ test("WebGPT provider port keeps target opaque and separates observe from reconc
   });
   assert.equal(observed.state, "RUNNING");
   assert.doesNotMatch(JSON.stringify(observed), /https?:\/\/|chatUrl|targetChatUrl/i);
-  assert.equal(calls.status, 1);
+  // Acceptance now performs a dispatch-admission status read before the
+  // explicit observe call.  This is the safety gate that prevents accepting
+  // a queued/pre-dispatch record as an external side effect.
+  assert.equal(calls.status, 2);
   assert.equal(calls.reconcile, 0);
 
   const reconciled = await port.reconcile({
@@ -299,6 +302,59 @@ test("WebGPT provider port keeps target opaque and separates observe from reconc
   assert.doesNotMatch(JSON.stringify(reconciled), /https?:\/\/|chatUrl|targetChatUrl/i);
   assert.equal(calls.reconcile, 1);
   assert.equal(calls.submit, 1, "observe/reconcile never redispatch the provider side effect");
+});
+
+test("WebGPT provider acceptance waits for dispatch and rejects a known pre-send failure", async () => {
+  const record = requestRecord("FAILED");
+  let statusReads = 0;
+  const targetRef = createWebGptRoleTargetRef(record.projectId!, record.role!);
+  const port = new WebGptAutomationProviderPort({
+    roleSession: {
+      status: async () => ({ status: "BOUND", chatUrl: record.targetChatUrl }),
+      submit: async () => record,
+    } as never,
+    requestManager: {
+      requestStatus: async () => {
+        statusReads += 1;
+        return record;
+      },
+      waitForActiveOperationLease: async () => null,
+      reconcileRequest: async () => record,
+    } as never,
+    resolveInputRef: async () => "provider-input",
+    readRuntimeCapability: async () => runtimeCapability(),
+    policyAuthority: policyAuthority(),
+  });
+
+  await assert.rejects(() => port.submit({
+    provider: "WEBGPT",
+    operation: "PLAN_REQUIREMENT",
+    workflowRole: "PLANNER",
+    providerTargetRef: targetRef,
+    inputRef: "input:arch-v2-6",
+    payloadRef: "input:arch-v2-6",
+    plannerRequest: {
+      operation: "PLAN_REQUIREMENT",
+      projectId: record.projectId!,
+      requirementVersionId: "requirement-arch-v2-6",
+      requirementPayloadSha256: "requirement-hash",
+      providerTargetRef: targetRef,
+      priorPlanVersionId: null,
+      targetStageId: null,
+      planningConstraints: [],
+      inputRefs: ["input:arch-v2-6"],
+    },
+    correlation: {
+      actionIntentId: "intent-arch-v2-6",
+      actionAttemptId: "attempt-arch-v2-6",
+      policyVersionId: "policy-arch-v2-6",
+      idempotencyRef: "idem-arch-v2-6",
+      projectId: record.projectId!,
+      semanticRef: record.semanticSha256,
+      providerScopeRef: targetRef,
+    },
+  }), { code: "WEBGPT_REQUEST_NOT_DISPATCHED" });
+  assert.equal(statusReads >= 1, true);
 });
 
 test("WebGPT provider observation rejects a request journal last observed on another Chat", async () => {

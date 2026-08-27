@@ -35,6 +35,7 @@ class FakeWorkspace {
   openChatCount = 0;
   submitCount = 0;
   waitErrorCode: string | null = null;
+  submitErrorCode: string | null = null;
   openChatUrlOverride: string | null = null;
   openChatUrlSequence: string[] = [];
   waitGate: Promise<void> | null = null;
@@ -63,6 +64,11 @@ class FakeWorkspace {
   async submitPrompt(_prompt: string): Promise<{ chatUrl: string; baseline: WebGptPageProbe; submitted: WebGptPageProbe }> {
     this.submitCount += 1;
     const baseline = this.probe;
+    if (this.submitErrorCode) {
+      const error = new Error(this.submitErrorCode) as Error & { code: string };
+      error.code = this.submitErrorCode;
+      throw error;
+    }
     this.probe = pageProbe(true, baseline.page.assistantCount + 1, "WEBGPT_TEST_OK");
     this.probe.page.url = baseline.page.url;
     this.probe.page.userCount = baseline.page.userCount + 1;
@@ -237,6 +243,7 @@ test("WebGPT Request Manager persists role metadata and refuses a mismatched tar
     const waited = await manager.waitForRequest(submitted.requestId, 10_000);
     assert.equal(waited.record.state, "RECOVERY_REQUIRED");
     assert.equal(waited.record.error?.code, "ROLE_CHAT_MISMATCH");
+    assert.equal(waited.record.sendStartedAt, null);
     assert.equal((await manager.getResult(submitted.requestId)).projectId, "project-a");
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -611,6 +618,27 @@ test("WebGPT Request Manager turns a response timeout into recovery without a re
     const retry = await manager.submit("timeout prompt", {}, "timeout-key");
     assert.equal(retry.requestId, created.requestId);
     assert.equal(workspace.submitCount, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT Request Manager never records a possible post-submit error as terminal FAILED", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-post-submit-error-"));
+  const workspace = new FakeWorkspace();
+  workspace.mode = "AUTO_CONTROL";
+  workspace.submitErrorCode = "WEBGPT_SUBMIT_TRANSPORT_ERROR";
+  try {
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const created = await manager.submit("post-submit uncertainty", {}, "post-submit-uncertainty-key");
+    const recovered = await manager.waitForRequest(created.requestId, 10_000);
+    assert.equal(recovered.record.state, "RECOVERY_REQUIRED");
+    assert.equal(recovered.record.error?.code, "WEBGPT_SUBMIT_TRANSPORT_ERROR");
+    assert.notEqual(recovered.record.state, "FAILED");
+    assert.equal(recovered.record.sendStartedAt !== null, true);
+    const replay = await manager.submit("post-submit uncertainty", {}, "post-submit-uncertainty-key");
+    assert.equal(replay.requestId, created.requestId);
+    assert.equal(workspace.submitCount, 1, "recovery must not blindly invoke submit twice");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
