@@ -70,7 +70,7 @@
     "baseCommit": "62e8cbb9691c04a6f2a7e64c59bdf1fa458fb0aa",
     "repositoryHeadAtRoundStart": "23e070a87ec10721c81fc94154752090baa5c610",
     "implementationCommit": "dfe57ae84f8ccb21e4c22f65a499fd258fd47f6b",
-    "freezeOrReviewCommit": "PENDING_FREEZE_COMMIT",
+    "freezeOrReviewCommit": "240eea3a9d964e861495dd9612b2363ff316716a",
     "branch": "codex/workbench-v1",
     "dirtyWorktreeAtRoundStart": true
   },

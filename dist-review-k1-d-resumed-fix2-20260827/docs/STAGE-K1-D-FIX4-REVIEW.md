@@ -31,6 +31,6 @@ No verifier, scheduler, execution step, or new native thread was started. Raw pr
 
 - `base_commit`: `62e8cbb9691c04a6f2a7e64c59bdf1fa458fb0aa`
 - `implementation_commit`: `dfe57ae84f8ccb21e4c22f65a499fd258fd47f6b`
-- `freeze_or_review_commit`: recorded in the final package provenance after the review-source freeze commit
+- `freeze_or_review_commit`: `240eea3a9d964e861495dd9612b2363ff316716a`
 
 The package source is the exact staged review source. The ZIP SHA-256 is recorded in its external sidecar.
