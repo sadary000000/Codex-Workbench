@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { normalizeRoleChatUrl, roleChatUrlsEquivalent, WebGptRoleSessionRegistry } from "../src/features/webgpt/runtime/webgpt-role-session-registry.ts";
+import { normalizeRoleChatUrl, roleChatIdentityKey, roleChatUrlsEquivalent, WebGptRoleSessionRegistry } from "../src/features/webgpt/runtime/webgpt-role-session-registry.ts";
 
 test("Role Registry keeps three project-scoped roles and persists only safe metadata", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-role-registry-"));
@@ -64,6 +64,23 @@ test("Role Registry strictly validates Chat URLs, collisions, and explicit repla
     ),
     false,
   );
+  assert.equal(
+    roleChatUrlsEquivalent(
+      "https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workts/c/shared",
+      "https://chatgpt.com/c/shared",
+    ),
+    true,
+  );
+  assert.equal(
+    roleChatUrlsEquivalent(
+      "https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315/c/shared",
+      "https://chatgpt.com/c/other",
+    ),
+    false,
+  );
+  assert.equal(roleChatIdentityKey("https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workts/c/shared"), "conversation:shared");
+  assert.equal(roleChatIdentityKey("https://chatgpt.com/c/shared"), "conversation:shared");
+  assert.throws(() => roleChatIdentityKey("https://chatgpt.com/"), { code: "ROLE_CHAT_URL_INVALID" });
     const registry = new WebGptRoleSessionRegistry({ storageDirectory: directory });
     await registry.bind("project-a", "PLANNER", "https://chatgpt.com/c/shared");
     await assert.rejects(() => registry.bind("project-a", "PLANNER", "https://chatgpt.com/c/other"), { code: "ROLE_ALREADY_BOUND" });

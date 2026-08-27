@@ -2,6 +2,9 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { WebGptRole, WebGptRoleBinding, WebGptRoleBindingStatus } from "../types.ts";
+import { normalizeRoleChatUrl, roleChatIdentityKey, roleChatUrlsEquivalent } from "../../../shared/chat-url-identity.ts";
+
+export { normalizeRoleChatUrl, roleChatIdentityKey, roleChatUrlsEquivalent } from "../../../shared/chat-url-identity.ts";
 
 const REGISTRY_FILE = "role-sessions.json";
 const REGISTRY_VERSION = 1 as const;
@@ -26,75 +29,6 @@ export function normalizeWebGptRole(value: unknown): WebGptRole {
   const error = new Error(`不支持的 WebGPT Role：${String(value ?? "")}`) as Error & { code: string };
   error.code = "ROLE_UNSUPPORTED";
   throw error;
-}
-
-/** Normalize only real ChatGPT conversation URLs; never accepts arbitrary WebGPT pages. */
-export function normalizeRoleChatUrl(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) throw codedError("ROLE_CHAT_URL_INVALID", "Role Chat URL 不能为空。");
-  let url: URL;
-  try {
-    url = new URL(trimmed);
-  } catch {
-    throw codedError("ROLE_CHAT_URL_INVALID", "Role Chat URL 不是有效 URL。");
-  }
-  if (url.protocol !== "https:" || !["chatgpt.com", "www.chatgpt.com"].includes(url.hostname.toLowerCase())) {
-    throw codedError("ROLE_CHAT_URL_INVALID", "Role 只允许绑定 https://chatgpt.com 的 Chat URL。");
-  }
-  if (url.port || url.username || url.password) {
-    throw codedError("ROLE_CHAT_URL_INVALID", "Role Chat URL 不允许端口、用户名或密码。");
-  }
-  // Accept one optional trailing slash, then emit one canonical path. Do not
-  // filter empty segments: `/c//id` is not an equivalent Chat identity and
-  // must not be allowed to bypass collision or target checks.
-  const standardMatch = /^\/c\/([^/]+)\/?$/.exec(url.pathname);
-  const gptScopedMatch = /^\/g\/([^/]+)\/c\/([^/]+)\/?$/.exec(url.pathname);
-  if (!standardMatch && !gptScopedMatch) {
-    throw codedError("ROLE_CHAT_URL_INVALID", "Role 必须绑定真实的 /c/<chat-id> 或 /g/<gpt-id>/c/<chat-id> Chat URL。");
-  }
-  url.hostname = "chatgpt.com";
-  // ChatGPT currently emits both `/g/g-<id>/c/<chat>` and
-  // `/g/g-p-<id>/c/<chat>` for the same GPT-scoped conversation.  Treat only
-  // this observed, bounded prefix variant as one canonical identity; the GPT
-  // id suffix and the Chat id must still match exactly.
-  const scopedGptId = gptScopedMatch?.[1];
-  const canonicalScopedGptId = scopedGptId?.startsWith("g-p-")
-    ? `g-${scopedGptId.slice("g-p-".length)}`
-    : scopedGptId;
-  url.pathname = standardMatch
-    ? `/c/${standardMatch[1]}`
-    : `/g/${canonicalScopedGptId}/c/${gptScopedMatch![2]}`;
-  url.search = "";
-  url.hash = "";
-  return url.toString();
-}
-
-interface ComparableChatIdentity {
-  scope: "CHAT" | "GPT";
-  chatId: string;
-  gptId?: string;
-}
-
-function comparableChatIdentity(value: string): ComparableChatIdentity | null {
-  let url: URL;
-  try { url = new URL(normalizeRoleChatUrl(value)); } catch { return null; }
-  const standard = /^\/c\/([^/]+)$/.exec(url.pathname);
-  if (standard) return { scope: "CHAT", chatId: standard[1] };
-  const scoped = /^\/g\/(g-p-([0-9a-f]{32})|g-([0-9a-f]{32})(?:-[^/]+)?)\/c\/([^/]+)$/.exec(url.pathname);
-  if (!scoped) return null;
-  // ChatGPT exposes the same GPT-scoped Chat through both the human-readable
-  // `/g/g-<id>-<slug>/c/<chat>` route and the internal `/g/g-p-<id>/c/<chat>`
-  // route. The 32-hex GPT id and Chat id are the bounded identity components;
-  // the optional slug is presentation only.
-  return { scope: "GPT", gptId: scoped[2] ?? scoped[3], chatId: scoped[4] };
-}
-
-/** Compare Chat identities while accepting only the observed GPT route alias. */
-export function roleChatUrlsEquivalent(left: string, right: string): boolean {
-  const a = comparableChatIdentity(left);
-  const b = comparableChatIdentity(right);
-  if (!a || !b || a.scope !== b.scope || a.chatId !== b.chatId) return false;
-  return a.scope === "CHAT" || a.gptId === b.gptId;
 }
 
 function codedError(code: string, message: string): Error & { code: string } {
@@ -220,7 +154,7 @@ export class WebGptRoleSessionRegistry {
       const key = this.key(id, normalizedRole);
       const previous = this.bindings.get(key);
       if (previous && !replace && previous.status !== "PENDING_CHAT_URL") throw codedError("ROLE_ALREADY_BOUND", "该 Role 已有绑定；如需覆盖请显式使用 --replace。");
-      const collision = [...this.bindings.values()].find((candidate) => this.key(candidate.projectId, candidate.role) !== key && candidate.status === "BOUND" && candidate.chatUrl === chatUrl);
+      const collision = [...this.bindings.values()].find((candidate) => this.key(candidate.projectId, candidate.role) !== key && candidate.status === "BOUND" && roleChatUrlsEquivalent(candidate.chatUrl, chatUrl));
       if (collision) throw codedError("ROLE_BIND_CONFLICT", `Chat 已绑定到 ${collision.projectId}/${collision.role}，不能跨 Role 或 Project 复用。`);
       const now = this.now();
       const binding: WebGptRoleBinding = {
@@ -246,7 +180,7 @@ export class WebGptRoleSessionRegistry {
       const key = this.key(id, normalizedRole);
       const previous = this.bindings.get(key);
       if (!previous) throw codedError("ROLE_UNBOUND", "Role 尚未创建，不能自动建立绑定。");
-      if (previous.status === "BOUND" && previous.chatUrl !== chatUrl) throw codedError("ROLE_BIND_CONFLICT", "Role 已绑定到另一个 Chat，拒绝静默替换。");
+      if (previous.status === "BOUND" && !roleChatUrlsEquivalent(previous.chatUrl, chatUrl)) throw codedError("ROLE_BIND_CONFLICT", "Role 已绑定到另一个 Chat，拒绝静默替换。");
       const now = this.now();
       const binding: WebGptRoleBinding = {
         ...previous,
@@ -255,7 +189,7 @@ export class WebGptRoleSessionRegistry {
         status: "BOUND",
         updatedAt: now,
       };
-      const collision = [...this.bindings.values()].find((candidate) => this.key(candidate.projectId, candidate.role) !== key && candidate.status === "BOUND" && candidate.chatUrl === chatUrl);
+      const collision = [...this.bindings.values()].find((candidate) => this.key(candidate.projectId, candidate.role) !== key && candidate.status === "BOUND" && roleChatUrlsEquivalent(candidate.chatUrl, chatUrl));
       if (collision) throw codedError("ROLE_BIND_CONFLICT", `Chat 已绑定到 ${collision.projectId}/${collision.role}，不能跨 Role 或 Project 复用。`);
       this.bindings.set(key, binding);
       return cloneBinding(binding);
@@ -316,14 +250,14 @@ export class WebGptRoleSessionRegistry {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || (parsed as StoredDocument).version !== REGISTRY_VERSION || !Array.isArray((parsed as StoredDocument).bindings)) {
       throw codedError("ROLE_REGISTRY_INVALID", "Role Registry schema 无效。");
     }
-    const seenUrls = new Set<string>();
+    const seenUrls: string[] = [];
     for (const value of (parsed as StoredDocument).bindings) {
       const binding = normalizeBinding(value);
       if (!binding) throw codedError("ROLE_REGISTRY_INVALID", "Role Registry 包含无效绑定。");
       const key = this.key(binding.projectId, binding.role);
       if (this.bindings.has(key)) throw codedError("ROLE_REGISTRY_INVALID", "Role Registry 包含重复 Role 绑定。");
-      if (binding.status === "BOUND" && binding.chatUrl && seenUrls.has(binding.chatUrl)) throw codedError("ROLE_REGISTRY_INVALID", "Role Registry 包含重复 Chat URL。");
-      if (binding.status === "BOUND" && binding.chatUrl) seenUrls.add(binding.chatUrl);
+      if (binding.status === "BOUND" && binding.chatUrl && seenUrls.some((url) => roleChatUrlsEquivalent(url, binding.chatUrl))) throw codedError("ROLE_REGISTRY_INVALID", "Role Registry 包含重复 Chat URL。");
+      if (binding.status === "BOUND" && binding.chatUrl) seenUrls.push(binding.chatUrl);
       this.bindings.set(key, binding);
     }
   }

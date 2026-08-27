@@ -38,6 +38,30 @@ test("bridges only an explicitly bound REQUIREMENT Chat and parses a completed r
   assert.equal(envelope.status, "READY_FOR_DRAFT");
 });
 
+test("accepts equivalent URL aliases while keeping opaque REQUIREMENT refs exact", async () => {
+  const gptId = "6a85db5dd9c4819181028671e2fb9315";
+  const scoped = `https://chatgpt.com/g/g-${gptId}-workbench/c/requirement-alias`;
+  const internal = `https://chatgpt.com/g/g-p-${gptId}/c/requirement-alias`;
+  const urlRequest = createRequirementRequest({
+    projectId: "webgpt-project",
+    binding: { projectId: "webgpt-project", role: REQUIREMENT_ROLE, chatRef: scoped },
+    requestId: "aut2-url-alias-request",
+    idempotencyKey: "aut2-url-alias-key",
+    prompt: "Return the bounded AUT-2 requirement envelope.",
+  });
+  const response = JSON.stringify(semanticResponseFromEnvelope(createReadyForDraftEnvelope(requirementContextFromRequest(urlRequest), { draft: { goal: "URL alias" } })));
+  const adapter = new RequirementWebGptAdapter({
+    runtime: {
+      async getRequirementBinding() { return { projectId: urlRequest.projectId, role: REQUIREMENT_ROLE, chatUrl: internal, status: "BOUND" }; },
+      async submitRequirement() { return { requestId: "accepted:url-alias", targetChatUrl: internal }; },
+      async waitRequest() { return { state: "COMPLETED", timedOut: false }; },
+      async getResult() { return { state: "COMPLETED", response }; },
+    },
+  });
+  const result = await adapter.submit(urlRequest);
+  assert.equal(result.status, "READY_FOR_DRAFT");
+});
+
 test("does not fall back when the Role binding or accepted target differs", async () => {
   const mismatched = runtime({
     async getRequirementBinding() { return { projectId: request.projectId, role: REQUIREMENT_ROLE, chatUrl: "another-chat", status: "BOUND" }; },

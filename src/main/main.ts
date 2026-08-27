@@ -23,7 +23,7 @@ import { buildNativeTurnOptions, parseComposerPreferences } from "../codex/compo
 import { validateProjectDirectory } from "../shared/project-path.ts";
 import { WebGptWorkspace, type WebGptBounds } from "../features/webgpt/index.ts";
 import { WebGptRequestManager } from "../features/webgpt/runtime/webgpt-request-manager.ts";
-import { WebGptRoleSessionRegistry } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
+import { roleChatUrlsEquivalent, WebGptRoleSessionRegistry } from "../features/webgpt/runtime/webgpt-role-session-registry.ts";
 import { WebGptRoleSessionService } from "../features/webgpt/runtime/webgpt-role-session-service.ts";
 import { WebGptProjectRegistry } from "../features/webgpt/runtime/webgpt-project-registry.ts";
 import { WebGptReviewSubmissionService } from "../features/webgpt/review-submission/webgpt-review-submission-service.ts";
@@ -42,7 +42,9 @@ import { WebGptExternalActionBridge, createWebGptRequestManagerActionAdapter } f
 import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority, createWebGptProviderPolicyAuthority, webGptRuntimeCapability } from "../automation/webgpt-policy-authority.ts";
 import { assertProviderSeamExecutable } from "../automation/provider-seam-classification.ts";
 import { InputRefRegistry } from "../automation/input-ref.ts";
-import { WebGptAutomationProviderPort } from "../features/webgpt/automation/webgpt-provider-port.ts";
+import { createPlannerProviderIntegrationService, type PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
+import { runStageK1DRealPlannerSmoke } from "../automation/stage-k1-d-real-planner-smoke.ts";
+import { createWebGptRoleTargetRef, WebGptAutomationProviderPort } from "../features/webgpt/automation/webgpt-provider-port.ts";
 import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../automation/aut2-real-webgpt-gate.ts";
 import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
 import { classifyWebGptActionReadiness, type WebGptActionScope } from "../automation/webgpt-action-readiness.ts";
@@ -152,6 +154,7 @@ let automationComposition: AutomationComposition | null = null;
 let webGptPolicyAuthority: WebGptPolicyAuthority | null = null;
 let webGptProviderPort: WebGptAutomationProviderPort | null = null;
 let requirementAutomationService: RequirementAutomationService | null = null;
+let plannerProviderIntegrationService: PlannerProviderIntegrationService | null = null;
 /** Process-owned provider payload boundary; only opaque InputRefs cross into Automation. */
 const automationInputRefs = new InputRefRegistry();
 let webGptExternalActionBridge: WebGptExternalActionBridge | null = null;
@@ -177,6 +180,7 @@ async function startAutomationPersistence(): Promise<void> {
     // this port through their compatibility callers.
     getWebGptProviderPort();
     getRequirementAutomationService();
+    getPlannerProviderIntegrationService();
     return;
   }
 
@@ -267,6 +271,48 @@ async function startAut3RealPlannerGate(): Promise<void> {
     preflight: () => aut3PlannerPreflight(webgptProjectId, process.env.AUT3_RECOVERY_REQUEST_ID?.trim() || null),
   });
   logger.info("aut3_real_planner_gate_finished", { result: evidence.result, requestId: evidence.realPlanner.requestId ?? null, outputPath });
+  if (evidence.result !== "PASS_REAL") process.exitCode = 1;
+  setTimeout(() => app.quit(), 50);
+}
+
+async function startStageK1DRealPlannerSmoke(): Promise<void> {
+  if (process.env.STAGE_K1_D_REAL_PLANNER_SMOKE !== "1") return;
+  if (!automationStore) throw new Error("STAGE-K1-D requires the Automation Store.");
+  const providerProjectId = process.env.K1D_WEBGPT_PROJECT_ID?.trim() || "";
+  const automationProjectId = process.env.K1D_AUTOMATION_PROJECT_ID?.trim() || providerProjectId;
+  if (!providerProjectId || !automationProjectId) throw new Error("K1D_WEBGPT_PROJECT_ID is required for the real Planner smoke.");
+  const outputPath = process.env.STAGE_K1_D_REAL_PLANNER_SMOKE_OUTPUT?.trim()
+    || join(app.getPath("userData"), "stage-k1-d-real-planner-evidence.json");
+  const evidence = await runStageK1DRealPlannerSmoke({
+    store: automationStore,
+    provider: getWebGptProviderPort(),
+    requestManager: getWebGptRequestManager(),
+    inputRefs: automationInputRefs,
+    providerTargetRef: createWebGptRoleTargetRef(providerProjectId, "PLANNER"),
+    providerProjectId,
+    automationProjectId,
+    outputPath,
+    timeoutMs: Number(process.env.STAGE_K1_D_REAL_PLANNER_SMOKE_TIMEOUT_MS ?? 300_000),
+    idempotencyLabel: process.env.K1D_IDEMPOTENCY_LABEL?.trim() || undefined,
+    returnAutomationControl: async () => {
+      const state = await getWebGptWorkspace().returnAutomationControl();
+      await getWebGptRequestManager().automationControl();
+      return state;
+    },
+    openWorkspace: () => getWebGptRequestManager().openWorkspace(),
+    openPlannerTarget: () => getWebGptRoleService().open(providerProjectId, "PLANNER"),
+    recordTargetBinding: (expectedChatUrl, details) => getWebGptWorkspace().recordTargetBinding(expectedChatUrl, details),
+    getTargetIdentityTrace: () => getWebGptWorkspace().getTargetIdentityTrace().map((event): Readonly<Record<string, unknown>> => ({
+      ...event,
+      details: { ...event.details },
+    })),
+  });
+  logger.info("stage_k1_d_real_planner_smoke_finished", {
+    result: evidence.result,
+    outputPath,
+    realPlannerPrompts: evidence.plannerRequest.realPlannerPrompts,
+    duplicatePlannerPrompt: evidence.plannerRequest.duplicatePlannerPrompt,
+  });
   if (evidence.result !== "PASS_REAL") process.exitCode = 1;
   setTimeout(() => app.quit(), 50);
 }
@@ -924,6 +970,29 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "webgpt.requirement.reconcile") {
       if (!request.requirementSessionId) response = controlFail(request.command, "REQUIREMENT_SESSION_REQUIRED", "requirement reconcile 必须提供 sessionId。");
       else response = controlOk(request.command, await getRequirementAutomationService().reconcileProviderRequest({ sessionId: request.requirementSessionId, ...(request.requirementRoundId ? { roundId: request.requirementRoundId } : {}), ...(request.timeoutMs === undefined ? {} : { waitTimeoutMs: request.timeoutMs }) }));
+    } else if (request.command === "webgpt.planner.create") {
+      if (!request.projectId || !request.providerTargetRef) response = controlFail(request.command, "PLANNER_CREATE_REQUIRED", "planner create 必须提供 Project ID 和 opaque provider target。");
+      else response = controlOk(request.command, await getPlannerProviderIntegrationService().createPlanFromRequirement({
+        projectId: request.projectId,
+        providerTargetRef: request.providerTargetRef,
+        ...(request.requirementVersionId ? { requirementVersionId: request.requirementVersionId } : {}),
+        ...(request.plannerOperation ? { operation: request.plannerOperation } : {}),
+        ...(request.priorPlanVersionId !== undefined ? { priorPlanVersionId: request.priorPlanVersionId } : {}),
+        ...(request.targetStageId !== undefined ? { targetStageId: request.targetStageId } : {}),
+        ...(request.planningConstraints ? { planningConstraints: request.planningConstraints } : {}),
+        ...(request.inputRefs ? { inputRefs: request.inputRefs } : {}),
+        ...(request.requestId ? { requestId: request.requestId } : {}),
+        ...(request.idempotencyRef ? { idempotencyRef: request.idempotencyRef } : {}),
+      }));
+    } else if (request.command === "webgpt.planner.reconcile") {
+      if (!request.projectId || !request.actionAttemptId) response = controlFail(request.command, "PLANNER_RECONCILE_REQUIRED", "planner reconcile 必须提供 Project ID 和 ActionAttempt ID。");
+      else response = controlOk(request.command, await getPlannerProviderIntegrationService().reconcilePlannerRequest({ projectId: request.projectId, actionAttemptId: request.actionAttemptId }));
+    } else if (request.command === "webgpt.planner.status") {
+      if (!request.projectId || !request.actionIntentId) response = controlFail(request.command, "PLANNER_QUERY_REQUIRED", "planner status 必须提供 Project ID 和 ActionIntent ID。");
+      else response = controlOk(request.command, await getPlannerProviderIntegrationService().plannerStatus({ projectId: request.projectId, actionIntentId: request.actionIntentId }));
+    } else if (request.command === "webgpt.planner.result") {
+      if (!request.projectId || !request.actionIntentId) response = controlFail(request.command, "PLANNER_QUERY_REQUIRED", "planner result 必须提供 Project ID 和 ActionIntent ID。");
+      else response = controlOk(request.command, await getPlannerProviderIntegrationService().plannerResult({ projectId: request.projectId, actionIntentId: request.actionIntentId }));
     } else if (request.command === "webgpt.role.list") {
       if (!request.projectId) response = controlFail(request.command, "PROJECT_REQUIRED", "role list 必须提供 Project ID。");
       else response = controlOk(request.command, await getWebGptRoleService().list(request.projectId));
@@ -1152,7 +1221,7 @@ function getWebGptRequestManager(): WebGptRequestManager {
     validateTarget: async (record) => {
       if (!record.projectId || !record.role || !record.targetChatUrl) return;
       const binding = await getWebGptRoleService().status(record.projectId, record.role);
-      if (binding.status !== "BOUND" || binding.chatUrl !== record.targetChatUrl) {
+       if (binding.status !== "BOUND" || !roleChatUrlsEquivalent(binding.chatUrl, record.targetChatUrl)) {
         throw codedError("ROLE_BINDING_CHANGED", "Role 绑定已变化，恢复时拒绝使用旧 Chat 目标。");
       }
     },
@@ -1242,6 +1311,18 @@ function getRequirementAutomationService(): RequirementAutomationService {
     inputRefs: automationInputRefs,
   });
   return requirementAutomationService;
+}
+
+/**
+ * Production Planner composition uses the same provider port and policy/
+ * InputRef boundaries as Requirement dispatch. The legacy WebGPT Planner
+ * service is intentionally not constructed here.
+ */
+function getPlannerProviderIntegrationService(): PlannerProviderIntegrationService {
+  if (plannerProviderIntegrationService) return plannerProviderIntegrationService;
+  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");
+  plannerProviderIntegrationService = createPlannerProviderIntegrationService({ store: automationStore, provider: getWebGptProviderPort() });
+  return plannerProviderIntegrationService;
 }
 
 /**
@@ -2269,7 +2350,13 @@ if (officialCliMode) {
           getWebGptProviderPort();
           logger.info("webgpt_provider_port_ready", { provider: "WEBGPT", submit: true, reconcile: true, cancel: false });
           await startWebGptControlPlane();
-          if (process.env.AUT2_AUT3_FIX10_REAL_GATE === "1") {
+          if (process.env.STAGE_K1_D_REAL_PLANNER_SMOKE === "1") {
+            void startStageK1DRealPlannerSmoke().catch((error) => {
+              logError(logger, "stage_k1_d_real_planner_smoke_failed", error);
+              process.exitCode = 1;
+              setTimeout(() => app.quit(), 50);
+            });
+          } else if (process.env.AUT2_AUT3_FIX10_REAL_GATE === "1") {
             void startAut2Fix10AndAut3RealGate().catch((error) => {
               logError(logger, "aut2_fix10_aut3_real_gate_failed", error);
               process.exitCode = 1;

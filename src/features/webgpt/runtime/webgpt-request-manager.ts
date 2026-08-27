@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { WebGptLatestResponse, WebGptPageProbe, WebGptPageState, WebGptRequestRecord, WebGptRequestResult, WebGptRequestState, WebGptRequestStateEvent, WebGptRole, WebGptState } from "../types.ts";
 import { isTransientWebGptResponse, normalizeChatUrl } from "../adapter/webgpt-page-adapter.ts";
-import { normalizeRoleChatUrl, roleChatUrlsEquivalent } from "./webgpt-role-session-registry.ts";
+import { normalizeRoleChatUrl, roleChatIdentityKey, roleChatUrlsEquivalent } from "../../../shared/chat-url-identity.ts";
 import { isWebGptInterruptionTestHookEnabled, waitForWebGptInterruptionTestHook, waitForWebGptSubmittedUserMessage } from "./webgpt-interruption-test-hook.ts";
 import type { WebGptWorkspace } from "./webgpt-workspace.ts";
 import type { WebGptProjectOperationTimeline } from "./webgpt-operation-budget.ts";
@@ -314,12 +314,12 @@ export class WebGptRequestManager {
     if (!value) throw this.codedError("PROMPT_EMPTY", "Prompt 不能为空。");
     if (value.length > MAX_PROMPT_CHARS) throw this.codedError("PROMPT_TOO_LARGE", `Prompt 超过 ${MAX_PROMPT_CHARS} 个字符限制。`);
     const key = normalizeIdempotencyKey(idempotencyKey);
-    const normalizedMetadata = { ...metadata, targetChatUrl: normalizeSemanticTarget(metadata) };
+    const normalizedMetadata = { ...metadata, targetChatUrl: normalizeRequestTarget(metadata) };
     const semanticSha256 = semanticHash(value, normalizedMetadata);
     if (key) {
       const existing = this.findRecordByIdempotencyKey(key);
       if (existing) {
-        if (existing.semanticSha256 !== semanticSha256) throw this.codedError("IDEMPOTENCY_CONFLICT", "相同 idempotency key 对应的请求语义不同，已拒绝覆盖或重发。");
+        this.assertSameSemantic(existing, value, normalizedMetadata);
         if (normalizedMetadata.policyVersionId && existing.policyVersionId !== normalizedMetadata.policyVersionId) {
           throw this.codedError("POLICY_PIN_MISMATCH", "相同 idempotency key 已绑定其它 PolicyVersion，已拒绝静默换 pin。", { requestId: existing.requestId });
         }
@@ -500,7 +500,7 @@ export class WebGptRequestManager {
         // TARGET_CHAT_CHANGED while a real home-page redirect still fails
         // closed.
         try { lastActualUrl = normalizeRoleChatUrl(probe.page.url); } catch { lastActualUrl = null; }
-        if (lastActualUrl === target) return probe;
+        if (lastActualUrl !== null && roleChatUrlsEquivalent(lastActualUrl, target)) return probe;
       } catch (error) {
         const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "";
         if (code !== "COMPOSER_NOT_READY" || attempt >= TARGET_REOPEN_ATTEMPTS) throw error;
@@ -598,7 +598,7 @@ export class WebGptRequestManager {
     if (!chatUrl) return [];
     await this.ready();
     return [...this.records.values()]
-      .filter((record) => isLiveRequestState(record.state) && comparableChatUrl(record.targetChatUrl || record.chatUrl) === chatUrl)
+      .filter((record) => isLiveRequestState(record.state) && roleChatUrlsEquivalent(record.targetChatUrl || record.chatUrl, chatUrl))
       .map((record) => ({ requestId: record.requestId, state: record.state, chatUrl: record.chatUrl, idempotencyKey: record.idempotencyKey }));
   }
 
@@ -977,7 +977,22 @@ export class WebGptRequestManager {
   }
 
   private assertSameSemantic(record: WebGptRequestRecord, prompt: string, metadata: WebGptRequestMetadata): void {
-    if (record.semanticSha256 !== semanticHash(prompt.trim(), metadata)) throw this.codedError("IDEMPOTENCY_CONFLICT", "相同 idempotency key 对应的请求语义不同，已拒绝覆盖或重发。");
+    const targetMatches = requestTargetsEquivalent(record.targetChatUrl, metadata);
+    if (record.semanticSha256 === semanticHash(prompt.trim(), metadata) && targetMatches) return;
+    // Records written before the shared identity key existed used the full
+    // normalized URL in their semantic hash. Accept only that legacy hash
+    // when the durable target and the requested target are equivalent; this
+    // migrates aliases without rewriting the journal or weakening mismatch
+    // protection.
+    const legacyTarget = record.targetChatUrl ?? null;
+    const legacySemantic = semanticHashFromParts(
+      promptHash(prompt.trim()),
+      prompt.trim().length,
+      metadata.projectId?.trim() || null,
+      metadata.role ?? null,
+      legacySemanticTarget({ ...metadata, targetChatUrl: legacyTarget }),
+    );
+    if (record.semanticSha256 !== legacySemantic || !targetMatches) throw this.codedError("IDEMPOTENCY_CONFLICT", "相同 idempotency key 对应的请求语义不同，已拒绝覆盖或重发。");
   }
 
   private requireRecord(requestId: string): WebGptRequestRecord {
@@ -1103,7 +1118,7 @@ export class WebGptRequestManager {
       requestId,
       idempotencyKey: normalizeIdempotencyKey(value.idempotencyKey ?? undefined),
       policyVersionId: typeof value.policyVersionId === "string" && value.policyVersionId.trim() ? value.policyVersionId.trim().slice(0, 256) : null,
-      semanticSha256: typeof value.semanticSha256 === "string" && value.semanticSha256 ? value.semanticSha256.slice(0, 128) : semanticHashFromParts(promptSha256, promptChars, projectId, role, targetChatUrl),
+      semanticSha256: typeof value.semanticSha256 === "string" && value.semanticSha256 ? value.semanticSha256.slice(0, 128) : semanticHashFromParts(promptSha256, promptChars, projectId, role, semanticTargetKey({ projectId: projectId ?? undefined, role: role ?? undefined, targetChatUrl })),
       state: value.state,
       projectId,
       role,
@@ -1173,14 +1188,37 @@ function promptHash(value: string): string {
 }
 
 function semanticHash(prompt: string, metadata: WebGptRequestMetadata): string {
-  return semanticHashFromParts(promptHash(prompt), prompt.length, metadata.projectId?.trim() || null, metadata.role ?? null, normalizeSemanticTarget(metadata));
+  return semanticHashFromParts(promptHash(prompt), prompt.length, metadata.projectId?.trim() || null, metadata.role ?? null, semanticTargetKey(metadata));
 }
 
-function normalizeSemanticTarget(metadata: WebGptRequestMetadata): string | null {
+function normalizeRequestTarget(metadata: WebGptRequestMetadata): string | null {
   const raw = typeof metadata.targetChatUrl === "string" ? metadata.targetChatUrl.trim() : "";
   if (!raw) return null;
   try { return metadata.role ? normalizeRoleChatUrl(raw) : normalizeChatUrl(raw); }
   catch { return raw; }
+}
+
+function semanticTargetKey(metadata: WebGptRequestMetadata): string | null {
+  const raw = typeof metadata.targetChatUrl === "string" ? metadata.targetChatUrl.trim() : "";
+  if (!raw) return null;
+  try { return metadata.role ? roleChatIdentityKey(raw) : normalizeChatUrl(raw); }
+  catch { return raw; }
+}
+
+function legacySemanticTarget(metadata: WebGptRequestMetadata): string | null {
+  const raw = typeof metadata.targetChatUrl === "string" ? metadata.targetChatUrl.trim() : "";
+  if (!raw) return null;
+  try { return metadata.role ? normalizeRoleChatUrl(raw) : normalizeChatUrl(raw); }
+  catch { return raw; }
+}
+
+function requestTargetsEquivalent(recordTarget: string | null, metadata: WebGptRequestMetadata): boolean {
+  const requestedTarget = typeof metadata.targetChatUrl === "string" ? metadata.targetChatUrl.trim() : "";
+  if (!recordTarget && !requestedTarget) return true;
+  if (!recordTarget || !requestedTarget) return false;
+  return metadata.role
+    ? roleChatUrlsEquivalent(recordTarget, requestedTarget)
+    : legacySemanticTarget({ ...metadata, targetChatUrl: recordTarget }) === legacySemanticTarget(metadata);
 }
 
 function semanticHashFromParts(promptSha256: string, promptChars: number, projectId: string | null, role: WebGptRole | null, targetChatUrl: string | null): string {

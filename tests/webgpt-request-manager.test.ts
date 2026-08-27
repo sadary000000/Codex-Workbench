@@ -475,6 +475,49 @@ test("WebGPT recovery accepts a canonical-equivalent target URL without changing
   }
 });
 
+test("WebGPT recovery accepts slugged, slugless, and g-p GPT route aliases for one Chat", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-recovery-gpt-alias-"));
+  const target = "https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workbench/c/target";
+  const record = {
+    requestId: "wgpt-gpt-alias",
+    idempotencyKey: "gpt-alias-key",
+    semanticSha256: "semantic",
+    state: "RECOVERY_REQUIRED",
+    projectId: "project-a",
+    role: "PLANNER",
+    targetChatUrl: target,
+    chatUrl: target,
+    promptChars: 0,
+    promptSha256: createHash("sha256").update("", "utf8").digest("hex"),
+    baselineUserCount: 0,
+    baselineAssistantCount: 0,
+    sendStartedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    submittedAt: new Date().toISOString(),
+    completedAt: null,
+    resultPath: null,
+    resultSha256: null,
+    resultBytes: null,
+    lastKnownPageState: null,
+    error: { code: "WORKBENCH_RESTARTED", message: "recovery evidence" },
+  };
+  try {
+    await writeFile(join(directory, "requests.json"), JSON.stringify({ version: 2, requests: [record] }), "utf8");
+    const workspace = new FakeWorkspace();
+    workspace.mode = "AUTO_CONTROL";
+    workspace.openChatUrlSequence = ["https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315/c/target"];
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const recovered = await manager.reconcileRequest(record.requestId);
+    assert.equal(recovered.state, "COMPLETED");
+    assert.equal(recovered.targetChatUrl, target);
+    assert.equal(recovered.chatUrl, "https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315/c/target");
+    assert.equal(workspace.openChatCount, 1);
+    assert.equal(workspace.submitCount, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("WebGPT recovery stays recovery-required when the exact target keeps resolving to home", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-recovery-home-loop-"));
   const target = "https://chatgpt.com/c/target";
@@ -535,6 +578,32 @@ test("WebGPT Request Manager returns the original Request for an idempotent retr
     assert.equal(workspace.submitCount, 1);
     const stored = await readFile(join(directory, "requests.json"), "utf8");
     assert.doesNotMatch(stored, /same prompt/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("WebGPT Request Manager treats GPT route aliases as one idempotent target", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-workbench-webgpt-idempotency-alias-"));
+  const workspace = new FakeWorkspace();
+  workspace.mode = "PAUSED";
+  const gptId = "6a85db5dd9c4819181028671e2fb9315";
+  const scoped = `https://chatgpt.com/g/g-${gptId}-workbench/c/alias-chat`;
+  const internal = `https://chatgpt.com/g/g-p-${gptId}/c/alias-chat`;
+  try {
+    const manager = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const first = await manager.submit("same prompt", { projectId: "project-a", role: "PLANNER", targetChatUrl: scoped }, "alias-key");
+    const retry = await manager.submit("same prompt", { projectId: "project-a", role: "PLANNER", targetChatUrl: internal }, "alias-key");
+    assert.equal(retry.requestId, first.requestId);
+    const stored = JSON.parse(await readFile(join(directory, "requests.json"), "utf8")) as { requests: Array<Record<string, unknown>> };
+    const promptSha256 = createHash("sha256").update("same prompt", "utf8").digest("hex");
+    stored.requests[0].semanticSha256 = createHash("sha256").update(JSON.stringify({ promptSha256, promptChars: "same prompt".length, projectId: "project-a", role: "PLANNER", targetChatUrl: scoped }), "utf8").digest("hex");
+    await writeFile(join(directory, "requests.json"), JSON.stringify(stored), "utf8");
+    const reloaded = new WebGptRequestManager({ workspace: workspace as never, storageDirectory: directory });
+    const legacyRetry = await reloaded.submit("same prompt", { projectId: "project-a", role: "PLANNER", targetChatUrl: internal }, "alias-key");
+    assert.equal(legacyRetry.requestId, first.requestId);
+    await assert.rejects(() => reloaded.submit("same prompt", { projectId: "project-a", role: "PLANNER", targetChatUrl: "https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9320/c/alias-chat" }, "alias-key"), { code: "IDEMPOTENCY_CONFLICT" });
+    assert.equal(workspace.submitCount, 0);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

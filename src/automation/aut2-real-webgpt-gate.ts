@@ -4,6 +4,7 @@ import { createRequirementWebGptAdapter, type RequirementResponseDiagnosticEvent
 import { RequirementAutomationService, type RequirementDraftResult } from "./requirement-service.ts";
 import { REQUIREMENT_ROLE, type RequirementChatBinding } from "./requirement-webgpt-contract.ts";
 import type { AutomationStore } from "./store.ts";
+import { roleChatUrlsEquivalent } from "../shared/chat-url-identity.ts";
 
 const SYNTHETIC_GOAL = "创建一个本地小型命令行示例程序，输入两个整数并输出它们的和。";
 const MAX_REAL_ALIGNMENT_REQUESTS = 3;
@@ -235,7 +236,7 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
     const initialBinding = await options.roleSession.status(webgptProjectId, REQUIREMENT_ROLE);
     originalBinding = { ...options.setupContext.originalBinding };
     if (initialBinding.status !== "BOUND" || !initialBinding.chatUrl) throw gateError("REQUIREMENT_ROLE_NOT_BOUND", "The explicit REQUIREMENT Role is not BOUND.");
-    if (initialBinding.chatUrl !== options.setupContext.setupChatRef) throw gateError("SETUP_ROLE_BINDING_MISMATCH", "The REQUIREMENT Role is not bound to the materialized setup Chat.");
+    if (!roleChatUrlsEquivalent(initialBinding.chatUrl, options.setupContext.setupChatRef)) throw gateError("SETUP_ROLE_BINDING_MISMATCH", "The REQUIREMENT Role is not bound to the materialized setup Chat.");
     setupStatus = "PASS_REAL_SETUP";
     binding = { projectId: webgptProjectId, role: REQUIREMENT_ROLE, chatRef: initialBinding.chatUrl };
     await options.roleSession.open(webgptProjectId, REQUIREMENT_ROLE);
@@ -429,7 +430,7 @@ export async function runAut2RealWebGptGate(options: Aut2RealWebGptGateOptions):
     }
   }
 
-  const bindingRestored = Boolean(originalBinding && finalBinding && originalBinding.status === finalBinding.status && originalBinding.chatUrl === finalBinding.chatUrl);
+  const bindingRestored = Boolean(originalBinding && finalBinding && originalBinding.status === finalBinding.status && roleChatUrlsEquivalent(originalBinding.chatUrl, finalBinding.chatUrl));
   if (!bindingRestored) errors.push({ code: "REQUIREMENT_BINDING_NOT_RESTORED", message: "The original REQUIREMENT binding did not remain unchanged." });
   attemptedRealRequests = options.setupContext.setupPromptCount + realPromptBudget.used;
   const lastResponseDiagnostic = responseDiagnostics[responseDiagnostics.length - 1] ?? null;

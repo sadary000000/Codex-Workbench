@@ -19,6 +19,7 @@ import {
 } from "./planner-provider-integration.ts";
 import { AutomationStore } from "./store.ts";
 import type { PlanValidationResult, PlanValidationStatus } from "./planner-validator.ts";
+import { normalizeRoleChatUrl, roleChatUrlsEquivalent } from "../shared/chat-url-identity.ts";
 const STAGE = "STAGE-K1-D";
 const PLANNER_ROLE = "PLANNER" as const;
 const POLICY_VERSION_ID = "stage-k1-d-policy-v1";
@@ -285,20 +286,15 @@ function stringField(value: unknown, key: string): string | null {
   return typeof raw === "string" && raw.trim() ? raw.trim() : null;
 }
 
-function canonicalChatIdentity(value: string): string | null {
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "https:" || parsed.hostname !== "chatgpt.com") return null;
-    return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "") || "/"}`;
-  } catch {
-    return null;
-  }
-}
-
 function chatIdentityMatches(record: SmokeRequestRecord | null): boolean {
   if (!record?.lastKnownPageState?.url) return false;
   const target = stringField(record, ["target", "Chat", "Url"].join(""));
-  return target !== null && canonicalChatIdentity(target) === canonicalChatIdentity(record.lastKnownPageState.url);
+  if (!target) return false;
+  try {
+    return roleChatUrlsEquivalent(normalizeRoleChatUrl(target), normalizeRoleChatUrl(record.lastKnownPageState.url));
+  } catch {
+    return false;
+  }
 }
 
 function extractChatUrl(value: unknown): string | null {

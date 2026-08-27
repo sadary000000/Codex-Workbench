@@ -54,6 +54,16 @@ test("a correct identity with unhydrated history waits without claiming a result
   assert.equal(readiness.historyReady, false);
 });
 
+test("GPT-scoped and standard Chat routes for the same conversation are equivalent", () => {
+  const readiness = resolveWebGptTargetReadiness(input({
+    expectedChatUrl: "https://chatgpt.com/c/target",
+    actualChatUrl: "https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workbench/c/target",
+    observerExpectedChatUrl: "https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315/c/target",
+  }));
+  assert.equal(readiness.state, "READY");
+  assert.equal(readiness.identityReady, true);
+});
+
 test("the global home composer without a canonical Chat identity waits during SPA navigation", () => {
   const readiness = resolveWebGptTargetReadiness(input({ actualChatUrl: null, onChatPage: true, historyReady: false }));
   assert.equal(readiness.state, "WAITING_IDENTITY_READY");

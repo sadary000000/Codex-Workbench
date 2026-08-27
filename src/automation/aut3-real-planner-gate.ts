@@ -4,6 +4,7 @@ import { PlannerAutomationService, PlannerServiceError } from "./planner-service
 import { createPlannerWebGptAdapter, type PlannerRoleBindingPort, type PlannerRequestObservationPort } from "./planner-webgpt-adapter.ts";
 import { PLANNER_ROLE, type PlannerEnvelope } from "./planner-contract.ts";
 import type { AutomationStore } from "./store.ts";
+import { roleChatUrlsEquivalent } from "../shared/chat-url-identity.ts";
 
 export interface Aut3RealPlannerGateInput {
   store: AutomationStore;
@@ -191,7 +192,7 @@ export async function runAut3RealPlannerGate(input: Aut3RealPlannerGateInput): P
     const allCurrentStepsPersisted = stepSpecs.length === first.envelope.payload.currentStage.steps.length;
     const exactRequirementBinding = plan.requirementVersionId === requirement.requirementVersionId && plan.requirementPayloadSha256 === requirement.payloadSha256 && projectAfter?.activeRequirementVersionId === requirement.requirementVersionId;
     const unchangedRole = JSON.stringify(bindingEvidence(requirementBefore)) === JSON.stringify(bindingEvidence(requirementAfter)) && JSON.stringify(bindingEvidence(reviewerBefore)) === JSON.stringify(bindingEvidence(reviewerAfter));
-    evidence.plannerBinding = { before: bindingEvidence(plannerBefore), after: bindingEvidence(plannerAfter), exact: plannerAfter.role === PLANNER_ROLE && plannerAfter.projectId === input.webgptProjectId && plannerAfter.chatUrl === plannerBefore.chatUrl };
+    evidence.plannerBinding = { before: bindingEvidence(plannerBefore), after: bindingEvidence(plannerAfter), exact: plannerAfter.role === PLANNER_ROLE && plannerAfter.projectId === input.webgptProjectId && roleChatUrlsEquivalent(plannerAfter.chatUrl, plannerBefore.chatUrl) };
     evidence.roleProtection = { requirementBefore: bindingEvidence(requirementBefore), requirementAfter: bindingEvidence(requirementAfter), reviewerBefore: bindingEvidence(reviewerBefore), reviewerAfter: bindingEvidence(reviewerAfter), unchanged: unchangedRole };
     evidence.realPlanner = {
       status: "PASS_REAL",

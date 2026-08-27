@@ -1,5 +1,6 @@
 import type { WebGptTargetReadiness, WebGptTargetReadinessState } from "../types.ts";
 import type { WebGptNetworkCandidateState } from "../network/network-types.ts";
+import { roleChatUrlsEquivalent } from "../../../shared/chat-url-identity.ts";
 
 export interface WebGptTargetReadinessInput {
   expectedChatUrl: string;
@@ -26,9 +27,9 @@ export function resolveWebGptTargetReadiness(input: WebGptTargetReadinessInput):
   // history have hydrated.  Treat that state as waiting; reserve mismatch for
   // a known, different Chat identity so A/B safety remains fail-closed.
   const pageIdentityKnown = input.actualChatUrl !== null;
-  const pageIdentityMatches = pageIdentityKnown && (input.identityMatches ?? input.actualChatUrl === input.expectedChatUrl);
+  const pageIdentityMatches = pageIdentityKnown && (input.identityMatches ?? roleChatUrlsEquivalent(input.actualChatUrl!, input.expectedChatUrl));
   const observerIdentityMatches = input.observerIdentityMatches
-    ?? (input.observerExpectedChatUrl !== null && input.observerExpectedChatUrl === input.expectedChatUrl);
+    ?? (input.observerExpectedChatUrl !== null && roleChatUrlsEquivalent(input.observerExpectedChatUrl, input.expectedChatUrl));
   const observerUncertain = UNCERTAIN_OBSERVER_STATES.has(input.observerCandidateState);
   const observerReady = input.observerReady
     ?? (input.observerExpectedChatUrl !== null && observerIdentityMatches && !observerUncertain);

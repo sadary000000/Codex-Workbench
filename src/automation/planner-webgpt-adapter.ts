@@ -6,6 +6,7 @@ import {
   validatePlannerEnvelope,
 } from "./planner-contract.ts";
 import { PlannerServiceError, type PlannerSubmission, type PlannerWebGptService } from "./planner-service.ts";
+import { roleChatUrlsEquivalent } from "../shared/chat-url-identity.ts";
 
 export interface PlannerRuntimeBinding {
   readonly projectId: string;
@@ -62,7 +63,7 @@ export class PlannerWebGptAdapter implements PlannerWebGptService {
     this.assertBinding(binding, request.projectId);
     const idempotencyKey = plannerTransportIdempotencyKey(request);
     const accepted = await this.runtime.submitPlanner({ projectId: request.projectId, prompt: buildPlannerPrompt(request), idempotencyKey });
-    if (!accepted.requestId || accepted.targetChatUrl !== binding.chatUrl) throw new PlannerServiceError("REQUEST_CONFLICT", "Planner runtime accepted a request without the exact bound PLANNER Chat.");
+    if (!accepted.requestId || !roleChatUrlsEquivalent(accepted.targetChatUrl, binding.chatUrl)) throw new PlannerServiceError("REQUEST_CONFLICT", "Planner runtime accepted a request without the exact bound PLANNER Chat.");
     const waited = await this.runtime.waitRequest(accepted.requestId, this.timeoutMs);
     if (waited.timedOut || waited.state !== "COMPLETED") throw new PlannerServiceError("PLANNER_INVALID", `PLANNER request did not complete: ${waited.state}.`, {
       requestId: accepted.requestId,

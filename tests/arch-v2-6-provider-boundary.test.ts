@@ -379,6 +379,28 @@ test("WebGPT provider observation rejects a request journal last observed on ano
   await assert.rejects(() => port.observe({ providerRequestRef: record.requestId }), /WEBGPT_TARGET_CHAT_MISMATCH/);
 });
 
+test("WebGPT provider observation accepts a GPT route alias for the same Chat", async () => {
+  const chatId = "provider-owned-alias";
+  const base = requestRecord("COMPLETED");
+  const targetChatUrl = `https://chatgpt.com/g/g-6a85db5dd9c4819181028671e2fb9315-workbench/c/${chatId}`;
+  const observedChatUrl = `https://chatgpt.com/g/g-p-6a85db5dd9c4819181028671e2fb9315/c/${chatId}`;
+  const record = {
+    ...base,
+    targetChatUrl,
+    chatUrl: observedChatUrl,
+    lastKnownPageState: { ...base.lastKnownPageState!, url: observedChatUrl },
+  };
+  const port = new WebGptAutomationProviderPort({
+    roleSession: { status: async () => ({ status: "BOUND", chatUrl: targetChatUrl }), submit: async () => record } as never,
+    requestManager: { requestStatus: async () => record, reconcileRequest: async () => record } as never,
+    resolveInputRef: async () => "unused",
+    readRuntimeCapability: async () => runtimeCapability(),
+    policyAuthority: policyAuthority(),
+  });
+  const observed = await port.observe({ providerRequestRef: record.requestId });
+  assert.equal(observed.outcomeCertainty, "TERMINAL_CONFIRMED");
+});
+
 test("WebGPT provider observation fails closed when page identity evidence is absent", async () => {
   const record = { ...requestRecord("RECOVERY_REQUIRED"), chatUrl: "", lastKnownPageState: null };
   const port = new WebGptAutomationProviderPort({

@@ -16,6 +16,7 @@ import {
   type RequirementResponseFailureCategory,
 } from "./requirement-webgpt-contract.ts";
 import type { PolicyBudgetAuthority } from "./effective-policy.ts";
+import { normalizeRoleChatUrl, roleChatUrlsEquivalent } from "../shared/chat-url-identity.ts";
 
 export const MAX_REQUIREMENT_REPAIR_PROMPTS = 3 as const;
 
@@ -339,14 +340,28 @@ export function createRequirementWebGptAdapter(dependencies: {
 }
 
 function assertExactBinding(binding: RequirementWebGptRuntimeBinding, expectedChatUrl: string, expectedProjectId: string): void {
-  if (binding.projectId !== expectedProjectId || binding.role !== REQUIREMENT_ROLE || binding.status !== "BOUND" || binding.chatUrl !== expectedChatUrl) {
+  if (binding.projectId !== expectedProjectId || binding.role !== REQUIREMENT_ROLE || binding.status !== "BOUND" || !requirementTargetMatches(binding.chatUrl, expectedChatUrl)) {
     throw codedError("TARGET_BINDING_MISMATCH", "The persisted REQUIREMENT Role binding does not match the request target.");
   }
 }
 
 function assertAcceptedTarget(accepted: RequirementWebGptAcceptedRequest, expectedChatUrl: string): void {
-  if (!accepted.requestId || accepted.targetChatUrl !== expectedChatUrl) {
+  if (!accepted.requestId || !requirementTargetMatches(accepted.targetChatUrl, expectedChatUrl)) {
     throw codedError("TARGET_BINDING_MISMATCH", "WebGPT accepted a request without the exact bound Chat target.");
+  }
+}
+
+function requirementTargetMatches(actual: string | null, expected: string): boolean {
+  if (!actual) return false;
+  try {
+    normalizeRoleChatUrl(actual);
+    normalizeRoleChatUrl(expected);
+    return roleChatUrlsEquivalent(actual, expected);
+  } catch {
+    // REQUIREMENT chatRef is deliberately opaque in the provider-neutral
+    // contract. Preserve exact matching for non-URL references used by paused
+    // compatibility callers and isolated tests.
+    return actual === expected;
   }
 }
 

@@ -14,6 +14,7 @@ import type {
   ResourceClaim,
 } from "./types.ts";
 import { createEvidenceCorrelation } from "./evidence-correlation.ts";
+import { normalizeRoleChatUrl, roleChatUrlsEquivalent } from "../shared/chat-url-identity.ts";
 
 const WEBGPT_PROVIDER = "WEBGPT" as const;
 
@@ -320,8 +321,8 @@ export class WebGptExternalActionBridge {
       || !actionTarget
       || !inputTarget
       || !recordTarget
-      || actionTarget !== inputTarget
-      || recordTarget !== actionTarget
+       || !targetIdentityMatches(actionTarget, inputTarget)
+       || !targetIdentityMatches(recordTarget, actionTarget)
       || requestRecord.idempotencyKey !== dispatchFacts.action.idempotencyKey
       || requestRecord.semanticSha256 !== dispatchFacts.action.semanticSha256) {
       throw new WebGptExternalActionError("REATTACH_REQUEST_MISMATCH", "The classifier reattach target is not the same idempotent request and semantic action.", { requestId, intentId: intent.intentId });
@@ -454,7 +455,7 @@ export class WebGptExternalActionBridge {
     if (providerRequest.provider !== WEBGPT_PROVIDER) mismatches.push("providerIdentity");
     if (!providerRequest.providerRequestId || observation.providerRequestId !== providerRequest.providerRequestId) mismatches.push("providerRequestId");
     if (observation.provider !== providerRequest.provider || observation.provider !== WEBGPT_PROVIDER) mismatches.push("providerIdentity");
-    if (!expectedTarget || !providerTarget || expectedTarget !== providerTarget || !observationTarget || observationTarget !== providerTarget) mismatches.push("targetIdentity");
+    if (!targetIdentityMatches(expectedTarget, providerTarget) || !targetIdentityMatches(observationTarget, providerTarget)) mismatches.push("targetIdentity");
     if (input.projectId !== intent.projectId) mismatches.push("projectIdentity");
     if (!persistedAttempt || persistedAttempt.intentId !== intent.intentId || persistedAttempt.providerRequestRef !== providerRequestRef) mismatches.push("attemptExternalRef");
     if (!providerRef || providerRef.kind !== "WEBGPT_PROVIDER_REQUEST" || providerRef.provider !== providerRequest.provider || providerRef.opaqueId !== providerRequest.providerRequestId) mismatches.push("externalRefCorrelation");
@@ -563,7 +564,11 @@ function providerObservationCorrelationError(error: unknown): WebGptExternalActi
 
 function canonicalTarget(value: string | null | undefined): string | null {
   if (!value?.trim()) return null;
-  return value.trim();
+  try { return normalizeRoleChatUrl(value); } catch { return null; }
+}
+
+function targetIdentityMatches(left: string | null, right: string | null): boolean {
+  return left !== null && right !== null && roleChatUrlsEquivalent(left, right);
 }
 
 /**

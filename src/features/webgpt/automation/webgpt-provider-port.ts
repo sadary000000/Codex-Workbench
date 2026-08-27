@@ -20,6 +20,7 @@ import type {
 } from "../../../automation/adapters.ts";
 import type { WebGptRole, WebGptRequestRecord, WebGptRequestState } from "../types.ts";
 import { normalizeRoleChatUrl, normalizeWebGptRole } from "../runtime/webgpt-role-session-registry.ts";
+import { roleChatUrlsEquivalent } from "../../../shared/chat-url-identity.ts";
 import type { WebGptRoleSessionService } from "../runtime/webgpt-role-session-service.ts";
 import type { WebGptRequestManager } from "../runtime/webgpt-request-manager.ts";
 
@@ -167,7 +168,7 @@ function assertObservedTargetIdentity(record: WebGptRequestRecord): void {
   } catch {
     throw new Error("WEBGPT_TARGET_CHAT_MISMATCH");
   }
-  if (observed !== expected) throw new Error("WEBGPT_TARGET_CHAT_MISMATCH");
+  if (!roleChatUrlsEquivalent(observed, expected)) throw new Error("WEBGPT_TARGET_CHAT_MISMATCH");
   if (record.lastKnownPageState && (!record.lastKnownPageState.onChatPage || record.lastKnownPageState.loginRequired)) {
     throw new Error("WEBGPT_TARGET_CHAT_MISMATCH");
   }
@@ -348,7 +349,7 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
 
   private async assertCurrentRoleTarget(record: Pick<WebGptRequestRecord, "projectId" | "role" | "targetChatUrl">, target: { projectId: string; role: WebGptRole }): Promise<void> {
     const binding = await this.roleSession.status(target.projectId, target.role);
-    if (binding.status !== "BOUND" || !binding.chatUrl || !record.targetChatUrl || normalizeRoleChatUrl(binding.chatUrl) !== normalizeRoleChatUrl(record.targetChatUrl)) {
+    if (binding.status !== "BOUND" || !binding.chatUrl || !record.targetChatUrl || !roleChatUrlsEquivalent(binding.chatUrl, record.targetChatUrl)) {
       throw new Error("PROVIDER_TARGET_CORRELATION_MISMATCH");
     }
   }
