@@ -8,13 +8,18 @@ review_package_source_commit: 62e8cbb9691c04a6f2a7e64c59bdf1fa458fb0aa
 review_documentation_base_commit: aa98bbb
 local_result: BLOCKED_EXTERNAL_TARGET
 smoke_result: BLOCKED
-gate: PENDING_GPT_REVIEW
-status: TARGET_RESOURCE_UNAVAILABLE
+submission: SENT
+review: REVIEW_RECEIVED
+gate: BLOCKED
+status: PARTIAL_NOT_FROZEN
 v1_frozen_core_changed: NO
 planner_prompts: 0/1
 duplicate_prompts: 0
 blind_resend: false
 new_chat: 0
+submission_id: 89638c8d44ceaa2e7e0bf1fb2cfab7edde8743a20a8e4d77ae27be8db2f795e8
+submission_sent_at: 2026-08-27T03:32:14.941Z
+review_received_at: 2026-08-27T03:34:20.908Z
 ```
 
 ## Executive summary
@@ -88,6 +93,36 @@ new_chat: 0
 The local result is `BLOCKED_EXTERNAL_TARGET`, not a successful Planner
 roundtrip. K1-B validation and Plan persistence/restart are consequently not
 claimed as real-smoke results.
+
+## GPT review outcome
+
+The independent Submission Runner sent this package to the fixed review
+conversation and verified the marker in the target conversation. The wait
+operation received a stable assistant reply and parsed the final decision
+contract:
+
+```yaml
+submission: SENT
+submission_id: 89638c8d44ceaa2e7e0bf1fb2cfab7edde8743a20a8e4d77ae27be8db2f795e8
+sent_at: 2026-08-27T03:32:14.941Z
+review: REVIEW_RECEIVED
+gate: BLOCKED
+status: PARTIAL_NOT_FROZEN
+parse_valid: true
+decision_valid: true
+new_review_submission: 0
+duplicate_send: 0
+```
+
+GPT's decision is that the identity/readiness code is now fail-closed and the
+remaining blocker is external: the persisted PLANNER Chat cannot be proven to
+remain reachable in the current ChatGPT session. GPT explicitly requires a
+new, existing, stable, authorized Planner Chat before any rebind or the one
+remaining real Planner prompt. This stage therefore stops here; no new Chat,
+history search, fallback, or blind retry is allowed.
+
+The machine-readable wait result is
+`STAGE-K1-D-FIX-ROUND-2-REVIEW-WAIT-RESULT.json`.
 
 ## Automated verification
 
