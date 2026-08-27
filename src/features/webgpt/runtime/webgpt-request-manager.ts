@@ -489,7 +489,7 @@ export class WebGptRequestManager {
     for (let attempt = 1; attempt <= TARGET_REOPEN_ATTEMPTS; attempt += 1) {
       try {
         await this.workspace.openChatForAutomation(target);
-        const probe = await this.waitForTargetPageHydration(await this.workspace.getPageProbe());
+        const probe = await this.waitForTargetPageHydration(target, await this.workspace.getPageProbe());
         record.chatUrl = probe.page.url;
         record.lastKnownPageState = { ...probe.page };
         await this.persist();
@@ -720,7 +720,12 @@ export class WebGptRequestManager {
           await this.workspace.openChatForAutomation(record.targetChatUrl);
           probe = await this.workspace.getPageProbe();
         }
-        probe = await this.waitForTargetPageHydration(probe);
+        // A blank Planner Chat is a valid send target.  Waiting for a prior
+        // message as a generic "hydration" signal can keep the browser on a
+        // transient route long enough for ChatGPT to redirect it home.  The
+        // strict identity/composer checks immediately below remain mandatory;
+        // only the history-count wait is relaxed for the planning-only role.
+        probe = await this.waitForTargetPageHydration(record.targetChatUrl, probe, record.role === "PLANNER");
         // Revalidate the exact target immediately before persisting the
         // SUBMITTING state.  `openChatForAutomation` already performs this
         // check, but ChatGPT's SPA may redirect after that method returns.
@@ -856,15 +861,33 @@ export class WebGptRequestManager {
     }
   }
 
-  private async waitForTargetPageHydration(initial: WebGptPageProbe): Promise<WebGptPageProbe> {
-    if (initial.page.userCount > 0 || initial.page.assistantCount > 0 || initial.page.generating) return initial;
+  private async waitForTargetPageHydration(expectedChatUrl: string | null, initial: WebGptPageProbe, allowEmpty = false): Promise<WebGptPageProbe> {
+    const startedAt = Date.now();
+    const targetAwareWorkspace = this.workspace as WebGptWorkspace & {
+      recordTargetHydration?: (expectedChatUrl: string | null, probe: WebGptPageProbe, details?: Readonly<Record<string, string | number | boolean | null>>) => void;
+    };
+    const isHydrated = (probe: WebGptPageProbe): boolean => probe.page.userCount > 0 || probe.page.assistantCount > 0 || probe.page.generating;
+    const recordHydration = (probe: WebGptPageProbe, phase: string): void => {
+      targetAwareWorkspace.recordTargetHydration?.(expectedChatUrl, probe, {
+        phase,
+        hydrated: isHydrated(probe),
+        elapsedMs: Date.now() - startedAt,
+        userCount: probe.page.userCount,
+        assistantCount: probe.page.assistantCount,
+        generating: probe.page.generating,
+      });
+    };
+    recordHydration(initial, allowEmpty ? "hydration_initial_empty_allowed" : "hydration_initial");
+    if (isHydrated(initial) || allowEmpty) return initial;
     const deadline = Date.now() + TARGET_PAGE_HYDRATION_TIMEOUT_MS;
     let probe = initial;
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 250));
       probe = await this.workspace.getPageProbe();
-      if (probe.page.userCount > 0 || probe.page.assistantCount > 0 || probe.page.generating) return probe;
+      recordHydration(probe, "hydration_sample");
+      if (isHydrated(probe)) return probe;
     }
+    recordHydration(probe, "hydration_timeout");
     return probe;
   }
 

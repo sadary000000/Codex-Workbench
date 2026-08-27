@@ -47,6 +47,9 @@ export interface StageK1DRealPlannerSmokeOptions {
   readonly returnAutomationControl: () => Promise<unknown>;
   readonly openWorkspace: () => Promise<unknown>;
   readonly openPlannerTarget: () => Promise<unknown>;
+  readonly recordTargetBinding?: (expectedChatUrl: string | null, details?: Readonly<Record<string, string | number | boolean | null>>) => void;
+  /** Sanitized WebGPT target lifecycle trace; must contain no raw page data. */
+  readonly getTargetIdentityTrace?: () => readonly Readonly<Record<string, unknown>>[];
 }
 
 export interface StageK1DEvidence {
@@ -84,6 +87,7 @@ export interface StageK1DEvidence {
   };
   readonly actionCorrelation: Readonly<Record<string, unknown>>;
   readonly providerResult: Readonly<Record<string, unknown>>;
+  readonly targetLifecycle: readonly Readonly<Record<string, unknown>>[];
   readonly persistence: Readonly<Record<string, unknown>>;
   readonly safety: {
     readonly executedSteps: false;
@@ -193,10 +197,12 @@ function summarizeRequest(record: SmokeRequestRecord | null): RequestSummary | n
   };
 }
 
-function resultStatus(result: PlannerIntegrationResult | null): StageK1DEvidence["result"] {
+function resultStatus(result: PlannerIntegrationResult | null, request: SmokeRequestRecord | null): StageK1DEvidence["result"] {
   if (result?.status === "PLAN_READY") return "PASS_REAL";
   const code = result?.errorCode ?? "";
-  if (code.startsWith("WEBGPT_LOGIN") || code.includes("UNAVAILABLE") || code.includes("AUTH") || code.includes("TARGET_UNAVAILABLE")) return "BLOCKED";
+  const requestCode = request?.error?.code ?? "";
+  if (code.startsWith("WEBGPT_LOGIN") || code.includes("UNAVAILABLE") || code.includes("AUTH") || code.includes("TARGET_UNAVAILABLE")
+    || requestCode === "WAITING_IDENTITY_READY" || requestCode === "WEBGPT_TARGET_CHAT_MISMATCH" || requestCode === "ROLE_CHAT_MISMATCH" || requestCode === "WEBGPT_LOGIN_REQUIRED") return "BLOCKED";
   return result ? "FIX_REQUIRED" : "BLOCKED";
 }
 
@@ -333,6 +339,8 @@ export async function runStageK1DRealPlannerSmoke(options: StageK1DRealPlannerSm
   let statusQuery: PlannerStatusResult | null = null;
   let resultQuery: PlannerResultQuery | null = null;
   let actionCorrelation: Readonly<Record<string, unknown>> = {};
+  let targetLifecycle: readonly Readonly<Record<string, unknown>>[] = [];
+  let bindingLifecycle: readonly Readonly<Record<string, unknown>>[] = [];
   let persistence: Readonly<Record<string, unknown>> = { attempted: false, reopened: false };
   let error: Readonly<Record<string, unknown>> | null = null;
   let promptForRedaction = "";
@@ -354,6 +362,19 @@ export async function runStageK1DRealPlannerSmoke(options: StageK1DRealPlannerSm
     boundChatUrlSha256 = hash(extractChatUrl(opened));
     targetResolution = await options.provider.resolveTarget({ workflowRole: PLANNER_ROLE, providerTargetRef });
     capabilities = await options.provider.capabilities();
+    bindingLifecycle = [{
+      stage: "TARGET_BINDING_RESOLVED",
+      at: now(),
+      providerTargetRefSha256: hash(providerTargetRef),
+      boundChatUrlSha256,
+      resolutionStatus: targetResolution.status,
+      capability: targetResolution.capability ?? null,
+    }];
+    options.recordTargetBinding?.(extractChatUrl(opened), {
+      phase: "planner_binding_resolved",
+      resolutionStatus: targetResolution.status,
+      capability: targetResolution.capability ?? null,
+    });
     if (targetResolution.status !== "AVAILABLE" || !capabilities.some((item) => item.code === "AVAILABLE")) {
       throw new Error(`K1D_TARGET_NOT_READY:${targetResolution.capability ?? "UNKNOWN"}`);
     }
@@ -459,11 +480,15 @@ export async function runStageK1DRealPlannerSmoke(options: StageK1DRealPlannerSm
   } catch (caught) {
     error = boundedError(caught, [promptForRedaction]);
   } finally {
+    targetLifecycle = [
+      ...bindingLifecycle,
+      ...(options.getTargetIdentityTrace?.().map((item) => ({ ...item })) ?? []),
+    ];
     if (inputRegistration) options.inputRefs.release(inputRegistration.inputRef, idempotencyLabel);
     if (!storeClosed) await options.store.close().catch(() => undefined);
   }
 
-  const observedResult = resultStatus(result);
+  const observedResult = resultStatus(result, requestAfter);
   const promptActuallySubmitted = requestAfter?.submittedAt !== null && requestAfter?.submittedAt !== undefined;
   const exactSinglePrompt = requestBefore === null && promptActuallySubmitted;
   const correlationClosed = actionCorrelation.targetIdentityMatch === true
@@ -527,6 +552,7 @@ export async function runStageK1DRealPlannerSmoke(options: StageK1DRealPlannerSm
       statusQuery: statusQuery ? { ...statusQuery } : null,
       resultQuery: resultQuery ? { actionIntentId: resultQuery.actionIntentId, actionAttemptId: resultQuery.actionAttemptId, receiptStatus: resultQuery.receipt?.status ?? null, planVersionId: resultQuery.planVersion?.planVersionId ?? null } : null,
     },
+    targetLifecycle,
     persistence,
     safety: {
       executedSteps: false,

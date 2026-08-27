@@ -44,6 +44,35 @@ type ProjectOperationContext = {
   remainingMs: () => number;
 };
 
+export type WebGptTargetIdentityTraceStage =
+  | "TARGET_BINDING_RESOLVED"
+  | "TARGET_NAVIGATION_START"
+  | "TARGET_NAVIGATION_SETTLED"
+  | "IDENTITY_SAMPLE"
+  | "HYDRATION_SAMPLE"
+  | "IDENTITY_QUIET_CONFIRMED"
+  | "IDENTITY_STABLE_MISMATCH"
+  | "IDENTITY_WAIT_TIMEOUT"
+  | "COMPOSER_READY"
+  | "OBSERVER_EPOCH_PREPARED";
+
+export interface WebGptTargetIdentityTraceEvent {
+  readonly stage: WebGptTargetIdentityTraceStage;
+  readonly at: string;
+  readonly revision: number;
+  readonly expectedChatUrlSha256: string | null;
+  readonly electronUrlSha256: string | null;
+  readonly pageProbeUrlSha256: string | null;
+  readonly observerExpectedChatUrlSha256: string | null;
+  readonly observerCandidateState: string | null;
+  readonly loading: boolean | null;
+  readonly stateReady: boolean;
+  readonly onChatPage: boolean | null;
+  readonly composerFound: boolean | null;
+  readonly historyReady: boolean | null;
+  readonly details: Readonly<Record<string, string | number | boolean | null>>;
+}
+
 function initialPage(url = ""): WebGptPageState {
   return {
     url,
@@ -117,6 +146,12 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
   private pageStateRevision = 0;
   private lastProjectOperationTimeline: WebGptProjectOperationTimeline | null = null;
   private lastTargetReadiness: WebGptTargetReadiness | null = null;
+  /**
+   * Sanitized, bounded identity lifecycle evidence for the K1-D smoke.  This
+   * deliberately stores hashes and readiness booleans, never URLs or page
+   * content, so a failed target can be diagnosed without exporting Chat data.
+   */
+  private readonly targetIdentityTrace: WebGptTargetIdentityTraceEvent[] = [];
 
   constructor(options: WebGptWorkspaceOptions) {
     this.mainWindow = options.mainWindow;
@@ -210,6 +245,37 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
 
   private setError(message: string): void {
     this.patchState({ error: message, ready: false });
+  }
+
+  private recordTargetIdentityTrace(
+    stage: WebGptTargetIdentityTraceStage,
+    expectedChatUrl?: string | null,
+    probe?: WebGptPageProbe | WebGptPageState | null,
+    details: Readonly<Record<string, string | number | boolean | null>> = {},
+  ): void {
+    const page = probe && "page" in probe ? probe.page : probe;
+    let electronUrl: string | null = null;
+    try { electronUrl = this.view.webContents.getURL() || this.state.url || null; } catch { /* destroyed contents */ }
+    const observer = this.networkObserver.getDiagnostics();
+    let loading: boolean | null = null;
+    try { loading = this.view.webContents.isLoading(); } catch { /* destroyed contents */ }
+    this.targetIdentityTrace.push({
+      stage,
+      at: new Date().toISOString(),
+      revision: this.pageStateRevision,
+      expectedChatUrlSha256: expectedChatUrl ? createHash("sha256").update(expectedChatUrl, "utf8").digest("hex") : null,
+      electronUrlSha256: electronUrl ? createHash("sha256").update(electronUrl, "utf8").digest("hex") : null,
+      pageProbeUrlSha256: page?.url ? createHash("sha256").update(page.url, "utf8").digest("hex") : null,
+      observerExpectedChatUrlSha256: observer.expectedChatUrl ? createHash("sha256").update(observer.expectedChatUrl, "utf8").digest("hex") : null,
+      observerCandidateState: observer.candidateState ?? null,
+      loading,
+      stateReady: this.state.ready,
+      onChatPage: page?.onChatPage ?? null,
+      composerFound: page?.composerFound ?? null,
+      historyReady: page ? (page.userCount > 0 || page.assistantCount > 0 || page.generating) : null,
+      details,
+    });
+    if (this.targetIdentityTrace.length > 64) this.targetIdentityTrace.splice(0, this.targetIdentityTrace.length - 64);
   }
 
   private attach(): void {
@@ -465,14 +531,22 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
   async openChatForAutomation(url: string): Promise<WebGptState> {
     const epoch = this.requireAutomationEpoch();
     const targetChatUrl = normalizeRoleChatUrl(normalizeChatUrl(url));
+    this.targetIdentityTrace.length = 0;
+    this.recordTargetIdentityTrace("TARGET_NAVIGATION_START", targetChatUrl, null, { phase: "role_target_navigation" });
     this.setVisible(true);
     this.networkObserver.prepareForTarget(targetChatUrl, "target_navigation_started");
     await this.load(normalizeChatUrl(url));
+    this.recordTargetIdentityTrace("TARGET_NAVIGATION_SETTLED", targetChatUrl, null, { phase: "loadURL_settled" });
     // Electron navigation events invalidate the previous observer epoch.  Set
     // the explicit target boundary again after navigation so a stale previous
     // candidate can never make the new page look ready or mismatched.
     this.networkObserver.prepareForTarget(targetChatUrl, "target_navigation_settled");
-    await this.waitForTargetChatIdentity(targetChatUrl);
+    try {
+      await this.waitForTargetChatIdentity(targetChatUrl);
+    } catch (error) {
+      this.recordTargetIdentityTrace("IDENTITY_WAIT_TIMEOUT", targetChatUrl, null, { phase: "initial_identity_window", errorCode: typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "UNKNOWN" });
+      throw error;
+    }
     // The page can emit a late SPA/navigation invalidation after the route is
     // already canonical.  That invalidation describes the previous network
     // epoch, not the historical Chat identity we are about to read.  Start a
@@ -481,17 +555,24 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
     // for evidence that the page is another Chat.
     this.networkObserver.prepareForTarget(targetChatUrl, "target_identity_converged");
     await this.waitForComposer();
+    this.recordTargetIdentityTrace("COMPOSER_READY", targetChatUrl, this.state.page, { phase: "composer_ready" });
     await this.assertTargetChatIdentity(targetChatUrl);
     // ChatGPT can emit a transient canonical /c/:id route and then redirect
     // back to the home composer after the SPA finishes resolving the Chat.
     // Require a second bounded identity window after Composer readiness so the
     // caller never treats that transient route as a sendable target.
-    await this.waitForTargetChatIdentity(targetChatUrl, 10_000);
+    try {
+      await this.waitForTargetChatIdentity(targetChatUrl, 10_000);
+    } catch (error) {
+      this.recordTargetIdentityTrace("IDENTITY_WAIT_TIMEOUT", targetChatUrl, this.state.page, { phase: "post_composer_identity_window", errorCode: typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "UNKNOWN" });
+      throw error;
+    }
     // A late SPA navigation notification may arrive after the route and
     // Composer have already converged.  Establish the observer epoch as the
     // final operation before returning so the next history read sees the
     // current target context, never a prior request's STALE candidate.
     this.networkObserver.prepareForTarget(targetChatUrl, "target_identity_converged");
+    this.recordTargetIdentityTrace("OBSERVER_EPOCH_PREPARED", targetChatUrl, this.state.page, { phase: "final_identity_boundary" });
     this.assertAutomationEpoch(epoch);
     return this.state;
   }
@@ -543,11 +624,21 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
       lastProbe = await this.getPageProbe();
       lastActualChatUrl = await this.readCanonicalChatIdentity(lastProbe);
       const probeChatUrl = this.readPageProbeChatIdentity(lastProbe);
+      const electronMatches = roleChatUrlsEquivalent(lastActualChatUrl ?? "", target);
+      const probeMatches = roleChatUrlsEquivalent(probeChatUrl ?? "", target);
+      this.recordTargetIdentityTrace("IDENTITY_SAMPLE", target, lastProbe, {
+        phase: "identity_sample",
+        electronIdentityMatches: electronMatches,
+        pageProbeIdentityMatches: probeMatches,
+        convergedForMs: convergedSince === null ? 0 : Date.now() - convergedSince,
+        actualChatUrlSha256: lastActualChatUrl ? createHash("sha256").update(lastActualChatUrl, "utf8").digest("hex") : null,
+        probeChatUrlSha256: probeChatUrl ? createHash("sha256").update(probeChatUrl, "utf8").digest("hex") : null,
+      });
       // Require both Electron's navigation URL and the page probe's own URL
       // to agree for two consecutive samples.  This closes the brief SPA
       // window where the browser has moved to the requested route but the DOM
       // probe still describes the previous page.
-      if (roleChatUrlsEquivalent(lastActualChatUrl ?? "", target) && roleChatUrlsEquivalent(probeChatUrl ?? "", target) && lastProbe.page.onChatPage) {
+      if (electronMatches && probeMatches && lastProbe.page.onChatPage) {
         convergedSince ??= Date.now();
         // Do not return at the first two matching samples.  ChatGPT can emit
         // a transient /c/:id route and then settle back to the home composer;
@@ -559,7 +650,10 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
           const finalProbeUrl = this.readPageProbeChatIdentity(finalProbe);
           if (roleChatUrlsEquivalent(finalActual ?? "", target)
             && roleChatUrlsEquivalent(finalProbeUrl ?? "", target)
-            && finalProbe.page.onChatPage) return finalProbe;
+            && finalProbe.page.onChatPage) {
+            this.recordTargetIdentityTrace("IDENTITY_QUIET_CONFIRMED", target, finalProbe, { phase: "quiet_window_confirmed", quietMs: Date.now() - convergedSince });
+            return finalProbe;
+          }
           convergedSince = null;
         }
       } else {
@@ -570,6 +664,7 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
       if (lastActualChatUrl && !roleChatUrlsEquivalent(lastActualChatUrl, target) && !loading) {
         differentChatSince ??= Date.now();
         if (Date.now() - differentChatSince >= mismatchGraceMs) {
+          this.recordTargetIdentityTrace("IDENTITY_STABLE_MISMATCH", target, lastProbe, { phase: "stable_different_chat", actualChatUrlSha256: createHash("sha256").update(lastActualChatUrl, "utf8").digest("hex") });
           throw this.codedError("WEBGPT_TARGET_CHAT_MISMATCH", "目标 Chat 导航已稳定落到另一个 Chat，已拒绝继续。", {
             expectedChatUrl: target,
             actualChatUrl: lastActualChatUrl,
@@ -583,6 +678,12 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
     }
 
     const readiness = this.evaluateTargetReadiness(target, lastProbe ?? await this.getPageProbe());
+    this.recordTargetIdentityTrace("IDENTITY_WAIT_TIMEOUT", target, lastProbe, {
+      phase: "identity_window_timeout",
+      actualChatUrlSha256: lastActualChatUrl ? createHash("sha256").update(lastActualChatUrl, "utf8").digest("hex") : null,
+      readinessState: readiness.state,
+      readinessReason: readiness.reason,
+    });
     throw this.codedError("WAITING_IDENTITY_READY", "目标 Chat 导航未在等待窗口内收敛，已拒绝使用首页或旧 Chat 继续。", {
       expectedChatUrl: target,
       actualChatUrl: lastActualChatUrl,
@@ -964,6 +1065,25 @@ export class WebGptWorkspace implements WebGptPublicService, ReviewSubmissionWor
     const probe = await this.readPageProbe();
     if (this.isCurrentPageProbe(revision, navigationUrl, probe)) this.applyPageProbe(probe);
     return probe;
+  }
+
+  getTargetIdentityTrace(): readonly WebGptTargetIdentityTraceEvent[] {
+    return this.targetIdentityTrace.map((event) => ({ ...event, details: { ...event.details } }));
+  }
+
+  recordTargetBinding(
+    expectedChatUrl: string | null,
+    details: Readonly<Record<string, string | number | boolean | null>> = {},
+  ): void {
+    this.recordTargetIdentityTrace("TARGET_BINDING_RESOLVED", expectedChatUrl, null, details);
+  }
+
+  recordTargetHydration(
+    expectedChatUrl: string | null,
+    probe: WebGptPageProbe,
+    details: Readonly<Record<string, string | number | boolean | null>> = {},
+  ): void {
+    this.recordTargetIdentityTrace("HYDRATION_SAMPLE", expectedChatUrl, probe, details);
   }
 
   async getTargetReadiness(expectedChatUrl: string): Promise<WebGptTargetReadiness> {
