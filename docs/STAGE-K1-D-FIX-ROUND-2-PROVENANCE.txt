@@ -12,4 +12,3 @@ submission_runner_changed=NO
 webgpt_page_logic_changed=NO
 raw_chat_content_included=NO
 credentials_or_tokens_included=NO
-

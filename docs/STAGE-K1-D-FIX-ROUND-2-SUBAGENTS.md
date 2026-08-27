@@ -32,4 +32,3 @@ Agent: Boyle (`01a0412b-50cb-7290-bbe6-4bc30a93665a`)
 Confirmed no false `SENT`, no wrong-target recovery, and no automatic second
 send. Required live target proof before consuming the single allowed Planner
 prompt. No files changed; no prompt sent.
-

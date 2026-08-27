@@ -22,4 +22,3 @@ The package contains no cookies, tokens, passwords, browser profile, raw
 requirement, raw prompt, private API traffic, or unrelated Chat content. The
 source changes do not alter Provider Port, Policy Authority, InputRef,
 Submission Runner, WebGPT page behavior, or V1 Frozen Core.
-

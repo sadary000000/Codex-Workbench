@@ -49,4 +49,3 @@ Return exactly one explicit primary Gate and one independent Status. A local
 Gate: PASS | FIX_REQUIRED | BLOCKED | REDESIGN
 Status: <explicit status>
 ```
-

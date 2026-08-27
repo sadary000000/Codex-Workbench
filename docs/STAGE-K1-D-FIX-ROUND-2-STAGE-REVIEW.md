@@ -126,4 +126,3 @@ Chat, history search, new Chat creation, or a blind retry.
 Gate: PASS | FIX_REQUIRED | BLOCKED | REDESIGN
 Status: <explicit status>
 ```
-
