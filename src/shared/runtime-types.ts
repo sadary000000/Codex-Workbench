@@ -63,6 +63,17 @@ export interface ProjectRecord {
   metadata: Record<string, string>;
 }
 
+/**
+ * Product-shell-owned identity association. AutomationProject lifecycle/state
+ * remains owned by Automation persistence and is deliberately not copied here.
+ */
+export interface ProjectAutomationAssociation {
+  associationId: string;
+  productProjectId: string;
+  automationProjectId: string;
+  createdAt: string;
+}
+
 export interface ThreadProjection {
   nativeThreadId: string;
   projectId: string | null;
@@ -110,6 +121,7 @@ export interface WorkbenchPersistenceDocument {
   version: 1;
   updatedAt: string;
   projects: ProjectRecord[];
+  projectAutomationAssociations: ProjectAutomationAssociation[];
   threads: ThreadProjection[];
   prompts: PromptRecoveryRecord[];
   composerPreferences: ComposerPreferenceRecord[];

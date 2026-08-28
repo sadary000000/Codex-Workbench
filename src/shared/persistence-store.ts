@@ -7,6 +7,7 @@ import type {
   ComposerPreferenceRecord,
   ComposerPreferences,
   ProjectRecord,
+  ProjectAutomationAssociation,
   RuntimeErrorInfo,
   DisplayTitleSource,
   ThreadProjection,
@@ -24,6 +25,7 @@ const MAX_METADATA_KEY_LENGTH = 128;
 const MAX_METADATA_VALUE_LENGTH = 1_024;
 const MAX_ERROR_MESSAGE_LENGTH = 4_000;
 const MAX_ERROR_STDERR_LENGTH = 8_000;
+const MAX_PROJECT_AUTOMATION_ASSOCIATIONS = 512;
 
 const THREAD_STATES = new Set<ThreadProjectionState>([
   "unknown",
@@ -50,6 +52,9 @@ export type PersistenceErrorCode =
   | "PROJECT_INVALID"
   | "PROJECT_CWD_CONFLICT"
   | "PROJECT_NOT_FOUND"
+  | "PROJECT_AUTOMATION_ASSOCIATION_INVALID"
+  | "PROJECT_AUTOMATION_ASSOCIATION_CONFLICT"
+  | "PROJECT_AUTOMATION_ASSOCIATION_NOT_FOUND"
   | "THREAD_PROJECTION_INVALID"
   | "THREAD_PROJECTION_NOT_FOUND"
   | "THREAD_ID_DUPLICATE"
@@ -94,6 +99,8 @@ export interface ProjectPatch {
 export interface ProjectRemovalResult {
   project: ProjectRecord;
   detachedNativeThreadIds: string[];
+  /** Associations removed from Product Shell only; AutomationProject rows are never deleted here. */
+  detachedAutomationProjectIds: string[];
 }
 
 export interface EnsureThreadProjectionInput {
@@ -203,7 +210,15 @@ function pathKey(value: string): string {
 }
 
 function emptyDocument(now: string): WorkbenchPersistenceDocument {
-  return { version: 1, updatedAt: now, projects: [], threads: [], prompts: [], composerPreferences: [] };
+  return {
+    version: 1,
+    updatedAt: now,
+    projects: [],
+    projectAutomationAssociations: [],
+    threads: [],
+    prompts: [],
+    composerPreferences: [],
+  };
 }
 
 function normalizeProject(value: unknown): ProjectRecord | null {
@@ -217,6 +232,17 @@ function normalizeProject(value: unknown): ProjectRecord | null {
   const metadata = normalizedMetadata(candidate.metadata);
   if (!projectId || !name || !cwd || !createdAt || !updatedAt || !metadata) return null;
   return { projectId, name, cwd, createdAt, updatedAt, metadata };
+}
+
+function normalizeProjectAutomationAssociation(value: unknown): ProjectAutomationAssociation | null {
+  const candidate = record(value);
+  if (!candidate) return null;
+  const associationId = boundedString(candidate.associationId, MAX_ID_LENGTH);
+  const productProjectId = boundedString(candidate.productProjectId, MAX_ID_LENGTH);
+  const automationProjectId = boundedString(candidate.automationProjectId, MAX_ID_LENGTH);
+  const createdAt = timestamp(candidate.createdAt);
+  if (!associationId || !productProjectId || !automationProjectId || !createdAt) return null;
+  return { associationId, productProjectId, automationProjectId, createdAt };
 }
 
 function normalizeThread(value: unknown): ThreadProjection | null {
@@ -340,9 +366,9 @@ export function normalizePersistenceDocument(value: unknown): WorkbenchPersisten
   const candidate = record(value);
   if (!candidate || candidate.version !== 1 || !timestamp(candidate.updatedAt)) return null;
   if (!Array.isArray(candidate.projects) || !Array.isArray(candidate.threads) || !Array.isArray(candidate.prompts)) return null;
-  // STAGE F adds this top-level collection. Missing on older v1 files means
-  // "never saved", not an invalid document and not a request to use a default.
+  // Additive v1 collections are backward compatible: absence means an empty collection.
   if (candidate.composerPreferences !== undefined && !Array.isArray(candidate.composerPreferences)) return null;
+  if (candidate.projectAutomationAssociations !== undefined && !Array.isArray(candidate.projectAutomationAssociations)) return null;
 
   const projects: ProjectRecord[] = [];
   const projectIds = new Set<string>();
@@ -353,6 +379,24 @@ export function normalizePersistenceDocument(value: unknown): WorkbenchPersisten
     projects.push(project);
     projectIds.add(project.projectId);
     projectPaths.add(pathKey(project.cwd));
+  }
+
+  const projectAutomationAssociations: ProjectAutomationAssociation[] = [];
+  const associationIds = new Set<string>();
+  const automationProjectIds = new Set<string>();
+  const rawAssociations = candidate.projectAutomationAssociations ?? [];
+  if (!Array.isArray(rawAssociations) || rawAssociations.length > MAX_PROJECT_AUTOMATION_ASSOCIATIONS) return null;
+  for (const value of rawAssociations) {
+    const association = normalizeProjectAutomationAssociation(value);
+    if (
+      !association ||
+      associationIds.has(association.associationId) ||
+      automationProjectIds.has(association.automationProjectId) ||
+      !projectIds.has(association.productProjectId)
+    ) return null;
+    projectAutomationAssociations.push(association);
+    associationIds.add(association.associationId);
+    automationProjectIds.add(association.automationProjectId);
   }
 
   const threads: ThreadProjection[] = [];
@@ -390,6 +434,7 @@ export function normalizePersistenceDocument(value: unknown): WorkbenchPersisten
     version: 1,
     updatedAt: candidate.updatedAt as string,
     projects,
+    projectAutomationAssociations,
     threads,
     prompts,
     composerPreferences,
@@ -554,6 +599,9 @@ export class V1PersistenceStore {
       if (projectIndex < 0) throw new PersistenceStoreError("PROJECT_NOT_FOUND", "Project does not exist.", this.filePath);
       const project = document.projects[projectIndex];
       const detachedNativeThreadIds: string[] = [];
+      const detachedAutomationProjectIds = document.projectAutomationAssociations
+        .filter((association) => association.productProjectId === id)
+        .map((association) => association.automationProjectId);
       const now = this.now();
       for (const thread of document.threads) {
         if (thread.projectId !== id) continue;
@@ -561,8 +609,10 @@ export class V1PersistenceStore {
         thread.updatedAt = now;
         detachedNativeThreadIds.push(thread.nativeThreadId);
       }
+      document.projectAutomationAssociations = document.projectAutomationAssociations
+        .filter((association) => association.productProjectId !== id);
       document.projects.splice(projectIndex, 1);
-      return { project: clone(project), detachedNativeThreadIds };
+      return { project: clone(project), detachedNativeThreadIds, detachedAutomationProjectIds };
     });
   }
 
@@ -570,6 +620,77 @@ export class V1PersistenceStore {
     const id = boundedString(projectId, MAX_ID_LENGTH);
     if (!id) return null;
     return clone((await this.read()).projects.find((project) => project.projectId === id) ?? null);
+  }
+
+  async listProjectAutomationAssociations(productProjectId?: string): Promise<ProjectAutomationAssociation[]> {
+    const id = productProjectId === undefined ? undefined : boundedString(productProjectId, MAX_ID_LENGTH);
+    if (productProjectId !== undefined && !id) {
+      throw new PersistenceStoreError("PROJECT_AUTOMATION_ASSOCIATION_INVALID", "Product Project ID is invalid.", this.filePath);
+    }
+    const document = await this.read();
+    if (id !== undefined && !document.projects.some((project) => project.projectId === id)) {
+      throw new PersistenceStoreError("PROJECT_NOT_FOUND", "Project does not exist.", this.filePath);
+    }
+    return clone(document.projectAutomationAssociations.filter((association) => id === undefined || association.productProjectId === id));
+  }
+
+  async getAutomationProjectAssociation(automationProjectId: string): Promise<ProjectAutomationAssociation | null> {
+    const id = boundedString(automationProjectId, MAX_ID_LENGTH);
+    if (!id) return null;
+    return clone((await this.read()).projectAutomationAssociations.find((association) => association.automationProjectId === id) ?? null);
+  }
+
+  async bindAutomationProject(productProjectId: string, automationProjectId: string): Promise<ProjectAutomationAssociation> {
+    const productId = boundedString(productProjectId, MAX_ID_LENGTH);
+    const automationId = boundedString(automationProjectId, MAX_ID_LENGTH);
+    if (!productId || !automationId) {
+      throw new PersistenceStoreError("PROJECT_AUTOMATION_ASSOCIATION_INVALID", "Project association identity is invalid.", this.filePath);
+    }
+    return this.mutate((document) => {
+      if (!document.projects.some((project) => project.projectId === productId)) {
+        throw new PersistenceStoreError("PROJECT_NOT_FOUND", "Project does not exist.", this.filePath);
+      }
+      const existing = document.projectAutomationAssociations.find((association) => association.automationProjectId === automationId);
+      if (existing) {
+        if (existing.productProjectId !== productId) {
+          throw new PersistenceStoreError(
+            "PROJECT_AUTOMATION_ASSOCIATION_CONFLICT",
+            "AutomationProject is already associated with another Product Project.",
+            this.filePath,
+          );
+        }
+        return clone(existing);
+      }
+      if (document.projectAutomationAssociations.length >= MAX_PROJECT_AUTOMATION_ASSOCIATIONS) {
+        throw new PersistenceStoreError("PROJECT_AUTOMATION_ASSOCIATION_INVALID", "Project association limit has been reached.", this.filePath);
+      }
+      const association: ProjectAutomationAssociation = {
+        associationId: randomUUID(),
+        productProjectId: productId,
+        automationProjectId: automationId,
+        createdAt: this.now(),
+      };
+      document.projectAutomationAssociations.push(association);
+      return clone(association);
+    });
+  }
+
+  async unlinkAutomationProject(productProjectId: string, automationProjectId: string): Promise<ProjectAutomationAssociation> {
+    const productId = boundedString(productProjectId, MAX_ID_LENGTH);
+    const automationId = boundedString(automationProjectId, MAX_ID_LENGTH);
+    if (!productId || !automationId) {
+      throw new PersistenceStoreError("PROJECT_AUTOMATION_ASSOCIATION_INVALID", "Project association identity is invalid.", this.filePath);
+    }
+    return this.mutate((document) => {
+      const index = document.projectAutomationAssociations.findIndex(
+        (association) => association.productProjectId === productId && association.automationProjectId === automationId,
+      );
+      if (index < 0) {
+        throw new PersistenceStoreError("PROJECT_AUTOMATION_ASSOCIATION_NOT_FOUND", "Project association does not exist.", this.filePath);
+      }
+      const [association] = document.projectAutomationAssociations.splice(index, 1);
+      return clone(association);
+    });
   }
 
   async listThreads(projectId?: string | null): Promise<ThreadProjection[]> {
