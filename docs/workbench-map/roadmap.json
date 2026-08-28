@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "kind": "workbench-handoff-map",
+  "projectionOnly": true,
+  "repository": "sadary000000/Codex-Workbench",
+  "truthDomains": {
+    "nativeRuntime": "Codex App Server",
+    "workflow": "Workbench automation persistence",
+    "externalAction": "provider/remote plus reconciled Workbench records",
+    "resource": "live runtime ownership/lease",
+    "projection": "Workbench UI/Map and docs/workbench-map"
+  },
+  "effectivePolicyFormula": "persisted PolicyVersion + hard constraints + runtime capability => EffectivePolicy",
+  "currentCheckpoint": {
+    "stageId": "R5",
+    "stageName": "Native Runtime Dedup",
+    "status": "ACTIVE",
+    "stackTipBeforeDocs": {
+      "branch": "arch-r4/webgpt-policy-budget-durability",
+      "sha": "717069965d211189919ed081946a21d224b11353"
+    },
+    "documentationBranch": "docs/workbench-handoff-map",
+    "nextAction": "Audit production call graphs in src/codex to distinguish native adapters and Workbench increments from duplicate runtime semantics before creating any R5 implementation diff."
+  },
+  "stages": [
+    {
+      "id": "R3",
+      "name": "Resource & External Action",
+      "status": "STACKED_DRAFT",
+      "dependsOn": ["R2"],
+      "exit": "Explicit provider side-effect boundary; query/reconcile separated; missing reconcile resource truth fails closed; unknown side effects reconcile instead of blind resend."
+    },
+    {
+      "id": "R4",
+      "name": "Policy & Evidence",
+      "status": "STACKED_DRAFT",
+      "dependsOn": ["R3"],
+      "exit": "One persisted policy truth; restart-durable Native/provider-neutral and WebGPT budget commitments; Evidence/Audit remain separate from resource ownership."
+    },
+    {
+      "id": "R5",
+      "name": "Native Runtime Dedup",
+      "status": "ACTIVE",
+      "dependsOn": ["R4"],
+      "exit": "Codex-facing Workbench code is native adapter/projection/product logic, not a competing Thread/context/agent/tool runtime."
+    },
+    {
+      "id": "R6",
+      "name": "Manual / Automation Decouple",
+      "status": "PLANNED",
+      "dependsOn": ["R5"],
+      "exit": "Manual V1 remains independent of Automation and Workbench Project remains distinct from AutomationProject."
+    },
+    {
+      "id": "R7",
+      "name": "Projection / Map",
+      "status": "PLANNED",
+      "dependsOn": ["R6"],
+      "exit": "Map connects Workbench governance and native runtime references as a projection without becoming execution truth."
+    },
+    {
+      "id": "R8",
+      "name": "Migration / Dead Code",
+      "status": "PLANNED",
+      "dependsOn": ["R7"],
+      "exit": "Superseded duplicate runtime paths are migrated and removed only after ownership and caller migration are proven."
+    },
+    {
+      "id": "AB",
+      "name": "A/B Validation",
+      "status": "PLANNED",
+      "dependsOn": ["R8"],
+      "exit": "Reproducible comparison evidence documents the value and tradeoffs of Workbench increments versus Codex-native behavior."
+    }
+  ],
+  "delivery": [
+    {
+      "pr": 2,
+      "name": "Planner retry/source-integrity",
+      "status": "MERGED"
+    },
+    {
+      "pr": 3,
+      "name": "Provider execution boundary",
+      "status": "STACKED_DRAFT",
+      "head": "36477bcd75e7c43c3704575eb06fcd31da7a1bb3"
+    },
+    {
+      "pr": 4,
+      "name": "Query/reconcile boundary",
+      "status": "STACKED_DRAFT",
+      "head": "1ea60dfdb6f03c929371c9069c1ee6c3b7661fa0"
+    },
+    {
+      "pr": 5,
+      "name": "Reconcile resource-truth fail-closed boundary",
+      "status": "STACKED_DRAFT",
+      "head": "3f24f8ff904907e7538289c897c682427fca1208"
+    },
+    {
+      "pr": 6,
+      "name": "Native/provider-neutral policy budget durability",
+      "status": "STACKED_DRAFT",
+      "head": "270e3de45bb07d4a9d5199a7cecb1c0058df4f10"
+    },
+    {
+      "pr": 7,
+      "name": "WebGPT policy budget durability",
+      "status": "STACKED_DRAFT",
+      "head": "717069965d211189919ed081946a21d224b11353"
+    }
+  ],
+  "r5AuditTargets": [
+    "src/codex/project-thread-store.ts",
+    "src/codex/context-sharing.ts",
+    "src/codex/agent-run-service.ts",
+    "src/codex/tool-registry.ts",
+    "src/codex/composer-capabilities.ts"
+  ],
+  "r5Classifications": [
+    "NATIVE_ADAPTER_PASS",
+    "WORKBENCH_INCREMENT_PASS",
+    "DUPLICATE_RUNTIME_CHANGE",
+    "NEEDS_EVIDENCE"
+  ],
+  "frozenInvariants": [
+    "Native Thread/Turn/Item are execution truth.",
+    "Do not persist a duplicate transcript.",
+    "Manual V1 remains independent of Automation.",
+    "Workbench Project remains distinct from AutomationProject.",
+    "RequirementVersion and PlanVersion remain Workbench governance truth.",
+    "Unknown external side effects reconcile instead of blind resend.",
+    "WebGPT exact-target actions fail closed when target identity cannot be proven.",
+    "Evidence/Audit do not own workers or resource leases.",
+    "Map is a Workbench incremental projection and is not duplicate native planning.",
+    "Do not implement a second sandbox, tool runtime, or subagent runtime."
+  ],
+  "resumeProtocol": [
+    "Read HANDOFF.md and ARCHITECTURE.md.",
+    "Verify remote refs and PR state before trusting stored SHA/status values.",
+    "Update this map if the delivery stack changed.",
+    "Continue the R5 production call-graph audit from the latest valid stacked head.",
+    "Create a bounded implementation slice only with concrete duplicate-runtime evidence.",
+    "Before branch creation/push, state the exact branch and base ref and that no merge will occur.",
+    "Never merge or delete branches without explicit approval.",
+    "Update the handoff map when the durable checkpoint changes."
+  ]
+}
