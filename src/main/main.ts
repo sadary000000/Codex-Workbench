@@ -50,6 +50,7 @@ import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts"
 import { classifyWebGptActionReadiness, type WebGptActionScope } from "../automation/webgpt-action-readiness.ts";
 import { createStartupPlan, runStartupPlan } from "./startup-policy.ts";
 import { createAutomationProviderHost, type AutomationProviderHost } from "./automation-provider-host.ts";
+import { createLazyExternalAutomationProviderPort, type FullAutomationProviderPort } from "./lazy-external-automation-provider-port.ts";
 
 const PAUSED_AUTOMATION_GATE_ENVIRONMENT_FLAGS = [
   "AUT2_REAL_WEBGPT_GATE",
@@ -154,6 +155,7 @@ let automationStore: AutomationStore | null = null;
 let automationComposition: AutomationComposition | null = null;
 let webGptPolicyAuthority: WebGptPolicyAuthority | null = null;
 let webGptProviderPort: WebGptAutomationProviderPort | null = null;
+let lazyWebGptProviderPort: FullAutomationProviderPort | null = null;
 let automationProviderHost: AutomationProviderHost | null = null;
 /** Process-owned provider payload boundary; only opaque InputRefs cross into Automation. */
 const automationInputRefs = new InputRefRegistry();
@@ -1426,6 +1428,12 @@ function getWebGptProviderPort(): WebGptAutomationProviderPort {
   return webGptProviderPort;
 }
 
+function getLazyWebGptProviderPort(): FullAutomationProviderPort {
+  if (lazyWebGptProviderPort) return lazyWebGptProviderPort;
+  lazyWebGptProviderPort = createLazyExternalAutomationProviderPort("WEBGPT", () => getWebGptProviderPort());
+  return lazyWebGptProviderPort;
+}
+
 /**
  * Native-first production Automation composition. The host consumes only the
  * already-owned RuntimeRegistry and registers WebGPT as an explicit optional
@@ -1439,7 +1447,7 @@ function getAutomationProviderHost(): AutomationProviderHost {
     inputRefs: automationInputRefs,
     nativeRuntimes: runtimes,
     nativeRuntimeId: workbenchInstanceId,
-    webgptProvider: getWebGptProviderPort(),
+    webgptProvider: getLazyWebGptProviderPort(),
   });
   return automationProviderHost;
 }
@@ -2537,6 +2545,7 @@ if (officialCliMode) {
           automationStore = null;
           webGptPolicyAuthority = null;
           webGptProviderPort = null;
+          lazyWebGptProviderPort = null;
           automationProviderHost = null;
           webGptExternalActionBridge = null;
           await runtimes.closeAll();
