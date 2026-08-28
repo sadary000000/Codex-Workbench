@@ -1,100 +1,213 @@
-# Git and Validation Workflow
+# Workbench Git 与验证工作流
 
-This file defines the branch and CI discipline for Codex-Workbench. Its goal is to keep the repository easy to understand while still preserving rigorous validation.
+本文档定义 Codex-Workbench 当前的 branch / CI / integration discipline。目标是：**验证要严谨，但仓库不能再靠大量长期分支保存中间状态。**
 
-## Core rule
+## 1. 三种系统各做一件事
 
-Use each system for one job:
+- **Git**：保存代码历史、短命 feature 工作和 durable integration points；
+- **`docs/workbench-map/`**：保存整个项目 Roadmap、当前阶段、架构 ownership、决策与 handoff；
+- **GitHub Actions**：保存 exact-ref validation、测试日志和可丢弃 artifacts。
 
-- **Git** stores code history and durable integration points.
-- **`docs/workbench-map/`** stores project stage, handoff, ownership, and route state.
-- **GitHub Actions** stores validation runs and disposable test artifacts.
+禁止再用 Git branch 代替 CI 记录或项目状态数据库。
 
-Do not use branches as a substitute for CI records or project-state bookkeeping.
+## 2. 当前远端分支模型
 
-## Long-lived branches
+清理后当前仓库保持极简结构：
 
-The intended long-lived development shape is:
+```text
+main
+codex/workbench-v1
+workbench/next
+feature/r7-map-entity-references   # 当前 R7 Draft 工作分支
+```
 
-- `main` — repository-level branch retained by the project owner.
-- `codex/workbench-v1` — formal Workbench integration/release target.
-- `workbench/next` — active integration branch for the current R-stage work.
+含义：
 
-Existing `arch/**` branches from the R2-R4 stacked delivery are legacy checkpoints and remain until that stack is deliberately resolved. Do not create new long-lived architecture checkpoint branches merely to record progress.
+- `main`：遗留历史线；与当前 Workbench 主历史并非普通前后继关系，暂不自动 merge / delete；
+- `codex/workbench-v1`：当前正式稳定基线 / integration-release target；
+- `workbench/next`：当前长期集成开发线；
+- `feature/*`：只有具体 bounded slice 需要隔离时才创建，完成后及时清理。
 
-## Short-lived implementation branches
+过去 R2–R4 的 `arch/**`、`docs/workbench-handoff-map`，以及仅用于 CI 的 `fix/**-exact-head-verify` 分支已经完成历史使命并清理。它们的 commit / PR / Actions 记录仍由 GitHub 历史保留。
 
-When a bounded change needs isolation, branch from the current `workbench/next` head using a short-lived `feature/**` branch.
+## 3. 标准开发流
 
-Typical flow:
+```text
+feature/<bounded-slice>
+        ↓ review / CI
+workbench/next
+        ↓ 阶段完整闭环 + 全量验证
+codex/workbench-v1
+        ↓
+Tag / Release
+```
 
-`workbench/next -> feature/<bounded-slice> -> review/CI -> workbench/next`
+### 3.1 什么时候建 feature branch
 
-Rules:
+只有当具体实现需要隔离时：
 
-1. One branch should represent one bounded implementation slice, not a roadmap stage database.
-2. Tests and review evidence belong to Actions/PRs, not a second validation branch.
-3. After an implementation slice is integrated and branch deletion is explicitly approved, the temporary feature branch should be removed.
-4. Do not create `fix/**-exact-head-verify` or similar branches solely to trigger CI.
+- 一刀生产代码修改；
+- 需要独立 Draft PR review；
+- 失败实验不希望直接污染 integration branch。
 
-## Exact-head validation
+不要因为以下原因创建分支：
 
-`.github/workflows/ci.yml` is designed to validate exact refs without helper branches.
+- 记录 R5/R6/R7 做到哪；
+- 触发 exact-head CI；
+- 保存测试日志；
+- 保存一次性 evidence；
+- 仅仅为了“每一步都有一个 branch”。
 
-- Pushes to `workbench/next` and `codex/workbench-v1` run CI.
-- PRs targeting either integration branch run CI.
-- PR CI checks out `github.event.pull_request.head.sha`, not the synthetic merge ref.
-- Manual `workflow_dispatch` accepts an optional `ref` that may be a branch, tag, or commit SHA.
+### 3.2 feature branch 规则
 
-The verification path remains:
+1. 从当时的 `workbench/next` exact head 创建；
+2. 一个 branch 对应一个 bounded implementation slice；
+3. CI / test evidence 放 PR 和 Actions；
+4. 完成并获得明确 integration/merge approval 后进入 `workbench/next`；
+5. branch deletion 仍是单独操作，需要明确授权；
+6. 不创建 helper validation branch。
 
-1. `npm ci`
-2. `npm run typecheck`
-3. `npm test`
-4. `npm run build`
+## 4. Exact-head CI
 
-If additional validation outputs are worth retaining temporarily, upload them as GitHub Actions artifacts rather than committing them or creating a branch for them.
+`.github/workflows/ci.yml` 已经改为直接验证真实 ref，不需要 `fix/**` 辅助分支。
 
-## Stage completion
+支持：
 
-A roadmap stage such as R5 can contain multiple bounded feature slices on `workbench/next`. The stage is not considered formally integrated merely because those slices are green.
+- push `workbench/next`；
+- push `codex/workbench-v1`；
+- PR targeting 两条 integration branch；
+- `workflow_dispatch` 指定 branch / tag / exact commit SHA。
 
-When the full stage satisfies its exit criteria:
+PR CI 必须 checkout：
 
-1. Update `ROADMAP.md`, `HANDOFF.md`, and `roadmap.json`.
-2. Run the full validation path on the exact `workbench/next` head.
-3. Review the complete diff against `codex/workbench-v1`.
-4. Open or update the formal integration PR.
-5. Merge only after explicit approval.
-6. After formal integration, create a version tag/release when useful for durable milestone discovery.
+```text
+github.event.pull_request.head.sha
+```
 
-## Releases and tags
+而不是把 synthetic merge ref 当成 PR head truth。
 
-Tags/releases are preferred over permanent branches for completed milestone discovery. A release checkpoint should identify:
+标准验证链：
 
-- stage/version;
-- exact commit SHA;
-- architecture/map checkpoint;
-- validation result;
-- meaningful migration or compatibility notes.
+```text
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
 
-Git history remains the historical record; the Map should describe the current route rather than preserve every obsolete checkpoint in prose.
+需要额外保存的日志、coverage、benchmark bundle、build bundle 等优先使用 GitHub Actions Artifact，并设置合理 retention；不要 commit 到源码分支。
 
-## Separate Lab repository policy
+## 5. Map 与 Git 的关系
 
-Do **not** create a second repository for ordinary product development or intermediate implementation branches. That creates cross-repository synchronization and provenance problems.
+Roadmap stage 不是 Git branch。
 
-A future `Codex-Workbench-Lab`-style repository is justified only if experiments produce materially separate assets such as very large benchmark datasets, generated fixtures, stress/fuzz corpora, disposable research prototypes, or different secret/access requirements.
+例如 R7 可以包含多个实现 slice，但 Roadmap 的 R7 节点只描述：
 
-Formal Workbench product code should continue to evolve in this repository.
+- 目标；
+- ownership；
+- 当前状态；
+- evidence；
+- exit condition。
 
-## Legacy validation branch cleanup
+具体 commit / PR 是该节点的 evidence reference，而不是 Roadmap 本身。
 
-The following branches were created only to trigger exact-head CI under the old workflow and have no independent product value:
+因此：
 
-- `fix/arch-r3-exact-head-verify`
-- `fix/arch-r3-resource-exact-head-verify`
-- `fix/arch-r4-native-budget-exact-head-verify`
-- `fix/arch-r4-webgpt-budget-exact-head-verify`
+```text
+R7 ACTIVE
+!= 必须存在 arch-r7 branch
+```
 
-They are obsolete under the new CI model. Delete them once branch deletion is explicitly approved and an authenticated deletion interface is available. Their historical CI runs remain GitHub Actions evidence; the branch names do not need to survive.
+## 6. 阶段完成
+
+当一个完整 R-stage 满足 exit criteria 时：
+
+1. 更新 `ROADMAP.md`、`HANDOFF.md`、`roadmap.json`；
+2. 对 `workbench/next` exact head 跑完整 CI；
+3. review `workbench/next` 对正式基线的完整 diff；
+4. 根据实际 release/integration 策略打开或更新正式 PR；
+5. **只有明确批准后才 merge**；
+6. 对具有长期价值的 checkpoint 使用 Tag / Release，而不是永久保留阶段 branch。
+
+## 7. Tag / Release
+
+完成的重要版本应优先通过 Tag / Release 发现，例如：
+
+```text
+v0.x.0
+workbench-v0.x-r8
+```
+
+Release 至少记录：
+
+- stage / version；
+- exact SHA；
+- architecture/map checkpoint；
+- CI / benchmark 结果；
+- migration / compatibility notes。
+
+Git 保留历史，Map 解释历史，Release 标记可交付里程碑。
+
+## 8. 第二个 Lab 仓库政策
+
+普通产品开发**不要**拆到第二个仓库。
+
+只有出现明显独立的大型实验资产时，才考虑类似 `Codex-Workbench-Lab`：
+
+- 大型 benchmark dataset；
+- stress / fuzz corpus；
+- generated fixture；
+- 可丢弃 research prototype；
+- 大体积实验产物；
+- 与正式产品不同的 secrets / access requirement。
+
+正式 Workbench 产品代码继续只在本仓库演进。
+
+原则：
+
+```text
+实验数据可以去 Lab
+产品代码不要在两个仓库间漂移
+```
+
+## 9. 当前历史分支清理状态
+
+已经清理：
+
+- R2–R4 旧 `arch/**` stacked branches；
+- `docs/workbench-handoff-map`；
+- 旧 `fix/**-exact-head-verify` validation branches。
+
+旧 Draft PR #3–#8 已关闭且未 merge；其历史 commit/CI/Conversation 仍可从 GitHub 查询，不需要依靠 branch 名长期存活。
+
+当前唯一短命工作分支是：
+
+```text
+feature/r7-map-entity-references
+```
+
+它对应 Draft PR #9，在 R7 完整处理前保留；后续是否 merge/delete 仍分别需要明确授权。
+
+## 10. Git 操作安全规则
+
+以下动作永远分开看：
+
+```text
+create branch
+push
+open PR
+merge PR
+close PR
+delete branch
+```
+
+一个动作获得授权，不自动授权其他动作。
+
+特别是：
+
+- Map 标记 `完成` != merge approval；
+- CI PASS != merge approval；
+- PR closed != branch deletion approval；
+- branch 已被 integration line 包含 != 可以未经确认删除。
+
+新 branch/push 前必须明确 branch 和 base ref；禁止 force update。
