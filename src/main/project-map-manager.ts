@@ -7,7 +7,7 @@ import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
 import { resolveCodexCommand } from "../codex/codex-command.ts";
 import { parseThreadReadResponse } from "../shared/thread-read-model.ts";
 import type { JsonRpcMessage, ThreadProjection, ThreadReadView, TurnResult } from "../shared/runtime-types.ts";
-import { MapValidationError, type MapDocument, type ProjectMapMaintenanceView, type ProjectMapStatus } from "../shared/map-types.ts";
+import { MapValidationError, type MapDocument, type MapEntityRef, type ProjectMapMaintenanceView, type ProjectMapStatus } from "../shared/map-types.ts";
 import { MapStore, mapFilePath } from "../shared/map-store.ts";
 import { V1PersistenceStore } from "../shared/persistence-store.ts";
 import { inspectThreadBinding } from "../shared/thread-state-store.ts";
@@ -190,6 +190,17 @@ export class ProjectMapManager {
     return (await inspectThreadBinding(this.bindingPath(projectId))).binding?.nativeThreadId ?? null;
   }
 
+  private async scopeReferences(projectId: string): Promise<MapEntityRef[]> {
+    const associations = await this.persistence.listProjectAutomationAssociations(projectId);
+    return associations
+      .map((association) => ({
+        domain: "automation" as const,
+        entityType: "AutomationProject",
+        entityId: association.automationProjectId,
+      }))
+      .sort((left, right) => left.entityId.localeCompare(right.entityId));
+  }
+
   private async emitStatus(projectId: string): Promise<ProjectMapStatus> {
     const status = await this.status(projectId);
     this.onChanged?.(status);
@@ -205,9 +216,11 @@ export class ProjectMapManager {
       available: false,
       maintenanceThreadId: null,
       maintenanceRunning: false,
+      scopeReferences: [],
       map: null,
       error: { code: "PROJECT_NOT_FOUND", message: `Project does not exist: ${id}` },
     };
+    const scopeReferences = await this.scopeReferences(id);
     try {
       await this.validateProjectDirectory(project.cwd);
     } catch (error) {
@@ -217,6 +230,7 @@ export class ProjectMapManager {
         available: false,
         maintenanceThreadId: await this.maintenanceThreadId(id),
         maintenanceRunning: false,
+        scopeReferences,
         map: null,
         error: errorMeta(error),
       };
@@ -231,11 +245,12 @@ export class ProjectMapManager {
       available: true,
       maintenanceThreadId: maintenanceId,
       maintenanceRunning,
+      scopeReferences,
       map: inspection.document,
       error: this.lastErrors.get(id) ?? null,
     };
-    if (inspection.status === "missing") return { projectId: id, enabled: false, available: true, maintenanceThreadId: maintenanceId, maintenanceRunning, map: null, error: null };
-    return { projectId: id, enabled: false, available: false, maintenanceThreadId: maintenanceId, maintenanceRunning, map: null, error: { code: inspection.code ?? "PROJECT_MAP_CORRUPT", message: inspection.message ?? "Project Map persistence is invalid." } };
+    if (inspection.status === "missing") return { projectId: id, enabled: false, available: true, maintenanceThreadId: maintenanceId, maintenanceRunning, scopeReferences, map: null, error: null };
+    return { projectId: id, enabled: false, available: false, maintenanceThreadId: maintenanceId, maintenanceRunning, scopeReferences, map: null, error: { code: inspection.code ?? "PROJECT_MAP_CORRUPT", message: inspection.message ?? "Project Map persistence is invalid." } };
   }
 
   async enable(projectId: string): Promise<ProjectMapStatus> {
@@ -517,6 +532,7 @@ export class ProjectMapManager {
       available: true,
       maintenanceThreadId: await this.maintenanceThreadId(projectId),
       maintenanceRunning: Boolean(runtime?.snapshot().activeTurnId),
+      scopeReferences: await this.scopeReferences(projectId),
       map,
       error: null,
     };

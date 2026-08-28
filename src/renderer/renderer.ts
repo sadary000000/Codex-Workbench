@@ -160,6 +160,7 @@ const sidebarToggleButton = document.querySelector<HTMLButtonElement>("#toggle-s
 const sidebarCloseButton = document.querySelector<HTMLButtonElement>("#sidebar-close")!;
 const mapPanelElement = document.querySelector<HTMLElement>("#map-panel")!;
 const mapPanelStatusElement = document.querySelector<HTMLElement>("#map-panel-status")!;
+const mapScopeReferencesElement = document.querySelector<HTMLElement>("#map-scope-references")!;
 const mapTreeElement = document.querySelector<HTMLElement>("#map-tree")!;
 const toggleMapButton = document.querySelector<HTMLButtonElement>("#toggle-map")!;
 const closeMapButton = document.querySelector<HTMLButtonElement>("#close-map")!;
@@ -952,6 +953,18 @@ function renderNavigation(): void {
   navigationElement.scrollTop = preservedScrollTop;
 }
 
+function renderMapScopeReferences(): void {
+  const references = mapScope === "project" ? projectMapStatus?.scopeReferences ?? [] : [];
+  mapScopeReferencesElement.replaceChildren();
+  mapScopeReferencesElement.hidden = mapScope !== "project" || references.length === 0;
+  for (const reference of references) {
+    const chip = document.createElement("span");
+    chip.className = "map-reference";
+    chip.textContent = `${reference.domain} · ${reference.entityType} · ${reference.entityId}`;
+    mapScopeReferencesElement.append(chip);
+  }
+}
+
 function mapNodeMarker(status: MapNode["status"]): string {
   return { planned: "○", in_progress: "◉", completed: "●", blocked: "!" }[status];
 }
@@ -1020,6 +1033,18 @@ function createMapTreeItem(node: MapNode, nodes: MapNode[], level: number): HTML
     });
     wrapper.append(sourceList);
   }
+  const references = node.references ?? [];
+  if (references.length) {
+    const referenceList = document.createElement("div");
+    referenceList.className = "map-node-references";
+    references.forEach((reference) => {
+      const referenceChip = document.createElement("span");
+      referenceChip.className = "map-reference";
+      referenceChip.textContent = `${reference.domain} · ${reference.entityType} · ${reference.entityId}`;
+      referenceList.append(referenceChip);
+    });
+    wrapper.append(referenceList);
+  }
   const children = nodes.filter((candidate) => candidate.parentId === node.nodeId).sort((left, right) => left.ordering - right.ordering);
   if (children.length) {
     const childList = document.createElement("ul");
@@ -1040,6 +1065,7 @@ function renderMapPanel(): void {
   mapScopeConversationButton.setAttribute("aria-selected", String(mapScope === "conversation"));
   mapScopeProjectButton.setAttribute("aria-selected", String(mapScope === "project"));
   mapScopeProjectButton.disabled = !currentProjection?.projectId;
+  renderMapScopeReferences();
   const activeStatus = mapScope === "project" ? projectMapStatus : mapStatus;
   const activeMap = activeStatus?.map ?? null;
   const activeTitle = mapScope === "project" ? "Project Map" : "Conversation Map";

@@ -166,6 +166,8 @@ export interface ProjectMapStatus {
   available: boolean;
   maintenanceThreadId: string | null;
   maintenanceRunning: boolean;
+  /** Live Product-shell association projection; never persisted in MapDocument. */
+  scopeReferences?: MapEntityRef[];
   map: MapDocument | null;
   error: { code: string; message: string } | null;
 }
