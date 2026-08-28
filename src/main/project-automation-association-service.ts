@@ -38,10 +38,16 @@ export class ProjectAutomationAssociationServiceError extends Error {
  * and bind validation, and no Automation lifecycle mutation is exposed here.
  */
 export class ProjectAutomationAssociationService {
+  private readonly productStore: ProductAssociationStore;
+  private readonly getAutomationReader: () => Promise<AutomationProjectReader>;
+
   constructor(
-    private readonly productStore: ProductAssociationStore,
-    private readonly getAutomationReader: () => Promise<AutomationProjectReader>,
-  ) {}
+    productStore: ProductAssociationStore,
+    getAutomationReader: () => Promise<AutomationProjectReader>,
+  ) {
+    this.productStore = productStore;
+    this.getAutomationReader = getAutomationReader;
+  }
 
   listAssociations(productProjectId: string): Promise<ProjectAutomationAssociation[]> {
     return this.productStore.listProjectAutomationAssociations(productProjectId);
