@@ -30,6 +30,8 @@ export interface RequirementReconcileCommand {
 type PlannerCreateInput = Parameters<PlannerProviderIntegrationService["createPlanFromRequirement"]>[0];
 type PlannerReconcileInput = Parameters<PlannerProviderIntegrationService["reconcilePlannerRequest"]>[0];
 type PlannerRetryInput = Parameters<PlannerProviderIntegrationService["retryPlannerRequest"]>[0];
+type PlannerStatusInput = Parameters<PlannerProviderIntegrationService["plannerStatus"]>[0];
+type PlannerResultInput = Parameters<PlannerProviderIntegrationService["plannerResult"]>[0];
 
 function normalizeProviderId(value: AutomationProviderId | null | undefined): AutomationProviderId | null {
   if (value === null || value === undefined) return null;
@@ -85,6 +87,16 @@ export class AutomationExecutionFacade {
     if (!logicalId) throw new AutomationExecutionRoutingError("AUTOMATION_PLANNER_INTENT_NOT_FOUND", "Planner retry has no logical request identity.");
     const provider = await this.providerForPlannerIntent(logicalId, providerId);
     return this.services.planner(provider).retryPlannerRequest(input);
+  }
+
+  async plannerStatus(input: PlannerStatusInput, providerId?: AutomationProviderId | null) {
+    const provider = await this.providerForPlannerIntent(input.actionIntentId, providerId);
+    return this.services.planner(provider).plannerStatus(input);
+  }
+
+  async plannerResult(input: PlannerResultInput, providerId?: AutomationProviderId | null) {
+    const provider = await this.providerForPlannerIntent(input.actionIntentId, providerId);
+    return this.services.planner(provider).plannerResult(input);
   }
 
   async providerForRequirementSession(sessionId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {

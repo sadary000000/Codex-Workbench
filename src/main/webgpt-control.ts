@@ -44,7 +44,7 @@ export interface WebGptControlDescriptor {
   workbenchVersion?: string;
 }
 
-export type WebGptControlCommandName = WebGptCliCommandName | "webgpt.initialize" | "webgpt.planner.create" | "webgpt.planner.reconcile" | "webgpt.planner.retry" | "webgpt.planner.status" | "webgpt.planner.result";
+export type WebGptControlCommandName = typeof WEBGPT_CONTROL_COMMANDS[number];
 
 export interface WebGptControlRequest {
   version: typeof WEBGPT_CONTROL_PROTOCOL_VERSION;
@@ -289,8 +289,9 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if ((command === "webgpt.request.status" || command === "webgpt.request.reconcile") && typeof record.targetRequestId !== "string") return controlError("REQUEST_ID_REQUIRED", `${command.endsWith("reconcile") ? "request reconcile" : "request status"} 必须提供 requestId。`, command, requestId);
   if (command === "webgpt.request.list" && record.active !== true) return controlError("REQUEST_LIST_SCOPE_REQUIRED", "request list 目前必须使用 active=true。", command, requestId);
   if (command === "webgpt.requirement.start" && (typeof record.projectId !== "string" || typeof record.webgptProjectId !== "string" || typeof record.providerTargetRef !== "string" || typeof record.goal !== "string")) return controlError("REQUIREMENT_START_REQUIRED", "requirement start 必须提供 projectId、webgptProjectId、providerTargetRef 和 goal。", command, requestId);
-  if (command === "webgpt.requirement.draft" && typeof record.requirementSessionId !== "string") return controlError("REQUIREMENT_SESSION_REQUIRED", "requirement draft 必须提供 sessionId。", command, requestId);
-  if (command === "webgpt.requirement.reconcile" && typeof record.requirementSessionId !== "string") return controlError("REQUIREMENT_SESSION_REQUIRED", "requirement reconcile 必须提供 sessionId。", command, requestId);
+  if (command === "automation.requirement.start" && (typeof record.projectId !== "string" || typeof record.providerTargetRef !== "string" || typeof record.goal !== "string")) return controlError("REQUIREMENT_START_REQUIRED", "automation requirement start 必须提供 projectId、providerTargetRef 和 goal。", command, requestId);
+  if ((command === "webgpt.requirement.draft" || command === "automation.requirement.draft") && typeof record.requirementSessionId !== "string") return controlError("REQUIREMENT_SESSION_REQUIRED", "requirement draft 必须提供 sessionId。", command, requestId);
+  if ((command === "webgpt.requirement.reconcile" || command === "automation.requirement.reconcile") && typeof record.requirementSessionId !== "string") return controlError("REQUIREMENT_SESSION_REQUIRED", "requirement reconcile 必须提供 sessionId。", command, requestId);
   if (["webgpt.project.inspect", "webgpt.project.open", "webgpt.project.create", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
   if (record.idempotencyKey !== undefined && command !== "webgpt.send" && command !== "webgpt.review-submit") return controlError("CONTROL_IDEMPOTENCY_UNSUPPORTED", "idempotencyKey 只支持 send/review-submit。", command, requestId);
   if (record.replace !== undefined && command !== "webgpt.role.new" && command !== "webgpt.role.bind") return controlError("CONTROL_REPLACE_INVALID", "replace 只支持 role new/bind。", command, requestId);
@@ -331,6 +332,14 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.planner.retry": ["projectId", "actionIntentId", "logicalPlannerRequestId", "requirementVersionId", "plannerRequirementPayloadSha256", "policyVersionId"],
     "webgpt.planner.status": ["projectId", "actionIntentId"],
     "webgpt.planner.result": ["projectId", "actionIntentId"],
+    "automation.requirement.start": ["projectId", "providerTargetRef", "goal"],
+    "automation.requirement.draft": ["requirementSessionId"],
+    "automation.requirement.reconcile": ["requirementSessionId", "requirementRoundId", "timeoutMs"],
+    "automation.planner.create": ["projectId", "providerTargetRef", "requirementVersionId", "operation", "priorPlanVersionId", "targetStageId", "planningConstraints", "inputRefs", "requestId", "idempotencyRef"],
+    "automation.planner.reconcile": ["projectId", "actionAttemptId"],
+    "automation.planner.retry": ["projectId", "actionIntentId", "logicalPlannerRequestId", "requirementVersionId", "plannerRequirementPayloadSha256", "policyVersionId"],
+    "automation.planner.status": ["projectId", "actionIntentId"],
+    "automation.planner.result": ["projectId", "actionIntentId"],
   };
   const allowedFields = new Set(["version", "protocolVersion", "requestId", "command", "clientInfo", "sessionId", ...(allowedByCommand[command] ?? [])]);
   const unexpectedField = Object.keys(record).find((field) => !allowedFields.has(field));

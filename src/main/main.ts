@@ -1059,6 +1059,30 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
       operationStartMs = Date.now();
       if (!request.projectName) response = controlFail(request.command, "PROJECT_NAME_REQUIRED", "project new-chat 必须提供 Project 名称。");
       else response = controlOk(request.command, await getWebGptRequestManager().createChatInProject(request.projectName));
+    } else if (request.command === "automation.requirement.start") {
+      if (!request.projectId || !request.providerTargetRef || !request.goal) response = controlFail(request.command, "REQUIREMENT_START_REQUIRED", "automation requirement start 必须提供 Automation project、opaque provider target 和 goal。");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.startRequirement({ projectId: request.projectId, goal: request.goal, questions: [], providerTargetRef: request.providerTargetRef }));
+    } else if (request.command === "automation.requirement.draft") {
+      if (!request.requirementSessionId) response = controlFail(request.command, "REQUIREMENT_SESSION_REQUIRED", "automation requirement draft 必须提供 sessionId。");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.requestRequirementDraft({ sessionId: request.requirementSessionId }));
+    } else if (request.command === "automation.requirement.reconcile") {
+      if (!request.requirementSessionId) response = controlFail(request.command, "REQUIREMENT_SESSION_REQUIRED", "automation requirement reconcile 必须提供 sessionId。");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.reconcileRequirement({ sessionId: request.requirementSessionId, ...(request.requirementRoundId ? { roundId: request.requirementRoundId } : {}), ...(request.timeoutMs === undefined ? {} : { waitTimeoutMs: request.timeoutMs }) }));
+    } else if (request.command === "automation.planner.create") {
+      if (!request.projectId || !request.providerTargetRef) response = controlFail(request.command, "PLANNER_CREATE_REQUIRED", "automation planner create 必须提供 Project ID 和 opaque provider target。");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.createPlan({ projectId: request.projectId, providerTargetRef: request.providerTargetRef, ...(request.requirementVersionId ? { requirementVersionId: request.requirementVersionId } : {}), ...(request.operation ? { operation: request.operation } : {}), ...(request.priorPlanVersionId !== undefined ? { priorPlanVersionId: request.priorPlanVersionId } : {}), ...(request.targetStageId !== undefined ? { targetStageId: request.targetStageId } : {}), ...(request.planningConstraints ? { planningConstraints: request.planningConstraints } : {}), ...(request.inputRefs ? { inputRefs: request.inputRefs } : {}), ...(request.requestId ? { requestId: request.requestId } : {}), ...(request.idempotencyRef ? { idempotencyRef: request.idempotencyRef } : {}) }));
+    } else if (request.command === "automation.planner.reconcile") {
+      if (!request.projectId || !request.actionAttemptId) response = controlFail(request.command, "PLANNER_RECONCILE_REQUIRED", "automation planner reconcile 必须提供 Project ID 和 ActionAttempt ID。");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.reconcilePlan({ projectId: request.projectId, actionAttemptId: request.actionAttemptId }));
+    } else if (request.command === "automation.planner.retry") {
+      if (!request.projectId || (!request.actionIntentId && !request.logicalPlannerRequestId) || (request.actionIntentId !== undefined && request.logicalPlannerRequestId !== undefined)) response = controlFail(request.command, "PLANNER_RETRY_REQUIRED", "automation planner retry 必须提供 Project ID 和恰好一个 Planner logical request identity。");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.retryPlan({ projectId: request.projectId, ...(request.actionIntentId ? { actionIntentId: request.actionIntentId } : {}), ...(request.logicalPlannerRequestId ? { logicalPlannerRequestId: request.logicalPlannerRequestId } : {}), ...(request.requirementVersionId ? { requirementVersionId: request.requirementVersionId } : {}), ...(request.plannerRequirementPayloadSha256 ? { requirementPayloadSha256: request.plannerRequirementPayloadSha256 } : {}), ...(request.policyVersionId ? { policyVersionId: request.policyVersionId } : {}) }));
+    } else if (request.command === "automation.planner.status") {
+      if (!request.projectId || !request.actionIntentId) response = controlFail(request.command, "PLANNER_QUERY_REQUIRED", "automation planner status 必须提供 Project ID 和 ActionIntent ID。");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.plannerStatus({ projectId: request.projectId, actionIntentId: request.actionIntentId }));
+    } else if (request.command === "automation.planner.result") {
+      if (!request.projectId || !request.actionIntentId) response = controlFail(request.command, "PLANNER_QUERY_REQUIRED", "automation planner result 必须提供 Project ID 和 ActionIntent ID。");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.plannerResult({ projectId: request.projectId, actionIntentId: request.actionIntentId }));
     } else if (request.command === "webgpt.requirement.start") {
       if (!request.projectId || !request.webgptProjectId || !request.providerTargetRef || !request.goal) response = controlFail(request.command, "REQUIREMENT_START_REQUIRED", "requirement start 必须提供 Automation project、provider project、opaque target 和 goal。");
       else response = controlOk(request.command, await getRequirementAutomationService().startAlignment({ projectId: request.projectId, goal: request.goal, questions: [], webgptProjectId: request.webgptProjectId, providerTargetRef: request.providerTargetRef }));

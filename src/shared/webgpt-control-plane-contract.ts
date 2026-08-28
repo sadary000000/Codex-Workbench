@@ -27,8 +27,10 @@ export const CONTROL_PLANE_CAPABILITIES = [
   { name: "webgpt.project", status: "STABLE", description: "Remote Project creation, inspection, navigation, and Project-scoped chat creation." },
   { name: "webgpt.role", status: "STABLE", description: "Project Role registry and target-safe routing." },
   { name: "webgpt.request-lifecycle", status: "STABLE", description: "Request status, wait, result, and idempotent send lifecycle." },
-  { name: "webgpt.requirement", status: "STABLE", description: "Provider-neutral Requirement alignment entry and recovery lifecycle." },
-  { name: "webgpt.planner", status: "STABLE", description: "Provider-neutral Planner create, retry, reconcile, status, and result lifecycle." },
+  { name: "webgpt.requirement", status: "STABLE", description: "Explicit WebGPT Requirement compatibility entry and recovery lifecycle." },
+  { name: "webgpt.planner", status: "STABLE", description: "Explicit WebGPT Planner compatibility create, retry, reconcile, status, and result lifecycle." },
+  { name: "automation.requirement", status: "STABLE", description: "Provider-neutral Requirement lifecycle; new work defaults to Native and continuations restore persisted provider identity." },
+  { name: "automation.planner", status: "STABLE", description: "Provider-neutral Planner lifecycle; new work defaults to Native and recovery preserves persisted provider identity." },
   { name: "webgpt.review-submit", status: "STABLE", description: "Idempotent Review ZIP plus summary submission through the existing WebGPT browser runtime." },
   { name: "webgpt.read-latest", status: "STABLE", description: "Targeted metadata/result reads without prompt submission." },
   { name: "webgpt.browser-screenshot", status: "EXPERIMENTAL", description: "Explicit screenshot output through the existing WebGPT runtime." },
@@ -77,6 +79,14 @@ export const WEBGPT_CONTROL_COMMANDS = [
   "webgpt.planner.retry",
   "webgpt.planner.status",
   "webgpt.planner.result",
+  "automation.requirement.start",
+  "automation.requirement.draft",
+  "automation.requirement.reconcile",
+  "automation.planner.create",
+  "automation.planner.reconcile",
+  "automation.planner.retry",
+  "automation.planner.status",
+  "automation.planner.result",
 ] as const;
 
 export type ControlPlaneCommandName = typeof WEBGPT_CONTROL_COMMANDS[number];
@@ -119,6 +129,14 @@ const COMMAND_REQUIRED_CAPABILITY: Readonly<Record<ControlPlaneCommandName, Cont
   "webgpt.planner.retry": "webgpt.planner",
   "webgpt.planner.status": "webgpt.planner",
   "webgpt.planner.result": "webgpt.planner",
+  "automation.requirement.start": "automation.requirement",
+  "automation.requirement.draft": "automation.requirement",
+  "automation.requirement.reconcile": "automation.requirement",
+  "automation.planner.create": "automation.planner",
+  "automation.planner.reconcile": "automation.planner",
+  "automation.planner.retry": "automation.planner",
+  "automation.planner.status": "automation.planner",
+  "automation.planner.result": "automation.planner",
 });
 
 export function requiredControlPlaneCapability(command: string): ControlPlaneCapabilityName | null {
