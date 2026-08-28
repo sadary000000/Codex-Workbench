@@ -126,6 +126,13 @@ export class ProviderPolicyAuthority implements ProviderPolicyAuthorityPort {
         this.budgets.set(policyVersionId, authority);
       }
       const budgetCorrelation = input.correlation.actionAttemptId ?? correlationId;
+      await this.claimDurableBudget({
+        projectId,
+        policyVersionId,
+        budgetKind,
+        correlationId: budgetCorrelation,
+        limit: decision.effectivePolicy.budgets[budgetKind],
+      });
       const reservation = authority.reserve(budgetKind, budgetCorrelation);
       if (!reservation.allowed) {
         throw new ProviderPolicyAuthorityError(
@@ -146,6 +153,41 @@ export class ProviderPolicyAuthority implements ProviderPolicyAuthorityPort {
       policyVersionId,
       effectivePolicy: decision,
       runtimeCapability: capability,
+    });
+  }
+
+  private async claimDurableBudget(input: {
+    readonly projectId: string;
+    readonly policyVersionId: string;
+    readonly budgetKind: BudgetKind;
+    readonly correlationId: string;
+    readonly limit: number;
+  }): Promise<void> {
+    await this.store.transaction((tx) => {
+      const committed = tx.table("auditEvents").filter((event) =>
+        event.projectId === input.projectId
+        && event.entityType === "PolicyVersion"
+        && event.entityId === input.policyVersionId
+        && event.eventType === "POLICY_BUDGET_COMMITTED"
+        && event.boundedPayload.budgetKind === input.budgetKind,
+      );
+      if (committed.some((event) => event.correlationId === input.correlationId)) {
+        throw new ProviderPolicyAuthorityError("POLICY_BUDGET_DENIED", `Provider ${input.budgetKind} budget correlation was already committed.`, { policyVersionId: input.policyVersionId, budgetKind: input.budgetKind, correlationId: input.correlationId, remaining: Math.max(0, input.limit - committed.length) });
+      }
+      if (committed.length >= input.limit) {
+        throw new ProviderPolicyAuthorityError("POLICY_BUDGET_EXHAUSTED", `Provider ${input.budgetKind} budget is exhausted for the pinned PolicyVersion.`, { policyVersionId: input.policyVersionId, budgetKind: input.budgetKind, correlationId: input.correlationId, remaining: 0 });
+      }
+      tx.appendAudit({
+        projectId: input.projectId,
+        entityType: "PolicyVersion",
+        entityId: input.policyVersionId,
+        eventType: "POLICY_BUDGET_COMMITTED",
+        actorType: "AUTOMATION",
+        actorRef: null,
+        boundedPayload: { budgetKind: input.budgetKind, effectiveBudget: input.limit },
+        correlationId: input.correlationId,
+        causationId: null,
+      });
     });
   }
 
