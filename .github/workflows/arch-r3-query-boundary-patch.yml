@@ -40,6 +40,22 @@ jobs:
           elif new_signature not in text or old_branch in text:
               raise SystemExit('requestStatus boundary shape not found')
 
+          provider = Path('src/features/webgpt/automation/webgpt-provider-port.ts')
+          provider_text = provider.read_text(encoding='utf-8')
+          replacements = {
+              'this.requestManager.requestStatus(input.providerRequestRef, false)': 'this.requestManager.requestStatus(input.providerRequestRef)',
+              'this.requestManager.requestStatus(requestId, false)': 'this.requestManager.requestStatus(requestId)',
+          }
+          changed = False
+          for old, new in replacements.items():
+              if old in provider_text:
+                  provider_text = provider_text.replace(old, new)
+                  changed = True
+          if changed:
+              provider.write_text(provider_text, encoding='utf-8')
+          if ', false)' in '\n'.join(line for line in provider_text.splitlines() if 'requestStatus(' in line):
+              raise SystemExit('query-only provider callers still pass a reconcile flag')
+
           test = Path('tests/arch-r3-query-reconcile-boundary.test.ts')
           expected = '\n'.join([
               'import assert from "node:assert/strict";',
@@ -47,6 +63,7 @@ jobs:
               'import test from "node:test";',
               '',
               'const managerSourceUrl = new URL("../src/features/webgpt/runtime/webgpt-request-manager.ts", import.meta.url);',
+              'const providerSourceUrl = new URL("../src/features/webgpt/automation/webgpt-provider-port.ts", import.meta.url);',
               '',
               'test("ARCH-R3 requestStatus is structurally query-only", async () => {',
               '  const source = await readFile(managerSourceUrl, "utf8");',
@@ -61,10 +78,16 @@ jobs:
               '  assert.match(source, /reconcilePersistedRecord\\(/);',
               '});',
               '',
+              'test("ARCH-R3 WebGPT provider observations use the pure query shape", async () => {',
+              '  const source = await readFile(providerSourceUrl, "utf8");',
+              '  assert.doesNotMatch(source, /requestStatus\\([^\\n]*,\\s*(?:true|false)\\)/);',
+              '  assert.match(source, /requestManager\\.reconcileRequest\\(input\\.providerRequestRef\\)/);',
+              '});',
+              '',
           ])
           if test.exists():
               if test.read_text(encoding='utf-8') != expected:
-                  raise SystemExit('ARCH-R3 test already exists with unexpected content')
+                  test.write_text(expected, encoding='utf-8')
           else:
               test.write_text(expected, encoding='utf-8')
           PY
@@ -76,7 +99,7 @@ jobs:
           printf '%s\n' "${changed[@]}"
           for path in "${changed[@]}"; do
             case "$path" in
-              src/features/webgpt/runtime/webgpt-request-manager.ts|tests/arch-r3-query-reconcile-boundary.test.ts) ;;
+              src/features/webgpt/runtime/webgpt-request-manager.ts|src/features/webgpt/automation/webgpt-provider-port.ts|tests/arch-r3-query-reconcile-boundary.test.ts) ;;
               *) echo "Unexpected changed path: $path" >&2; exit 1 ;;
             esac
           done
@@ -97,6 +120,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/features/webgpt/runtime/webgpt-request-manager.ts tests/arch-r3-query-reconcile-boundary.test.ts
+          git add src/features/webgpt/runtime/webgpt-request-manager.ts src/features/webgpt/automation/webgpt-provider-port.ts tests/arch-r3-query-reconcile-boundary.test.ts
           git commit -m "refactor(arch-r3): make request status query-only"
           git push origin HEAD:arch-r3/query-reconcile-boundary
