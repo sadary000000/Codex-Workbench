@@ -799,7 +799,7 @@ export class WebGptRequestManager {
       } else if (!probe.page.onChatPage || !probe.page.composerFound) {
         newChatAdmission = await this.admitPolicy("NEW_CHAT", `webgpt:new-chat:${record.requestId}`, record.policyVersionId, false, record.projectId);
         await this.attachPolicy(record, newChatAdmission);
-        newChatAdmission?.reservation.commit();
+        await this.commitPolicy(newChatAdmission);
         newChatCommitted = newChatAdmission !== null;
         await this.workspace.createChat();
         probe = await this.workspace.getPageProbe();
@@ -837,7 +837,7 @@ export class WebGptRequestManager {
         clearTimeout(preDispatchTimer);
         preDispatchTimer = null;
       }
-      promptAdmission?.reservation.commit();
+      await this.commitPolicy(promptAdmission);
       promptCommitted = promptAdmission !== null;
       record.sendStartedAt = new Date().toISOString();
       submitInvocationStarted = true;
@@ -1092,11 +1092,24 @@ export class WebGptRequestManager {
     }
   }
 
+  private async commitPolicy(admission: WebGptPolicyAdmission | null): Promise<void> {
+    if (!admission) return;
+    if (this.policyAuthority?.commit) {
+      await this.policyAuthority.commit(admission);
+      return;
+    }
+    if (this.requirePolicyAuthority) {
+      admission.reservation.release();
+      throw this.codedError("POLICY_DURABLE_COMMIT_REQUIRED", "Production WebGPT policy authority cannot persist the committed dispatch budget; browser mutation refused.");
+    }
+    admission.reservation.commit();
+  }
+
   private async dispatchWithPolicy<T>(admission: WebGptPolicyAdmission | null, dispatch: () => Promise<T>): Promise<T> {
     // Commit is deliberately the last local step before the provider/browser
     // call. If dispatch throws after this point, the outcome is unknown and the
     // reservation must remain committed rather than being refunded and replayed.
-    admission?.reservation.commit();
+    await this.commitPolicy(admission);
     return dispatch();
   }
 

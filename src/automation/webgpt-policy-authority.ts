@@ -45,6 +45,8 @@ export interface WebGptPolicyAuthorizer {
   /** Evaluate a pinned operation without reserving a budget. Used by explicit
    * reconcile/cancel paths that still require policy authority. */
   evaluatePinned(operation: PolicyOperation, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability, scopeProjectId?: string | null): Promise<EffectivePolicyDecision>;
+  /** Persist the committed dispatch budget immediately before the browser/provider mutation. */
+  commit?(admission: WebGptPolicyAdmission): Promise<void>;
 }
 
 export class WebGptPolicyAuthorityError extends Error {
@@ -69,6 +71,7 @@ export class WebGptPolicyAuthorityError extends Error {
  */
 export class WebGptPolicyAuthority implements WebGptPolicyAuthorizer {
   private readonly budgets = new Map<string, PolicyBudgetAuthority>();
+  private readonly committedAdmissions = new WeakSet<object>();
   private readonly store: AutomationStore;
   private readonly projectId: string;
   private readonly hardConstraints: HardConstraints;
@@ -116,6 +119,40 @@ export class WebGptPolicyAuthority implements WebGptPolicyAuthorizer {
       if (error instanceof PolicyContractError) throw new WebGptPolicyAuthorityError("POLICY_PIN_INVALID", error.message, { operation, policyVersionId: normalizedPolicyVersionId, path: error.path });
       throw error;
     }
+  }
+
+  async commit(admission: WebGptPolicyAdmission): Promise<void> {
+    if (this.committedAdmissions.has(admission)) return;
+    const effectivePolicy = admission.decision.effectivePolicy;
+    const correlationId = admission.pin.correlationId;
+    const limit = effectivePolicy.budgets[admission.operation];
+    if (admission.policyVersionId !== effectivePolicy.policyVersionId || admission.pin.policyVersionId !== effectivePolicy.policyVersionId) {
+      admission.reservation.release();
+      throw new WebGptPolicyAuthorityError("POLICY_PIN_MISMATCH", "WebGPT budget commit no longer matches the admitted PolicyVersion; browser mutation refused.", { policyVersionId: admission.policyVersionId, effectivePolicyVersionId: effectivePolicy.policyVersionId });
+    }
+    try {
+      await this.store.transaction((tx) => {
+        const committed = tx.table("auditEvents").filter((event) =>
+          event.projectId === effectivePolicy.projectId
+          && event.entityType === "PolicyVersion"
+          && event.entityId === effectivePolicy.policyVersionId
+          && event.eventType === "POLICY_BUDGET_COMMITTED"
+          && event.boundedPayload.budgetKind === admission.operation,
+        );
+        if (committed.some((event) => event.correlationId === correlationId)) {
+          throw new WebGptPolicyAuthorityError("POLICY_BUDGET_DENIED", `WebGPT ${admission.operation} budget correlation was already committed.`, { policyVersionId: effectivePolicy.policyVersionId, operation: admission.operation, correlationId, remaining: Math.max(0, limit - committed.length) });
+        }
+        if (committed.length >= limit) {
+          throw new WebGptPolicyAuthorityError("POLICY_BUDGET_EXHAUSTED", `WebGPT ${admission.operation} budget is exhausted for the pinned PolicyVersion.`, { policyVersionId: effectivePolicy.policyVersionId, operation: admission.operation, correlationId, remaining: 0 });
+        }
+        tx.appendAudit({ projectId: effectivePolicy.projectId, entityType: "PolicyVersion", entityId: effectivePolicy.policyVersionId, eventType: "POLICY_BUDGET_COMMITTED", actorType: "AUTOMATION", actorRef: null, boundedPayload: { budgetKind: admission.operation, effectiveBudget: limit }, correlationId, causationId: null });
+      });
+    } catch (error) {
+      admission.reservation.release();
+      throw error;
+    }
+    admission.reservation.commit();
+    this.committedAdmissions.add(admission);
   }
 
   snapshot(policyVersionId = WEBGPT_RUNTIME_POLICY_VERSION_ID): ReturnType<PolicyBudgetAuthority["snapshot"]> | null {
