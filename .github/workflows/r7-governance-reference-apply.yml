@@ -1,0 +1,56 @@
+name: R7 governance reference apply
+
+on:
+  push:
+    branches:
+      - feature/r7-project-map-governance-references
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/r7-project-map-governance-references
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply bounded governance patch
+        run: python3 .github/r7-governance-reference-apply.py
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test governance reference resolver
+        run: node --experimental-strip-types --test tests/r7-project-map-governance-reference-service.test.ts
+      - name: Test explicit governance projection UI boundary
+        run: node --experimental-strip-types --test tests/r7-project-map-governance-reference-ui.test.ts
+      - name: Test live Project scope references
+        run: node --experimental-strip-types --test tests/r7-project-map-scope-references.test.ts
+      - name: Test node reference producer boundary
+        run: node --experimental-strip-types --test tests/r7-map-reference-producer-boundary.test.ts
+      - name: Test Product association persistence
+        run: node --experimental-strip-types --test tests/r7-product-automation-association.test.ts
+      - name: Test association lazy service
+        run: node --experimental-strip-types --test tests/r7-project-automation-association-service.test.ts
+      - name: Test startup independence
+        run: node --experimental-strip-types --test tests/arch-v2-8-startup-idle.test.ts
+      - name: Test full repository
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit verified slice
+        shell: bash
+        run: |
+          rm .github/r7-governance-reference-apply.py
+          rm .github/workflows/r7-governance-reference-apply.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(r7): project active governance references"
+          git push origin HEAD:feature/r7-project-map-governance-references
