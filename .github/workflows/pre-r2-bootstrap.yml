@@ -31,6 +31,7 @@ jobs:
           if [ -f scripts/pre-r2-source-integrity-fix2.mjs ]; then node scripts/pre-r2-source-integrity-fix2.mjs; fi
           if [ -f scripts/pre-r2-source-integrity-fix3.mjs ]; then node scripts/pre-r2-source-integrity-fix3.mjs; fi
           if [ -f scripts/pre-r2-source-integrity-fix4.mjs ]; then node scripts/pre-r2-source-integrity-fix4.mjs; fi
+          if [ -f scripts/pre-r2-source-integrity-fix5.mjs ]; then node scripts/pre-r2-source-integrity-fix5.mjs; fi
       - name: Typecheck
         run: npm run typecheck
       - name: Targeted Planner tests
