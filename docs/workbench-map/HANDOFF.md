@@ -1,109 +1,189 @@
-# Current Handoff Checkpoint
+# Workbench 当前交接 Checkpoint
 
-Read `ARCHITECTURE.md` before changing ownership boundaries, `ROADMAP.md` before changing stage order, and `GIT_WORKFLOW.md` before creating development/validation branches.
+新的会话如果只想最快恢复上下文，按以下顺序阅读：
 
-## Repository checkpoint
+1. `README.md` — Map 的用途和证据规则；
+2. `ROADMAP.md` — 整个项目从起点到未来的完整节点；
+3. `ARCHITECTURE.md` — 当前冻结 ownership / truth boundary；
+4. `GIT_WORKFLOW.md` — branch / CI / merge discipline；
+5. R5/R6/R7 审计文件 — 当前迁移为何推进到 R7；
+6. 本文件 — 精确继续点。
 
-- Repository: `sadary000000/Codex-Workbench`
-- Formal integration target: `codex/workbench-v1`
-- Active integration branch: `workbench/next`
-- `workbench/next` was created from `375206182e5ee436dd1eac4ddf9d60938f98c37d`.
-- Exact-ref CI transition: `52df1f3f987c521e7ee9619d1d3ea567a7564843`.
-- R5 audit source base: `3a7c3509b7fff16fb10a2b598aa6a20c857cd7b6`.
-- R6 audit source base: `68d813b707326e4079992c26435bfbe53a148982`.
-- PR #8 remains Draft; ongoing integration is on `workbench/next`.
+## 1. Repository Checkpoint
 
-Git is authoritative for the current remote SHA. This file is a durable navigation checkpoint, not Git truth.
+- Repository：`sadary000000/Codex-Workbench`
+- 正式稳定基线：`codex/workbench-v1`
+- 当前集成分支：`workbench/next`
+- 本轮“全项目 Map + 中文文档”重建前的 `workbench/next` code/docs checkpoint：`abd15c39e07aa736721c977c07de9b98eb6c6360`
+- 当前真实 branch head：**以远端 Git ref 为准**；本文件属于持续更新的 projection，不把自身 SHA 当 Git truth。
 
-## Development workflow
+## 2. 当前远端分支模型
 
-`feature/<bounded-slice> -> workbench/next -> codex/workbench-v1 -> tag/release`
+清理后只保留：
 
-Use a feature branch only when a concrete implementation slice benefits from isolation. Do not create branches solely for CI. GitHub Actions owns exact-ref validation evidence.
+```text
+main
+codex/workbench-v1
+workbench/next
+feature/r7-map-entity-references
+```
 
-Four obsolete `fix/**-exact-head-verify` branches have deletion approval but remain because the current connector cannot delete remote branch refs. Do not use them for new work. Existing `arch/**` branches remain references for Draft PRs #3-#7 and must not be deleted without explicit approval.
+说明：
 
-## Delivery state
+- `main` 是遗留历史线，和当前 Workbench 主历史不是普通祖先/后继关系，暂不自动处理；
+- `codex/workbench-v1` 是稳定基线；
+- `workbench/next` 是当前集成线；
+- `feature/r7-map-entity-references` 是当前唯一短命 feature branch。
 
-PR #2 is merged. PRs #3-#8 remain Draft/unmerged checkpoints; no stage/audit status grants merge approval.
+旧 `arch/**`、旧 `docs/workbench-handoff-map`、旧 `fix/**-exact-head-verify` 分支已经清理。
 
-Known Draft heads:
+## 3. PR 状态
 
-- #3 `36477bcd75e7c43c3704575eb06fcd31da7a1bb3`
-- #4 `1ea60dfdb6f03c929371c9069c1ee6c3b7661fa0`
-- #5 `3f24f8ff904907e7538289c897c682427fca1208`
-- #6 `270e3de45bb07d4a9d5199a7cecb1c0058df4f10`
-- #7 `717069965d211189919ed081946a21d224b11353`
-- #8 `375206182e5ee436dd1eac4ddf9d60938f98c37d`
+- PR #2：Planner retry/source-integrity，已合入；
+- PR #3–#8：**已关闭、未 merge**；旧 branch 已删除；其 stacked commits 已经由 `workbench/next` 历史继承；
+- PR #9：**Draft / open / 未 merge**，R7 当前实现分支。
 
-## Completed audits
+PR #9：
 
-### R5 — Native Runtime Dedup: `AUDIT_PASS`
+```text
+feature/r7-map-entity-references
+  -> workbench/next
+```
 
-Codex App Server remains Thread/Turn/Item truth. Workbench does not persist a duplicate Native transcript or implement a second agent/subagent/tool/sandbox runtime. Evidence: `R5_NATIVE_RUNTIME_AUDIT.md`.
+已验证 feature exact head：
 
-### R6 — Manual / Automation Decouple: `AUDIT_PASS`
+```text
+efd27cc9cc8bd854be011cc87aba67453b4ffcce
+```
 
-Evidence established that:
+该 tree 的标准 exact-head CI 已通过：typecheck、全量 tests、build PASS。
 
-- ordinary GUI startup does not initialize Automation/WebGPT persistence/control-plane state unless explicitly activated;
-- `tests/arch-v2-8-startup-idle.test.ts` verifies no Automation filesystem/store side effects on ordinary startup;
-- manual Thread/Turn IPC calls `NativeThreadRuntime` directly without Workflow/Requirement/Plan/AutomationProject prerequisites;
-- product `ProjectRecord` is owned by V1 Workbench persistence and groups cwd/ThreadProjection navigation;
-- `AutomationProject` is owned by independent `automation.db` and owns workflow/governance lifecycle;
-- Requirement and Planner operations require an existing AutomationProject;
-- normal Product Project creation passes `{name, cwd}` and gets identity from V1 persistence;
-- no automatic Product Project -> AutomationProject identity equality/binding was found;
-- Automation's legacy `WORKBENCH_PROJECT` ExternalRef kind is a provider-scope carrier name, not Product Project ownership.
+> Stage/CI/Map 状态从来不自动授予 merge approval。
 
-Evidence: `R6_MANUAL_AUTOMATION_AUDIT.md`.
+## 4. 已完成架构审计
 
-No R5 or R6 production diff was justified.
+### R5 — Native Runtime Dedup
 
-## Current engineering stage
+状态：`AUDIT_PASS`。
 
-`R7 — Projection / Map` is active.
+结论：
 
-Read `R7_AUDIT_TARGETS.md`. Start with read-only ownership/call-graph/persistence evidence before editing production code.
+- Codex App Server 仍是 Thread/Turn/Item truth；
+- Workbench 没有 durable duplicate Native transcript；
+- 没有第二 agent/subagent/tool/sandbox runtime；
+- Map maintenance 是受限 Workbench 增量能力，执行仍是 Codex Native；
+- 没有证明需要 R5 production refactor。
 
-Primary questions:
+证据：`R5_NATIVE_RUNTIME_AUDIT.md`。
 
-1. Can Map state mutate Native Thread/Turn/Item, Automation Workflow, provider, or resource truth, or is it projection-only?
-2. Are Conversation/Project Map context reads bounded and read-only rather than a second transcript store?
-3. Are hidden maintenance Threads explicitly scoped and executed by Codex Native runtime with narrow dynamic Map tools?
-4. How are stale/unavailable projections represented and reconciled?
-5. Which missing Requirement/Plan/Workflow/Change/Evidence/Review/PR/commit/native/provider/resource links are real Workbench product gaps rather than duplicated Codex-native plan/status UI?
+### R6 — Manual / Automation Decouple
 
-R7 classifications:
+状态：`AUDIT_PASS`。
 
-- `PROJECTION_BOUNDARY_PASS`
-- `MAP_INCREMENT_PASS`
-- `PROJECTION_LEAK_CHANGE`
-- `MAP_PRODUCT_GAP`
-- `NEEDS_EVIDENCE`
+结论：
 
-Do not create a production diff until a concrete `PROJECTION_LEAK_CHANGE` or bounded `MAP_PRODUCT_GAP` is proven.
+- 普通 GUI startup 不初始化 Automation/WebGPT persistence；
+- Manual `native-runtime:*` 直接进入 Native Runtime；
+- Product `ProjectRecord` 属于 V1 persistence；
+- `AutomationProject` 属于独立 `automation.db`；
+- Requirement/Planner 需要真实 AutomationProject；
+- 没有自动 Product Project -> AutomationProject identity collapse。
 
-## Resume protocol
+证据：`R6_MANUAL_AUTOMATION_AUDIT.md`。
 
-1. Verify current `workbench/next` remote SHA and relevant Draft PR states.
-2. Read `ARCHITECTURE.md`, `GIT_WORKFLOW.md`, `R5_NATIVE_RUNTIME_AUDIT.md`, `R6_MANUAL_AUTOMATION_AUDIT.md`, and `R7_AUDIT_TARGETS.md`.
-3. Audit MapStore/map types and all Map mutation callers first.
-4. Trace Conversation Map and Project Map context/maintenance paths back to Native `thread/read` and Map dynamic tools.
-5. Classify each surface by owner; distinguish an ownership leak from a legitimate product projection gap.
-6. If implementation is justified, define one bounded regression test and slice. Use `feature/**` only when isolation is useful.
-7. Never create a helper branch solely for exact-head CI.
-8. Before creating/pushing a new implementation branch, state exact branch/base and that no merge will occur.
-9. Never merge or delete branches without explicit approval.
-10. Update ROADMAP/HANDOFF/roadmap.json at durable checkpoints.
+## 5. 当前工程阶段：R7 Projection / Map
 
-## Frozen continuation constraints
+R7 当前已经证明 Map 的 ownership 基础是正确的：
 
-- Native Thread/Turn/Item are execution truth; no duplicate transcript.
-- Manual V1 remains independent of Automation.
-- Workbench Project remains distinct from AutomationProject.
-- RequirementVersion/PlanVersion remain Workbench governance truth.
-- Unknown provider side effects reconcile instead of blind resend.
-- Evidence/Audit do not own resource leases.
-- Map remains a Workbench projection/governance increment, not duplicate native planning.
-- Do not add a second sandbox, Native tool executor, or subagent runtime.
+- `MapStore` 是独立 JSON sidecar，只写 `MapDocument` projection；
+- Map mutation 没有写 Native/Automation/provider/resource truth 的接口；
+- `MapNode.sources` 使用 Native Thread/Turn/Item source trace，不复制 Native item body；
+- Project Map context read 有 project membership 和 request/turn/bytes 边界；
+- maintenance 使用真实 Codex Native Thread/Turn；
+- Map 不是第二 transcript / Agent Runtime。
+
+### PR #9 已实现的 R7 slice
+
+#### R7.1 — Typed Projection Reference
+
+Map node 可以保存 identity-only reference：
+
+```text
+domain / entityType / entityId
+```
+
+不复制外部 mutable state。
+
+#### R7.2 — Readonly UI Surface
+
+Renderer 只读显示 typed reference identity，不自动读取 Automation/GitHub/provider 状态，不伪造跳转。
+
+#### R7.3 — Producer Safety Boundary
+
+- legacy `add_node` 不再静默丢 typed reference；
+- maintenance prompt 明确禁止从名称、自然语言、URL 或同名 `projectId` 猜跨域 ID；
+- 只有 owner-confirmed stable identity 才能成为 reference。
+
+## 6. 已确认但尚未实现的 Product Association
+
+Product Project ↔ AutomationProject 语义已经冻结为：
+
+```text
+Product Project 1 : N AutomationProject
+```
+
+规则：
+
+1. **显式绑定**；
+2. 不通过名字、同名 `projectId`、上下文、Map 自动猜；
+3. unlink 只删除 association；
+4. **绝不因为 unlink 删除 AutomationProject**；
+5. association 由 **Workbench Product Shell** 拥有；
+6. association 只保存 identity，不复制 Automation lifecycle/status；
+7. Map 只投影 association，不成为 association truth；
+8. association 未实现前，不自动生成 RequirementVersion/PlanVersion 等跨域 Map producer。
+
+这是 `CURRENT_DECISION / WAITING_IMPLEMENTATION`。
+
+## 7. 下一步
+
+R7 不应继续为了“多接几个实体”而让模型猜 ID。
+
+安全继续顺序：
+
+1. review PR #9 最终 R7 typed-reference diff；
+2. 判断 R7 是否已经满足当前 projection foundation exit；
+3. association 如果要实现，先设计 Product-Shell-owned persistence + 显式 UI/command lifecycle，而不是把关系塞进 MapStore；
+4. association 不做时，也可以把 R7 以“foundation completed, producer gated”收口；
+5. 然后进入 **R8 — Migration / Dead Code** 只读审计；
+6. R8 只在 owner 证明后删除 legacy/duplicate path；
+7. R8 后执行 Direct Codex vs Workbench Native A/B。
+
+## 8. Resume Protocol
+
+新会话继续时：
+
+1. 查询 `workbench/next` 远端 exact SHA；
+2. 查询 PR #9 当前 head/state/CI，不能依赖本文档缓存状态；
+3. 先读 `ROADMAP.md`，不要只从 R7 开始而忘掉历史路线；
+4. 任何架构修改先对照 `ARCHITECTURE.md` 冻结不变量；
+5. Production change 前先证明具体 ownership violation 或 bounded product gap；
+6. feature branch 只用于 bounded slice；
+7. 不创建 exact-head validation helper branch；
+8. 新 branch/push 前声明 exact branch/base，并说明不会 merge；
+9. merge 与 branch deletion 分别需要明确授权；
+10. durable checkpoint 改变时同步 `ROADMAP.md` / `HANDOFF.md` / `roadmap.json`。
+
+## 9. 不可破坏的继续约束
+
+- Native Thread/Turn/Item 是 execution truth；
+- 不复制第二 transcript；
+- Manual V1 不依赖 Automation；
+- Product Project != AutomationProject；
+- Product Project ↔ AutomationProject = 1:N explicit association；unlink != delete；
+- RequirementVersion/PlanVersion 是 Workbench governance truth；
+- unknown provider side effect -> reconcile，禁止 blind resend；
+- Evidence/Audit 不拥有 resource lease；
+- Map 是 Projection / Governance increment，不是 duplicate native planning；
+- 不实现第二 sandbox / Native tool executor / subagent runtime；
+- 不让 optional Workbench feature 无必要污染普通 Native Codex context。
