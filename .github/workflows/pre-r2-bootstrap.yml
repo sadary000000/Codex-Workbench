@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   apply-and-verify:
-    if: ${{ !contains(github.event.head_commit.message, 'fix: repair Planner logical retry lifecycle') }}
+    if: "${{ !contains(github.event.head_commit.message, 'fix: repair Planner logical retry lifecycle') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
