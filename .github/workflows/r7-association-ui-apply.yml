@@ -26,7 +26,13 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
-      - name: Test
+      - name: Test R7 association service
+        run: node --experimental-strip-types --test tests/r7-project-automation-association-service.test.ts
+      - name: Test R7 association UI wiring
+        run: node --experimental-strip-types --test tests/r7-project-automation-association-ui.test.ts
+      - name: Test startup independence regression
+        run: node --experimental-strip-types --test tests/arch-v2-8-startup-idle.test.ts
+      - name: Test full repository
         run: npm test
       - name: Build
         run: npm run build
