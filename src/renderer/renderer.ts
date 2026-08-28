@@ -2,6 +2,7 @@ import type {
   NativeEvent,
   NativeTurnCompletionEvent,
   ProjectRecord,
+  ProjectAutomationAssociation,
   RuntimeErrorInfo,
   RuntimeSnapshot,
   ThreadNavigationResult,
@@ -32,6 +33,14 @@ interface IpcEnvelope<T = unknown> {
   error?: RuntimeErrorInfo;
 }
 
+interface AutomationProjectAssociationCandidate {
+  projectId: string;
+  name: string;
+  lifecycle: string;
+  activeRequirementVersionId: string | null;
+  activePlanVersionId: string | null;
+}
+
 interface NativeServerRequestEvent {
   status: "pending" | "resolved" | "rejected";
   threadId: string | null;
@@ -50,6 +59,10 @@ interface V1Api {
   updateProject(projectId: string, patch: unknown): Promise<IpcEnvelope<ProjectRecord>>;
   removeProject(projectId: string): Promise<IpcEnvelope<{ project: ProjectRecord; detachedNativeThreadIds: string[]; metadataCleanup: "cleaned" | "failed" }>>;
   openProject(projectId: string): Promise<IpcEnvelope<{ projectId: string; cwd: string }>>;
+  listProjectAutomationAssociations(productProjectId: string): Promise<IpcEnvelope<ProjectAutomationAssociation[]>>;
+  listAutomationProjectsForAssociation(): Promise<IpcEnvelope<AutomationProjectAssociationCandidate[]>>;
+  bindAutomationProject(productProjectId: string, automationProjectId: string): Promise<IpcEnvelope<ProjectAutomationAssociation>>;
+  unlinkAutomationProject(productProjectId: string, automationProjectId: string): Promise<IpcEnvelope<ProjectAutomationAssociation>>;
   listThreads(projectId?: string | null): Promise<IpcEnvelope<ThreadProjection[]>>;
   bindThreadToProject(nativeThreadId: string, projectId: string | null): Promise<IpcEnvelope<ThreadProjection>>;
   updateThreadProjection(nativeThreadId: string, patch: unknown): Promise<IpcEnvelope<ThreadProjection>>;
@@ -182,6 +195,15 @@ const projectMenuName = document.querySelector<HTMLElement>("#project-menu-name"
 const projectMenuRenameButton = document.querySelector<HTMLButtonElement>("#project-menu-rename")!;
 const projectMenuOpenButton = document.querySelector<HTMLButtonElement>("#project-menu-open")!;
 const projectMenuRemoveButton = document.querySelector<HTMLButtonElement>("#project-menu-remove")!;
+const projectMenuAutomationButton = document.querySelector<HTMLButtonElement>("#project-menu-automation")!;
+const projectAutomationDialog = document.querySelector<HTMLDialogElement>("#project-automation-dialog")!;
+const projectAutomationForm = document.querySelector<HTMLFormElement>("#project-automation-form")!;
+const projectAutomationName = document.querySelector<HTMLElement>("#project-automation-name")!;
+const projectAutomationList = document.querySelector<HTMLElement>("#project-automation-list")!;
+const projectAutomationSelect = document.querySelector<HTMLSelectElement>("#project-automation-select")!;
+const projectAutomationBindButton = document.querySelector<HTMLButtonElement>("#project-automation-bind")!;
+const projectAutomationCloseButton = document.querySelector<HTMLButtonElement>("#project-automation-close")!;
+const projectAutomationError = document.querySelector<HTMLElement>("#project-automation-error")!;
 const projectRemoveDialog = document.querySelector<HTMLDialogElement>("#project-remove-dialog")!;
 const projectRemoveForm = document.querySelector<HTMLFormElement>("#project-remove-form")!;
 const projectRemoveMessage = document.querySelector<HTMLElement>("#project-remove-message")!;
@@ -230,6 +252,7 @@ let threadUnavailableId: string | null = null;
 let currentProjection: ThreadProjection | null = null;
 let editingProjectId: string | null = null;
 let projectMenuTarget: ProjectRecord | null = null;
+let projectAutomationTarget: ProjectRecord | null = null;
 let pendingProjectRemoval: ProjectRecord | null = null;
 const projectOpenState = new Map<string, boolean>();
 let threadView: ThreadReadView | null = null;
@@ -1621,6 +1644,124 @@ function closeProjectMenuDialog(): void {
   projectMenuDialog.close();
 }
 
+function renderProjectAutomationAssociations(associations: ProjectAutomationAssociation[], candidates: AutomationProjectAssociationCandidate[] = []): void {
+  projectAutomationList.replaceChildren();
+  const candidateById = new Map(candidates.map((candidate) => [candidate.projectId, candidate]));
+  if (associations.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "尚未关联 AutomationProject。";
+    projectAutomationList.append(empty);
+    return;
+  }
+  for (const association of associations) {
+    const candidate = candidateById.get(association.automationProjectId);
+    const row = document.createElement("div");
+    row.className = "project-automation-row";
+    const summary = document.createElement("div");
+    summary.className = "project-automation-summary";
+    const title = document.createElement("strong");
+    title.textContent = candidate?.name ?? association.automationProjectId;
+    const identity = document.createElement("code");
+    identity.textContent = association.automationProjectId;
+    summary.append(title, identity);
+    if (candidate) {
+      const meta = document.createElement("span");
+      meta.className = "muted";
+      meta.textContent = `Automation · ${candidate.lifecycle}`;
+      summary.append(meta);
+    }
+    const unlink = document.createElement("button");
+    unlink.type = "button";
+    unlink.className = "debug-button";
+    unlink.textContent = "解除关联";
+    unlink.addEventListener("click", () => void unlinkAutomationProjectAssociation(association.automationProjectId, unlink));
+    row.append(summary, unlink);
+    projectAutomationList.append(row);
+  }
+}
+
+async function refreshProjectAutomationDialog(projectId: string): Promise<void> {
+  projectAutomationError.hidden = true;
+  projectAutomationError.textContent = "";
+  projectAutomationSelect.disabled = true;
+  projectAutomationBindButton.disabled = true;
+  projectAutomationSelect.replaceChildren();
+
+  const associations = await consume("project.automation.associations.list", api.listProjectAutomationAssociations(projectId));
+  if (!associations) {
+    projectAutomationError.textContent = "读取 Product Project 关联失败。";
+    projectAutomationError.hidden = false;
+    return;
+  }
+  renderProjectAutomationAssociations(associations);
+
+  // This is the only dialog read that explicitly activates Automation persistence.
+  const candidates = await consume("project.automation.candidates.list", api.listAutomationProjectsForAssociation());
+  if (!candidates) {
+    projectAutomationError.textContent = "AutomationProject 列表暂时不可用；现有关联仍可解除。";
+    projectAutomationError.hidden = false;
+    return;
+  }
+
+  renderProjectAutomationAssociations(associations, candidates);
+  const bound = new Set(associations.map((association) => association.automationProjectId));
+  const available = candidates.filter((candidate) => !bound.has(candidate.projectId));
+  if (available.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "没有可关联的 AutomationProject";
+    projectAutomationSelect.append(option);
+    return;
+  }
+  for (const candidate of available) {
+    const option = document.createElement("option");
+    option.value = candidate.projectId;
+    option.textContent = `${candidate.name} · ${candidate.lifecycle} · ${candidate.projectId}`;
+    projectAutomationSelect.append(option);
+  }
+  projectAutomationSelect.disabled = false;
+  projectAutomationBindButton.disabled = false;
+}
+
+function openProjectAutomationDialog(project: ProjectRecord): void {
+  projectAutomationTarget = project;
+  projectAutomationName.textContent = `${project.name} · Product Project ${project.projectId}`;
+  projectAutomationList.replaceChildren();
+  projectAutomationError.hidden = true;
+  projectAutomationDialog.showModal();
+  void refreshProjectAutomationDialog(project.projectId);
+}
+
+async function bindSelectedAutomationProject(): Promise<void> {
+  const project = projectAutomationTarget;
+  const automationProjectId = projectAutomationSelect.value.trim();
+  if (!project || !automationProjectId) return;
+  projectAutomationBindButton.disabled = true;
+  const result = await consume("project.automation.association.bind", api.bindAutomationProject(project.projectId, automationProjectId));
+  if (!result) {
+    projectAutomationError.textContent = "建立关联失败；AutomationProject 可能不存在或已被其他 Product Project 关联。";
+    projectAutomationError.hidden = false;
+    projectAutomationBindButton.disabled = false;
+    return;
+  }
+  await refreshProjectAutomationDialog(project.projectId);
+}
+
+async function unlinkAutomationProjectAssociation(automationProjectId: string, button: HTMLButtonElement): Promise<void> {
+  const project = projectAutomationTarget;
+  if (!project) return;
+  button.disabled = true;
+  const result = await consume("project.automation.association.unlink", api.unlinkAutomationProject(project.projectId, automationProjectId));
+  if (!result) {
+    projectAutomationError.textContent = "解除关联失败。";
+    projectAutomationError.hidden = false;
+    button.disabled = false;
+    return;
+  }
+  await refreshProjectAutomationDialog(project.projectId);
+}
+
 async function selectThread(nativeThreadId: string): Promise<void> {
   const previousState = latestState;
   const previousProjection = currentProjection;
@@ -2103,6 +2244,22 @@ projectCreateForm.addEventListener("submit", (event) => {
   void submitProjectCreate();
 });
 projectCreateCancelButton.addEventListener("click", () => projectCreateDialog.close());
+projectMenuAutomationButton.addEventListener("click", () => {
+  const project = projectMenuTarget;
+  closeProjectMenuDialog();
+  if (project) openProjectAutomationDialog(project);
+});
+projectAutomationForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void bindSelectedAutomationProject();
+});
+projectAutomationCloseButton.addEventListener("click", () => projectAutomationDialog.close());
+projectAutomationDialog.addEventListener("close", () => {
+  projectAutomationTarget = null;
+  projectAutomationList.replaceChildren();
+  projectAutomationSelect.replaceChildren();
+  projectAutomationError.hidden = true;
+});
 projectMenuRenameButton.addEventListener("click", () => {
   const project = projectMenuTarget;
   closeProjectMenuDialog();

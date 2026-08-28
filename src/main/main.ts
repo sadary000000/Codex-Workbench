@@ -15,6 +15,7 @@ import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-
 import type { JsonRpcMessage, NativeTurnCompletionEvent, RuntimeSnapshot, ThreadNavigationResult } from "../shared/runtime-types.ts";
 import { ConversationMapCoordinator } from "./map-coordinator.ts";
 import { ProjectMapManager } from "./project-map-manager.ts";
+import { ProjectAutomationAssociationService } from "./project-automation-association-service.ts";
 import { RuntimeRegistry } from "./runtime-registry.ts";
 import { isConversationMapSidecarEnabled } from "./map-activation.ts";
 import { markThreadUnavailable } from "./thread-availability.ts";
@@ -85,6 +86,10 @@ const IPC = Object.freeze({
   projectUpdate: "persistence:projects:update",
   projectRemove: "persistence:projects:remove",
   projectOpen: "persistence:projects:open",
+  projectAutomationAssociationList: "persistence:project-automation-associations:list",
+  projectAutomationCandidateList: "automation:projects:association-candidates",
+  projectAutomationBind: "persistence:project-automation-associations:bind",
+  projectAutomationUnlink: "persistence:project-automation-associations:unlink",
   threadList: "persistence:threads:list",
   threadBind: "persistence:threads:bind",
   threadUpdate: "persistence:threads:update",
@@ -136,6 +141,7 @@ let threadSwitchSequence = 0;
 let persistence: V1PersistenceStore | null = null;
 let conversationMaps: ConversationMapCoordinator | null = null;
 let projectMaps: ProjectMapManager | null = null;
+let projectAutomationAssociationService: ProjectAutomationAssociationService | null = null;
 let webGptWorkspace: WebGptWorkspace | null = null;
 let quittingForExit = false;
 let pendingWebGptCommand: WebGptExternalCommand | null = null;
@@ -1678,6 +1684,20 @@ function getPersistence(): V1PersistenceStore {
   return persistence;
 }
 
+function getProjectAutomationAssociationService(): ProjectAutomationAssociationService {
+  if (projectAutomationAssociationService) return projectAutomationAssociationService;
+  projectAutomationAssociationService = new ProjectAutomationAssociationService(
+    getPersistence(),
+    async () => {
+      // R7 boundary: only an explicit candidate read/bind may initialize Automation.
+      await ensureAutomationPersistence();
+      if (!automationStore) throw new Error("Automation persistence is unavailable.");
+      return automationStore;
+    },
+  );
+  return projectAutomationAssociationService;
+}
+
 async function detachLoadedProjectRuntimes(projectId: string): Promise<void> {
   const memberIds = new Set((await getPersistence().listThreads(projectId)).map((thread) => thread.nativeThreadId));
   for (const { nativeThreadId, runtime } of runtimes.list()) {
@@ -2155,6 +2175,38 @@ function registerIpc(): void {
         throw error;
       }
       return ok({ projectId: project.projectId, cwd });
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectAutomationAssociationList, async (_event, productProjectId: unknown) => {
+    try {
+      if (typeof productProjectId !== "string") throw new Error("Product Project ID is required.");
+      return ok(await getProjectAutomationAssociationService().listAssociations(productProjectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectAutomationCandidateList, async () => {
+    try {
+      return ok(await getProjectAutomationAssociationService().listAutomationProjects());
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectAutomationBind, async (_event, productProjectId: unknown, automationProjectId: unknown) => {
+    try {
+      if (typeof productProjectId !== "string" || typeof automationProjectId !== "string") throw new Error("Project association IDs are required.");
+      return ok(await getProjectAutomationAssociationService().bind(productProjectId, automationProjectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectAutomationUnlink, async (_event, productProjectId: unknown, automationProjectId: unknown) => {
+    try {
+      if (typeof productProjectId !== "string" || typeof automationProjectId !== "string") throw new Error("Project association IDs are required.");
+      // Product-owned unlink deliberately remains available without Automation initialization.
+      return ok(await getProjectAutomationAssociationService().unlink(productProjectId, automationProjectId));
     } catch (error) {
       return fail(error);
     }
