@@ -112,6 +112,7 @@ function normalizeCompatibilityPatch(value: unknown): unknown {
           details: item.details,
           history: item.history,
           sources: item.sources,
+          references: item.references,
           ordering: item.ordering,
         },
       };
@@ -300,6 +301,10 @@ export class ProjectMapManager {
       "If the delta implies a major route change, submit a Map Patch with requiresUserConfirmation=true and a concise confirmationReason; do not silently replace the old route.",
       "Use the workbench_map_patch dynamic tool for the machine-readable update. Keep any final text short; the user-visible answer belongs to the normal Thread.",
       "Map Patch operations must use the literal key op, for example {op:\"add\",node:{...}}; do not use type or add_node.",
+      "Typed references are projection-only identities; they never carry owner-domain status, title, payload, or authority.",
+      "Do not invent or infer references from names, prose, summaries, URLs, or coincidental Project IDs.",
+      "Only preserve an existing typed reference or add one when bounded input explicitly provides an owner-confirmed {domain, entityType, entityId} identity.",
+      "If no owner-confirmed identity is explicitly provided, omit references.",
       "If the bounded delta contains forceContextRequest=true and a contextRequest object, call workbench_map_context_request exactly once before workbench_map_patch, using that bounded request; do not skip it.",
       `Project Map revision: ${mapStatus.map.revision}`,
       `Project scope: ${boundedJson({ kind: "project", projectId: id }, 1_000)}`,
