@@ -22,7 +22,11 @@ export class AutomationExecutionRoutingError extends Error {
 
 type RequirementStartInput = Parameters<ProviderAwareRequirementAutomationService["startAlignment"]>[0];
 type RequirementDraftInput = Parameters<ProviderAwareRequirementAutomationService["requestDraft"]>[0];
-type RequirementReconcileInput = Parameters<ProviderAwareRequirementAutomationService["reconcileProviderRequest"]>[0];
+export interface RequirementReconcileCommand {
+  readonly sessionId: string;
+  readonly roundId?: string;
+  readonly waitTimeoutMs?: number;
+}
 type PlannerCreateInput = Parameters<PlannerProviderIntegrationService["createPlanFromRequirement"]>[0];
 type PlannerReconcileInput = Parameters<PlannerProviderIntegrationService["reconcilePlannerRequest"]>[0];
 type PlannerRetryInput = Parameters<PlannerProviderIntegrationService["retryPlannerRequest"]>[0];
@@ -35,7 +39,7 @@ function normalizeProviderId(value: AutomationProviderId | null | undefined): Au
 }
 
 /**
- * Provider-neutral main-process workflow façade.
+ * Provider-neutral main-process workflow facade.
  *
  * New logical work defaults to the registry default (Native). Continuations
  * never apply that default blindly: Requirement sessions recover provider id
@@ -62,9 +66,9 @@ export class AutomationExecutionFacade {
     return this.services.requirement(provider).requestDraft(input);
   }
 
-  async reconcileRequirement(input: RequirementReconcileInput, providerId?: AutomationProviderId | null) {
+  async reconcileRequirement(input: RequirementReconcileCommand, providerId?: AutomationProviderId | null) {
     const provider = await this.providerForRequirementSession(input.sessionId, providerId);
-    return this.services.requirement(provider).reconcileProviderRequest(input);
+    return this.services.requirement(provider).reconcileProviderRequest(input.sessionId, input.roundId, input.waitTimeoutMs);
   }
 
   async createPlan(input: PlannerCreateInput, providerId?: AutomationProviderId | null) {
