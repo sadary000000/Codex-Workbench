@@ -24,74 +24,28 @@
       "manualExactRef": "workflow_dispatch.inputs.ref",
       "verification": ["npm ci", "npm run typecheck", "npm test", "npm run build"],
       "evidenceStorage": "GitHub Actions runs/artifacts rather than helper branches"
-    },
-    "labRepositoryPolicy": "Keep product code in this repository. A separate Lab repository is only justified for materially separate large benchmark data, generated fixtures, fuzz/stress corpora, disposable research prototypes, or different access/secret requirements."
+    }
   },
   "currentCheckpoint": {
-    "stageId": "R6",
-    "stageName": "Manual / Automation Decouple",
+    "stageId": "R7",
+    "stageName": "Projection / Map",
     "status": "ACTIVE",
     "formalIntegrationBranch": "codex/workbench-v1",
     "activeIntegrationBranch": "workbench/next",
     "integrationBranchCreatedFrom": "375206182e5ee436dd1eac4ddf9d60938f98c37d",
     "exactRefCiTransitionCommit": "52df1f3f987c521e7ee9619d1d3ea567a7564843",
     "r5AuditBaseSha": "3a7c3509b7fff16fb10a2b598aa6a20c857cd7b6",
-    "r5AuditReportCommit": "90ee105fda031916ee514baac43bc0776edb5ceb",
-    "nextAction": "Audit normal Electron/manual Native startup dependencies and Workbench Project versus AutomationProject identity boundaries before creating any R6 implementation diff."
+    "r6AuditBaseSha": "68d813b707326e4079992c26435bfbe53a148982",
+    "nextAction": "Audit MapStore ownership, bounded context reads, maintenance execution, stale projection behavior, and concrete cross-domain Map product gaps before editing production code."
   },
   "stages": [
-    {
-      "id": "R3",
-      "name": "Resource & External Action",
-      "status": "STACKED_DRAFT",
-      "dependsOn": ["R2"],
-      "exit": "Explicit provider side-effect boundary; query/reconcile separated; missing reconcile resource truth fails closed; unknown side effects reconcile instead of blind resend."
-    },
-    {
-      "id": "R4",
-      "name": "Policy & Evidence",
-      "status": "STACKED_DRAFT",
-      "dependsOn": ["R3"],
-      "exit": "One persisted policy truth; restart-durable Native/provider-neutral and WebGPT budget commitments; Evidence/Audit remain separate from resource ownership."
-    },
-    {
-      "id": "R5",
-      "name": "Native Runtime Dedup",
-      "status": "AUDIT_PASS",
-      "dependsOn": ["R4"],
-      "exit": "Codex-facing Workbench code is native adapter/projection/product logic, not a competing Thread/context/agent/tool runtime.",
-      "result": "No production duplicate Native runtime was proven; no R5 code diff was justified.",
-      "evidence": "docs/workbench-map/R5_NATIVE_RUNTIME_AUDIT.md"
-    },
-    {
-      "id": "R6",
-      "name": "Manual / Automation Decouple",
-      "status": "ACTIVE",
-      "dependsOn": ["R5"],
-      "exit": "Manual V1 remains independent of Automation and Workbench Project remains distinct from AutomationProject.",
-      "auditTargets": "docs/workbench-map/R6_AUDIT_TARGETS.md"
-    },
-    {
-      "id": "R7",
-      "name": "Projection / Map",
-      "status": "PLANNED",
-      "dependsOn": ["R6"],
-      "exit": "Map connects Workbench governance and native runtime references as a projection without becoming execution truth."
-    },
-    {
-      "id": "R8",
-      "name": "Migration / Dead Code",
-      "status": "PLANNED",
-      "dependsOn": ["R7"],
-      "exit": "Superseded duplicate runtime paths are migrated and removed only after ownership and caller migration are proven."
-    },
-    {
-      "id": "AB",
-      "name": "A/B Validation",
-      "status": "PLANNED",
-      "dependsOn": ["R8"],
-      "exit": "Reproducible comparison evidence documents the value and tradeoffs of Workbench increments versus Codex-native behavior."
-    }
+    {"id": "R3", "name": "Resource & External Action", "status": "STACKED_DRAFT", "dependsOn": ["R2"]},
+    {"id": "R4", "name": "Policy & Evidence", "status": "STACKED_DRAFT", "dependsOn": ["R3"]},
+    {"id": "R5", "name": "Native Runtime Dedup", "status": "AUDIT_PASS", "dependsOn": ["R4"], "result": "No production duplicate Native runtime was proven; no R5 code diff was justified.", "evidence": "docs/workbench-map/R5_NATIVE_RUNTIME_AUDIT.md"},
+    {"id": "R6", "name": "Manual / Automation Decouple", "status": "AUDIT_PASS", "dependsOn": ["R5"], "result": "Ordinary Manual Native operation is Automation-independent and Product Project identity remains separate from AutomationProject; no R6 code diff was justified.", "evidence": "docs/workbench-map/R6_MANUAL_AUTOMATION_AUDIT.md"},
+    {"id": "R7", "name": "Projection / Map", "status": "ACTIVE", "dependsOn": ["R6"], "exit": "Map connects Workbench governance and native/runtime/provider/resource references as a useful projection without becoming execution or workflow truth.", "auditTargets": "docs/workbench-map/R7_AUDIT_TARGETS.md"},
+    {"id": "R8", "name": "Migration / Dead Code", "status": "PLANNED", "dependsOn": ["R7"]},
+    {"id": "AB", "name": "A/B Validation", "status": "PLANNED", "dependsOn": ["R8"]}
   ],
   "delivery": [
     {"pr": 2, "name": "Planner retry/source-integrity", "status": "MERGED"},
@@ -108,48 +62,22 @@
     {"branch": "fix/arch-r4-native-budget-exact-head-verify", "status": "DELETE_APPROVED_TOOLING_BLOCKED"},
     {"branch": "fix/arch-r4-webgpt-budget-exact-head-verify", "status": "DELETE_APPROVED_TOOLING_BLOCKED"}
   ],
-  "r5Audit": {
-    "baseSha": "3a7c3509b7fff16fb10a2b598aa6a20c857cd7b6",
+  "r5Audit": {"baseSha": "3a7c3509b7fff16fb10a2b598aa6a20c857cd7b6", "status": "AUDIT_PASS", "report": "docs/workbench-map/R5_NATIVE_RUNTIME_AUDIT.md"},
+  "r6Audit": {
+    "baseSha": "68d813b707326e4079992c26435bfbe53a148982",
     "status": "AUDIT_PASS",
-    "report": "docs/workbench-map/R5_NATIVE_RUNTIME_AUDIT.md",
-    "staleTargetsRemoved": [
-      "src/codex/project-thread-store.ts",
-      "src/codex/context-sharing.ts",
-      "src/codex/agent-run-service.ts",
-      "src/codex/tool-registry.ts"
-    ],
-    "actualSurfaces": [
-      "src/codex/native-thread-runtime.ts",
-      "src/codex/app-server-host.ts",
-      "src/shared/thread-read-model.ts",
-      "src/shared/persistence-store.ts",
-      "src/main/runtime-registry.ts",
-      "src/main/native-provider-runtime-adapter.ts",
-      "src/codex/automation/native-provider-port.ts",
-      "src/codex/composer-capabilities.ts",
-      "src/renderer/message-projection.ts",
-      "src/main/map-coordinator.ts",
-      "src/main/project-map-manager.ts"
-    ],
+    "report": "docs/workbench-map/R6_MANUAL_AUTOMATION_AUDIT.md",
     "conclusions": [
-      "Native Thread/Turn/Item remain Codex App Server truth.",
-      "No durable duplicate Native transcript is persisted by Workbench.",
-      "Raw Prompt recovery text is process-local and stripped from persistence.",
-      "Automation Native dispatch reuses an attached runtime and cannot silently create a missing target.",
-      "Composer approval/sandbox handling is native protocol adaptation rather than a second executor.",
-      "Map maintenance is a Workbench projection increment executed through real Codex Native Threads/Turns.",
-      "No independent Workbench agent/subagent runtime or generic Native tool executor/registry was found."
-    ],
-    "compatibilityExceptions": [
-      "Conversation Map resume fallback may use an isolated App Server process because thread/resume cannot register dynamicTools in the current CLI ABI.",
-      "Project Map maintenance and bounded context readers use explicit isolated capability domains; process sharing may be reconsidered later without changing ownership."
+      "Ordinary GUI startup does not initialize Automation unless explicitly activated.",
+      "Manual Native Thread/Turn IPC does not require Automation workflow/governance state.",
+      "Product ProjectRecord is owned by V1 Workbench persistence.",
+      "AutomationProject is owned by independent Automation persistence.",
+      "Requirement and Planner operations require an existing AutomationProject.",
+      "No automatic Product Project to AutomationProject identity collapse was found.",
+      "Legacy WORKBENCH_PROJECT ExternalRef kind is provider workflow scope carrier vocabulary, not V1 Project ownership."
     ]
   },
-  "r6Audit": {
-    "status": "ACTIVE",
-    "targets": "docs/workbench-map/R6_AUDIT_TARGETS.md",
-    "classifications": ["MANUAL_INDEPENDENCE_PASS", "IDENTITY_BOUNDARY_PASS", "DECOUPLE_CHANGE", "NEEDS_EVIDENCE"]
-  },
+  "r7Audit": {"status": "ACTIVE", "targets": "docs/workbench-map/R7_AUDIT_TARGETS.md", "classifications": ["PROJECTION_BOUNDARY_PASS", "MAP_INCREMENT_PASS", "PROJECTION_LEAK_CHANGE", "MAP_PRODUCT_GAP", "NEEDS_EVIDENCE"]},
   "frozenInvariants": [
     "Native Thread/Turn/Item are execution truth.",
     "Do not persist a duplicate transcript.",
@@ -163,14 +91,14 @@
     "Do not implement a second sandbox, tool runtime, or subagent runtime."
   ],
   "resumeProtocol": [
-    "Read HANDOFF.md, ARCHITECTURE.md, GIT_WORKFLOW.md, R5_NATIVE_RUNTIME_AUDIT.md, and R6_AUDIT_TARGETS.md.",
-    "Verify the current workbench/next SHA and relevant remote refs before trusting stored checkpoint values.",
-    "Audit manual Native startup dependencies on Automation persistence/composition.",
-    "Audit Workbench Project versus AutomationProject identity crossings.",
-    "Create a bounded feature branch only if a concrete DECOUPLE_CHANGE is proven and isolation is useful.",
+    "Read HANDOFF.md, ARCHITECTURE.md, GIT_WORKFLOW.md, R5_NATIVE_RUNTIME_AUDIT.md, R6_MANUAL_AUTOMATION_AUDIT.md, and R7_AUDIT_TARGETS.md.",
+    "Verify current workbench/next and relevant remote refs before trusting stored checkpoint values.",
+    "Audit MapStore ownership and all Map mutation callers.",
+    "Audit Conversation/Project Map bounded context and maintenance paths.",
+    "Identify concrete projection ownership leaks or product gaps before editing production code.",
     "Never create a helper branch solely for exact-head CI.",
-    "Before branch creation/push, state the exact branch and base ref and that no merge will occur.",
+    "Before implementation branch creation/push, state exact branch/base and that no merge will occur.",
     "Never merge or delete branches without explicit approval.",
-    "Update the handoff map when the durable checkpoint changes."
+    "Update the handoff map at durable checkpoints."
   ]
 }
