@@ -68,7 +68,7 @@ export class AutomationExecutionFacade {
 
   async reconcileRequirement(input: RequirementReconcileCommand, providerId?: AutomationProviderId | null) {
     const provider = await this.providerForRequirementSession(input.sessionId, providerId);
-    return this.services.requirement(provider).reconcileProviderRequest(input.sessionId, input.roundId, input.waitTimeoutMs);
+    return this.services.requirement(provider).reconcileProviderRequest(input);
   }
 
   async createPlan(input: PlannerCreateInput, providerId?: AutomationProviderId | null) {
