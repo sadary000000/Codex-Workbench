@@ -43,9 +43,9 @@ import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority, createWebGptProviderP
 import { assertProviderSeamExecutable } from "../automation/provider-seam-classification.ts";
 import { InputRefRegistry } from "../automation/input-ref.ts";
 import { createPlannerProviderIntegrationService, type PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
-import { runStageK1DPositiveRetrySmoke, runStageK1DRealPlannerSmoke, type StageK1DProvenance } from "../automation/stage-k1-d-real-planner-smoke.ts";
+import { runStageK1DRealPlannerSmoke } from "../automation/stage-k1-d-real-planner-smoke.ts";
 import { runStageK1DReconcileOnly } from "../automation/stage-k1-d-reconcile-only.ts";
-import { assessStageK1DProvenance } from "../automation/stage-k1-d-provenance.ts";
+import { assessStageK1DProvenance, type StageK1DProvenance } from "../automation/stage-k1-d-provenance.ts";
 import { createWebGptRoleTargetRef, WebGptAutomationProviderPort } from "../features/webgpt/automation/webgpt-provider-port.ts";
 import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../automation/aut2-real-webgpt-gate.ts";
 import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
@@ -345,12 +345,9 @@ async function startStageK1DRealPlannerSmoke(): Promise<void> {
       ...event,
       details: { ...event.details },
     })),
-    authorizePositiveRetry: process.env.K1D_POSITIVE_RETRY_AUTHORIZED === "1",
     provenance,
   } as const;
-  const evidence = process.env.K1D_POSITIVE_RETRY_SMOKE === "1"
-    ? await runStageK1DPositiveRetrySmoke(smokeOptions)
-    : await runStageK1DRealPlannerSmoke(smokeOptions);
+  const evidence = await runStageK1DRealPlannerSmoke(smokeOptions);
   logger.info("stage_k1_d_real_planner_smoke_finished", {
     result: evidence.result,
     outputPath,
@@ -1081,7 +1078,7 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
         projectId: request.projectId,
         providerTargetRef: request.providerTargetRef,
         ...(request.requirementVersionId ? { requirementVersionId: request.requirementVersionId } : {}),
-        ...(request.plannerOperation ? { operation: request.plannerOperation } : {}),
+        ...(request.operation ? { operation: request.operation } : {}),
         ...(request.priorPlanVersionId !== undefined ? { priorPlanVersionId: request.priorPlanVersionId } : {}),
         ...(request.targetStageId !== undefined ? { targetStageId: request.targetStageId } : {}),
         ...(request.planningConstraints ? { planningConstraints: request.planningConstraints } : {}),

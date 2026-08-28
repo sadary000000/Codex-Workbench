@@ -27,6 +27,7 @@ import {
 
 const MAX_LIST_ITEMS = 64;
 const MAX_TEXT = 4_096;
+const MAX_PLANNER_PROVIDER_ATTEMPTS = 2;
 const OPAQUE_INPUT_REF = /^automation-input-v1:[a-f0-9]{64}$/i;
 
 export type PlannerIntegrationStatus =
@@ -69,6 +70,16 @@ export interface PlannerCreateFromRequirementInput {
 export interface PlannerReconcileInput {
   readonly projectId: string;
   readonly actionAttemptId: string;
+}
+
+export interface PlannerRetryInput {
+  readonly projectId: string;
+  readonly actionIntentId?: string;
+  /** Compatibility alias: in the current model the logical Planner request identity is the ActionIntent identity. */
+  readonly logicalPlannerRequestId?: string;
+  readonly requirementVersionId?: string;
+  readonly requirementPayloadSha256?: string;
+  readonly policyVersionId?: string;
 }
 
 export interface PlannerIntegrationResult {
@@ -428,6 +439,9 @@ export class PlannerProviderIntegrationService {
       const existingAttempt = snapshot.actionAttempts.find((item) => item.intentId === existingIntent.intentId) ?? null;
       const existingPlan = promotedPlan(snapshot, existingIntent.intentId);
       if (existingPlan) return emptyResult({ status: "PLAN_READY", actionIntentId: existingIntent.intentId, actionAttemptId: existingAttempt?.actionAttemptId ?? null, planVersion: clone(existingPlan), request });
+      if (existingIntent.state === "FAILED" && existingAttempt?.plannerResultClassification === "INVALID_OUTPUT_RETRYABLE") {
+        return emptyResult({ status: "INVALID_PROVIDER_RESULT", actionIntentId: existingIntent.intentId, actionAttemptId: existingAttempt.actionAttemptId, providerRequestRef: this.providerRequestOpaque(snapshot, existingAttempt), providerRequestExternalRef: existingAttempt.providerRequestRef ?? null, request, errorCode: "RETRY_AUTHORIZATION_REQUIRED", errorMessage: "The previous provider attempt completed, but its Planner payload was invalid. Use the explicit bounded Planner retry command." });
+      }
       if (existingAttempt?.providerRequestRef || existingIntent.state === "UNCERTAIN" || existingIntent.state === "RECOVERY_REQUIRED") {
         return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: existingIntent.intentId, actionAttemptId: existingAttempt?.actionAttemptId ?? null, providerRequestRef: this.providerRequestOpaque(snapshot, existingAttempt), providerRequestExternalRef: existingAttempt?.providerRequestRef ?? null, request, errorCode: "NO_BLIND_RESEND", errorMessage: "An existing Planner ActionAttempt must be reconciled; create never resubmits it." });
       }
@@ -497,6 +511,69 @@ export class PlannerProviderIntegrationService {
       return this.acceptedUnknown({ intent, attempt, accepted, request, errorCode: "ACCEPTED_LOCAL_PERSISTENCE_UNCERTAIN", errorMessage: errorMessage(error) });
     }
     await this.store.transitionActionIntent(intent.intentId, "DISPATCHED", { actorType: "AUTOMATION", correlationId: intent.intentId });
+    return this.settleObserved({ projectId: project.projectId, intent, attempt: { ...attempt, providerRequestRef: requestExternal.externalRefId, providerSemanticSha256: accepted.semanticRef ?? null }, request, providerRequestRef: accepted.providerRequestRef, requestExternal, providerSemanticRef: accepted.semanticRef ?? null, reconcile: false });
+  }
+
+  async retryPlannerRequest(input: PlannerRetryInput): Promise<PlannerIntegrationResult> {
+    const snapshot = await this.store.snapshot();
+    const project = snapshot.automationProjects.find((item) => item.projectId === input.projectId);
+    if (!project) throw new PlannerProviderIntegrationError("PROJECT_NOT_FOUND", `Automation Project ${input.projectId} was not found.`);
+    const identityCount = Number(Boolean(input.actionIntentId)) + Number(Boolean(input.logicalPlannerRequestId));
+    if (identityCount !== 1) throw new PlannerProviderIntegrationError("INVALID_INPUT", "Planner retry requires exactly one logical request identity.");
+    const logicalId = input.actionIntentId ?? input.logicalPlannerRequestId!;
+    const intent = snapshot.actionIntents.find((item) => item.projectId === project.projectId && item.intentId === logicalId) ?? null;
+    if (!intent || intent.actionType !== "PLANNER_REQUEST") throw new PlannerProviderIntegrationError("PLANNER_ACTION_NOT_FOUND", "The logical Planner request was not found in this project.");
+    const existingPlan = promotedPlan(snapshot, intent.intentId);
+    const attempts = snapshot.actionAttempts.filter((item) => item.intentId === intent.intentId).sort((left, right) => left.dispatchNumber - right.dispatchNumber);
+    const latest = attempts.at(-1) ?? null;
+    if (existingPlan) return emptyResult({ status: "PLAN_READY", actionIntentId: intent.intentId, actionAttemptId: latest?.actionAttemptId ?? null, planVersion: clone(existingPlan) });
+    const request = requestFromIntent(intent);
+    const requirement = snapshot.requirementVersions.find((item) => item.requirementVersionId === request.requirementVersionId) ?? null;
+    if (!requirement || requirement.projectId !== project.projectId || project.activeRequirementVersionId !== requirement.requirementVersionId || !["CONFIRMED", "ACTIVE"].includes(requirement.status) || requirement.payloadSha256 !== request.requirementPayloadSha256) {
+      throw new PlannerProviderIntegrationError("REQUIREMENT_NOT_CONFIRMED", "Planner retry requires the same exact active confirmed RequirementVersion and payload hash.");
+    }
+    if ((input.requirementVersionId && input.requirementVersionId !== request.requirementVersionId) || (input.requirementPayloadSha256 && input.requirementPayloadSha256 !== request.requirementPayloadSha256)) {
+      throw new PlannerProviderIntegrationError("PLANNER_ACTION_MISMATCH", "Planner retry Requirement identity does not match the persisted logical request.");
+    }
+    if (!intent.policyVersionId || intent.policyVersionId !== project.policyVersionId || (input.policyVersionId && input.policyVersionId !== intent.policyVersionId)) {
+      throw new PlannerProviderIntegrationError("PLANNER_ACTION_MISMATCH", "Planner retry requires the exact current PolicyVersion pinned by the logical request.");
+    }
+    if (!latest) return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, request, errorCode: "ACTION_INCOMPLETE", errorMessage: "The logical Planner request has no provider attempt to retry." });
+    const latestReceipt = snapshot.actionReceipts.find((item) => item.actionAttemptId === latest.actionAttemptId) ?? null;
+    if (intent.state === "UNCERTAIN" || intent.state === "RECOVERY_REQUIRED" || latest.state === "UNCERTAIN" || latest.state === "RECOVERY_REQUIRED" || latestReceipt?.status === "UNKNOWN") {
+      return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: latest.actionAttemptId, providerRequestRef: this.providerRequestOpaque(snapshot, latest), providerRequestExternalRef: latest.providerRequestRef ?? null, receiptId: latestReceipt?.receiptId ?? null, request, errorCode: "RECONCILE_BEFORE_RETRY", errorMessage: "The latest Planner provider outcome is uncertain; reconcile the existing attempt before any retry." });
+    }
+    if (attempts.length >= MAX_PLANNER_PROVIDER_ATTEMPTS) {
+      return emptyResult({ status: "INVALID_PROVIDER_RESULT", actionIntentId: intent.intentId, actionAttemptId: latest.actionAttemptId, receiptId: latestReceipt?.receiptId ?? null, request, errorCode: "RETRY_BUDGET_EXHAUSTED", errorMessage: "The bounded Planner provider-attempt budget is exhausted." });
+    }
+    if (intent.state !== "FAILED" || latest.state !== "COMPLETED" || latestReceipt?.status !== "SUCCEEDED" || latest.plannerResultClassification !== "INVALID_OUTPUT_RETRYABLE" || !["TERMINAL_CONFIRMED", "RESULT_OBSERVED"].includes(latestReceipt.outcomeCertainty)) {
+      return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: latest.actionAttemptId, receiptId: latestReceipt?.receiptId ?? null, request, errorCode: "RETRY_NOT_AUTHORIZED", errorMessage: "Planner retry is only allowed after a terminally confirmed provider response was classified as invalid output." });
+    }
+
+    await this.store.transitionActionIntent(intent.intentId, "REAUTHORIZE_RETRY", { actorType: "AUTOMATION", correlationId: intent.intentId, causationId: latest.actionAttemptId, boundedPayload: { previousDispatchNumber: latest.dispatchNumber } });
+    const attempt = await this.store.createActionAttempt({ intentId: intent.intentId, policyVersionId: intent.policyVersionId, executorRef: "automation.planner-provider" });
+    await this.store.transitionActionAttempt(attempt.actionAttemptId, "START", { actorType: "AUTOMATION", correlationId: intent.intentId, causationId: latest.actionAttemptId });
+    let accepted: ProviderRequestAccepted;
+    const requestCorrelation = correlation(intent, attempt, request);
+    try {
+      accepted = await this.provider.submit({ provider: this.provider.provider, operation: request.operation, workflowRole: "PLANNER", providerTargetRef: request.providerTargetRef, inputRef: request.inputRefs[0] ?? null, payloadRef: request.inputRefs[0] ?? null, correlation: requestCorrelation, plannerRequest: request });
+    } catch (error) {
+      if (isDefinitiveProviderRejection(error)) {
+        await this.recordFailed(attempt.actionAttemptId, error);
+        return emptyResult({ status: "PROVIDER_FAILED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, request, errorCode: errorCode(error) ?? "PROVIDER_REJECTED", errorMessage: errorMessage(error) });
+      }
+      await this.recordSubmitUnknown(attempt.actionAttemptId, error);
+      return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, request, errorCode: "SUBMIT_OUTCOME_UNKNOWN", errorMessage: `Provider retry submit outcome is unknown; reconcile-only recovery is required. ${errorMessage(error)}` });
+    }
+    if (accepted.provider !== this.provider.provider || accepted.providerTargetRef !== request.providerTargetRef) return this.acceptedUnknown({ intent, attempt, accepted, request, errorCode: "ACCEPTED_IDENTITY_MISMATCH", errorMessage: "Provider retry acceptance did not preserve Planner target/provider identity; reconcile only." });
+    try { assertAcceptedPolicyProvenance(accepted, intent, attempt); } catch (error) { return this.acceptedUnknown({ intent, attempt, accepted, request, errorCode: "ACCEPTED_POLICY_MISMATCH", errorMessage: errorMessage(error) }); }
+    let requestExternal: { externalRefId: string; opaqueId: string };
+    try {
+      requestExternal = (await this.store.persistActionAttemptProviderRequest({ projectId: project.projectId, actionAttemptId: attempt.actionAttemptId, provider: accepted.provider, providerRequestRef: accepted.providerRequestRef, providerSemanticSha256: accepted.semanticRef ?? null })).externalRef;
+    } catch (error) {
+      return this.acceptedUnknown({ intent, attempt, accepted, request, errorCode: "ACCEPTED_LOCAL_PERSISTENCE_UNCERTAIN", errorMessage: errorMessage(error) });
+    }
+    await this.store.transitionActionIntent(intent.intentId, "DISPATCHED", { actorType: "AUTOMATION", correlationId: intent.intentId, causationId: latest.actionAttemptId });
     return this.settleObserved({ projectId: project.projectId, intent, attempt: { ...attempt, providerRequestRef: requestExternal.externalRefId, providerSemanticSha256: accepted.semanticRef ?? null }, request, providerRequestRef: accepted.providerRequestRef, requestExternal, providerSemanticRef: accepted.semanticRef ?? null, reconcile: false });
   }
 
@@ -623,15 +700,23 @@ export class PlannerProviderIntegrationService {
     try {
       normalized = normalizePlannerProviderResponse(result.response);
     } catch (error) {
+      try { await this.store.markPlannerAttemptInvalidOutput(input.attempt.actionAttemptId); } catch (classificationError) {
+        return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, errorCode: "RETRY_CLASSIFICATION_PERSIST_FAILED", errorMessage: errorMessage(classificationError) });
+      }
       return emptyResult({ status: "INVALID_PROVIDER_RESULT", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, errorCode: "MALFORMED_PROVIDER_RESULT", errorMessage: errorMessage(error) });
     }
     const validationContext = createPlannerValidationContext(await this.store.snapshot(), input.projectId);
     const validation = validatePlanCandidate(normalized.candidate, validationContext);
     if (validation.status === "PLANNING_NEEDS_REQUIREMENT_INPUT") return emptyResult({ status: "PLANNING_NEEDS_REQUIREMENT_INPUT", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, validation, blockingQuestions: validation.blockingQuestions, missingRequirementFields: validation.missingRequirementFields });
-    if (!validation.valid || !validation.normalizedCandidate) return emptyResult({ status: "INVALID_PROVIDER_RESULT", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, validation, errorCode: "VALIDATOR_REJECTED", errorMessage: validation.errors.map((item) => `${item.code}:${item.path}`).join("; ").slice(0, 512) });
+    if (!validation.valid || !validation.normalizedCandidate) {
+      try { await this.store.markPlannerAttemptInvalidOutput(input.attempt.actionAttemptId); } catch (classificationError) {
+        return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, validation, errorCode: "RETRY_CLASSIFICATION_PERSIST_FAILED", errorMessage: errorMessage(classificationError) });
+      }
+      return emptyResult({ status: "INVALID_PROVIDER_RESULT", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, validation, errorCode: "VALIDATOR_REJECTED", errorMessage: validation.errors.map((item) => `${item.code}:${item.path}`).join("; ").slice(0, 512) });
+    }
     try {
       const validationStatus = validation.status === "VALID_WITH_ASSUMPTIONS" ? "VALID_WITH_ASSUMPTIONS" : "VALID";
-      const persisted = await this.store.persistValidatedPlannerCandidate({ projectId: input.projectId, candidate: normalized.candidate, actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, provider: this.providerName, providerRequestRef: input.requestExternal.externalRefId, providerObservationRef: observationExternal.externalRefId, validationStatus });
+      const persisted = await this.store.persistValidatedPlannerCandidate({ projectId: input.projectId, candidate: validation.normalizedCandidate, actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, provider: this.providerName, providerRequestRef: input.requestExternal.externalRefId, providerObservationRef: observationExternal.externalRefId, validationStatus });
       return emptyResult({ status: "PLAN_READY", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, planVersion: persisted.planVersion, request: input.request, validation });
     } catch (error) {
       return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, validation, errorCode: "PROMOTION_FAILED", errorMessage: errorMessage(error) });

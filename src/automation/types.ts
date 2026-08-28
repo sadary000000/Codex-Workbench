@@ -425,6 +425,15 @@ export interface ActionIntent {
   expectedOutcomeRef: string | null;
   /** Immutable PolicyVersion identity selected when this intent was created; legacy records may omit it. */
   policyVersionId?: string | null;
+  /** Exact bounded provider-neutral Planner request descriptor; never the raw provider prompt. */
+  plannerRequestCanonical?: string | null;
+  logicalPlannerRequestId?: string | null;
+  plannerRequirementVersionId?: string | null;
+  plannerRequirementPayloadSha256?: string | null;
+  plannerOperation?: "PLAN_REQUIREMENT" | "DETAIL_STAGE" | null;
+  plannerMaxProviderAttempts?: number | null;
+  plannerState?: "ACTIVE" | "PROMOTED" | "FAILED" | null;
+  promotedPlanVersionId?: string | null;
   state: ActionIntentState;
   createdAt: IsoTimestamp;
 }
@@ -434,6 +443,8 @@ export interface ActionAttempt {
   intentId: string;
   dispatchNumber: number;
   state: ActionAttemptState;
+  /** Additive timestamp retained for historical Planner attempt evidence. */
+  createdAt?: IsoTimestamp;
   startedAt: IsoTimestamp | null;
   completedAt: IsoTimestamp | null;
   executorRef: string | null;
@@ -444,6 +455,12 @@ export interface ActionAttempt {
   providerRequestRef?: string | null;
   providerObservationRef?: string | null;
   providerSemanticSha256?: string | null;
+  logicalPlannerRequestId?: string | null;
+  attemptNumber?: number | null;
+  providerTargetRef?: string | null;
+  externalSideEffectCertainty?: ActionOutcomeCertainty | null;
+  /** Planner-only logical classification of this concrete provider attempt. */
+  plannerResultClassification?: "INVALID_OUTPUT_RETRYABLE" | "UNKNOWN_AFTER_SIDE_EFFECT" | "VALID_RESULT" | null;
 }
 
 export interface ActionReceipt {

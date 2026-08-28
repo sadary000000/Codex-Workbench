@@ -77,6 +77,7 @@ import type {
   WorkspaceSnapshot,
 } from "./types.ts";
 import type { PlannerReadyPayload } from "./planner-contract.ts";
+import type { PlanCandidate } from "./planner-validator.ts";
 import {
   assertPolicyPin,
   pinProjectPolicy,
@@ -249,6 +250,13 @@ export interface ActionIntentInput {
   idempotencyRef?: string | null;
   expectedOutcomeRef?: string | null;
   policyVersionId?: string | null;
+  /** Exact bounded provider-neutral Planner request descriptor. */
+  plannerRequestCanonical?: string | null;
+  logicalPlannerRequestId?: string | null;
+  plannerRequirementVersionId?: string | null;
+  plannerRequirementPayloadSha256?: string | null;
+  plannerOperation?: "PLAN_REQUIREMENT" | "DETAIL_STAGE" | null;
+  plannerMaxProviderAttempts?: number | null;
 }
 
 export interface ActionAttemptInput {
@@ -1000,6 +1008,39 @@ export class AutomationStore {
     });
   }
 
+  async persistValidatedPlannerCandidate(input: { projectId: string; candidate: PlanCandidate; actionIntentId: string; actionAttemptId: string; provider: string; providerRequestRef: string; providerObservationRef: string; validationStatus: "VALID" | "VALID_WITH_ASSUMPTIONS" }): Promise<PersistPlannerPlanResult> {
+    return this.transaction((tx) => {
+      const project = tx.require("automationProjects", input.projectId);
+      const intent = tx.require("actionIntents", input.actionIntentId);
+      const attempt = tx.require("actionAttempts", input.actionAttemptId);
+      if (intent.projectId !== project.projectId || intent.actionType !== "PLANNER_REQUEST" || attempt.intentId !== intent.intentId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner promotion correlation is invalid.");
+      const priorPromotion = [...tx.table("auditEvents")].reverse().find((event) => event.eventType === "PLANNER_PLAN_PROMOTED" && event.correlationId === intent.intentId);
+      if (priorPromotion) {
+        const existing = tx.require("planVersions", priorPromotion.entityId);
+        return { planVersion: clone(existing), stageSpecs: clone(tx.table("stageSpecs").filter((item) => item.planVersionId === existing.planVersionId)), stepSpecs: clone(tx.table("stepSpecs").filter((step) => tx.table("stageSpecs").some((stage) => stage.planVersionId === existing.planVersionId && stage.stageSpecId === step.stageSpecId))) };
+      }
+      const c = input.candidate;
+      const requirement = tx.require("requirementVersions", c.requirementVersionId);
+      if (c.projectId !== project.projectId || requirement.projectId !== project.projectId || project.activeRequirementVersionId !== requirement.requirementVersionId || !["CONFIRMED", "ACTIVE"].includes(requirement.status) || c.requirementPayloadSha256 !== requirement.payloadSha256) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner candidate does not bind the exact active RequirementVersion.");
+      if (tx.table("planVersions").some((item) => item.planVersionId === c.planVersionId)) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner candidate PlanVersion identity already exists without matching promotion evidence.");
+      const previous = project.activePlanVersionId ? tx.require("planVersions", project.activePlanVersionId) : null;
+      if ((previous?.planVersionId ?? null) !== c.supersedes) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner candidate predecessor does not match the active PlanVersion.");
+      if (previous) tx.replace("planVersions", { ...previous, status: "SUPERSEDED" });
+      const timestamp = now();
+      const planVersion: PlanVersion = { planVersionId: c.planVersionId, projectId: c.projectId, requirementVersionId: c.requirementVersionId, version: c.version, status: "ACTIVE", createdBy: "planner-provider", origin: text(input.provider, "planner.provider", 256), requirementPayloadSha256: c.requirementPayloadSha256, planningMode: "JIT", plannerRole: "PLANNER", plannerChatRef: null, currentStageId: c.currentStageId, createdAt: timestamp, supersedes: c.supersedes };
+      tx.insert("planVersions", planVersion);
+      const stageSpecs: StageSpec[] = c.stages.map((stage) => ({ stageSpecId: stage.stageSpecId, planVersionId: planVersion.planVersionId, stageKey: stage.stageKey, name: stage.name, objective: stage.objective, dependsOn: [...stage.dependsOn], acceptanceCriteria: [...stage.acceptanceCriteria], detailLevel: stage.detailLevel, assumptions: [...stage.assumptions], risks: [...stage.risks], specVersion: stage.specVersion, status: "ACTIVE", ordinal: stage.ordinal, goal: stage.objective, createdAt: timestamp, supersedes: stage.supersedes }));
+      for (const stage of stageSpecs) tx.insert("stageSpecs", stage);
+      const stepSpecs: StepSpec[] = c.steps.map((step) => ({ stepSpecId: step.stepSpecId, stageSpecId: step.stageSpecId, stepKey: step.stepKey, specVersion: step.specVersion, kind: step.kind, ordinal: step.ordinal, objective: step.objective, inputs: [...step.inputs], expectedOutputs: [...step.expectedOutputs], acceptanceCriteria: [...step.acceptanceCriteria], assumptions: [...step.assumptions], constraints: [...step.constraints], goal: step.objective, riskClass: step.riskClass, sideEffectClass: step.sideEffectClass, specStatus: "ACTIVE", createdAt: timestamp, supersedes: step.supersedes }));
+      for (const step of stepSpecs) { tx.insert("stepSpecs", step); tx.insert("stepRuntimes", { stepRuntimeId: `runtime:${step.stepSpecId}`, stepSpecId: step.stepSpecId, lifecycle: "NOT_STARTED", terminalResult: null, waitReason: "NONE", currentAttemptId: null, revision: 0, createdAt: timestamp, updatedAt: timestamp }); }
+      tx.replace("automationProjects", { ...project, activePlanVersionId: planVersion.planVersionId, updatedAt: timestamp, revision: project.revision + 1 });
+      tx.replace("actionIntents", { ...intent, state: "COMPLETED", plannerState: "PROMOTED", promotedPlanVersionId: planVersion.planVersionId });
+      tx.replace("actionAttempts", { ...attempt, externalSideEffectCertainty: "TERMINAL_CONFIRMED", plannerResultClassification: "VALID_RESULT" });
+      tx.appendAudit({ projectId: project.projectId, entityType: "PlanVersion", entityId: planVersion.planVersionId, eventType: "PLANNER_PLAN_PROMOTED", actorType: "AUTOMATION", actorRef: null, boundedPayload: { actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, validationStatus: input.validationStatus, providerRequestRef: input.providerRequestRef, providerObservationRef: input.providerObservationRef }, correlationId: intent.intentId, causationId: attempt.actionAttemptId });
+      return { planVersion: clone(planVersion), stageSpecs: clone(stageSpecs), stepSpecs: clone(stepSpecs) };
+    });
+  }
+
   async createStageSpec(input: StageSpecInput): Promise<StageSpec> {
     return this.transaction((tx) => {
       const plan = tx.require("planVersions", input.planVersionId);
@@ -1145,7 +1186,9 @@ export class AutomationStore {
         const policy = tx.require("policyVersions", policyVersionId);
         if (policy.projectId !== project.projectId) throw new AutomationStoreError("AUTOMATION_CONFLICT", "ActionIntent PolicyVersion belongs to another project.");
       }
-      const item: ActionIntent = { intentId: id(input.intentId, "intentId"), projectId: project.projectId, stageSpecId: input.stageSpecId ?? null, stepSpecId: input.stepSpecId ?? null, attemptId: input.attemptId ?? null, actionType, targetRef, sideEffectClass: input.sideEffectClass, payloadRef, payloadHash, executionOptions, semanticSha256, idempotencyRef, expectedOutcomeRef, policyVersionId, state: "PLANNED", createdAt: now() };
+      const intentId = id(input.intentId, "intentId");
+      const plannerOperation = input.plannerOperation ?? (executionOptions.plannerOperation === "PLAN_REQUIREMENT" || executionOptions.plannerOperation === "DETAIL_STAGE" ? executionOptions.plannerOperation : null);
+      const item: ActionIntent = { intentId, projectId: project.projectId, stageSpecId: input.stageSpecId ?? null, stepSpecId: input.stepSpecId ?? null, attemptId: input.attemptId ?? null, actionType, targetRef, sideEffectClass: input.sideEffectClass, payloadRef, payloadHash, executionOptions, semanticSha256, idempotencyRef, expectedOutcomeRef, policyVersionId, plannerRequestCanonical: optionalText(input.plannerRequestCanonical, "intent.plannerRequestCanonical", 32_768), ...(actionType === "PLANNER_REQUEST" ? { logicalPlannerRequestId: input.logicalPlannerRequestId ?? intentId, plannerRequirementVersionId: input.plannerRequirementVersionId ?? (typeof executionOptions.requirementVersionId === "string" ? executionOptions.requirementVersionId : null), plannerRequirementPayloadSha256: input.plannerRequirementPayloadSha256 ?? (typeof executionOptions.requirementPayloadSha256 === "string" ? executionOptions.requirementPayloadSha256 : null), plannerOperation, plannerMaxProviderAttempts: input.plannerMaxProviderAttempts ?? 2, plannerState: "ACTIVE" as const, promotedPlanVersionId: null } : {}), state: "PLANNED", createdAt: now() };
       tx.insert("actionIntents", item);
       tx.appendAudit({ projectId: project.projectId, entityType: "ActionIntent", entityId: item.intentId, eventType: "ACTION_INTENT_PERSISTED", actorType: "SYSTEM", actorRef: null, boundedPayload: { actionType: item.actionType, sideEffectClass: item.sideEffectClass, policyVersionId: item.policyVersionId ?? null }, correlationId: null, causationId: null });
       return clone(item);
@@ -1157,20 +1200,8 @@ export class AutomationStore {
       const intent = tx.require("actionIntents", input.intentId);
       if (intent.state !== "DISPATCH_ELIGIBLE") throw new AutomationStoreError("AUTOMATION_CONFLICT", "ActionIntent must be persisted and dispatch-eligible before an attempt is recorded.");
       const previous = tx.table("actionAttempts").filter((attempt) => attempt.intentId === input.intentId);
-      const item: ActionAttempt = {
-        actionAttemptId: id(input.actionAttemptId, "actionAttemptId"),
-        intentId: input.intentId,
-        dispatchNumber: previous.length + 1,
-        state: "CREATED",
-        startedAt: null,
-        completedAt: null,
-        executorRef: optionalText(input.executorRef, "actionAttempt.executorRef", 256),
-        recoveryState: "KNOWN_NOT_STARTED",
-        policyVersionId: input.policyVersionId === undefined ? intent.policyVersionId ?? null : optionalText(input.policyVersionId, "actionAttempt.policyVersionId", 256),
-        providerRequestRef: optionalText(input.providerRequestRef, "actionAttempt.providerRequestRef", 256),
-        providerObservationRef: optionalText(input.providerObservationRef, "actionAttempt.providerObservationRef", 256),
-        providerSemanticSha256: optionalText(input.providerSemanticSha256, "actionAttempt.providerSemanticSha256", 128),
-      };
+const dispatchNumber = previous.length + 1;
+      const item: ActionAttempt = { actionAttemptId: id(input.actionAttemptId, "actionAttemptId"), intentId: intent.intentId, dispatchNumber, state: "CREATED", createdAt: now(), startedAt: null, completedAt: null, executorRef: optionalText(input.executorRef, "actionAttempt.executorRef", 256), recoveryState: "KNOWN_NOT_STARTED", policyVersionId: input.policyVersionId === undefined ? intent.policyVersionId ?? null : optionalText(input.policyVersionId, "actionAttempt.policyVersionId", 256), providerRequestRef: optionalText(input.providerRequestRef, "actionAttempt.providerRequestRef", 256), providerObservationRef: optionalText(input.providerObservationRef, "actionAttempt.providerObservationRef", 256), providerSemanticSha256: optionalText(input.providerSemanticSha256, "actionAttempt.providerSemanticSha256", 128), ...(intent.actionType === "PLANNER_REQUEST" ? { logicalPlannerRequestId: intent.logicalPlannerRequestId ?? intent.intentId, attemptNumber: dispatchNumber, providerTargetRef: intent.targetRef, externalSideEffectCertainty: null, plannerResultClassification: null } : {}) };
       try {
         assertIntentAttemptPolicyPin(intent, item);
       } catch (error) {
@@ -1232,6 +1263,30 @@ export class AutomationStore {
       tx.replace("actionIntents", { ...intent, state: nextIntentState });
       tx.appendAudit({ projectId: intent.projectId, entityType: "ActionReceipt", entityId: receipt.receiptId, eventType: "ACTION_RECEIPT_RECORDED", actorType: "SYSTEM", actorRef: null, boundedPayload: { status: receipt.status, reconcileState: receipt.reconcileState }, correlationId: null, causationId: null });
       return clone(receipt);
+    });
+  }
+
+  /**
+   * Planner-only semantic classification. The provider action has already
+   * completed successfully, but its returned payload is not a valid Plan.
+   * Keep the successful receipt/attempt intact and fail the logical intent so
+   * a bounded explicit retry can use the existing FAILED -> REAUTHORIZE_RETRY
+   * transition. Unknown outcomes never enter this method.
+   */
+  async markPlannerAttemptInvalidOutput(actionAttemptId: string): Promise<ActionAttempt> {
+    return this.transaction((tx) => {
+      const attempt = tx.require("actionAttempts", actionAttemptId);
+      const intent = tx.require("actionIntents", attempt.intentId);
+      if (intent.actionType !== "PLANNER_REQUEST") throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner invalid-output classification requires a PLANNER_REQUEST ActionIntent.");
+      const receipt = tx.table("actionReceipts").find((item) => item.actionAttemptId === actionAttemptId);
+      if (!receipt || receipt.status !== "SUCCEEDED" || !["TERMINAL_CONFIRMED", "RESULT_OBSERVED"].includes(receipt.outcomeCertainty)) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner invalid-output retry requires a terminally confirmed successful provider receipt.");
+      }
+      const updated: ActionAttempt = { ...attempt, externalSideEffectCertainty: receipt.outcomeCertainty, plannerResultClassification: "INVALID_OUTPUT_RETRYABLE" };
+      tx.replace("actionAttempts", updated);
+      tx.replace("actionIntents", { ...intent, state: "FAILED" });
+      tx.appendAudit({ projectId: intent.projectId, entityType: "ActionAttempt", entityId: actionAttemptId, eventType: "PLANNER_RESULT_INVALID_RETRYABLE", actorType: "AUTOMATION", actorRef: null, boundedPayload: { dispatchNumber: attempt.dispatchNumber }, correlationId: intent.intentId, causationId: actionAttemptId });
+      return clone(updated);
     });
   }
 
@@ -1436,6 +1491,10 @@ export class AutomationStore {
       const attempt = tx.require("actionAttempts", input.actionAttemptId);
       const intent = tx.require("actionIntents", attempt.intentId);
       const status = input.status;
+      const requestedCertainty = input.outcomeCertainty ?? (status === "SUCCEEDED" ? "TERMINAL_CONFIRMED" : status === "FAILED" ? "TERMINAL_FAILED" : "ABANDONED_WITH_UNKNOWN_OUTCOME");
+      if (status === "SUCCEEDED" && !["TERMINAL_CONFIRMED", "RESULT_OBSERVED"].includes(requestedCertainty)) throw new AutomationStoreError("AUTOMATION_CONFLICT", "A successful reconciliation requires terminally confirmed provider outcome certainty.");
+      if (status === "FAILED" && requestedCertainty !== "TERMINAL_FAILED") throw new AutomationStoreError("AUTOMATION_CONFLICT", "A failed reconciliation requires terminal-failed provider outcome certainty.");
+      if (status === "UNKNOWN" && ["TERMINAL_CONFIRMED", "RESULT_OBSERVED", "TERMINAL_FAILED"].includes(requestedCertainty)) throw new AutomationStoreError("AUTOMATION_CONFLICT", "An UNKNOWN reconciliation cannot claim terminal provider certainty.");
       const providerRequestRef = optionalText(input.providerRequestRef ?? existing.providerRequestRef, "receipt.providerRequestRef", 256);
       const providerObservationRef = optionalText(input.providerObservationRef, "receipt.providerObservationRef", 256);
       const providerRequestExternalRef = providerRequestRef ? tx.require("externalRefs", providerRequestRef) : null;
@@ -1454,7 +1513,7 @@ export class AutomationStore {
         provider: optionalText(input.provider ?? existing.provider, "receipt.provider", 256),
         providerRequestRef,
         providerObservationRef,
-        outcomeCertainty: input.outcomeCertainty ?? (status === "SUCCEEDED" ? "TERMINAL_CONFIRMED" : status === "FAILED" ? "TERMINAL_FAILED" : "ABANDONED_WITH_UNKNOWN_OUTCOME"),
+        outcomeCertainty: requestedCertainty,
         evidenceRefs,
       };
       tx.replace("actionReceipts", next);
