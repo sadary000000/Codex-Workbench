@@ -1,0 +1,92 @@
+name: ARCH-R2 lazy WebGPT composition v2
+
+on:
+  push:
+    branches:
+      - arch-r2/provider-execution-boundary
+    paths:
+      - .github/workflows/arch-r2-lazy-webgpt-cutover-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: arch-r2/provider-execution-boundary
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Apply bounded lazy-provider patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          main = Path('src/main/main.ts')
+          text = main.read_text(encoding='utf-8')
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once('import { createStartupPlan, runStartupPlan } from "./startup-policy.ts";\nimport { createAutomationProviderHost, type AutomationProviderHost } from "./automation-provider-host.ts";\n', 'import { createStartupPlan, runStartupPlan } from "./startup-policy.ts";\nimport { createAutomationProviderHost, type AutomationProviderHost } from "./automation-provider-host.ts";\nimport { createLazyExternalAutomationProviderPort, type FullAutomationProviderPort } from "./lazy-external-automation-provider-port.ts";\n', 'add lazy provider import')
+          replace_once('let webGptProviderPort: WebGptAutomationProviderPort | null = null;\nlet automationProviderHost: AutomationProviderHost | null = null;\n', 'let webGptProviderPort: WebGptAutomationProviderPort | null = null;\nlet lazyWebGptProviderPort: FullAutomationProviderPort | null = null;\nlet automationProviderHost: AutomationProviderHost | null = null;\n', 'add lazy provider singleton')
+          replace_once('  return webGptProviderPort;\n}\n\n/**\n * Native-first production Automation composition.', '  return webGptProviderPort;\n}\n\nfunction getLazyWebGptProviderPort(): FullAutomationProviderPort {\n  if (lazyWebGptProviderPort) return lazyWebGptProviderPort;\n  lazyWebGptProviderPort = createLazyExternalAutomationProviderPort("WEBGPT", () => getWebGptProviderPort());\n  return lazyWebGptProviderPort;\n}\n\n/**\n * Native-first production Automation composition.', 'insert lazy provider factory')
+          replace_once('    nativeRuntimeId: workbenchInstanceId,\n    webgptProvider: getWebGptProviderPort(),\n', '    nativeRuntimeId: workbenchInstanceId,\n    webgptProvider: getLazyWebGptProviderPort(),\n', 'make host WebGPT registration lazy')
+          replace_once('          webGptProviderPort = null;\n          automationProviderHost = null;\n', '          webGptProviderPort = null;\n          lazyWebGptProviderPort = null;\n          automationProviderHost = null;\n', 'clear lazy provider on shutdown')
+          main.write_text(text, encoding='utf-8')
+
+          module = Path('src/main/lazy-external-automation-provider-port.ts')
+          if module.exists():
+              raise SystemExit('lazy provider module already exists')
+          module.write_text('''import type { AutomationProviderId, AutomationProviderPort } from "../automation/adapters.ts";\n\nexport type FullAutomationProviderPort = AutomationProviderPort & Required<Pick<AutomationProviderPort, "resolveRequestByCorrelation" | "readResult" | "waitResult" | "cancel">>;\n\n/**\n * Provider identity is registered eagerly, but the expensive provider runtime\n * is loaded only when a real provider operation is invoked. This keeps\n * persisted continuation routing available without materializing an optional\n * external runtime during Native-only startup.\n */\nexport function createLazyExternalAutomationProviderPort(\n  providerId: AutomationProviderId,\n  load: () => FullAutomationProviderPort,\n): FullAutomationProviderPort {\n  let loaded: FullAutomationProviderPort | null = null;\n  const target = (): FullAutomationProviderPort => {\n    if (loaded) return loaded;\n    const candidate = load();\n    if (candidate.provider !== providerId) throw new Error("LAZY_PROVIDER_ID_MISMATCH");\n    loaded = candidate;\n    return candidate;\n  };\n  const lazy: FullAutomationProviderPort = {\n    provider: providerId,\n    resolveTarget: (input) => target().resolveTarget(input),\n    capabilities: () => target().capabilities(),\n    submit: (input) => target().submit(input),\n    observe: (input) => target().observe(input),\n    reconcile: (input) => target().reconcile(input),\n    resolveRequestByCorrelation: (input) => target().resolveRequestByCorrelation(input),\n    readResult: (input) => target().readResult(input),\n    waitResult: (input) => target().waitResult(input),\n    cancel: (input) => target().cancel(input),\n  };\n  return Object.freeze(lazy);\n}\n''', encoding='utf-8')
+
+          test = Path('tests/arch-r2-lazy-external-provider.test.ts')
+          if test.exists():
+              raise SystemExit('lazy provider test already exists')
+          test.write_text('''import assert from "node:assert/strict";\nimport { readFile } from "node:fs/promises";\nimport test from "node:test";\nimport { createLazyExternalAutomationProviderPort, type FullAutomationProviderPort } from "../src/main/lazy-external-automation-provider-port.ts";\n\nfunction externalProvider(): FullAutomationProviderPort {\n  return {\n    provider: "WEBGPT",\n    resolveTarget: async ({ workflowRole, providerTargetRef }) => ({ provider: "WEBGPT", workflowRole, providerTargetRef, status: "AVAILABLE", capability: "AVAILABLE" }),\n    capabilities: async () => [{ provider: "WEBGPT", code: "AVAILABLE" }],\n    submit: async () => { throw new Error("not used"); },\n    observe: async ({ providerRequestRef }) => ({ provider: "WEBGPT", providerRequestRef, providerTargetRef: "webgpt-role-v1:test:PLANNER", state: "UNKNOWN", outcomeCertainty: "ACCEPTED_UNKNOWN_RESULT", resultRef: null, resultHash: null, evidenceRefs: [] }),\n    reconcile: async ({ providerRequestRef }) => ({ provider: "WEBGPT", providerRequestRef, providerTargetRef: "webgpt-role-v1:test:PLANNER", state: "UNKNOWN", outcomeCertainty: "ACCEPTED_UNKNOWN_RESULT", resultRef: null, resultHash: null, evidenceRefs: [] }),\n    resolveRequestByCorrelation: async () => null,\n    readResult: async ({ providerRequestRef }) => ({ provider: "WEBGPT", providerRequestRef, state: "UNKNOWN", response: null, resultHash: null }),\n    waitResult: async ({ providerRequestRef }) => ({ provider: "WEBGPT", providerRequestRef, state: "UNKNOWN", response: null, resultHash: null }),\n    cancel: async ({ providerRequestRef }) => ({ provider: "WEBGPT", providerRequestRef, providerTargetRef: "webgpt-role-v1:test:PLANNER", state: "INTERRUPTED", outcomeCertainty: "TERMINAL_FAILED", resultRef: null, resultHash: null, evidenceRefs: [] }),\n  };\n}\n\ntest("ARCH-R2 lazy external provider does not materialize its runtime until first operation", async () => {\n  let loads = 0;\n  const lazy = createLazyExternalAutomationProviderPort("WEBGPT", () => { loads += 1; return externalProvider(); });\n  assert.equal(lazy.provider, "WEBGPT");\n  assert.equal(loads, 0);\n  await lazy.capabilities();\n  assert.equal(loads, 1);\n  await lazy.resolveTarget({ workflowRole: "PLANNER", providerTargetRef: "webgpt-role-v1:test:PLANNER" });\n  assert.equal(loads, 1, "the same provider instance is reused after lazy materialization");\n});\n\ntest("ARCH-R2 lazy external provider fails closed on provider identity mismatch", async () => {\n  const wrong = { ...externalProvider(), provider: "NATIVE" } as FullAutomationProviderPort;\n  const lazy = createLazyExternalAutomationProviderPort("WEBGPT", () => wrong);\n  await assert.rejects(() => lazy.capabilities(), /LAZY_PROVIDER_ID_MISMATCH/);\n});\n\ntest("ARCH-R2 production host registers lazy WebGPT without eager WebGPT materialization", async () => {\n  const main = await readFile(new URL("../src/main/main.ts", import.meta.url), "utf8");\n  assert.match(main, /webgptProvider: getLazyWebGptProviderPort\(\)/);\n  assert.match(main, /createLazyExternalAutomationProviderPort\("WEBGPT", \(\) => getWebGptProviderPort\(\)\)/);\n  assert.doesNotMatch(main, /webgptProvider: getWebGptProviderPort\(\)/);\n});\n''', encoding='utf-8')
+          PY
+      - name: Enforce allowed files and bounded diffs
+        shell: bash
+        run: |
+          git diff --check
+          mapfile -t changed < <({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)
+          printf '%s\n' "${changed[@]}"
+          for path in "${changed[@]}"; do
+            case "$path" in
+              src/main/main.ts|src/main/lazy-external-automation-provider-port.ts|tests/arch-r2-lazy-external-provider.test.ts) ;;
+              *) echo "unexpected changed file: $path"; exit 1 ;;
+            esac
+          done
+          test "${#changed[@]}" -eq 3
+          git add -N src/main/lazy-external-automation-provider-port.ts tests/arch-r2-lazy-external-provider.test.ts
+          while read -r adds dels path; do
+            test "$adds" != "-" && test "$dels" != "-"
+            test "$adds" -le 100
+            test "$dels" -le 40
+            echo "$path: +$adds -$dels"
+          done < <(git diff --numstat)
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit and integration tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit verified business patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/main.ts src/main/lazy-external-automation-provider-port.ts tests/arch-r2-lazy-external-provider.test.ts
+          git commit -m "refactor(arch-r2): lazy-load optional WebGPT provider"
+          git push origin HEAD:arch-r2/provider-execution-boundary
