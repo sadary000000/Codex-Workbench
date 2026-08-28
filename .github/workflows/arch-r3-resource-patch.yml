@@ -1,0 +1,77 @@
+name: ARCH-R3 Resource Reconcile Patch
+
+on:
+  push:
+    branches:
+      - arch-r3/resource-reconcile-boundary
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    if: github.event.head_commit.message == 'ARCH-R3: install resource reconcile patch runner'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact resource reconcile patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src/automation/webgpt-external-action.ts')
+          raw = path.read_bytes()
+          old = b'''    const observation = await this.provider.reconcile({ providerRequestId: providerRequest.providerRequestId, actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId });\r\n    const resourceClaim = snapshot.resourceClaims.find((value) => value.ownerAttemptId === attempt.actionAttemptId)\r\n      ?? await this.store.createResourceClaim({ projectId: intent.projectId, resourceType: "WEBGPT_BROWSER", resourceKey: "webgpt:browser:singleton", mode: "EXCLUSIVE", state: "RELEASED", ownerAttemptId: attempt.actionAttemptId });\r\n'''
+          if old not in raw:
+              old = old.replace(b'\r\n', b'\n')
+          if raw.count(old) != 1:
+              raise SystemExit(f'expected exactly one reconcile fallback block, found {raw.count(old)}')
+          newline = b'\r\n' if b'\r\n' in old else b'\n'
+          new = newline.join([
+              b'    const resourceClaim = snapshot.resourceClaims.find((value) => value.ownerAttemptId === attempt.actionAttemptId);',
+              b'    if (!resourceClaim) {',
+              b'      throw new WebGptExternalActionError("RECONCILE_RESOURCE_CORRELATION_MISSING", "Reconcile requires the existing ResourceClaim correlation; provider access and replacement claims are forbidden when local resource truth is missing.", { providerRequestId: providerRequest.providerRequestId, actionAttemptId: attempt.actionAttemptId });',
+              b'    }',
+              b'    const observation = await this.provider.reconcile({ providerRequestId: providerRequest.providerRequestId, actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId });',
+              b'',
+          ])
+          path.write_bytes(raw.replace(old, new, 1))
+
+      - name: Enforce bounded source diff
+        run: |
+          git diff --check
+          git diff --numstat -- src/automation/webgpt-external-action.ts
+          changed=$(git diff --numstat -- src/automation/webgpt-external-action.ts | awk '{print $1+$2}')
+          test "${changed:-999}" -le 12
+          ! git diff -- src/automation/webgpt-external-action.ts | grep -F 'createResourceClaim({ projectId: intent.projectId, resourceType: "WEBGPT_BROWSER"' >/dev/null
+          git diff -- src/automation/webgpt-external-action.ts | grep -F 'RECONCILE_RESOURCE_CORRELATION_MISSING' >/dev/null
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: R3 resource reconcile regression
+        run: node --experimental-strip-types --test tests/arch-r3-resource-reconcile-boundary.test.ts
+
+      - name: External action regression
+        run: node --experimental-strip-types --test tests/arch-v2-4-external-action.test.ts
+
+      - name: Full unit and integration suite
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit verified production patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/automation/webgpt-external-action.ts
+          git commit -m 'ARCH-R3: fail closed on missing reconcile resource truth'
+          git push origin HEAD:arch-r3/resource-reconcile-boundary
