@@ -26,8 +26,16 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
-      - name: Test R7 association service
-        run: node --experimental-strip-types --test tests/r7-project-automation-association-service.test.ts
+      - name: Test service list without Automation
+        run: node --experimental-strip-types --test --test-name-pattern="listing Product-owned associations" tests/r7-project-automation-association-service.test.ts
+      - name: Test service unlink without Automation
+        run: node --experimental-strip-types --test --test-name-pattern="unlink remains available" tests/r7-project-automation-association-service.test.ts
+      - name: Test service candidate read
+        run: node --experimental-strip-types --test --test-name-pattern="candidate listing" tests/r7-project-automation-association-service.test.ts
+      - name: Test service bind existing target
+        run: node --experimental-strip-types --test --test-name-pattern="bind verifies" tests/r7-project-automation-association-service.test.ts
+      - name: Test service bind missing target
+        run: node --experimental-strip-types --test --test-name-pattern="bind fails closed" tests/r7-project-automation-association-service.test.ts
       - name: Test R7 association UI wiring
         run: node --experimental-strip-types --test tests/r7-project-automation-association-ui.test.ts
       - name: Test startup independence regression
