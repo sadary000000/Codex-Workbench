@@ -29,12 +29,15 @@ jobs:
 
           source = Path('src/features/webgpt/runtime/webgpt-request-manager.ts')
           text = source.read_text(encoding='utf-8')
-          old = '  async requestStatus(requestId: string, reconcile = false): Promise<WebGptRequestRecord> {\n    if (reconcile) return this.reconcileRequest(requestId);\n'
-          new = '  async requestStatus(requestId: string): Promise<WebGptRequestRecord> {\n'
-          if old in text:
-              text = text.replace(old, new, 1)
+          old_signature = '  async requestStatus(requestId: string, reconcile = false): Promise<WebGptRequestRecord> {'
+          new_signature = '  async requestStatus(requestId: string): Promise<WebGptRequestRecord> {'
+          old_branch = '    if (reconcile && (record.state === "RECOVERY_REQUIRED" || record.state === "INDETERMINATE")) return this.reconcileRequest(record.requestId);\n'
+          if old_signature in text:
+              if text.count(old_signature) != 1 or text.count(old_branch) != 1:
+                  raise SystemExit('requestStatus boundary is not uniquely patchable')
+              text = text.replace(old_signature, new_signature, 1).replace(old_branch, '', 1)
               source.write_text(text, encoding='utf-8')
-          elif new not in text:
+          elif new_signature not in text or old_branch in text:
               raise SystemExit('requestStatus boundary shape not found')
 
           test = Path('tests/arch-r3-query-reconcile-boundary.test.ts')
@@ -49,7 +52,7 @@ jobs:
               '  const source = await readFile(managerSourceUrl, "utf8");',
               '  assert.match(source, /async requestStatus\\(requestId: string\\): Promise<WebGptRequestRecord>/);',
               '  assert.doesNotMatch(source, /requestStatus\\(requestId: string,\\s*reconcile/);',
-              '  assert.doesNotMatch(source, /if \\(reconcile\\) return this\\.reconcileRequest\\(requestId\\)/);',
+              '  assert.doesNotMatch(source, /if \\(reconcile/);',
               '});',
               '',
               'test("ARCH-R3 reconciliation remains an explicit command path", async () => {',
