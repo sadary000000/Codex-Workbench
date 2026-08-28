@@ -303,7 +303,7 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
   }
 
   async observe(input: { providerRequestRef: string; correlation?: ProviderCorrelation }): Promise<ProviderObservation> {
-    const record = await this.requestManager.requestStatus(input.providerRequestRef, false);
+    const record = await this.requestManager.requestStatus(input.providerRequestRef);
     if (input.correlation) {
       ensureCorrelation(input.correlation);
       if (!record.projectId || !record.role) throw new Error("PROVIDER_TARGET_CORRELATION_MISSING");
@@ -322,7 +322,7 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
     const authorization = await this.authorize("RECONCILE", input.correlation, liveCapability);
     assertProviderExecutionAuthorization({ operation: "RECONCILE", correlation: input.correlation, authorization });
     assertLiveCapabilityProof(authorization, liveCapability);
-    const before = await this.requestManager.requestStatus(input.providerRequestRef, false);
+    const before = await this.requestManager.requestStatus(input.providerRequestRef);
     const target = before.projectId && before.role ? { projectId: before.projectId, role: normalizeWebGptRole(before.role) } : null;
     if (!target) throw new Error("PROVIDER_TARGET_CORRELATION_MISSING");
     assertRecordCorrelation(before, input.correlation, target);
@@ -364,11 +364,11 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
    */
   private async awaitDispatchAdmission(requestId: string): Promise<WebGptRequestRecord> {
     const waitForActive = this.requestManager.waitForActiveOperationLease;
-    if (!waitForActive) return this.requestManager.requestStatus(requestId, false);
+    if (!waitForActive) return this.requestManager.requestStatus(requestId);
     const ensureDispatchPump = this.requestManager.ensureDispatchPump;
     if (ensureDispatchPump) await ensureDispatchPump.call(this.requestManager, requestId);
     const deadline = Date.now() + DISPATCH_ADMISSION_TIMEOUT_MS;
-    let record = await this.requestManager.requestStatus(requestId, false);
+    let record = await this.requestManager.requestStatus(requestId);
     while (isDispatchPending(record)) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
@@ -380,7 +380,7 @@ export class WebGptAutomationProviderPort implements AutomationProviderPort {
       }
       await waitForActive.call(this.requestManager, requestId, Math.min(1_000, remaining));
       if (ensureDispatchPump) await ensureDispatchPump.call(this.requestManager, requestId);
-      record = await this.requestManager.requestStatus(requestId, false);
+      record = await this.requestManager.requestStatus(requestId);
       // waitForActiveOperationLease() legitimately resolves immediately while
       // this Request owns the live Browser lease.  Yield to the timer queue so
       // Request Manager's pre-dispatch deadline and renderer recovery timers

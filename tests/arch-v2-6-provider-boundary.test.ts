@@ -213,10 +213,9 @@ test("WebGPT provider port keeps target opaque and separates observe from reconc
     },
   };
   const requestManager = {
-    requestStatus: async (requestId: string, reconcile?: boolean) => {
+    requestStatus: async (requestId: string) => {
       calls.status += 1;
       assert.equal(requestId, record.requestId);
-      assert.equal(reconcile, false);
       return record;
     },
     reconcileRequest: async (requestId: string) => {

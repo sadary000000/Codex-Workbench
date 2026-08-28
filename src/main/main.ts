@@ -321,7 +321,7 @@ async function startStageK1DRealPlannerSmoke(): Promise<void> {
     provider: getWebGptProviderPort(),
     requestManager: {
       findByIdempotencyKey: requestManager.findByIdempotencyKey.bind(requestManager),
-      getRequestById: (requestId: string) => requestManager.requestStatus(requestId, false),
+      getRequestById: (requestId: string) => requestManager.requestStatus(requestId),
       waitForRequest: requestManager.waitForRequest.bind(requestManager),
     },
     inputRefs: automationInputRefs,
@@ -789,7 +789,7 @@ async function collectWebGptActionReadiness(action: WebGptActionScope): Promise<
   const activeRequests = await requestManager.activeSummary();
   const loaded = await Promise.all(activeRequests.map(async (summary) => {
     try {
-      return { record: await requestManager.requestStatus(summary.requestId, false), unavailable: false };
+      return { record: await requestManager.requestStatus(summary.requestId), unavailable: false };
     } catch {
       return { record: null, unavailable: true };
     }
@@ -891,7 +891,7 @@ async function aut3PlannerPreflight(webgptProjectId: string, recoveryRequestId: 
   let recovery: Record<string, unknown> = { status: "NOT_REQUESTED", requestId: recoveryRequestId };
   if (recoveryRequestId) {
     try {
-      const record = await requestManager.requestStatus(recoveryRequestId, false);
+      const record = await requestManager.requestStatus(recoveryRequestId);
       recovery = {
         status: "FOUND",
         requestId: record.requestId,
