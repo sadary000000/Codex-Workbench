@@ -96,7 +96,7 @@ replace_once(
 replace_once(
     "src/renderer/index.html",
     '      .map-scope-references { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 10px; }\n      .map-reference { max-width: 100%; overflow: hidden; padding: 2px 5px; border: 1px solid #45413a; border-radius: 5px; background: #28251f; color: #c9b989; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; cursor: default; user-select: text; }\n',
-    '      .map-scope-references, .map-governance-references { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 10px; }\n      .map-reference { max-width: 100%; overflow: hidden; padding: 2px 5px; border: 1px solid #45413a; border-radius: 5px; background: #28251f; color: #c9b989; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; cursor: default; user-select: text; }\n      .map-reference-unavailable { border-style: dashed; color: #d69a8f; }\n',
+    '      .map-scope-references { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 10px; }\n      .map-governance-references { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 10px; }\n      .map-reference { max-width: 100%; overflow: hidden; padding: 2px 5px; border: 1px solid #45413a; border-radius: 5px; background: #28251f; color: #c9b989; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; cursor: default; user-select: text; }\n      .map-reference-unavailable { border-style: dashed; color: #d69a8f; }\n',
 )
 replace_once(
     "src/renderer/index.html",
