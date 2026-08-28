@@ -1,0 +1,104 @@
+name: R7 Map Reference Producer Boundary Verify
+
+on:
+  push:
+    branches:
+      - feature/r7-map-entity-references
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Patch producer boundary
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/main/project-map-manager.ts")
+          data = path.read_bytes()
+          newline = "\r\n" if b"\r\n" in data else "\n"
+
+          def replace_once(before_lines: list[str], after_lines: list[str]) -> None:
+              global data
+              before = newline.join(before_lines).encode("utf-8")
+              after = newline.join(after_lines).encode("utf-8")
+              count = data.count(before)
+              if count != 1:
+                  raise SystemExit(f"expected exactly one anchor, found {count}")
+              data = data.replace(before, after, 1)
+
+          replace_once(
+              [
+                  "          sources: item.sources,",
+                  "          ordering: item.ordering,",
+              ],
+              [
+                  "          sources: item.sources,",
+                  "          references: item.references,",
+                  "          ordering: item.ordering,",
+              ],
+          )
+
+          replace_once(
+              [
+                  '      "Map Patch operations must use the literal key op, for example {op:\\"add\\",node:{...}}; do not use type or add_node.",',
+                  '      "If the bounded delta contains forceContextRequest=true and a contextRequest object, call workbench_map_context_request exactly once before workbench_map_patch, using that bounded request; do not skip it.",',
+              ],
+              [
+                  '      "Map Patch operations must use the literal key op, for example {op:\\"add\\",node:{...}}; do not use type or add_node.",',
+                  '      "Typed references are projection-only identities; they never carry owner-domain status, title, payload, or authority.",',
+                  '      "Do not invent or infer references from names, prose, summaries, URLs, or coincidental Project IDs.",',
+                  '      "Only preserve an existing typed reference or add one when bounded input explicitly provides an owner-confirmed {domain, entityType, entityId} identity.",',
+                  '      "If no owner-confirmed identity is explicitly provided, omit references.",',
+                  '      "If the bounded delta contains forceContextRequest=true and a contextRequest object, call workbench_map_context_request exactly once before workbench_map_patch, using that bounded request; do not skip it.",',
+              ],
+          )
+
+          path.write_bytes(data)
+          PY
+
+      - name: Guard bounded diff
+        shell: bash
+        run: |
+          git diff --check
+          changed="$(git status --short | awk '{print $2}' | sort)"
+          expected="src/main/project-map-manager.ts"
+          test "$changed" = "$expected"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit verified boundary and remove runner
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/r7-map-reference-producer-boundary-verify.yml
+          git add src/main/project-map-manager.ts
+          git commit -m "R7: harden map reference producer boundary"
+          git push origin HEAD:feature/r7-map-entity-references
