@@ -85,48 +85,6 @@ function policyAuthority(): ProviderPolicyAuthorityPort {
   };
 }
 
-function runtime(options: { throwOnStart?: boolean } = {}): NativeProviderRuntimePort & { starts: number; reads: number; reconciles: number } {
-  const completed: NativeProviderTurnView = {
-    nativeThreadId: "thread-r2",
-    nativeTurnId: "turn-r2",
-    state: "COMPLETED",
-    response: '{"ok":true}',
-    resultHash: "result-hash-r2",
-  };
-  return {
-    starts: 0,
-    reads: 0,
-    reconciles: 0,
-    hasThread: async (nativeThreadId) => nativeThreadId === "thread-r2",
-    runtimeCapability: async () => capability,
-    startTurn: async ({ nativeThreadId, prompt }) => {
-      assert.equal(nativeThreadId, "thread-r2");
-      assert.equal(prompt, "native provider prompt");
-      const self = runtimeRef!;
-      self.starts += 1;
-      if (options.throwOnStart) throw new Error("APP_SERVER_TIMEOUT");
-      return { nativeTurnId: "turn-r2" };
-    },
-    readTurn: async (nativeTurnId) => {
-      const self = runtimeRef!;
-      self.reads += 1;
-      assert.equal(nativeTurnId, "turn-r2");
-      return completed;
-    },
-    reconcileTurn: async (nativeTurnId) => {
-      const self = runtimeRef!;
-      self.reconciles += 1;
-      assert.equal(nativeTurnId, "turn-r2");
-      return completed;
-    },
-  };
-
-  // Assigned immediately by each test after construction; methods are only
-  // invoked after that assignment. Kept outside the returned structural type
-  // so the runtime seam itself carries no test-only self pointer.
-  var runtimeRef: (NativeProviderRuntimePort & { starts: number; reads: number; reconciles: number }) | null;
-}
-
 function createRuntime(options: { throwOnStart?: boolean } = {}): NativeProviderRuntimePort & { starts: number; reads: number; reconciles: number } {
   let starts = 0;
   let reads = 0;
