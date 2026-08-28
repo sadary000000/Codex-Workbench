@@ -80,7 +80,9 @@ test("ARCH-R2 provider id is durable before a submit whose transport outcome bec
     assert.equal(calls.submit, 1);
     assert.equal(await persistedProviderIdForIntent(f.store, f.intent.intentId), "NATIVE", "provider selection survives even when no provider request ref was returned");
     const snapshot = await f.store.snapshot();
-    assert.ok(snapshot.auditEvents.some((event) => event.eventType === "PROVIDER_BOUND_BEFORE_DISPATCH" && event.entityId === f.intent.intentId));
+    assert.equal(snapshot.actionIntents.find((intent) => intent.intentId === f.intent.intentId)?.semanticSha256, f.intent.semanticSha256, "binding never rewrites ActionIntent semantics");
+    assert.match(snapshot.actionAttempts.find((attempt) => attempt.actionAttemptId === f.attempt.actionAttemptId)?.executorRef ?? "", /^automation-provider-v1:/);
+    assert.ok(snapshot.auditEvents.some((event) => event.eventType === "PROVIDER_BOUND_BEFORE_DISPATCH" && event.entityId === f.attempt.actionAttemptId && event.correlationId === f.intent.intentId));
   } finally {
     await f.store.close();
     await rm(f.root, { recursive: true, force: true });
