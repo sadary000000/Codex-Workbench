@@ -16,6 +16,7 @@ import type { JsonRpcMessage, NativeTurnCompletionEvent, RuntimeSnapshot, Thread
 import { ConversationMapCoordinator } from "./map-coordinator.ts";
 import { ProjectMapManager } from "./project-map-manager.ts";
 import { ProjectAutomationAssociationService } from "./project-automation-association-service.ts";
+import { ProjectMapGovernanceReferenceService } from "./project-map-governance-reference-service.ts";
 import { RuntimeRegistry } from "./runtime-registry.ts";
 import { isConversationMapSidecarEnabled } from "./map-activation.ts";
 import { markThreadUnavailable } from "./thread-availability.ts";
@@ -104,6 +105,7 @@ const IPC = Object.freeze({
   mapResume: "map:resume",
   mapState: "map:state",
   projectMapStatus: "project-map:status",
+  projectMapGovernanceReferences: "project-map:governance-references",
   projectMapEnable: "project-map:enable",
   projectMapPause: "project-map:pause",
   projectMapResume: "project-map:resume",
@@ -142,6 +144,7 @@ let persistence: V1PersistenceStore | null = null;
 let conversationMaps: ConversationMapCoordinator | null = null;
 let projectMaps: ProjectMapManager | null = null;
 let projectAutomationAssociationService: ProjectAutomationAssociationService | null = null;
+let projectMapGovernanceReferenceService: ProjectMapGovernanceReferenceService | null = null;
 let webGptWorkspace: WebGptWorkspace | null = null;
 let quittingForExit = false;
 let pendingWebGptCommand: WebGptExternalCommand | null = null;
@@ -1698,6 +1701,20 @@ function getProjectAutomationAssociationService(): ProjectAutomationAssociationS
   return projectAutomationAssociationService;
 }
 
+function getProjectMapGovernanceReferenceService(): ProjectMapGovernanceReferenceService {
+  if (projectMapGovernanceReferenceService) return projectMapGovernanceReferenceService;
+  projectMapGovernanceReferenceService = new ProjectMapGovernanceReferenceService(
+    getPersistence(),
+    async () => {
+      // R7 boundary: governance truth is loaded only by an explicit Project Map projection request.
+      await ensureAutomationPersistence();
+      if (!automationStore) throw new Error("Automation persistence is unavailable.");
+      return automationStore;
+    },
+  );
+  return projectMapGovernanceReferenceService;
+}
+
 async function detachLoadedProjectRuntimes(projectId: string): Promise<void> {
   const memberIds = new Set((await getPersistence().listThreads(projectId)).map((thread) => thread.nativeThreadId));
   for (const { nativeThreadId, runtime } of runtimes.list()) {
@@ -1983,6 +2000,14 @@ function registerIpc(): void {
     try {
       if (typeof projectId !== "string") throw new Error("Project ID is required.");
       return ok(await getProjectMaps().status(projectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.projectMapGovernanceReferences, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string") throw new Error("Project ID is required.");
+      return ok(await getProjectMapGovernanceReferenceService().list(projectId));
     } catch (error) {
       return fail(error);
     }
