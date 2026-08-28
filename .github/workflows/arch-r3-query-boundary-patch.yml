@@ -1,0 +1,100 @@
+name: ARCH-R3 bounded query boundary patch
+
+on:
+  push:
+    branches:
+      - arch-r3/query-reconcile-boundary
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: arch-r3/query-reconcile-boundary
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Apply bounded ARCH-R3 patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/features/webgpt/runtime/webgpt-request-manager.ts')
+          text = source.read_text(encoding='utf-8')
+          old = '''  async requestStatus(requestId: string, reconcile = false): Promise<WebGptRequestRecord> {
+    if (reconcile) return this.reconcileRequest(requestId);
+'''
+          new = '''  async requestStatus(requestId: string): Promise<WebGptRequestRecord> {
+'''
+          if old in text:
+              text = text.replace(old, new, 1)
+              source.write_text(text, encoding='utf-8')
+          elif new not in text:
+              raise SystemExit('requestStatus boundary shape not found')
+
+          test = Path('tests/arch-r3-query-reconcile-boundary.test.ts')
+          expected = '''import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const managerSourceUrl = new URL("../src/features/webgpt/runtime/webgpt-request-manager.ts", import.meta.url);
+
+test("ARCH-R3 requestStatus is structurally query-only", async () => {
+  const source = await readFile(managerSourceUrl, "utf8");
+  assert.match(source, /async requestStatus\\(requestId: string\\): Promise<WebGptRequestRecord>/);
+  assert.doesNotMatch(source, /requestStatus\\(requestId: string,\\s*reconcile/);
+  assert.doesNotMatch(source, /if \\(reconcile\\) return this\\.reconcileRequest\\(requestId\\)/);
+});
+
+test("ARCH-R3 reconciliation remains an explicit command path", async () => {
+  const source = await readFile(managerSourceUrl, "utf8");
+  assert.match(source, /async reconcileRequest\\(requestId: string\\): Promise<WebGptRequestRecord>/);
+  assert.match(source, /await this\\.reconcilePersistedRecord\\(/);
+});
+'''
+          if test.exists():
+              if test.read_text(encoding='utf-8') != expected:
+                  raise SystemExit('ARCH-R3 test already exists with unexpected content')
+          else:
+              test.write_text(expected, encoding='utf-8')
+          PY
+      - name: Enforce bounded diff
+        shell: bash
+        run: |
+          git diff --check
+          mapfile -t changed < <({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)
+          printf '%s\n' "${changed[@]}"
+          for path in "${changed[@]}"; do
+            case "$path" in
+              src/features/webgpt/runtime/webgpt-request-manager.ts|tests/arch-r3-query-reconcile-boundary.test.ts) ;;
+              *) echo "Unexpected changed path: $path" >&2; exit 1 ;;
+            esac
+          done
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit and integration tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit bounded patch when needed
+        shell: bash
+        run: |
+          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            echo "ARCH-R3 patch already materialized."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/features/webgpt/runtime/webgpt-request-manager.ts tests/arch-r3-query-reconcile-boundary.test.ts
+          git commit -m "refactor(arch-r3): make request status query-only"
+          git push origin HEAD:arch-r3/query-reconcile-boundary
