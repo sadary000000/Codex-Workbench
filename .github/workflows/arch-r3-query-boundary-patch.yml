@@ -1,13 +1,9 @@
 name: ARCH-R3 bounded query boundary patch
-
 on:
   push:
-    branches:
-      - arch-r3/query-reconcile-boundary
-
+    branches: [arch-r3/query-reconcile-boundary]
 permissions:
   contents: write
-
 jobs:
   patch:
     runs-on: ubuntu-latest
@@ -27,8 +23,8 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          source = Path('src/features/webgpt/runtime/webgpt-request-manager.ts')
-          text = source.read_text(encoding='utf-8')
+          manager = Path('src/features/webgpt/runtime/webgpt-request-manager.ts')
+          text = manager.read_text(encoding='utf-8')
           old_signature = '  async requestStatus(requestId: string, reconcile = false): Promise<WebGptRequestRecord> {'
           new_signature = '  async requestStatus(requestId: string): Promise<WebGptRequestRecord> {'
           old_branch = '    if (reconcile && (record.state === "RECOVERY_REQUIRED" || record.state === "INDETERMINATE")) return this.reconcileRequest(record.requestId);\n'
@@ -36,25 +32,19 @@ jobs:
               if text.count(old_signature) != 1 or text.count(old_branch) != 1:
                   raise SystemExit('requestStatus boundary is not uniquely patchable')
               text = text.replace(old_signature, new_signature, 1).replace(old_branch, '', 1)
-              source.write_text(text, encoding='utf-8')
+              manager.write_text(text, encoding='utf-8')
           elif new_signature not in text or old_branch in text:
               raise SystemExit('requestStatus boundary shape not found')
 
-          provider = Path('src/features/webgpt/automation/webgpt-provider-port.ts')
-          provider_text = provider.read_text(encoding='utf-8')
-          replacements = {
-              'this.requestManager.requestStatus(input.providerRequestRef, false)': 'this.requestManager.requestStatus(input.providerRequestRef)',
-              'this.requestManager.requestStatus(requestId, false)': 'this.requestManager.requestStatus(requestId)',
-          }
-          changed = False
-          for old, new in replacements.items():
-              if old in provider_text:
-                  provider_text = provider_text.replace(old, new)
-                  changed = True
-          if changed:
-              provider.write_text(provider_text, encoding='utf-8')
-          if ', false)' in '\n'.join(line for line in provider_text.splitlines() if 'requestStatus(' in line):
-              raise SystemExit('query-only provider callers still pass a reconcile flag')
+          for path in [Path('src/features/webgpt/automation/webgpt-provider-port.ts'), Path('src/main/main.ts')]:
+              value = path.read_text(encoding='utf-8')
+              import re
+              updated = re.sub(r'(requestStatus\([^\n,()]+),\s*false\)', r'\1)', value)
+              if updated != value:
+                  path.write_text(updated, encoding='utf-8')
+              remaining = [line for line in updated.splitlines() if 'requestStatus(' in line and re.search(r',\s*(?:true|false)\)', line)]
+              if remaining:
+                  raise SystemExit(f'boolean requestStatus caller remains in {path}: {remaining}')
 
           test = Path('tests/arch-r3-query-reconcile-boundary.test.ts')
           expected = '\n'.join([
@@ -64,6 +54,7 @@ jobs:
               '',
               'const managerSourceUrl = new URL("../src/features/webgpt/runtime/webgpt-request-manager.ts", import.meta.url);',
               'const providerSourceUrl = new URL("../src/features/webgpt/automation/webgpt-provider-port.ts", import.meta.url);',
+              'const mainSourceUrl = new URL("../src/main/main.ts", import.meta.url);',
               '',
               'test("ARCH-R3 requestStatus is structurally query-only", async () => {',
               '  const source = await readFile(managerSourceUrl, "utf8");',
@@ -78,18 +69,16 @@ jobs:
               '  assert.match(source, /reconcilePersistedRecord\\(/);',
               '});',
               '',
-              'test("ARCH-R3 WebGPT provider observations use the pure query shape", async () => {',
-              '  const source = await readFile(providerSourceUrl, "utf8");',
-              '  assert.doesNotMatch(source, /requestStatus\\([^\\n]*,\\s*(?:true|false)\\)/);',
-              '  assert.match(source, /requestManager\\.reconcileRequest\\(input\\.providerRequestRef\\)/);',
+              'test("ARCH-R3 callers cannot select reconciliation through requestStatus", async () => {',
+              '  const provider = await readFile(providerSourceUrl, "utf8");',
+              '  const main = await readFile(mainSourceUrl, "utf8");',
+              '  assert.doesNotMatch(provider, /requestStatus\\([^\\n]*,\\s*(?:true|false)\\)/);',
+              '  assert.doesNotMatch(main, /requestStatus\\([^\\n]*,\\s*(?:true|false)\\)/);',
+              '  assert.match(provider, /requestManager\\.reconcileRequest\\(input\\.providerRequestRef\\)/);',
               '});',
               '',
           ])
-          if test.exists():
-              if test.read_text(encoding='utf-8') != expected:
-                  test.write_text(expected, encoding='utf-8')
-          else:
-              test.write_text(expected, encoding='utf-8')
+          test.write_text(expected, encoding='utf-8')
           PY
       - name: Enforce bounded diff
         shell: bash
@@ -99,7 +88,7 @@ jobs:
           printf '%s\n' "${changed[@]}"
           for path in "${changed[@]}"; do
             case "$path" in
-              src/features/webgpt/runtime/webgpt-request-manager.ts|src/features/webgpt/automation/webgpt-provider-port.ts|tests/arch-r3-query-reconcile-boundary.test.ts) ;;
+              src/features/webgpt/runtime/webgpt-request-manager.ts|src/features/webgpt/automation/webgpt-provider-port.ts|src/main/main.ts|tests/arch-r3-query-reconcile-boundary.test.ts) ;;
               *) echo "Unexpected changed path: $path" >&2; exit 1 ;;
             esac
           done
@@ -114,12 +103,9 @@ jobs:
       - name: Commit bounded patch when needed
         shell: bash
         run: |
-          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
-            echo "ARCH-R3 patch already materialized."
-            exit 0
-          fi
+          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/features/webgpt/runtime/webgpt-request-manager.ts src/features/webgpt/automation/webgpt-provider-port.ts tests/arch-r3-query-reconcile-boundary.test.ts
+          git add src/features/webgpt/runtime/webgpt-request-manager.ts src/features/webgpt/automation/webgpt-provider-port.ts src/main/main.ts tests/arch-r3-query-reconcile-boundary.test.ts
           git commit -m "refactor(arch-r3): make request status query-only"
           git push origin HEAD:arch-r3/query-reconcile-boundary
