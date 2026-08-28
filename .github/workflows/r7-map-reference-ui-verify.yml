@@ -1,0 +1,127 @@
+name: R7 Map Reference UI Verify
+
+on:
+  push:
+    branches:
+      - feature/r7-map-entity-references
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Patch renderer and add contract test
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, before: str, after: str) -> None:
+              target = Path(path)
+              data = target.read_bytes()
+              newline = "\r\n" if b"\r\n" in data else "\n"
+              before_bytes = before.replace("\n", newline).encode("utf-8")
+              after_bytes = after.replace("\n", newline).encode("utf-8")
+              count = data.count(before_bytes)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one anchor, found {count}")
+              target.write_bytes(data.replace(before_bytes, after_bytes, 1))
+
+          replace_once(
+              "src/renderer/renderer.ts",
+              '''    wrapper.append(sourceList);
+  }
+  const children = nodes.filter((candidate) => candidate.parentId === node.nodeId).sort((left, right) => left.ordering - right.ordering);''',
+              '''    wrapper.append(sourceList);
+  }
+  const references = node.references ?? [];
+  if (references.length) {
+    const referenceList = document.createElement("div");
+    referenceList.className = "map-node-references";
+    references.forEach((reference) => {
+      const referenceChip = document.createElement("span");
+      referenceChip.className = "map-reference";
+      referenceChip.textContent = `${reference.domain} · ${reference.entityType} · ${reference.entityId}`;
+      referenceList.append(referenceChip);
+    });
+    wrapper.append(referenceList);
+  }
+  const children = nodes.filter((candidate) => candidate.parentId === node.nodeId).sort((left, right) => left.ordering - right.ordering);''',
+          )
+
+          replace_once(
+              "src/renderer/index.html",
+              '''      .map-source:hover, .map-source:focus-visible { border-color: #6eaa8c; outline: none; }
+      .map-node-children { display: grid; gap: 3px; margin-left: 16px; padding-left: 6px; border-left: 1px solid #333; }''',
+              '''      .map-source:hover, .map-source:focus-visible { border-color: #6eaa8c; outline: none; }
+      .map-node-references { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 7px 2px 29px; }
+      .map-reference { max-width: 100%; overflow: hidden; padding: 2px 5px; border: 1px solid #45413a; border-radius: 5px; background: #28251f; color: #c9b989; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; cursor: default; user-select: text; }
+      .map-node-children { display: grid; gap: 3px; margin-left: 16px; padding-left: 6px; border-left: 1px solid #333; }''',
+          )
+
+          test = '''import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import test from "node:test";
+
+const root = resolve(import.meta.dirname, "..");
+const renderer = readFileSync(resolve(root, "src/renderer/renderer.ts"), "utf8");
+const html = readFileSync(resolve(root, "src/renderer/index.html"), "utf8");
+
+test("Map renders typed projection references as read-only identity chips", () => {
+  const block = renderer.match(/const references = node\\.references \\?\\? \\[\\];[\\s\\S]*?wrapper\\.append\\(referenceList\\);\\n  }/)?.[0];
+  assert.ok(block, "typed-reference render block must exist");
+  assert.match(block, /document\\.createElement\\("span"\\)/);
+  assert.match(block, /referenceChip\\.className = "map-reference"/);
+  assert.ok(block.includes('referenceChip.textContent = `${reference.domain} · ${reference.entityType} · ${reference.entityId}`;'));
+  assert.doesNotMatch(block, /addEventListener|jumpTo|resolve|api\\.|webGptApi\\./);
+  assert.match(html, /\\.map-node-references \\{/);
+  assert.match(html, /\\.map-reference \\{/);
+});
+'''
+          Path("tests/r7-map-reference-ui-contract.test.ts").write_text(test, encoding="utf-8", newline="\n")
+          PY
+
+      - name: Guard bounded diff
+        shell: bash
+        run: |
+          git diff --check
+          changed="$(git status --short | awk '{print $2}' | sort)"
+          expected="$(printf '%s\n' src/renderer/index.html src/renderer/renderer.ts tests/r7-map-reference-ui-contract.test.ts | sort)"
+          test "$changed" = "$expected"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit verified R7 UI slice and remove runner
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/r7-map-reference-ui-verify.yml
+          git add src/renderer/renderer.ts src/renderer/index.html tests/r7-map-reference-ui-contract.test.ts
+          git commit -m "R7: render typed map references"
+          git push origin HEAD:feature/r7-map-entity-references
