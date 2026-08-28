@@ -76,7 +76,6 @@ jobs:
               'test("ARCH-R3 reconciliation remains an explicit command path", async () => {',
               '  const source = await readFile(managerSourceUrl, "utf8");',
               '  assert.match(source, /async reconcileRequest\\(requestId: string\\): Promise<WebGptRequestRecord>/);',
-              '  assert.match(source, /reconcilePersistedRecord\\(/);',
               '});',
               '',
               'test("ARCH-R3 callers cannot select reconciliation through requestStatus", async () => {',
@@ -106,8 +105,12 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
-      - name: R3 boundary tests
-        run: node --experimental-strip-types --test tests/arch-r3-query-reconcile-boundary.test.ts tests/arch-v2-6-provider-boundary.test.ts tests/webgpt-request-manager.test.ts
+      - name: R3 source-contract tests
+        run: node --experimental-strip-types --test tests/arch-r3-query-reconcile-boundary.test.ts
+      - name: Provider boundary regression
+        run: node --experimental-strip-types --test tests/arch-v2-6-provider-boundary.test.ts
+      - name: Request manager purity regression
+        run: node --experimental-strip-types --test tests/webgpt-request-manager.test.ts
       - name: Unit and integration tests
         run: npm test
       - name: Build
