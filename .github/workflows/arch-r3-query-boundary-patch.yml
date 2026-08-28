@@ -29,11 +29,8 @@ jobs:
 
           source = Path('src/features/webgpt/runtime/webgpt-request-manager.ts')
           text = source.read_text(encoding='utf-8')
-          old = '''  async requestStatus(requestId: string, reconcile = false): Promise<WebGptRequestRecord> {
-    if (reconcile) return this.reconcileRequest(requestId);
-'''
-          new = '''  async requestStatus(requestId: string): Promise<WebGptRequestRecord> {
-'''
+          old = '  async requestStatus(requestId: string, reconcile = false): Promise<WebGptRequestRecord> {\n    if (reconcile) return this.reconcileRequest(requestId);\n'
+          new = '  async requestStatus(requestId: string): Promise<WebGptRequestRecord> {\n'
           if old in text:
               text = text.replace(old, new, 1)
               source.write_text(text, encoding='utf-8')
@@ -41,25 +38,27 @@ jobs:
               raise SystemExit('requestStatus boundary shape not found')
 
           test = Path('tests/arch-r3-query-reconcile-boundary.test.ts')
-          expected = '''import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import test from "node:test";
-
-const managerSourceUrl = new URL("../src/features/webgpt/runtime/webgpt-request-manager.ts", import.meta.url);
-
-test("ARCH-R3 requestStatus is structurally query-only", async () => {
-  const source = await readFile(managerSourceUrl, "utf8");
-  assert.match(source, /async requestStatus\\(requestId: string\\): Promise<WebGptRequestRecord>/);
-  assert.doesNotMatch(source, /requestStatus\\(requestId: string,\\s*reconcile/);
-  assert.doesNotMatch(source, /if \\(reconcile\\) return this\\.reconcileRequest\\(requestId\\)/);
-});
-
-test("ARCH-R3 reconciliation remains an explicit command path", async () => {
-  const source = await readFile(managerSourceUrl, "utf8");
-  assert.match(source, /async reconcileRequest\\(requestId: string\\): Promise<WebGptRequestRecord>/);
-  assert.match(source, /await this\\.reconcilePersistedRecord\\(/);
-});
-'''
+          expected = '\n'.join([
+              'import assert from "node:assert/strict";',
+              'import { readFile } from "node:fs/promises";',
+              'import test from "node:test";',
+              '',
+              'const managerSourceUrl = new URL("../src/features/webgpt/runtime/webgpt-request-manager.ts", import.meta.url);',
+              '',
+              'test("ARCH-R3 requestStatus is structurally query-only", async () => {',
+              '  const source = await readFile(managerSourceUrl, "utf8");',
+              '  assert.match(source, /async requestStatus\\(requestId: string\\): Promise<WebGptRequestRecord>/);',
+              '  assert.doesNotMatch(source, /requestStatus\\(requestId: string,\\s*reconcile/);',
+              '  assert.doesNotMatch(source, /if \\(reconcile\\) return this\\.reconcileRequest\\(requestId\\)/);',
+              '});',
+              '',
+              'test("ARCH-R3 reconciliation remains an explicit command path", async () => {',
+              '  const source = await readFile(managerSourceUrl, "utf8");',
+              '  assert.match(source, /async reconcileRequest\\(requestId: string\\): Promise<WebGptRequestRecord>/);',
+              '  assert.match(source, /reconcilePersistedRecord\\(/);',
+              '});',
+              '',
+          ])
           if test.exists():
               if test.read_text(encoding='utf-8') != expected:
                   raise SystemExit('ARCH-R3 test already exists with unexpected content')
