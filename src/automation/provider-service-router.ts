@@ -1,14 +1,14 @@
 import type { AutomationProviderId, AutomationProviderPort } from "./adapters.ts";
 import { InputRefRegistry } from "./input-ref.ts";
 import { createPlannerProviderIntegrationService, type PlannerProviderIntegrationService } from "./planner-provider-integration.ts";
+import { ProviderAwareRequirementAutomationService } from "./provider-aware-requirement-service.ts";
 import { AutomationProviderRegistry } from "./provider-registry.ts";
-import { RequirementAutomationService } from "./requirement-service.ts";
 import { AutomationStore } from "./store.ts";
 
 export interface AutomationProviderServices {
   readonly providerId: AutomationProviderId;
   readonly provider: AutomationProviderPort;
-  readonly requirement: RequirementAutomationService;
+  readonly requirement: ProviderAwareRequirementAutomationService;
   readonly planner: PlannerProviderIntegrationService;
 }
 
@@ -44,7 +44,7 @@ export class AutomationProviderServiceRouter {
     const created: AutomationProviderServices = Object.freeze({
       providerId: id,
       provider,
-      requirement: new RequirementAutomationService({
+      requirement: new ProviderAwareRequirementAutomationService({
         store: this.store,
         provider,
         inputRefs: this.inputRefs,
@@ -58,7 +58,7 @@ export class AutomationProviderServiceRouter {
     return created;
   }
 
-  requirement(providerId?: AutomationProviderId | null): RequirementAutomationService {
+  requirement(providerId?: AutomationProviderId | null): ProviderAwareRequirementAutomationService {
     return this.services(providerId).requirement;
   }
 
