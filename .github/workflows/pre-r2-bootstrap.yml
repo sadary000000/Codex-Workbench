@@ -27,6 +27,7 @@ jobs:
         run: |
           if [ -f scripts/repair-pre-r2-bootstrap.mjs ]; then node scripts/repair-pre-r2-bootstrap.mjs; fi
           node scripts/pre-r2-source-integrity-fix.mjs
+          if [ -f scripts/repair-pre-r2-fix2.mjs ]; then node scripts/repair-pre-r2-fix2.mjs; fi
           if [ -f scripts/pre-r2-source-integrity-fix2.mjs ]; then node scripts/pre-r2-source-integrity-fix2.mjs; fi
       - name: Typecheck
         run: npm run typecheck
