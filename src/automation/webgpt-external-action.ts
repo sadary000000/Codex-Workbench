@@ -382,9 +382,11 @@ export class WebGptExternalActionBridge {
       state: "UNKNOWN",
       resourceLease: null,
     };
+    const resourceClaim = snapshot.resourceClaims.find((value) => value.ownerAttemptId === attempt.actionAttemptId);
+    if (!resourceClaim) {
+      throw new WebGptExternalActionError("RECONCILE_RESOURCE_CORRELATION_MISSING", "Reconcile requires the existing ResourceClaim correlation; provider access and replacement claims are forbidden when local resource truth is missing.", { providerRequestId: providerRequest.providerRequestId, actionAttemptId: attempt.actionAttemptId });
+    }
     const observation = await this.provider.reconcile({ providerRequestId: providerRequest.providerRequestId, actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId });
-    const resourceClaim = snapshot.resourceClaims.find((value) => value.ownerAttemptId === attempt.actionAttemptId)
-      ?? await this.store.createResourceClaim({ projectId: intent.projectId, resourceType: "WEBGPT_BROWSER", resourceKey: "webgpt:browser:singleton", mode: "EXCLUSIVE", state: "RELEASED", ownerAttemptId: attempt.actionAttemptId });
     const requestEvidence = requestEvidenceRecord?.evidenceId
       ?? (await this.createEvidence({ projectId: input.projectId, targetChatUrl: intent.targetRef, role: null, prompt: "", actionType: "RECONCILE", sideEffectClass: "RECONCILABLE", dispatchContext: { runtimeReady: true, policyPreconditionSatisfied: true, targetIdentityValid: true, liveResourceAvailable: true, noConflictingActiveAction: true, noUnknownOutcomeForSameSideEffect: true, idempotencySafe: true } }, attempt, "WEBGPT_PROVIDER_REQUEST", { providerRequestId: providerRequest.providerRequestId, providerState: providerRequest.state }, { requestId: providerRequest.providerRequestId }));
     const reconcileContext: WebGptExternalActionInput = {
