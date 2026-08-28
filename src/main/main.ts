@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
 import { AppServerHost } from "../codex/app-server-host.ts";
 import { resolveCodexCommand } from "../codex/codex-command.ts";
-import { MAP_DYNAMIC_TOOL_SPEC, MAP_TOOL_CALL_METHOD } from "../codex/map-tool.ts";
 import { errorInfo, isNoRolloutError } from "../shared/error-info.ts";
 import { createLogger, logError, type Logger } from "../shared/logger.ts";
 import { isNativeApprovalMethod, isValidNativeApprovalResponse, noAdditionalPermissions } from "../shared/native-approval.ts";
@@ -1492,8 +1491,6 @@ interface RuntimeTarget {
   projectId?: string | null;
   /** Enables bounded Map sidecar maintenance for this Runtime lifecycle. */
   mapEnabled?: boolean;
-  /** Registers the model-facing Map tool; only valid on thread/start. */
-  mapToolEnabled?: boolean;
 }
 
 interface PendingNativeApproval {
@@ -1545,18 +1542,13 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
     // latest switch request wins. Concurrent runtime resumes must not race
     // on this single historical binding file.
     persistBindingOnResume: false,
-    // Ordinary model-facing Native Threads share one initialized Host. Map
-    // compatibility runtimes keep their existing isolated path because they
-    // require a separate dynamic-tool capability domain.
-    ...(target.mapToolEnabled
-      ? {}
-      : {
-          clientFactory: (clientOptions) => getNativeAppServerHost().createThreadClient({
-            onServerRequest: clientOptions.onServerRequest,
-            onProcessExit: clientOptions.onProcessExit,
-          }),
-          skipInitialize: true,
-        }),
+    // Every production Native Thread uses the one initialized App Server Host.
+    // NativeThreadRuntime remains a thin per-thread adapter, never a second process.
+    clientFactory: (clientOptions) => getNativeAppServerHost().createThreadClient({
+      onServerRequest: clientOptions.onServerRequest,
+      onProcessExit: clientOptions.onProcessExit,
+    }),
+    skipInitialize: true,
     onEvent: (event) => {
       logger.info("native_event", { method: event.method, threadId: event.threadId, turnId: event.turnId, itemId: event.itemId });
       send(IPC.event, event);
@@ -1571,12 +1563,7 @@ function createRuntime(target: RuntimeTarget): NativeThreadRuntime {
       }
       if (createdRuntime) send(IPC.state, createdRuntime.snapshot());
     },
-    dynamicTools: target.mapToolEnabled ? [MAP_DYNAMIC_TOOL_SPEC] : [],
     onServerRequest: async (message: JsonRpcMessage) => {
-      if (message.method === MAP_TOOL_CALL_METHOD) {
-        if (!target.mapToolEnabled) return failClosedServerRequest(message, createdRuntime?.nativeThreadId ?? messageThreadId(message));
-        return getConversationMaps().handleServerRequest(message);
-      }
       if (!message.method || (typeof message.id !== "string" && typeof message.id !== "number") || !isNativeApprovalMethod(message.method)) {
         return failClosedServerRequest(message, createdRuntime?.nativeThreadId ?? messageThreadId(message));
       }
@@ -1834,7 +1821,7 @@ async function loadRuntimeForThread(nativeThreadId: string): Promise<NativeThrea
     // thread/resume cannot register thread/start.dynamicTools in the current
     // CLI ABI. Map-enabled resumed Threads therefore use sidecar maintenance,
     // while ordinary model-facing capability remains OFF.
-    const candidate = createRuntime({ cwd: projection.cwd, projectId: projection.projectId, mapEnabled, mapToolEnabled: false });
+    const candidate = createRuntime({ cwd: projection.cwd, projectId: projection.projectId, mapEnabled });
     try {
       await candidate.resume(nativeThreadId);
       if (mapEnabled) getConversationMaps().markResumedThread(nativeThreadId, projection.cwd);
@@ -1896,7 +1883,7 @@ async function createNativeThread(projectId: string | null): Promise<ThreadNavig
     cwd = await validateProjectDirectory(project.cwd);
     targetProjectId = project.projectId;
   }
-  const candidate = createRuntime({ cwd, projectId: targetProjectId, mapEnabled: false, mapToolEnabled: false });
+  const candidate = createRuntime({ cwd, projectId: targetProjectId, mapEnabled: false });
   let attachedNativeThreadId: string | null = null;
   try {
     const snapshot = await candidate.startNewThread(targetProjectId);
@@ -1941,7 +1928,6 @@ async function enableConversationMap(nativeThreadId: string): Promise<Awaited<Re
     cwd: projection.cwd,
     projectId: projection.projectId,
     mapEnabled: true,
-    mapToolEnabled: false,
   });
   try {
     await candidate.resume(id);
