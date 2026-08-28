@@ -1,0 +1,50 @@
+name: R8 shared native runtime cleanup
+
+on:
+  push:
+    branches:
+      - feature/r8-remove-unreachable-map-runtime
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply bounded R8 cleanup
+        run: python3 .github/r8-remove-unreachable-map-runtime.py
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test R8 composition boundary
+        run: node --experimental-strip-types --test tests/r8-shared-native-runtime-composition.test.ts
+      - name: Test Native runtime protocol adapter
+        run: node --experimental-strip-types --test tests/native-thread-runtime.test.ts
+      - name: Test shared Native provider adapter
+        run: node --experimental-strip-types --test tests/arch-r2-shared-native-runtime.test.ts
+      - name: Test Map boundaries
+        run: node --experimental-strip-types --test tests/map-activation.test.ts tests/map-coordinator.test.ts tests/map-tool.test.ts tests/project-map-manager.test.ts
+      - name: Test full repository
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit verified cleanup
+        shell: bash
+        run: |
+          rm -f .github/r8-remove-unreachable-map-runtime.py .github/workflows/r8-remove-unreachable-map-runtime.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "refactor(r8): remove unreachable isolated Map runtime"
+          git push origin HEAD:feature/r8-remove-unreachable-map-runtime
