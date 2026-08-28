@@ -997,6 +997,18 @@ function createMapTreeItem(node: MapNode, nodes: MapNode[], level: number): HTML
     });
     wrapper.append(sourceList);
   }
+  const references = node.references ?? [];
+  if (references.length) {
+    const referenceList = document.createElement("div");
+    referenceList.className = "map-node-references";
+    references.forEach((reference) => {
+      const referenceChip = document.createElement("span");
+      referenceChip.className = "map-reference";
+      referenceChip.textContent = `${reference.domain} · ${reference.entityType} · ${reference.entityId}`;
+      referenceList.append(referenceChip);
+    });
+    wrapper.append(referenceList);
+  }
   const children = nodes.filter((candidate) => candidate.parentId === node.nodeId).sort((left, right) => left.ordering - right.ordering);
   if (children.length) {
     const childList = document.createElement("ul");
