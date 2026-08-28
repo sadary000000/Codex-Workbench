@@ -44,7 +44,7 @@ function normalizeProviderId(value: AutomationProviderId | null | undefined): Au
  * New logical work defaults to the registry default (Native). Continuations
  * never apply that default blindly: Requirement sessions recover provider id
  * from their persisted scope ExternalRef, while Planner recovery/retry uses
- * the pre-dispatch ActionIntent provider binding (with legacy provider-request
+ * the pre-dispatch ActionAttempt provider binding (with legacy provider-request
  * refs as read-only compatibility evidence). An explicit conflicting provider
  * is rejected instead of switching execution backends mid-workflow.
  */
@@ -110,7 +110,7 @@ export class AutomationExecutionFacade {
     let persisted = await persistedProviderIdForIntent(this.store, actionIntentId) as AutomationProviderId | null;
     if (!persisted) {
       // Legacy compatibility only: old successful/accepted attempts predate the
-      // pre-dispatch binding field, but their provider request ExternalRef is
+      // pre-dispatch attempt binding, but their provider request ExternalRef is
       // authoritative enough to route a reconcile. Never infer from target
       // string shape or current default provider.
       const snapshot = await this.store.snapshot();
