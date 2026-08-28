@@ -17,92 +17,98 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Apply bounded ARCH-R3 patch
+      - name: Rebuild minimal semantic diff from R2 head
         shell: bash
         run: |
+          git checkout 36477bcd75e7c43c3704575eb06fcd31da7a1bb3 -- \
+            src/features/webgpt/runtime/webgpt-request-manager.ts \
+            src/features/webgpt/automation/webgpt-provider-port.ts \
+            src/main/main.ts \
+            tests/arch-v2-6-provider-boundary.test.ts
           python - <<'PY'
           from pathlib import Path
           import re
 
           manager = Path('src/features/webgpt/runtime/webgpt-request-manager.ts')
-          text = manager.read_text(encoding='utf-8')
-          old_signature = '  async requestStatus(requestId: string, reconcile = false): Promise<WebGptRequestRecord> {'
-          new_signature = '  async requestStatus(requestId: string): Promise<WebGptRequestRecord> {'
-          old_branch = '    if (reconcile && (record.state === "RECOVERY_REQUIRED" || record.state === "INDETERMINATE")) return this.reconcileRequest(record.requestId);\n'
-          if old_signature in text:
-              if text.count(old_signature) != 1 or text.count(old_branch) != 1:
-                  raise SystemExit('requestStatus boundary is not uniquely patchable')
-              text = text.replace(old_signature, new_signature, 1).replace(old_branch, '', 1)
-              manager.write_text(text, encoding='utf-8')
-          elif new_signature not in text or old_branch in text:
-              raise SystemExit('requestStatus boundary shape not found')
+          data = manager.read_bytes()
+          old_sig = b'async requestStatus(requestId: string, reconcile = false): Promise<WebGptRequestRecord>'
+          new_sig = b'async requestStatus(requestId: string): Promise<WebGptRequestRecord>'
+          branch = re.compile(br'^[ \t]*if \(reconcile && \(record\.state === "RECOVERY_REQUIRED" \|\| record\.state === "INDETERMINATE"\)\) return this\.reconcileRequest\(record\.requestId\);\r?\n', re.M)
+          if data.count(old_sig) != 1:
+              raise SystemExit('unexpected requestStatus signature count')
+          data = data.replace(old_sig, new_sig, 1)
+          data, count = branch.subn(b'', data, count=1)
+          if count != 1:
+              raise SystemExit('hidden reconcile branch not uniquely found')
+          manager.write_bytes(data)
 
-          for path in [Path('src/features/webgpt/automation/webgpt-provider-port.ts'), Path('src/main/main.ts')]:
-              value = path.read_text(encoding='utf-8')
-              updated = re.sub(r'(requestStatus\([^\n,()]+),\s*false\)', r'\1)', value)
-              if updated != value:
-                  path.write_text(updated, encoding='utf-8')
-              remaining = [line for line in updated.splitlines() if 'requestStatus(' in line and re.search(r',\s*(?:true|false)\)', line)]
-              if remaining:
-                  raise SystemExit(f'boolean requestStatus caller remains in {path}: {remaining}')
+          for name in ['src/features/webgpt/automation/webgpt-provider-port.ts', 'src/main/main.ts']:
+              path = Path(name)
+              value = path.read_bytes()
+              value, count = re.subn(br'(requestStatus\([^\r\n,()]+),\s*false\)', br'\1)', value)
+              path.write_bytes(value)
+              if re.search(br'requestStatus\([^\r\n]*,\s*(?:true|false)\)', value):
+                  raise SystemExit(f'boolean requestStatus caller remains in {name}')
 
-          legacy_test = Path('tests/arch-v2-6-provider-boundary.test.ts')
-          legacy = legacy_test.read_text(encoding='utf-8')
-          old_fake = '    requestStatus: async (requestId: string, reconcile?: boolean) => {\n      calls.status += 1;\n      assert.equal(requestId, record.requestId);\n      assert.equal(reconcile, false);\n      return record;\n    },'
-          new_fake = '    requestStatus: async (requestId: string) => {\n      calls.status += 1;\n      assert.equal(requestId, record.requestId);\n      return record;\n    },'
-          if old_fake in legacy:
-              legacy = legacy.replace(old_fake, new_fake, 1)
-              legacy_test.write_text(legacy, encoding='utf-8')
-          elif new_fake not in legacy:
-              raise SystemExit('legacy provider boundary fake shape not found')
+          legacy = Path('tests/arch-v2-6-provider-boundary.test.ts')
+          value = legacy.read_bytes()
+          old = b'requestStatus: async (requestId: string, reconcile?: boolean) => {'
+          new = b'requestStatus: async (requestId: string) => {'
+          if value.count(old) != 1:
+              raise SystemExit('legacy fake signature not uniquely found')
+          value = value.replace(old, new, 1)
+          value, count = re.subn(br'^[ \t]*assert\.equal\(reconcile, false\);\r?\n', b'', value, count=1, flags=re.M)
+          if count != 1:
+              raise SystemExit('legacy reconcile assertion not uniquely found')
+          legacy.write_bytes(value)
 
-          test = Path('tests/arch-r3-query-reconcile-boundary.test.ts')
-          expected = '\n'.join([
-              'import assert from "node:assert/strict";',
-              'import { readFile } from "node:fs/promises";',
-              'import test from "node:test";',
-              '',
-              'const managerSourceUrl = new URL("../src/features/webgpt/runtime/webgpt-request-manager.ts", import.meta.url);',
-              'const providerSourceUrl = new URL("../src/features/webgpt/automation/webgpt-provider-port.ts", import.meta.url);',
-              'const mainSourceUrl = new URL("../src/main/main.ts", import.meta.url);',
-              '',
-              'test("ARCH-R3 requestStatus is structurally query-only", async () => {',
-              '  const source = await readFile(managerSourceUrl, "utf8");',
-              '  assert.match(source, /async requestStatus\\(requestId: string\\): Promise<WebGptRequestRecord>/);',
-              '  assert.doesNotMatch(source, /requestStatus\\(requestId: string,\\s*reconcile/);',
-              '  assert.doesNotMatch(source, /if \\(reconcile/);',
-              '});',
-              '',
-              'test("ARCH-R3 reconciliation remains an explicit command path", async () => {',
-              '  const source = await readFile(managerSourceUrl, "utf8");',
-              '  assert.match(source, /async reconcileRequest\\(requestId: string\\): Promise<WebGptRequestRecord>/);',
-              '});',
-              '',
-              'test("ARCH-R3 callers cannot select reconciliation through requestStatus", async () => {',
-              '  const provider = await readFile(providerSourceUrl, "utf8");',
-              '  const main = await readFile(mainSourceUrl, "utf8");',
-              '  assert.doesNotMatch(provider, /requestStatus\\([^\\n]*,\\s*(?:true|false)\\)/);',
-              '  assert.doesNotMatch(main, /requestStatus\\([^\\n]*,\\s*(?:true|false)\\)/);',
-              '  assert.match(provider, /requestManager\\.reconcileRequest\\(input\\.providerRequestRef\\)/);',
-              '});',
-              '',
-          ])
-          test.write_text(expected, encoding='utf-8')
+          Path('tests/arch-r3-query-reconcile-boundary.test.ts').write_text('''import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const managerSourceUrl = new URL("../src/features/webgpt/runtime/webgpt-request-manager.ts", import.meta.url);
+const providerSourceUrl = new URL("../src/features/webgpt/automation/webgpt-provider-port.ts", import.meta.url);
+const mainSourceUrl = new URL("../src/main/main.ts", import.meta.url);
+
+test("ARCH-R3 requestStatus is structurally query-only", async () => {
+  const source = await readFile(managerSourceUrl, "utf8");
+  assert.match(source, /async requestStatus\\(requestId: string\\): Promise<WebGptRequestRecord>/);
+  assert.doesNotMatch(source, /requestStatus\\(requestId: string,\\s*reconcile/);
+  assert.doesNotMatch(source, /if \\(reconcile/);
+});
+
+test("ARCH-R3 reconciliation remains an explicit command path", async () => {
+  const source = await readFile(managerSourceUrl, "utf8");
+  assert.match(source, /async reconcileRequest\\(requestId: string\\): Promise<WebGptRequestRecord>/);
+});
+
+test("ARCH-R3 callers cannot select reconciliation through requestStatus", async () => {
+  const provider = await readFile(providerSourceUrl, "utf8");
+  const main = await readFile(mainSourceUrl, "utf8");
+  assert.doesNotMatch(provider, /requestStatus\\([^\\n]*,\\s*(?:true|false)\\)/);
+  assert.doesNotMatch(main, /requestStatus\\([^\\n]*,\\s*(?:true|false)\\)/);
+  assert.match(provider, /requestManager\\.reconcileRequest\\(input\\.providerRequestRef\\)/);
+});
+''', encoding='utf-8')
           PY
-      - name: Enforce bounded diff
+      - name: Enforce bounded final diff
         shell: bash
         run: |
           git diff --check
-          mapfile -t changed < <({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)
-          printf '%s\n' "${changed[@]}"
-          for path in "${changed[@]}"; do
-            case "$path" in
-              src/features/webgpt/runtime/webgpt-request-manager.ts|src/features/webgpt/automation/webgpt-provider-port.ts|src/main/main.ts|tests/arch-v2-6-provider-boundary.test.ts|tests/arch-r3-query-reconcile-boundary.test.ts) ;;
-              *) echo "Unexpected changed path: $path" >&2; exit 1 ;;
-            esac
-          done
-      - name: Install dependencies
-        run: npm ci
+          git diff --stat 36477bcd75e7c43c3704575eb06fcd31da7a1bb3 -- \
+            src/features/webgpt/runtime/webgpt-request-manager.ts \
+            src/features/webgpt/automation/webgpt-provider-port.ts \
+            src/main/main.ts \
+            tests/arch-v2-6-provider-boundary.test.ts \
+            tests/arch-r3-query-reconcile-boundary.test.ts
+          lines=$(git diff --numstat 36477bcd75e7c43c3704575eb06fcd31da7a1bb3 -- \
+            src/features/webgpt/runtime/webgpt-request-manager.ts \
+            src/features/webgpt/automation/webgpt-provider-port.ts \
+            src/main/main.ts \
+            tests/arch-v2-6-provider-boundary.test.ts \
+            tests/arch-r3-query-reconcile-boundary.test.ts | awk '{a+=$1; d+=$2} END {print a+d}')
+          test "${lines:-9999}" -le 80
+      - run: npm ci
       - name: Typecheck
         run: npm run typecheck
       - name: R3 source-contract tests
@@ -115,12 +121,11 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
-      - name: Commit bounded patch when needed
+      - name: Commit minimal semantic patch
         shell: bash
         run: |
-          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/features/webgpt/runtime/webgpt-request-manager.ts src/features/webgpt/automation/webgpt-provider-port.ts src/main/main.ts tests/arch-v2-6-provider-boundary.test.ts tests/arch-r3-query-reconcile-boundary.test.ts
-          git commit -m "refactor(arch-r3): make request status query-only"
+          git commit -m "refactor(arch-r3): normalize query/reconcile boundary diff" || true
           git push origin HEAD:arch-r3/query-reconcile-boundary
