@@ -3,11 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import {
-  ProviderNeutralAutomationStore,
-  isProviderNeutralExternalRef,
-  readProviderNeutralExternalRef,
-} from "../src/automation/provider-neutral-store.ts";
+import { ProviderNeutralAutomationStore } from "../src/automation/provider-v4-neutral-store.ts";
+import { readProviderReference } from "../src/automation/provider-reference.ts";
 
 async function createPreparedStore(): Promise<{ root: string; store: ProviderNeutralAutomationStore; projectId: string; attemptId: string }> {
   const root = await mkdtemp(join(tmpdir(), "arch-r2-provider-neutral-"));
@@ -46,7 +43,7 @@ async function createPreparedStore(): Promise<{ root: string; store: ProviderNeu
   return { root, store, projectId: project.projectId, attemptId: attempt.actionAttemptId };
 }
 
-test("ARCH-R2 provider request and observation are physically provider-neutral while legacy snapshot stays compatible", async () => {
+test("ARCH-R2 provider request and observation use neutral envelopes while frozen v4 carrier tags remain valid", async () => {
   const { root, store, projectId, attemptId } = await createPreparedStore();
   try {
     const request = await store.persistActionAttemptProviderRequest({
@@ -68,16 +65,17 @@ test("ARCH-R2 provider request and observation are physically provider-neutral w
     const truth = await store.snapshotProviderTruth();
     const storedRequest = truth.externalRefs.find((ref) => ref.externalRefId === request.externalRef.externalRefId)!;
     const storedObservation = truth.externalRefs.find((ref) => ref.externalRefId === observation.externalRef.externalRefId)!;
-    assert.equal(storedRequest.kind, "OTHER");
-    assert.equal(storedObservation.kind, "OTHER");
-    assert.equal(isProviderNeutralExternalRef(storedRequest), true);
-    assert.equal(isProviderNeutralExternalRef(storedObservation), true);
-    assert.deepEqual(readProviderNeutralExternalRef(storedRequest), { role: "REQUEST", provider: "NATIVE", providerOpaqueId: "native-turn-r2-neutral" });
-    assert.deepEqual(readProviderNeutralExternalRef(storedObservation), { role: "OBSERVATION", provider: "NATIVE", providerOpaqueId: "native-turn-r2-neutral" });
+    assert.equal(storedRequest.kind, "WEBGPT_PROVIDER_REQUEST", "v4 tag is a frozen carrier, not provider identity");
+    assert.equal(storedObservation.kind, "WEBGPT_PROVIDER_OBSERVATION", "v4 tag is a frozen carrier, not provider identity");
+    assert.equal(storedRequest.provider, "NATIVE");
+    assert.equal(storedObservation.provider, "NATIVE");
+    assert.deepEqual(readProviderReference(storedRequest), { role: "REQUEST", providerOpaqueId: "native-turn-r2-neutral", format: "NEUTRAL_V1" });
+    assert.deepEqual(readProviderReference(storedObservation), { role: "OBSERVATION", providerOpaqueId: "native-turn-r2-neutral", format: "NEUTRAL_V1" });
+    assert.notEqual(storedRequest.opaqueId, "native-turn-r2-neutral", "physical truth stores the versioned neutral envelope");
 
     const compatibility = await store.snapshot();
-    assert.equal(compatibility.externalRefs.find((ref) => ref.externalRefId === storedRequest.externalRefId)?.kind, "WEBGPT_PROVIDER_REQUEST");
-    assert.equal(compatibility.externalRefs.find((ref) => ref.externalRefId === storedObservation.externalRefId)?.kind, "WEBGPT_PROVIDER_OBSERVATION");
+    assert.equal(compatibility.externalRefs.find((ref) => ref.externalRefId === storedRequest.externalRefId)?.opaqueId, "native-turn-r2-neutral");
+    assert.equal(compatibility.externalRefs.find((ref) => ref.externalRefId === storedObservation.externalRefId)?.opaqueId, "native-turn-r2-neutral");
   } finally {
     await store.close();
     await rm(root, { recursive: true, force: true });
@@ -96,7 +94,8 @@ test("ARCH-R2 provider-neutral store reuses legacy WebGPT provider refs without 
     await store.attachActionAttemptProvider({ actionAttemptId: attemptId, providerRequestRef: legacy.externalRefId, providerSemanticSha256: "b".repeat(64) });
 
     const before = await store.snapshotProviderTruth();
-    assert.equal(before.externalRefs.find((ref) => ref.externalRefId === legacy.externalRefId)?.kind, "WEBGPT_PROVIDER_REQUEST");
+    const legacyBefore = before.externalRefs.find((ref) => ref.externalRefId === legacy.externalRefId)!;
+    assert.deepEqual(readProviderReference(legacyBefore), { role: "REQUEST", providerOpaqueId: "legacy-webgpt-request-r2", format: "LEGACY_V4" });
 
     const persisted = await store.persistActionAttemptProviderRequest({
       projectId,
@@ -108,7 +107,7 @@ test("ARCH-R2 provider-neutral store reuses legacy WebGPT provider refs without 
     assert.equal(persisted.externalRef.externalRefId, legacy.externalRefId);
 
     const after = await store.snapshotProviderTruth();
-    assert.equal(after.externalRefs.find((ref) => ref.externalRefId === legacy.externalRefId)?.kind, "WEBGPT_PROVIDER_REQUEST");
+    assert.equal(after.externalRefs.find((ref) => ref.externalRefId === legacy.externalRefId)?.opaqueId, "legacy-webgpt-request-r2");
     assert.equal(after.externalRefs.filter((ref) => ref.provider === "WEBGPT" && ref.opaqueId.includes("legacy-webgpt-request-r2")).length, 1);
   } finally {
     await store.close();
