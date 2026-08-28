@@ -1,4 +1,5 @@
 import type { AutomationProviderPort, ProviderCorrelation } from "../automation/adapters.ts";
+import { PersistedProviderBindingPort } from "../automation/provider-binding-port.ts";
 import { InputRefRegistry } from "../automation/input-ref.ts";
 import { ProviderPolicyAuthority } from "../automation/provider-policy-authority.ts";
 import { AutomationProviderRegistry } from "../automation/provider-registry.ts";
@@ -9,7 +10,9 @@ import { NativeAutomationProviderPort, type NativeProviderRuntimePort } from "..
 export interface AutomationProviderComposition {
   readonly providers: AutomationProviderRegistry;
   readonly services: AutomationProviderServiceRouter;
-  readonly nativeProvider: NativeAutomationProviderPort;
+  /** Registered executable Native port, including pre-dispatch persisted binding. */
+  readonly nativeProvider: AutomationProviderPort;
+  /** Registered executable external port, including pre-dispatch persisted binding. */
   readonly webgptProvider: AutomationProviderPort | null;
 }
 
@@ -32,7 +35,9 @@ async function validatePersistedAttempt(store: AutomationStore, correlation: Pro
  *
  * Native is always registered and is the registry default. WebGPT is optional
  * and is registered only when the caller provides the already-composed
- * external provider port. The composition never creates/resumes a Native
+ * external provider port. Every executable port is wrapped by the same
+ * pre-dispatch binding boundary, so provider choice is durable before the
+ * first external side effect. The composition never creates/resumes a Native
  * runtime; it consumes the shared-runtime adapter supplied by main.
  */
 export function createAutomationProviderComposition(options: {
@@ -42,16 +47,18 @@ export function createAutomationProviderComposition(options: {
   readonly webgptProvider?: AutomationProviderPort | null;
 }): AutomationProviderComposition {
   const nativePolicy = new ProviderPolicyAuthority(options.store);
-  const nativeProvider = new NativeAutomationProviderPort({
+  const nativeRuntimeProvider = new NativeAutomationProviderPort({
     runtime: options.nativeRuntime,
     resolveInputRef: async (inputRef) => options.inputRefs.resolve(inputRef),
     policyAuthority: nativePolicy,
     validateActionAttempt: (correlation) => validatePersistedAttempt(options.store, correlation),
   });
+  const nativeProvider = new PersistedProviderBindingPort({ store: options.store, provider: nativeRuntimeProvider });
   const providers = new AutomationProviderRegistry({ providers: [nativeProvider] });
-  const webgptProvider = options.webgptProvider ?? null;
-  if (webgptProvider) {
-    if (webgptProvider.provider !== "WEBGPT") throw new Error("WEBGPT_PROVIDER_ID_REQUIRED");
+  let webgptProvider: AutomationProviderPort | null = null;
+  if (options.webgptProvider) {
+    if (options.webgptProvider.provider !== "WEBGPT") throw new Error("WEBGPT_PROVIDER_ID_REQUIRED");
+    webgptProvider = new PersistedProviderBindingPort({ store: options.store, provider: options.webgptProvider });
     providers.register(webgptProvider);
   }
   const services = new AutomationProviderServiceRouter({
