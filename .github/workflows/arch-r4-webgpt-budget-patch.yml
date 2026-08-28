@@ -1,0 +1,198 @@
+name: ARCH-R4 WebGPT Policy Budget Patch
+
+on:
+  push:
+    branches:
+      - arch-r4/webgpt-policy-budget-durability
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    if: "${{ github.event.head_commit.message == 'ARCH-R4: execute WebGPT policy budget durability patch' }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply bounded WebGPT policy durability patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          policy_path = Path('src/automation/webgpt-policy-authority.ts')
+          raw = policy_path.read_bytes()
+          nl = b'\r\n' if b'\r\n' in raw else b'\n'
+
+          interface_anchor = b'  evaluatePinned(operation: PolicyOperation, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability, scopeProjectId?: string | null): Promise<EffectivePolicyDecision>;'
+          interface_new = nl.join([
+              interface_anchor,
+              b'  /** Persist the committed dispatch budget immediately before the browser/provider mutation. */',
+              b'  commit?(admission: WebGptPolicyAdmission): Promise<void>;',
+          ])
+          if raw.count(interface_anchor) != 1:
+              raise SystemExit(f'expected one WebGptPolicyAuthorizer anchor, found {raw.count(interface_anchor)}')
+          raw = raw.replace(interface_anchor, interface_new, 1)
+
+          field_anchor = b'  private readonly budgets = new Map<string, PolicyBudgetAuthority>();'
+          field_new = nl.join([
+              field_anchor,
+              b'  private readonly committedAdmissions = new WeakSet<object>();',
+          ])
+          if raw.count(field_anchor) != 1:
+              raise SystemExit(f'expected one budget field anchor, found {raw.count(field_anchor)}')
+          raw = raw.replace(field_anchor, field_new, 1)
+
+          snapshot_anchor = nl.join([
+              b'  snapshot(policyVersionId = WEBGPT_RUNTIME_POLICY_VERSION_ID): ReturnType<PolicyBudgetAuthority["snapshot"]> | null {',
+              b'    return this.budgets.get(policyVersionId)?.snapshot() ?? null;',
+              b'  }',
+          ])
+          commit_method = nl.join([
+              b'  async commit(admission: WebGptPolicyAdmission): Promise<void> {',
+              b'    if (this.committedAdmissions.has(admission)) return;',
+              b'    const effectivePolicy = admission.decision.effectivePolicy;',
+              b'    const correlationId = admission.pin.correlationId;',
+              b'    const limit = effectivePolicy.budgets[admission.operation];',
+              b'    if (admission.policyVersionId !== effectivePolicy.policyVersionId || admission.pin.policyVersionId !== effectivePolicy.policyVersionId) {',
+              b'      admission.reservation.release();',
+              b'      throw new WebGptPolicyAuthorityError("POLICY_PIN_MISMATCH", "WebGPT budget commit no longer matches the admitted PolicyVersion; browser mutation refused.", { policyVersionId: admission.policyVersionId, effectivePolicyVersionId: effectivePolicy.policyVersionId });',
+              b'    }',
+              b'    try {',
+              b'      await this.store.transaction((tx) => {',
+              b'        const committed = tx.table("auditEvents").filter((event) =>',
+              b'          event.projectId === effectivePolicy.projectId',
+              b'          && event.entityType === "PolicyVersion"',
+              b'          && event.entityId === effectivePolicy.policyVersionId',
+              b'          && event.eventType === "POLICY_BUDGET_COMMITTED"',
+              b'          && event.boundedPayload.budgetKind === admission.operation,',
+              b'        );',
+              b'        if (committed.some((event) => event.correlationId === correlationId)) {',
+              b'          throw new WebGptPolicyAuthorityError("POLICY_BUDGET_DENIED", `WebGPT ${admission.operation} budget correlation was already committed.`, { policyVersionId: effectivePolicy.policyVersionId, operation: admission.operation, correlationId, remaining: Math.max(0, limit - committed.length) });',
+              b'        }',
+              b'        if (committed.length >= limit) {',
+              b'          throw new WebGptPolicyAuthorityError("POLICY_BUDGET_EXHAUSTED", `WebGPT ${admission.operation} budget is exhausted for the pinned PolicyVersion.`, { policyVersionId: effectivePolicy.policyVersionId, operation: admission.operation, correlationId, remaining: 0 });',
+              b'        }',
+              b'        tx.appendAudit({',
+              b'          projectId: effectivePolicy.projectId,',
+              b'          entityType: "PolicyVersion",',
+              b'          entityId: effectivePolicy.policyVersionId,',
+              b'          eventType: "POLICY_BUDGET_COMMITTED",',
+              b'          actorType: "AUTOMATION",',
+              b'          actorRef: null,',
+              b'          boundedPayload: { budgetKind: admission.operation, effectiveBudget: limit },',
+              b'          correlationId,',
+              b'          causationId: null,',
+              b'        });',
+              b'      });',
+              b'    } catch (error) {',
+              b'      admission.reservation.release();',
+              b'      throw error;',
+              b'    }',
+              b'    admission.reservation.commit();',
+              b'    this.committedAdmissions.add(admission);',
+              b'  }',
+              b'',
+              snapshot_anchor,
+          ])
+          if raw.count(snapshot_anchor) != 1:
+              raise SystemExit(f'expected one WebGPT snapshot anchor, found {raw.count(snapshot_anchor)}')
+          raw = raw.replace(snapshot_anchor, commit_method, 1)
+          policy_path.write_bytes(raw)
+
+          manager_path = Path('src/features/webgpt/runtime/webgpt-request-manager.ts')
+          raw = manager_path.read_bytes()
+          nl = b'\r\n' if b'\r\n' in raw else b'\n'
+
+          replacements = [
+              (
+                  nl.join([b'        newChatAdmission?.reservation.commit();', b'        newChatCommitted = newChatAdmission !== null;']),
+                  nl.join([b'        await this.commitPolicy(newChatAdmission);', b'        newChatCommitted = newChatAdmission !== null;']),
+              ),
+              (
+                  nl.join([b'      promptAdmission?.reservation.commit();', b'      promptCommitted = promptAdmission !== null;']),
+                  nl.join([b'      await this.commitPolicy(promptAdmission);', b'      promptCommitted = promptAdmission !== null;']),
+              ),
+          ]
+          for old, new in replacements:
+              if raw.count(old) != 1:
+                  raise SystemExit(f'expected one RequestManager commit site, found {raw.count(old)}')
+              raw = raw.replace(old, new, 1)
+
+          dispatch_old = nl.join([
+              b'  private async dispatchWithPolicy<T>(admission: WebGptPolicyAdmission | null, dispatch: () => Promise<T>): Promise<T> {',
+              b'    // Commit is deliberately the last local step before the provider/browser',
+              b'    // call. If dispatch throws after this point, the outcome is unknown and the',
+              b'    // reservation must remain committed rather than being refunded and replayed.',
+              b'    admission?.reservation.commit();',
+              b'    return dispatch();',
+              b'  }',
+          ])
+          dispatch_new = nl.join([
+              b'  private async commitPolicy(admission: WebGptPolicyAdmission | null): Promise<void> {',
+              b'    if (!admission) return;',
+              b'    if (this.policyAuthority?.commit) {',
+              b'      await this.policyAuthority.commit(admission);',
+              b'      return;',
+              b'    }',
+              b'    if (this.requirePolicyAuthority) {',
+              b'      admission.reservation.release();',
+              b'      throw this.codedError("POLICY_DURABLE_COMMIT_REQUIRED", "Production WebGPT policy authority cannot persist the committed dispatch budget; browser mutation refused.");',
+              b'    }',
+              b'    admission.reservation.commit();',
+              b'  }',
+              b'',
+              b'  private async dispatchWithPolicy<T>(admission: WebGptPolicyAdmission | null, dispatch: () => Promise<T>): Promise<T> {',
+              b'    // Durable budget commit is deliberately the last local step before the',
+              b'    // provider/browser call. If dispatch throws after this point, the outcome',
+              b'    // is unknown and the committed budget must never be refunded and replayed.',
+              b'    await this.commitPolicy(admission);',
+              b'    return dispatch();',
+              b'  }',
+          ])
+          if raw.count(dispatch_old) != 1:
+              raise SystemExit(f'expected one dispatchWithPolicy block, found {raw.count(dispatch_old)}')
+          raw = raw.replace(dispatch_old, dispatch_new, 1)
+          manager_path.write_bytes(raw)
+          PY
+
+      - name: Enforce bounded source diff
+        shell: bash
+        run: |
+          git diff --check
+          git diff --numstat -- src/automation/webgpt-policy-authority.ts src/features/webgpt/runtime/webgpt-request-manager.ts
+          changed=$(git diff --numstat -- src/automation/webgpt-policy-authority.ts src/features/webgpt/runtime/webgpt-request-manager.ts | awk '{sum += $1+$2} END {print sum}')
+          test "${changed:-999}" -le 95
+          git diff -- src/automation/webgpt-policy-authority.ts | grep -F 'POLICY_BUDGET_COMMITTED' >/dev/null
+          git diff -- src/features/webgpt/runtime/webgpt-request-manager.ts | grep -F 'POLICY_DURABLE_COMMIT_REQUIRED' >/dev/null
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: R4 WebGPT restart regression
+        run: node --experimental-strip-types --test tests/arch-r4-webgpt-policy-budget-durability.test.ts
+
+      - name: Existing policy consumer regressions
+        run: node --experimental-strip-types --test tests/arch-v2-5-production-consumers.test.ts tests/webgpt-request-manager.test.ts
+
+      - name: Full unit and integration suite
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit verified production patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/automation/webgpt-policy-authority.ts src/features/webgpt/runtime/webgpt-request-manager.ts
+          git commit -m 'ARCH-R4: persist WebGPT policy budget commitments'
+          git push origin HEAD:arch-r4/webgpt-policy-budget-durability
