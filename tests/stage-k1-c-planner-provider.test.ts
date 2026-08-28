@@ -442,3 +442,56 @@ test("K1-C DETAIL_STAGE requires an explicit target stage and does not guess one
     await dispose(value);
   }
 });
+
+
+test("PRE-R2 retries a terminally observed invalid Planner payload once and promotes exactly once", async () => {
+  const value = await fixture();
+  const provider = new FakePlannerProvider();
+  provider.response = "not-json";
+  try {
+    const service = createPlannerProviderIntegrationService({ store: value.store, provider });
+    const first = await service.createPlanFromRequirement({ projectId: PROJECT_ID, providerTargetRef: TARGET });
+    assert.equal(first.status, "INVALID_PROVIDER_RESULT");
+    assert.equal(provider.submitted.length, 1);
+    let snapshot = await value.store.snapshot();
+    assert.equal(snapshot.actionIntents[0]?.state, "FAILED", "logical Planner request fails while provider receipt remains successful");
+    assert.equal(snapshot.actionAttempts[0]?.state, "COMPLETED");
+    assert.equal(snapshot.actionAttempts[0]?.plannerResultClassification, "INVALID_OUTPUT_RETRYABLE");
+    assert.equal(snapshot.actionReceipts[0]?.status, "SUCCEEDED");
+    assert.equal(snapshot.planVersions.length, 0);
+
+    provider.response = candidate();
+    const second = await service.retryPlannerRequest({ projectId: PROJECT_ID, actionIntentId: first.actionIntentId! });
+    assert.equal(second.status, "PLAN_READY");
+    assert.equal(provider.submitted.length, 2);
+    snapshot = await value.store.snapshot();
+    assert.deepEqual(snapshot.actionAttempts.map((item) => item.dispatchNumber).sort((left, right) => left - right), [1, 2]);
+    assert.equal(snapshot.actionReceipts.length, 2);
+    assert.equal(snapshot.planVersions.length, 1);
+    assert.equal(snapshot.automationProjects[0]?.activePlanVersionId, second.planVersion?.planVersionId);
+
+    const replay = await service.retryPlannerRequest({ projectId: PROJECT_ID, actionIntentId: first.actionIntentId! });
+    assert.equal(replay.status, "PLAN_READY");
+    assert.equal(provider.submitted.length, 2, "promotion replay must not create provider attempt #3");
+    assert.equal((await value.store.snapshot()).planVersions.length, 1, "Plan promotion remains exactly once");
+  } finally {
+    await dispose(value);
+  }
+});
+
+test("PRE-R2 refuses retry when the latest provider side effect is uncertain", async () => {
+  const value = await fixture();
+  const provider = new FakePlannerProvider();
+  provider.mode = "UNKNOWN";
+  try {
+    const service = createPlannerProviderIntegrationService({ store: value.store, provider });
+    const first = await service.createPlanFromRequirement({ projectId: PROJECT_ID, providerTargetRef: TARGET });
+    assert.equal(first.status, "RECOVERY_REQUIRED");
+    const retry = await service.retryPlannerRequest({ projectId: PROJECT_ID, actionIntentId: first.actionIntentId! });
+    assert.equal(retry.status, "RECOVERY_REQUIRED");
+    assert.equal(retry.errorCode, "RECONCILE_BEFORE_RETRY");
+    assert.equal(provider.submitted.length, 1, "unknown outcome must never blind-resend");
+  } finally {
+    await dispose(value);
+  }
+});

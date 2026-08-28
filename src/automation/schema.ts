@@ -371,6 +371,14 @@ function validateCommonTables(document: Record<string, unknown>): void {
     if (semanticSha256 !== expectedSemanticSha256) throw new AutomationSchemaError(`actionIntents[${index}].semanticSha256 does not match the canonical action descriptor.`);
     optionalString(item.idempotencyRef, `actionIntents[${index}].idempotencyRef`, 256);
     optionalString(item.policyVersionId ?? null, `actionIntents[${index}].policyVersionId`, 256);
+    optionalString(item.plannerRequestCanonical ?? null, `actionIntents[${index}].plannerRequestCanonical`, 32 * 1024);
+    optionalString(item.logicalPlannerRequestId ?? null, `actionIntents[${index}].logicalPlannerRequestId`, 256);
+    optionalString(item.plannerRequirementVersionId ?? null, `actionIntents[${index}].plannerRequirementVersionId`, 256);
+    optionalString(item.plannerRequirementPayloadSha256 ?? null, `actionIntents[${index}].plannerRequirementPayloadSha256`, 128);
+    if (item.plannerOperation !== undefined && item.plannerOperation !== null) enumValue(item.plannerOperation, `actionIntents[${index}].plannerOperation`, new Set(["PLAN_REQUIREMENT", "DETAIL_STAGE"]));
+    if (item.plannerMaxProviderAttempts !== undefined && item.plannerMaxProviderAttempts !== null) integer(item.plannerMaxProviderAttempts, `actionIntents[${index}].plannerMaxProviderAttempts`, 1);
+    if (item.plannerState !== undefined && item.plannerState !== null) enumValue(item.plannerState, `actionIntents[${index}].plannerState`, new Set(["ACTIVE", "PROMOTED", "FAILED"]));
+    optionalString(item.promotedPlanVersionId ?? null, `actionIntents[${index}].promotedPlanVersionId`, 256);
     if (item.idempotencyRef !== null) {
       const key = `${item.projectId}\u0000${item.idempotencyRef}`;
       if (idempotencyKeys.has(key)) throw new AutomationSchemaError(`actionIntents[${index}].idempotencyRef is duplicated within a project.`);
@@ -438,12 +446,18 @@ function validateCommonTables(document: Record<string, unknown>): void {
     string(item.intentId, `actionAttempts[${index}].intentId`, 256);
     integer(item.dispatchNumber, `actionAttempts[${index}].dispatchNumber`, 1);
     enumValue(item.state, `actionAttempts[${index}].state`, new Set(["CREATED", "RUNNING", "COMPLETED", "FAILED", "UNCERTAIN", "RECOVERY_REQUIRED"]));
+    if (item.createdAt !== undefined) timestamp(item.createdAt, `actionAttempts[${index}].createdAt`);
     optionalString(item.startedAt, `actionAttempts[${index}].startedAt`, 64);
     optionalString(item.completedAt, `actionAttempts[${index}].completedAt`, 64);
     optionalString(item.executorRef, `actionAttempts[${index}].executorRef`, 256);
     optionalString(item.providerRequestRef ?? null, `actionAttempts[${index}].providerRequestRef`, 256);
     optionalString(item.providerObservationRef ?? null, `actionAttempts[${index}].providerObservationRef`, 256);
     optionalString(item.providerSemanticSha256 ?? null, `actionAttempts[${index}].providerSemanticSha256`, 128);
+    optionalString(item.logicalPlannerRequestId ?? null, `actionAttempts[${index}].logicalPlannerRequestId`, 256);
+    if (item.attemptNumber !== undefined && item.attemptNumber !== null) integer(item.attemptNumber, `actionAttempts[${index}].attemptNumber`, 1);
+    optionalString(item.providerTargetRef ?? null, `actionAttempts[${index}].providerTargetRef`, 2_000);
+    if (item.externalSideEffectCertainty !== undefined && item.externalSideEffectCertainty !== null) enumValue(item.externalSideEffectCertainty, `actionAttempts[${index}].externalSideEffectCertainty`, new Set(["NOT_DISPATCHED", "ACCEPTED_UNKNOWN_RESULT", "RESULT_OBSERVED", "TERMINAL_CONFIRMED", "TERMINAL_FAILED", "ABANDONED_WITH_UNKNOWN_OUTCOME"]));
+    if (item.plannerResultClassification !== undefined && item.plannerResultClassification !== null) enumValue(item.plannerResultClassification, `actionAttempts[${index}].plannerResultClassification`, new Set(["INVALID_OUTPUT_RETRYABLE", "UNKNOWN_AFTER_SIDE_EFFECT", "VALID_RESULT"]));
     optionalString(item.policyVersionId ?? null, `actionAttempts[${index}].policyVersionId`, 256);
     enumValue(item.recoveryState, `actionAttempts[${index}].recoveryState`, new Set(["KNOWN_NOT_STARTED", "IN_PROGRESS", "COMPLETED", "FAILED", "UNCERTAIN", "RECOVERY_REQUIRED"]));
     const identity = `${item.intentId}\u0000${item.dispatchNumber}`;

@@ -8,6 +8,7 @@
  */
 
 import type { EffectivePolicyDecision, RuntimeCapability } from "./effective-policy.ts";
+import type { PlannerProviderRequest } from "./planner-provider-contract.ts";
 
 export type AutomationProviderId = "NATIVE" | "WEBGPT" | (string & {});
 export type ProviderTargetRef = string;
@@ -93,6 +94,8 @@ export interface ProviderSubmitInput {
   /** Opaque bounded input reference; provider adapters resolve it locally. */
   readonly inputRef: string | null;
   readonly payloadRef: string | null;
+  /** Optional provider-neutral Planner descriptor; never raw prompt/browser state. */
+  readonly plannerRequest?: PlannerProviderRequest | null;
   readonly correlation: ProviderCorrelation;
 }
 

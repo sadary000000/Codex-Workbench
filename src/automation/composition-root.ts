@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { AutomationMigrationService } from "./migration-contract.ts";
 import { classifyRecoveryIntent } from "./recovery-intent.ts";
 import { AutomationStore } from "./store.ts";
@@ -35,9 +35,10 @@ function requiredRoot(root: string): string {
 }
 
 function isSameOrInside(candidate: string, parent: string): boolean {
-  const child = resolve(candidate).toLowerCase();
-  const base = resolve(parent).toLowerCase();
-  return child === base || child.startsWith(`${base.endsWith("\\") ? base : `${base}\\`}`);
+  const child = resolve(candidate);
+  const base = resolve(parent);
+  const relation = relative(base, child);
+  return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
 }
 
 function pathsFor(root: string): AutomationCompositionPaths {

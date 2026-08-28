@@ -41,7 +41,7 @@ export interface WebGptPolicyAuthorizer {
   /** Read-only pin acquisition for a new command; it never reserves budget. */
   currentPolicyVersionId(): Promise<string>;
   authorize(operation: BudgetKind, correlationId: string, runtimeCapability: RuntimeCapability): Promise<WebGptPolicyAdmission>;
-  authorizePinned(operation: BudgetKind, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability): Promise<WebGptPolicyAdmission>;
+  authorizePinned(operation: BudgetKind, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability, scopeProjectId?: string | null): Promise<WebGptPolicyAdmission>;
   /** Evaluate a pinned operation without reserving a budget. Used by explicit
    * reconcile/cancel paths that still require policy authority. */
   evaluatePinned(operation: PolicyOperation, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability, scopeProjectId?: string | null): Promise<EffectivePolicyDecision>;
@@ -88,8 +88,8 @@ export class WebGptPolicyAuthority implements WebGptPolicyAuthorizer {
     return this.admit(policy, operation, correlationId, runtimeCapability);
   }
 
-  async authorizePinned(operation: BudgetKind, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability): Promise<WebGptPolicyAdmission> {
-    const decision = await this.evaluatePinned(operation, correlationId, policyVersionId, runtimeCapability);
+  async authorizePinned(operation: BudgetKind, correlationId: string, policyVersionId: string, runtimeCapability: RuntimeCapability, scopeProjectId?: string | null): Promise<WebGptPolicyAdmission> {
+    const decision = await this.evaluatePinned(operation, correlationId, policyVersionId, runtimeCapability, scopeProjectId);
     if (decision.decision !== "ALLOW") throw this.policyDecisionError(operation, decision);
     const budget = this.budgets.get(decision.effectivePolicy.policyVersionId) ?? new PolicyBudgetAuthority(decision.effectivePolicy);
     this.budgets.set(decision.effectivePolicy.policyVersionId, budget);

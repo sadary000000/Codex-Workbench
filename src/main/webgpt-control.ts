@@ -44,7 +44,7 @@ export interface WebGptControlDescriptor {
   workbenchVersion?: string;
 }
 
-export type WebGptControlCommandName = WebGptCliCommandName | "webgpt.initialize";
+export type WebGptControlCommandName = WebGptCliCommandName | "webgpt.initialize" | "webgpt.planner.create" | "webgpt.planner.reconcile" | "webgpt.planner.retry" | "webgpt.planner.status" | "webgpt.planner.result";
 
 export interface WebGptControlRequest {
   version: typeof WEBGPT_CONTROL_PROTOCOL_VERSION;
@@ -73,6 +73,18 @@ export interface WebGptControlRequest {
   providerTargetRef?: string;
   requirementSessionId?: string;
   requirementRoundId?: string;
+  requirementVersionId?: string;
+  operation?: "PLAN_REQUIREMENT" | "DETAIL_STAGE";
+  priorPlanVersionId?: string;
+  targetStageId?: string;
+  planningConstraints?: string[];
+  inputRefs?: string[];
+  idempotencyRef?: string;
+  actionAttemptId?: string;
+  actionIntentId?: string;
+  logicalPlannerRequestId?: string;
+  plannerRequirementPayloadSha256?: string;
+  policyVersionId?: string;
 }
 
 export interface WebGptControlError {
@@ -237,6 +249,15 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (record.providerTargetRef !== undefined && (typeof record.providerTargetRef !== "string" || !record.providerTargetRef.trim() || record.providerTargetRef.length > 512 || /^https?:\/\//i.test(record.providerTargetRef.trim()))) return controlError("REQUIREMENT_PROVIDER_TARGET_INVALID", "Requirement providerTargetRef 必须是有限长度的 opaque reference。", record.command, requestId);
   if (record.requirementSessionId !== undefined && (typeof record.requirementSessionId !== "string" || !record.requirementSessionId.trim() || record.requirementSessionId.length > 256)) return controlError("REQUIREMENT_SESSION_INVALID", "Requirement sessionId 无效。", record.command, requestId);
   if (record.requirementRoundId !== undefined && (typeof record.requirementRoundId !== "string" || !record.requirementRoundId.trim() || record.requirementRoundId.length > 256)) return controlError("REQUIREMENT_ROUND_INVALID", "Requirement roundId 无效。", record.command, requestId);
+  for (const field of ["requirementVersionId", "priorPlanVersionId", "targetStageId", "idempotencyRef", "actionAttemptId", "actionIntentId", "logicalPlannerRequestId", "plannerRequirementPayloadSha256", "policyVersionId"] as const) {
+    const value = record[field];
+    if (value !== undefined && (typeof value !== "string" || !value.trim() || value.length > 256)) return controlError("PLANNER_FIELD_INVALID", `Planner field ${field} is invalid.`, record.command, requestId);
+  }
+  if (record.operation !== undefined && record.operation !== "PLAN_REQUIREMENT" && record.operation !== "DETAIL_STAGE") return controlError("PLANNER_OPERATION_INVALID", "Planner operation is invalid.", record.command, requestId);
+  for (const field of ["planningConstraints", "inputRefs"] as const) {
+    const value = record[field];
+    if (value !== undefined && (!Array.isArray(value) || value.length > 64 || value.some((item) => typeof item !== "string" || !item.trim() || item.length > 1_024))) return controlError("PLANNER_LIST_INVALID", `Planner field ${field} is invalid.`, record.command, requestId);
+  }
   if (record.targetRequestId !== undefined && (typeof record.targetRequestId !== "string" || record.targetRequestId.length === 0 || record.targetRequestId.length > 128)) return controlError("CONTROL_REQUEST_ID_INVALID", "目标 requestId 无效。", record.command, requestId);
   if (record.timeoutMs !== undefined && (typeof record.timeoutMs !== "number" || !Number.isSafeInteger(record.timeoutMs) || record.timeoutMs < 0 || record.timeoutMs > 300_000)) return controlError("CONTROL_TIMEOUT_INVALID", "timeoutMs 必须是 0 到 300000 之间的整数。", record.command, requestId);
   if (command === "webgpt.initialize") {
@@ -305,6 +326,11 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "webgpt.requirement.start": ["projectId", "webgptProjectId", "providerTargetRef", "goal"],
     "webgpt.requirement.draft": ["requirementSessionId"],
     "webgpt.requirement.reconcile": ["requirementSessionId", "requirementRoundId", "timeoutMs"],
+    "webgpt.planner.create": ["projectId", "providerTargetRef", "requirementVersionId", "operation", "priorPlanVersionId", "targetStageId", "planningConstraints", "inputRefs", "requestId", "idempotencyRef"],
+    "webgpt.planner.reconcile": ["projectId", "actionAttemptId"],
+    "webgpt.planner.retry": ["projectId", "actionIntentId", "logicalPlannerRequestId", "requirementVersionId", "plannerRequirementPayloadSha256", "policyVersionId"],
+    "webgpt.planner.status": ["projectId", "actionIntentId"],
+    "webgpt.planner.result": ["projectId", "actionIntentId"],
   };
   const allowedFields = new Set(["version", "protocolVersion", "requestId", "command", "clientInfo", "sessionId", ...(allowedByCommand[command] ?? [])]);
   const unexpectedField = Object.keys(record).find((field) => !allowedFields.has(field));
@@ -335,6 +361,18 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     ...(typeof record.providerTargetRef === "string" ? { providerTargetRef: record.providerTargetRef.trim() } : {}),
     ...(typeof record.requirementSessionId === "string" ? { requirementSessionId: record.requirementSessionId.trim() } : {}),
     ...(typeof record.requirementRoundId === "string" ? { requirementRoundId: record.requirementRoundId.trim() } : {}),
+    ...(typeof record.requirementVersionId === "string" ? { requirementVersionId: record.requirementVersionId.trim() } : {}),
+    ...(record.operation === "PLAN_REQUIREMENT" || record.operation === "DETAIL_STAGE" ? { operation: record.operation } : {}),
+    ...(typeof record.priorPlanVersionId === "string" ? { priorPlanVersionId: record.priorPlanVersionId.trim() } : {}),
+    ...(typeof record.targetStageId === "string" ? { targetStageId: record.targetStageId.trim() } : {}),
+    ...(Array.isArray(record.planningConstraints) ? { planningConstraints: record.planningConstraints.map((item) => String(item).trim()) } : {}),
+    ...(Array.isArray(record.inputRefs) ? { inputRefs: record.inputRefs.map((item) => String(item).trim()) } : {}),
+    ...(typeof record.idempotencyRef === "string" ? { idempotencyRef: record.idempotencyRef.trim() } : {}),
+    ...(typeof record.actionAttemptId === "string" ? { actionAttemptId: record.actionAttemptId.trim() } : {}),
+    ...(typeof record.actionIntentId === "string" ? { actionIntentId: record.actionIntentId.trim() } : {}),
+    ...(typeof record.logicalPlannerRequestId === "string" ? { logicalPlannerRequestId: record.logicalPlannerRequestId.trim() } : {}),
+    ...(typeof record.plannerRequirementPayloadSha256 === "string" ? { plannerRequirementPayloadSha256: record.plannerRequirementPayloadSha256.trim() } : {}),
+    ...(typeof record.policyVersionId === "string" ? { policyVersionId: record.policyVersionId.trim() } : {}),
   };
 }
 
