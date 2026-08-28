@@ -8,6 +8,11 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+main_path = Path("src/main/main.ts")
+main = main_path.read_text(encoding="utf-8")
+main = replace_once(main, '    command: undefined,\n', "", "dead ConversationMapCoordinator command injection")
+main_path.write_text(main, encoding="utf-8")
+
 path = Path("src/main/map-coordinator.ts")
 text = path.read_text(encoding="utf-8")
 
