@@ -1,7 +1,7 @@
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { AutomationMigrationService } from "./migration-contract.ts";
 import { classifyRecoveryIntent } from "./recovery-intent.ts";
-import { ProviderNeutralAutomationStore } from "./provider-v4-neutral-store.ts";
+import { ProviderWorkflowAutomationStore } from "./provider-workflow-store.ts";
 
 export type AutomationCompositionMode = "PRODUCTION" | "REVIEW_HARNESS";
 
@@ -22,7 +22,7 @@ export interface AutomationCompositionOptions {
 export interface AutomationComposition {
   readonly mode: AutomationCompositionMode;
   readonly paths: AutomationCompositionPaths;
-  readonly store: ProviderNeutralAutomationStore;
+  readonly store: ProviderWorkflowAutomationStore;
   readonly migration: AutomationMigrationService;
   readonly classifyRecoveryIntent: typeof classifyRecoveryIntent;
   close(): Promise<void>;
@@ -62,7 +62,7 @@ export function createAutomationComposition(options: AutomationCompositionOption
     throw new Error("AUTOMATION_REVIEW_ROOT_OVERLAPS_PRODUCTION_ROOT");
   }
   const paths = pathsFor(root);
-  const store = new ProviderNeutralAutomationStore(paths.automationDbPath);
+  const store = new ProviderWorkflowAutomationStore(paths.automationDbPath);
   const migration = new AutomationMigrationService(store);
   return {
     mode: options.mode,
