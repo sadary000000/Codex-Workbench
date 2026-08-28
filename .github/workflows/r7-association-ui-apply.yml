@@ -1,0 +1,42 @@
+name: R7 association UI apply
+
+on:
+  push:
+    branches:
+      - feature/r7-project-automation-association-ui
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/r7-project-automation-association-ui
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply bounded UI patch
+        run: python3 .github/r7-association-ui-apply.py
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit verified slice
+        shell: bash
+        run: |
+          rm .github/r7-association-ui-apply.py
+          rm .github/workflows/r7-association-ui-apply.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(r7): add explicit automation association UI"
+          git push origin HEAD:feature/r7-project-automation-association-ui
