@@ -6,6 +6,7 @@ export * from "./sqlite-persistence.ts";
 export * from "./schema.ts";
 export * from "./state-machine.ts";
 export * from "./store.ts";
+export * from "./provider-neutral-store.ts";
 export * from "./types.ts";
 export * from "./requirement-egress-policy.ts";
 export * from "./requirement-service.ts";
