@@ -1,8 +1,22 @@
 {
-  "schemaVersion": 1,
-  "kind": "workbench-handoff-map",
+  "schemaVersion": 2,
+  "kind": "workbench-project-map",
   "projectionOnly": true,
   "repository": "sadary000000/Codex-Workbench",
+  "humanReadableLanguage": "zh-CN",
+  "sourceAuthority": [
+    "current_git_tree",
+    "current_tests_schema_production_composition",
+    "confirmed_frozen_contract_or_product_decision",
+    "historical_gate_or_review_status",
+    "early_planning"
+  ],
+  "sourceClasses": [
+    "SOURCE_CURRENT",
+    "PRODUCT_INTENT",
+    "HISTORICAL_STATUS",
+    "CURRENT_DECISION"
+  ],
   "truthDomains": {
     "nativeRuntime": "Codex App Server",
     "workflow": "Workbench automation persistence",
@@ -17,12 +31,29 @@
     "shortLivedImplementationPattern": "feature/**",
     "validationBranchPattern": null,
     "validationBranchPolicy": "Do not create branches solely to trigger or preserve exact-head CI evidence.",
+    "remoteBranchesAtMapRebuild": [
+      "main",
+      "codex/workbench-v1",
+      "workbench/next",
+      "feature/r7-map-entity-references"
+    ],
     "ci": {
-      "pushBranches": ["codex/workbench-v1", "workbench/next"],
-      "pullRequestTargets": ["codex/workbench-v1", "workbench/next"],
+      "pushBranches": [
+        "codex/workbench-v1",
+        "workbench/next"
+      ],
+      "pullRequestTargets": [
+        "codex/workbench-v1",
+        "workbench/next"
+      ],
       "pullRequestCheckout": "github.event.pull_request.head.sha",
       "manualExactRef": "workflow_dispatch.inputs.ref",
-      "verification": ["npm ci", "npm run typecheck", "npm test", "npm run build"],
+      "verification": [
+        "npm ci",
+        "npm run typecheck",
+        "npm test",
+        "npm run build"
+      ],
       "evidenceStorage": "GitHub Actions runs/artifacts rather than helper branches"
     }
   },
@@ -32,73 +63,255 @@
     "status": "ACTIVE",
     "formalIntegrationBranch": "codex/workbench-v1",
     "activeIntegrationBranch": "workbench/next",
-    "integrationBranchCreatedFrom": "375206182e5ee436dd1eac4ddf9d60938f98c37d",
-    "exactRefCiTransitionCommit": "52df1f3f987c521e7ee9619d1d3ea567a7564843",
-    "r5AuditBaseSha": "3a7c3509b7fff16fb10a2b598aa6a20c857cd7b6",
-    "r6AuditBaseSha": "68d813b707326e4079992c26435bfbe53a148982",
-    "nextAction": "Audit MapStore ownership, bounded context reads, maintenance execution, stale projection behavior, and concrete cross-domain Map product gaps before editing production code."
+    "mapRebuildBaseSha": "abd15c39e07aa736721c977c07de9b98eb6c6360",
+    "r7FeatureBranch": "feature/r7-map-entity-references",
+    "r7FeatureHead": "efd27cc9cc8bd854be011cc87aba67453b4ffcce",
+    "r7PullRequest": 9,
+    "r7PullRequestState": "DRAFT_OPEN_UNMERGED",
+    "nextStage": "R8",
+    "nextStageName": "Migration / Dead Code"
   },
-  "stages": [
-    {"id": "R3", "name": "Resource & External Action", "status": "STACKED_DRAFT", "dependsOn": ["R2"]},
-    {"id": "R4", "name": "Policy & Evidence", "status": "STACKED_DRAFT", "dependsOn": ["R3"]},
-    {"id": "R5", "name": "Native Runtime Dedup", "status": "AUDIT_PASS", "dependsOn": ["R4"], "result": "No production duplicate Native runtime was proven; no R5 code diff was justified.", "evidence": "docs/workbench-map/R5_NATIVE_RUNTIME_AUDIT.md"},
-    {"id": "R6", "name": "Manual / Automation Decouple", "status": "AUDIT_PASS", "dependsOn": ["R5"], "result": "Ordinary Manual Native operation is Automation-independent and Product Project identity remains separate from AutomationProject; no R6 code diff was justified.", "evidence": "docs/workbench-map/R6_MANUAL_AUTOMATION_AUDIT.md"},
-    {"id": "R7", "name": "Projection / Map", "status": "ACTIVE", "dependsOn": ["R6"], "exit": "Map connects Workbench governance and native/runtime/provider/resource references as a useful projection without becoming execution or workflow truth.", "auditTargets": "docs/workbench-map/R7_AUDIT_TARGETS.md"},
-    {"id": "R8", "name": "Migration / Dead Code", "status": "PLANNED", "dependsOn": ["R7"]},
-    {"id": "AB", "name": "A/B Validation", "status": "PLANNED", "dependsOn": ["R8"]}
+  "projectHistory": [
+    {
+      "lineId": "V1_PRODUCT_FREEZE",
+      "name": "V1 Product Scope Freeze",
+      "status": "HISTORICAL_COMPLETED_PRODUCT_INTENT_ACTIVE",
+      "date": "2026-08-17",
+      "nodes": [
+        {
+          "id": "V1-FREEZE",
+          "name": "Native Thread/Turn/Item truth, App Server direction, Product Project shell, incremental Map",
+          "sourceClass": "PRODUCT_INTENT"
+        }
+      ]
+    },
+    {
+      "lineId": "V1_REBUILD_PHASES",
+      "name": "V1 Native Rebuild Phase 0-7",
+      "status": "HISTORICAL_SUPERSEDED",
+      "nodes": [
+        {"id": "PHASE-0", "name": null, "status": "HISTORICAL_TITLE_NOT_RECOVERED"},
+        {"id": "PHASE-1", "name": null, "status": "HISTORICAL_TITLE_NOT_RECOVERED"},
+        {"id": "PHASE-2", "name": null, "status": "HISTORICAL_TITLE_NOT_RECOVERED"},
+        {"id": "PHASE-3", "name": null, "status": "HISTORICAL_TITLE_NOT_RECOVERED"},
+        {"id": "PHASE-4", "name": null, "status": "HISTORICAL_TITLE_NOT_RECOVERED"},
+        {"id": "PHASE-5", "name": null, "status": "HISTORICAL_TITLE_NOT_RECOVERED"},
+        {"id": "PHASE-6", "name": "Map implementation and gate closure", "status": "HISTORICAL_COMPLETED"},
+        {"id": "PHASE-7", "name": null, "status": "HISTORICAL_TITLE_NOT_RECOVERED"}
+      ],
+      "verifiedMilestones": [
+        {"name": "Native Thread Foundation", "sha": "f3f11cc0492bba49681ba48d470fa9c61126838e"},
+        {"name": "Native Foundation Gate", "sha": "cc7b5231aefb84ba434e6257a569e18166e0f137"},
+        {"name": "Identity/Persistence Reliability Foundation", "sha": "983d32232e790833dcf673747665261c745ca0cf"},
+        {"name": "Conversation Map initialization", "sha": "42002c22"},
+        {"name": "Codex-driven Work Maps", "sha": "98f80c23"},
+        {"name": "Phase 6 implementation evidence", "sha": "fdf661b1"},
+        {"name": "Phase 6 Map gate closure", "sha": "5c1fed73"},
+        {"name": "V1 RC acceptance evidence freeze", "sha": "48c58627"},
+        {"name": "V1 RC Gate PASS", "sha": "8a300ecc"}
+      ]
+    },
+    {
+      "lineId": "UI_ACCEPTANCE",
+      "name": "Manual Acceptance UI Stage A-I",
+      "status": "HISTORICAL_COMPLETED",
+      "nodes": [
+        {"id": "STAGE-A", "name": "Per-thread interaction lock"},
+        {"id": "STAGE-B", "name": "Workspace/composer/error/cwd interaction hardening", "freezeSha": "26652c9d"},
+        {"id": "STAGE-C", "name": "Project path blocked/resume and projection diagnostics", "freezeSha": "28f7f62b"},
+        {"id": "STAGE-D", "name": "Thread list, multi-thread navigation, header and conversation stream", "freezeSha": "c6d81a9e"},
+        {"id": "STAGE-E", "name": "Unified composer and native composer capabilities", "freezeSha": "22ddf05b"},
+        {"id": "STAGE-F", "name": "Top bar mode switch and project lifecycle convergence", "freezeSha": "226ce01c"},
+        {"id": "STAGE-G", "name": "Observability gate and runtime mode diagnostics", "freezeSha": "fe4eb144"},
+        {"id": "STAGE-H", "name": "Reliability hardening", "implementationSha": "1c6dbcc7", "gateSha": "39484c5f"},
+        {"id": "STAGE-I", "name": "App shell/UI optimization/compact composer", "implementationSha": "3a06289f", "gateSha": "49b8a949"}
+      ]
+    },
+    {
+      "lineId": "WEBGPT",
+      "name": "WebGPT Provider Track",
+      "status": "HISTORICAL_IMPLEMENTATION_CURRENTLY_OPTIONAL_PROVIDER",
+      "nodes": [
+        {"id": "WEB-1A", "name": "RequestManager skeleton and manual control/persistence"},
+        {"id": "WEB-1B", "name": "Exclusive ownership, OperationArbiter, AUTO_CONTROL recovery"},
+        {"id": "WEB-1C", "name": "Cancel continuity, contradiction repair, resume receipts"},
+        {"id": "WEB-2", "name": "Request journal, recovery, bounded retry, reconcile, receipt state machine"},
+        {"id": "WEB-3", "name": "Hidden BrowserWindow lifecycle integration"},
+        {"id": "WEB-4A", "name": "Browser page visual shell"},
+        {"id": "WEB-4B", "name": "Visual acceptance hardening"},
+        {"id": "WEB-5", "name": "Launcher, takeover, recovery, evidence and receipt product path"},
+        {"id": "WEB5-FIX10", "name": "Historical real-gate/journal/identity/recovery fixes", "status": "HISTORICAL_STATUS_ONLY"},
+        {"id": "WEB5-FIX11", "name": "Historical reconciliation/scope fix line", "status": "HISTORICAL_STATUS_ONLY"}
+      ]
+    },
+    {
+      "lineId": "AUTOMATION_INCUBATION",
+      "name": "Automation Incubation and Archived Planning",
+      "status": "HISTORICAL_REPLANNED",
+      "nodes": [
+        {"id": "AUT-ALIGN", "name": "Requirement/Plan/Workflow product intent alignment", "sourceClass": "PRODUCT_INTENT"},
+        {"id": "K0", "name": "Foundation: domain/persistence/provider/recovery boundary", "status": "HISTORICAL_FOUNDATION"},
+        {"id": "K1", "name": null, "status": "HISTORICAL_ARCHIVED_CANDIDATE"},
+        {"id": "K2", "name": null, "status": "HISTORICAL_ARCHIVED_CANDIDATE"},
+        {"id": "K3", "name": null, "status": "HISTORICAL_ARCHIVED_CANDIDATE"},
+        {"id": "K4", "name": null, "status": "HISTORICAL_ARCHIVED_CANDIDATE"},
+        {"id": "K5", "name": null, "status": "HISTORICAL_ARCHIVED_CANDIDATE"},
+        {"id": "K6", "name": null, "status": "HISTORICAL_ARCHIVED_CANDIDATE"},
+        {"id": "K7", "name": null, "status": "HISTORICAL_ARCHIVED_CANDIDATE"},
+        {"id": "K8", "name": null, "status": "HISTORICAL_ARCHIVED_CANDIDATE"},
+        {"id": "AUT-2", "name": "Requirement Alignment and RequirementVersion", "status": "SEMANTICS_RETAINED_TRANSPORT_REBASELINED"},
+        {"id": "AUT-3", "name": "Planner and PlanVersion", "status": "SEMANTICS_RETAINED_TRANSPORT_REBASELINED"},
+        {"id": "AUT-4", "name": "Executor", "status": "HISTORICAL_PAUSED_BEFORE_NATIVE_FIRST_DEDUP"}
+      ]
+    },
+    {
+      "lineId": "ARCH_V2",
+      "name": "Architecture Rebaseline v2",
+      "status": "HISTORICAL_FROZEN_THEN_REBASELINED",
+      "nodes": [
+        {"id": "ARCH-V2-0", "name": null, "status": "HISTORICAL_TITLE_NOT_RECOVERED"},
+        {"id": "ARCH-V2-1", "name": null, "status": "HISTORICAL_TITLE_NOT_RECOVERED"},
+        {"id": "ARCH-V2-2", "name": "Shared Codex Host", "sha": "283f5d918c654b58316abc061012ea967e591d94"},
+        {"id": "ARCH-V2-3", "name": "Query Command Reconcile Separation", "sha": "791a68df906d953078c63c34ef670ae32cff5709"},
+        {"id": "ARCH-V2-4", "name": "External Action Reconciliation", "sha": "d304e703ea46d678504ccb7a50967f6012b73e06"},
+        {"id": "ARCH-V2-5", "name": "Policy Authority", "sha": "8660ebc78d3b9436f38a94aa0333ad044b069e86"},
+        {"id": "ARCH-V2-6", "name": "Provider-neutral WebGPT Boundary", "sha": "afdbab863d170057b0e067764e70fa57440e7eb4"},
+        {"id": "ARCH-V2-7", "name": "Persistence and Recovery Boundaries", "sha": "a17d65e3be8e4ea5a7e16d11671dd055171849c0"},
+        {"id": "ARCH-V2-8", "name": "Final Architecture Review/Freeze", "finalFreezeSha": "f219398bdeb3b7d0e260d92e7106d8cb219356c7"}
+      ]
+    },
+    {
+      "lineId": "NATIVE_FIRST_REBASELINE",
+      "name": "Native-first Reality Rebaseline and Migration",
+      "status": "CURRENT_ROUTE",
+      "nodes": [
+        {"id": "ARCH-R0", "name": "Reality Audit", "status": "AUDIT_PASS"},
+        {"id": "ARCH-R1", "name": "Truth and Ownership Baseline", "status": "COMPLETED"},
+        {"id": "PRE-R2", "name": "Planner Retry/Source Integrity", "status": "MERGED", "sha": "b2e891bcf8e0a5059e1edd63fbea1ea2fc325619", "pr": 2},
+        {"id": "R2", "name": "Provider Execution Boundary", "status": "INTEGRATION_HISTORY", "historicalHead": "36477bcd75e7c43c3704575eb06fcd31da7a1bb3"},
+        {"id": "R3", "name": "Resource and External Action", "status": "INTEGRATION_HISTORY"},
+        {"id": "R4", "name": "Policy and Evidence", "status": "INTEGRATION_HISTORY"},
+        {"id": "R5", "name": "Native Runtime Dedup", "status": "AUDIT_PASS", "evidence": "docs/workbench-map/R5_NATIVE_RUNTIME_AUDIT.md"},
+        {"id": "R6", "name": "Manual / Automation Decouple", "status": "AUDIT_PASS", "evidence": "docs/workbench-map/R6_MANUAL_AUTOMATION_AUDIT.md"},
+        {"id": "R7", "name": "Projection / Map", "status": "ACTIVE", "auditTargets": "docs/workbench-map/R7_AUDIT_TARGETS.md", "pullRequest": 9},
+        {"id": "R8", "name": "Migration / Dead Code", "status": "PLANNED"},
+        {"id": "AB", "name": "Direct Codex vs Workbench Native A/B Validation", "status": "PLANNED"}
+      ]
+    }
   ],
-  "delivery": [
-    {"pr": 2, "name": "Planner retry/source-integrity", "status": "MERGED"},
-    {"pr": 3, "name": "Provider execution boundary", "status": "STACKED_DRAFT", "head": "36477bcd75e7c43c3704575eb06fcd31da7a1bb3"},
-    {"pr": 4, "name": "Query/reconcile boundary", "status": "STACKED_DRAFT", "head": "1ea60dfdb6f03c929371c9069c1ee6c3b7661fa0"},
-    {"pr": 5, "name": "Reconcile resource-truth fail-closed boundary", "status": "STACKED_DRAFT", "head": "3f24f8ff904907e7538289c897c682427fca1208"},
-    {"pr": 6, "name": "Native/provider-neutral policy budget durability", "status": "STACKED_DRAFT", "head": "270e3de45bb07d4a9d5199a7cecb1c0058df4f10"},
-    {"pr": 7, "name": "WebGPT policy budget durability", "status": "STACKED_DRAFT", "head": "717069965d211189919ed081946a21d224b11353"},
-    {"pr": 8, "name": "Workbench handoff map", "status": "STACKED_DRAFT", "head": "375206182e5ee436dd1eac4ddf9d60938f98c37d"}
-  ],
-  "obsoleteValidationBranches": [
-    {"branch": "fix/arch-r3-exact-head-verify", "status": "DELETE_APPROVED_TOOLING_BLOCKED"},
-    {"branch": "fix/arch-r3-resource-exact-head-verify", "status": "DELETE_APPROVED_TOOLING_BLOCKED"},
-    {"branch": "fix/arch-r4-native-budget-exact-head-verify", "status": "DELETE_APPROVED_TOOLING_BLOCKED"},
-    {"branch": "fix/arch-r4-webgpt-budget-exact-head-verify", "status": "DELETE_APPROVED_TOOLING_BLOCKED"}
-  ],
-  "r5Audit": {"baseSha": "3a7c3509b7fff16fb10a2b598aa6a20c857cd7b6", "status": "AUDIT_PASS", "report": "docs/workbench-map/R5_NATIVE_RUNTIME_AUDIT.md"},
+  "r3": {
+    "status": "INTEGRATION_HISTORY",
+    "slices": [
+      {"name": "Query/Reconcile Boundary", "historicalHead": "1ea60dfdb6f03c929371c9069c1ee6c3b7661fa0"},
+      {"name": "Resource Reconcile Fail-closed", "historicalHead": "3f24f8ff904907e7538289c897c682427fca1208"}
+    ]
+  },
+  "r4": {
+    "status": "INTEGRATION_HISTORY",
+    "slices": [
+      {"name": "Native/Provider-neutral Policy Budget Durability", "historicalHead": "270e3de45bb07d4a9d5199a7cecb1c0058df4f10"},
+      {"name": "WebGPT Policy Budget Durability", "historicalHead": "717069965d211189919ed081946a21d224b11353"}
+    ]
+  },
+  "r5Audit": {
+    "baseSha": "3a7c3509b7fff16fb10a2b598aa6a20c857cd7b6",
+    "status": "AUDIT_PASS",
+    "report": "docs/workbench-map/R5_NATIVE_RUNTIME_AUDIT.md",
+    "result": "No competing Native Thread/context/agent/tool runtime was proven."
+  },
   "r6Audit": {
     "baseSha": "68d813b707326e4079992c26435bfbe53a148982",
     "status": "AUDIT_PASS",
     "report": "docs/workbench-map/R6_MANUAL_AUTOMATION_AUDIT.md",
-    "conclusions": [
-      "Ordinary GUI startup does not initialize Automation unless explicitly activated.",
-      "Manual Native Thread/Turn IPC does not require Automation workflow/governance state.",
-      "Product ProjectRecord is owned by V1 Workbench persistence.",
-      "AutomationProject is owned by independent Automation persistence.",
-      "Requirement and Planner operations require an existing AutomationProject.",
-      "No automatic Product Project to AutomationProject identity collapse was found.",
-      "Legacy WORKBENCH_PROJECT ExternalRef kind is provider workflow scope carrier vocabulary, not V1 Project ownership."
+    "result": "Manual Native operation is Automation-independent and Product Project identity remains separate from AutomationProject."
+  },
+  "r7": {
+    "status": "ACTIVE",
+    "targets": "docs/workbench-map/R7_AUDIT_TARGETS.md",
+    "featureBranch": "feature/r7-map-entity-references",
+    "featureHead": "efd27cc9cc8bd854be011cc87aba67453b4ffcce",
+    "pullRequest": 9,
+    "pullRequestStatus": "DRAFT_OPEN_UNMERGED",
+    "implementedSlices": [
+      "identity-only typed Map references",
+      "readonly renderer reference chips",
+      "legacy add_node reference preservation",
+      "maintenance fail-closed rule against guessed cross-domain IDs"
+    ],
+    "classifications": [
+      "PROJECTION_BOUNDARY_PASS",
+      "MAP_INCREMENT_PASS",
+      "PROJECTION_LEAK_CHANGE",
+      "MAP_PRODUCT_GAP",
+      "NEEDS_EVIDENCE"
     ]
   },
-  "r7Audit": {"status": "ACTIVE", "targets": "docs/workbench-map/R7_AUDIT_TARGETS.md", "classifications": ["PROJECTION_BOUNDARY_PASS", "MAP_INCREMENT_PASS", "PROJECTION_LEAK_CHANGE", "MAP_PRODUCT_GAP", "NEEDS_EVIDENCE"]},
+  "productAutomationAssociationDecision": {
+    "status": "CURRENT_DECISION_WAITING_IMPLEMENTATION",
+    "owner": "Workbench Product Shell",
+    "cardinality": "ONE_PRODUCT_PROJECT_TO_MANY_AUTOMATION_PROJECTS",
+    "binding": "EXPLICIT_ONLY",
+    "inferByName": false,
+    "inferByProjectIdFieldEquality": false,
+    "inferByContext": false,
+    "unlinkDeletesAutomationProject": false,
+    "mapOwnsAssociationTruth": false,
+    "mapProducerGate": "Do not auto-produce cross-domain governance references until an authoritative explicit association exists."
+  },
+  "delivery": [
+    {"pr": 2, "name": "Planner retry/source-integrity", "status": "MERGED"},
+    {"pr": 3, "name": "Provider execution boundary", "status": "CLOSED_UNMERGED_HISTORY_PRESERVED", "head": "36477bcd75e7c43c3704575eb06fcd31da7a1bb3"},
+    {"pr": 4, "name": "Query/reconcile boundary", "status": "CLOSED_UNMERGED_HISTORY_PRESERVED", "head": "1ea60dfdb6f03c929371c9069c1ee6c3b7661fa0"},
+    {"pr": 5, "name": "Reconcile resource-truth fail-closed boundary", "status": "CLOSED_UNMERGED_HISTORY_PRESERVED", "head": "3f24f8ff904907e7538289c897c682427fca1208"},
+    {"pr": 6, "name": "Native/provider-neutral policy budget durability", "status": "CLOSED_UNMERGED_HISTORY_PRESERVED", "head": "270e3de45bb07d4a9d5199a7cecb1c0058df4f10"},
+    {"pr": 7, "name": "WebGPT policy budget durability", "status": "CLOSED_UNMERGED_HISTORY_PRESERVED", "head": "717069965d211189919ed081946a21d224b11353"},
+    {"pr": 8, "name": "Initial Workbench handoff map", "status": "CLOSED_UNMERGED_HISTORY_PRESERVED", "head": "375206182e5ee436dd1eac4ddf9d60938f98c37d"},
+    {"pr": 9, "name": "R7 Map entity references", "status": "DRAFT_OPEN_UNMERGED", "head": "efd27cc9cc8bd854be011cc87aba67453b4ffcce"}
+  ],
+  "branchCleanup": {
+    "status": "COMPLETED",
+    "removedCategories": [
+      "legacy arch/** stacked branches",
+      "docs/workbench-handoff-map",
+      "fix/**-exact-head-verify validation branches"
+    ],
+    "remainingBranches": [
+      "main",
+      "codex/workbench-v1",
+      "workbench/next",
+      "feature/r7-map-entity-references"
+    ]
+  },
   "frozenInvariants": [
     "Native Thread/Turn/Item are execution truth.",
-    "Do not persist a duplicate transcript.",
+    "Do not persist a duplicate Native transcript.",
     "Manual V1 remains independent of Automation.",
-    "Workbench Project remains distinct from AutomationProject.",
+    "Product Project and AutomationProject remain distinct identity/lifecycle domains.",
+    "Product Project to AutomationProject association is 1:N, explicit-only, and unlink never deletes AutomationProject.",
     "RequirementVersion and PlanVersion remain Workbench governance truth.",
     "Unknown external side effects reconcile instead of blind resend.",
     "WebGPT exact-target actions fail closed when target identity cannot be proven.",
     "Evidence/Audit do not own workers or resource leases.",
     "Map is a Workbench incremental projection and is not duplicate native planning.",
-    "Do not implement a second sandbox, tool runtime, or subagent runtime."
+    "Map/UI/docs do not own external mutable truth.",
+    "Do not implement a second sandbox, tool runtime, or subagent runtime.",
+    "Optional Workbench features should not unnecessarily alter ordinary Native Codex model-visible context.",
+    "Query, Command, and Reconcile remain semantically separate."
+  ],
+  "future": [
+    {"id": "R8", "status": "PLANNED", "name": "Migration / Dead Code"},
+    {"id": "AB", "status": "PLANNED", "name": "Direct Codex vs Workbench Native A/B Validation"},
+    {"id": "AUTOMATION_PRODUCT_CLOSURE", "status": "PLANNED_AFTER_R8_AB", "name": "Requirement -> Plan -> Native Executor -> Verifier/Evidence -> Review/Gate"},
+    {"id": "PRODUCTIZATION", "status": "PLANNED", "name": "Release, packaging, backup/restore, migration recovery, diagnostics and upgrade rollback"}
   ],
   "resumeProtocol": [
-    "Read HANDOFF.md, ARCHITECTURE.md, GIT_WORKFLOW.md, R5_NATIVE_RUNTIME_AUDIT.md, R6_MANUAL_AUTOMATION_AUDIT.md, and R7_AUDIT_TARGETS.md.",
-    "Verify current workbench/next and relevant remote refs before trusting stored checkpoint values.",
-    "Audit MapStore ownership and all Map mutation callers.",
-    "Audit Conversation/Project Map bounded context and maintenance paths.",
-    "Identify concrete projection ownership leaks or product gaps before editing production code.",
-    "Never create a helper branch solely for exact-head CI.",
+    "Read README.md and the full ROADMAP.md before treating the latest R-stage as the whole project history.",
+    "Verify current workbench/next and PR #9 remote refs before trusting stored checkpoint values.",
+    "Preserve current truth ownership and explicit Product Project/AutomationProject association semantics.",
+    "Do not generate cross-domain Map references from guessed identity.",
+    "Do not create helper branches solely for exact-head CI.",
     "Before implementation branch creation/push, state exact branch/base and that no merge will occur.",
     "Never merge or delete branches without explicit approval.",
-    "Update the handoff map at durable checkpoints."
+    "Update ROADMAP.md, HANDOFF.md, and roadmap.json at durable checkpoints."
   ]
 }
