@@ -35,14 +35,12 @@ import { createWebGptCliArgumentError, createWebGptCliFailure, presentWebGptCliO
 import { writeWebGptTextOutput } from "./webgpt-output.ts";
 import { sanitizeControlPlaneErrorDetails, type ControlPlaneErrorDetails } from "../shared/control-plane-errors.ts";
 import { AutomationStore } from "../automation/store.ts";
-import { RequirementAutomationService } from "../automation/requirement-service.ts";
 import { createProductionAutomationComposition, type AutomationComposition } from "../automation/composition-root.ts";
 import { automationDataDirectoryFromDatabasePath } from "../automation/production-path-contract.ts";
 import { WebGptExternalActionBridge, createWebGptRequestManagerActionAdapter } from "../automation/webgpt-external-action.ts";
 import { ensureWebGptRuntimePolicy, WebGptPolicyAuthority, createWebGptProviderPolicyAuthority, webGptRuntimeCapability } from "../automation/webgpt-policy-authority.ts";
 import { assertProviderSeamExecutable } from "../automation/provider-seam-classification.ts";
 import { InputRefRegistry } from "../automation/input-ref.ts";
-import { createPlannerProviderIntegrationService, type PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
 import { runStageK1DRealPlannerSmoke } from "../automation/stage-k1-d-real-planner-smoke.ts";
 import { runStageK1DReconcileOnly } from "../automation/stage-k1-d-reconcile-only.ts";
 import { assessStageK1DProvenance, type StageK1DProvenance } from "../automation/stage-k1-d-provenance.ts";
@@ -51,6 +49,7 @@ import { runAut2RealWebGptGate, type Aut2RealWebGptSetupContext } from "../autom
 import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts";
 import { classifyWebGptActionReadiness, type WebGptActionScope } from "../automation/webgpt-action-readiness.ts";
 import { createStartupPlan, runStartupPlan } from "./startup-policy.ts";
+import { createAutomationProviderHost, type AutomationProviderHost } from "./automation-provider-host.ts";
 
 const PAUSED_AUTOMATION_GATE_ENVIRONMENT_FLAGS = [
   "AUT2_REAL_WEBGPT_GATE",
@@ -155,8 +154,7 @@ let automationStore: AutomationStore | null = null;
 let automationComposition: AutomationComposition | null = null;
 let webGptPolicyAuthority: WebGptPolicyAuthority | null = null;
 let webGptProviderPort: WebGptAutomationProviderPort | null = null;
-let requirementAutomationService: RequirementAutomationService | null = null;
-let plannerProviderIntegrationService: PlannerProviderIntegrationService | null = null;
+let automationProviderHost: AutomationProviderHost | null = null;
 /** Process-owned provider payload boundary; only opaque InputRefs cross into Automation. */
 const automationInputRefs = new InputRefRegistry();
 let webGptExternalActionBridge: WebGptExternalActionBridge | null = null;
@@ -180,9 +178,7 @@ async function startAutomationPersistence(): Promise<void> {
     // Materialize the only production provider composition root before any
     // legacy AUT gate can be considered. The paused gates below never reach
     // this port through their compatibility callers.
-    getWebGptProviderPort();
-    getRequirementAutomationService();
-    getPlannerProviderIntegrationService();
+    getAutomationProviderHost();
     return;
   }
 
@@ -1407,34 +1403,31 @@ function getWebGptProviderPort(): WebGptAutomationProviderPort {
 }
 
 /**
- * Active Requirement production composition.  This is the only main-process
- * caller that creates RequirementAutomationService for live execution: it
- * shares the same provider port and process-owned InputRef registry, so an
- * opaque input reference cannot be resolved by a second, unrelated registry.
- * The paused AUT-2/AUT-3 harnesses remain legacy/test-only and are not routed
- * through this service.
+ * Native-first production Automation composition. The host consumes only the
+ * already-owned RuntimeRegistry and registers WebGPT as an explicit optional
+ * provider; it never creates a second Native runtime trunk.
  */
-function getRequirementAutomationService(): RequirementAutomationService {
-  if (requirementAutomationService) return requirementAutomationService;
+function getAutomationProviderHost(): AutomationProviderHost {
+  if (automationProviderHost) return automationProviderHost;
   if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");
-  requirementAutomationService = new RequirementAutomationService({
+  automationProviderHost = createAutomationProviderHost({
     store: automationStore,
-    provider: getWebGptProviderPort(),
     inputRefs: automationInputRefs,
+    nativeRuntimes: runtimes,
+    nativeRuntimeId: workbenchInstanceId,
+    webgptProvider: getWebGptProviderPort(),
   });
-  return requirementAutomationService;
+  return automationProviderHost;
 }
 
-/**
- * Production Planner composition uses the same provider port and policy/
- * InputRef boundaries as Requirement dispatch. The legacy WebGPT Planner
- * service is intentionally not constructed here.
- */
-function getPlannerProviderIntegrationService(): PlannerProviderIntegrationService {
-  if (plannerProviderIntegrationService) return plannerProviderIntegrationService;
-  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");
-  plannerProviderIntegrationService = createPlannerProviderIntegrationService({ store: automationStore, provider: getWebGptProviderPort() });
-  return plannerProviderIntegrationService;
+/** Legacy webgpt.* Requirement commands stay explicitly pinned to WebGPT. */
+function getRequirementAutomationService() {
+  return getAutomationProviderHost().composition.services.requirement("WEBGPT");
+}
+
+/** Legacy webgpt.* Planner commands stay explicitly pinned to WebGPT. */
+function getPlannerProviderIntegrationService() {
+  return getAutomationProviderHost().composition.services.planner("WEBGPT");
 }
 
 /**
@@ -2520,6 +2513,7 @@ if (officialCliMode) {
           automationStore = null;
           webGptPolicyAuthority = null;
           webGptProviderPort = null;
+          automationProviderHost = null;
           webGptExternalActionBridge = null;
           await runtimes.closeAll();
           if (nativeAppServerHost) await nativeAppServerHost.close();
