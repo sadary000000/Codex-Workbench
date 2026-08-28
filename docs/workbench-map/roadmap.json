@@ -11,16 +11,47 @@
     "projection": "Workbench UI/Map and docs/workbench-map"
   },
   "effectivePolicyFormula": "persisted PolicyVersion + hard constraints + runtime capability => EffectivePolicy",
+  "developmentWorkflow": {
+    "formalIntegrationBranch": "codex/workbench-v1",
+    "activeIntegrationBranch": "workbench/next",
+    "shortLivedImplementationPattern": "feature/**",
+    "validationBranchPattern": null,
+    "validationBranchPolicy": "Do not create branches solely to trigger or preserve exact-head CI evidence.",
+    "ci": {
+      "pushBranches": [
+        "codex/workbench-v1",
+        "workbench/next"
+      ],
+      "pullRequestTargets": [
+        "codex/workbench-v1",
+        "workbench/next"
+      ],
+      "pullRequestCheckout": "github.event.pull_request.head.sha",
+      "manualExactRef": "workflow_dispatch.inputs.ref",
+      "verification": [
+        "npm ci",
+        "npm run typecheck",
+        "npm test",
+        "npm run build"
+      ],
+      "evidenceStorage": "GitHub Actions runs/artifacts rather than helper branches"
+    },
+    "labRepositoryPolicy": "Keep product code in this repository. A separate Lab repository is only justified for materially separate large benchmark data, generated fixtures, fuzz/stress corpora, disposable research prototypes, or different access/secret requirements."
+  },
   "currentCheckpoint": {
     "stageId": "R5",
     "stageName": "Native Runtime Dedup",
     "status": "ACTIVE",
+    "formalIntegrationBranch": "codex/workbench-v1",
+    "activeIntegrationBranch": "workbench/next",
+    "integrationBranchCreatedFrom": "375206182e5ee436dd1eac4ddf9d60938f98c37d",
+    "exactRefCiTransitionCommit": "52df1f3f987c521e7ee9619d1d3ea567a7564843",
     "stackTipBeforeDocs": {
       "branch": "arch-r4/webgpt-policy-budget-durability",
       "sha": "717069965d211189919ed081946a21d224b11353"
     },
     "documentationBranch": "docs/workbench-handoff-map",
-    "nextAction": "Audit production call graphs in src/codex to distinguish native adapters and Workbench increments from duplicate runtime semantics before creating any R5 implementation diff."
+    "nextAction": "Audit production call graphs in src/codex from the current workbench/next head to distinguish native adapters and Workbench increments from duplicate runtime semantics before creating any R5 implementation diff."
   },
   "stages": [
     {
@@ -108,6 +139,30 @@
       "name": "WebGPT policy budget durability",
       "status": "STACKED_DRAFT",
       "head": "717069965d211189919ed081946a21d224b11353"
+    },
+    {
+      "pr": 8,
+      "name": "Workbench handoff map",
+      "status": "STACKED_DRAFT",
+      "head": "375206182e5ee436dd1eac4ddf9d60938f98c37d"
+    }
+  ],
+  "obsoleteValidationBranches": [
+    {
+      "branch": "fix/arch-r3-exact-head-verify",
+      "status": "DELETE_APPROVED_TOOLING_BLOCKED"
+    },
+    {
+      "branch": "fix/arch-r3-resource-exact-head-verify",
+      "status": "DELETE_APPROVED_TOOLING_BLOCKED"
+    },
+    {
+      "branch": "fix/arch-r4-native-budget-exact-head-verify",
+      "status": "DELETE_APPROVED_TOOLING_BLOCKED"
+    },
+    {
+      "branch": "fix/arch-r4-webgpt-budget-exact-head-verify",
+      "status": "DELETE_APPROVED_TOOLING_BLOCKED"
     }
   ],
   "r5AuditTargets": [
@@ -136,11 +191,12 @@
     "Do not implement a second sandbox, tool runtime, or subagent runtime."
   ],
   "resumeProtocol": [
-    "Read HANDOFF.md and ARCHITECTURE.md.",
-    "Verify remote refs and PR state before trusting stored SHA/status values.",
-    "Update this map if the delivery stack changed.",
-    "Continue the R5 production call-graph audit from the latest valid stacked head.",
-    "Create a bounded implementation slice only with concrete duplicate-runtime evidence.",
+    "Read HANDOFF.md, ARCHITECTURE.md, and GIT_WORKFLOW.md.",
+    "Verify the current workbench/next SHA and relevant remote refs before trusting stored checkpoint values.",
+    "Update this map if the delivery stack or integration workflow changed.",
+    "Continue the R5 production call-graph audit from the current workbench/next head.",
+    "Create a bounded feature branch only with concrete duplicate-runtime evidence and when isolation is useful.",
+    "Never create a helper branch solely for exact-head CI; use the CI exact-ref path.",
     "Before branch creation/push, state the exact branch and base ref and that no merge will occur.",
     "Never merge or delete branches without explicit approval.",
     "Update the handoff map when the durable checkpoint changes."

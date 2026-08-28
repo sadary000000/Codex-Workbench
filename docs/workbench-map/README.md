@@ -33,8 +33,19 @@ Start here, then read:
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — frozen responsibility boundaries and invariants.
 - [`ROADMAP.md`](./ROADMAP.md) — stage graph, status, dependencies, and exit criteria.
+- [`GIT_WORKFLOW.md`](./GIT_WORKFLOW.md) — branch discipline, exact-head CI, integration, releases, and Lab-repository policy.
 - [`HANDOFF.md`](./HANDOFF.md) — current checkpoint and exact continuation instructions.
 - [`roadmap.json`](./roadmap.json) — machine-readable projection for future tooling or AI bootstrap.
+
+## Project-state separation
+
+Keep these responsibilities separate:
+
+- **Git** — code history and durable integration points.
+- **Workbench Map** — project route, current stage, handoff, decisions, and ownership projection.
+- **GitHub Actions** — tests, exact-ref validation, and disposable validation artifacts.
+
+Do not create branches solely to preserve CI evidence or to encode where the roadmap currently is.
 
 ## Update rule
 
@@ -42,8 +53,9 @@ Update this directory whenever a change materially affects one of the following:
 
 - architecture ownership or a frozen invariant;
 - roadmap stage status or dependency;
-- stacked PR/branch/commit checkpoint;
+- integration branch, formal PR, branch, or commit checkpoint;
 - the next safe implementation or audit action;
+- the Git/CI workflow used to preserve validation evidence;
 - a newly discovered risk that changes how the next session should proceed.
 
 Routine code edits do not need a map update unless they change the handoff state.
