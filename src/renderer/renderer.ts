@@ -15,7 +15,7 @@ import type {
   ComposerPreferenceRecord,
   ComposerRequestDiagnostics,
 } from "../shared/runtime-types.ts";
-import type { ConversationMapStatus, MapNode, MapSourceRef, ProjectMapMaintenanceView, ProjectMapStatus } from "../shared/map-types.ts";
+import type { ConversationMapStatus, MapEntityRef, MapNode, MapSourceRef, ProjectMapMaintenanceView, ProjectMapStatus } from "../shared/map-types.ts";
 import { normalizeNativeEvent, type NormalizedNativeEvent } from "../shared/native-event-normalizer.ts";
 import { buildNavigationModel, type NavigationModel } from "./navigation-model.ts";
 import { isComposerTargetValid } from "../shared/thread-target.ts";
@@ -39,6 +39,11 @@ interface AutomationProjectAssociationCandidate {
   lifecycle: string;
   activeRequirementVersionId: string | null;
   activePlanVersionId: string | null;
+}
+
+interface ProjectMapGovernanceReferenceProjection {
+  references: MapEntityRef[];
+  unavailableAutomationProjectIds: string[];
 }
 
 interface NativeServerRequestEvent {
@@ -88,6 +93,7 @@ interface V1Api {
   resumeMap(nativeThreadId?: string): Promise<IpcEnvelope<ConversationMapStatus>>;
   onMapState(listener: (payload: ConversationMapStatus) => void): () => void;
   getProjectMapStatus(projectId: string): Promise<IpcEnvelope<ProjectMapStatus>>;
+  getProjectMapGovernanceReferences(projectId: string): Promise<IpcEnvelope<ProjectMapGovernanceReferenceProjection>>;
   enableProjectMap(projectId: string): Promise<IpcEnvelope<ProjectMapStatus>>;
   pauseProjectMap(projectId: string): Promise<IpcEnvelope<ProjectMapStatus>>;
   resumeProjectMap(projectId: string): Promise<IpcEnvelope<ProjectMapStatus>>;
@@ -161,6 +167,7 @@ const sidebarCloseButton = document.querySelector<HTMLButtonElement>("#sidebar-c
 const mapPanelElement = document.querySelector<HTMLElement>("#map-panel")!;
 const mapPanelStatusElement = document.querySelector<HTMLElement>("#map-panel-status")!;
 const mapScopeReferencesElement = document.querySelector<HTMLElement>("#map-scope-references")!;
+const mapGovernanceReferencesElement = document.querySelector<HTMLElement>("#map-governance-references")!;
 const mapTreeElement = document.querySelector<HTMLElement>("#map-tree")!;
 const toggleMapButton = document.querySelector<HTMLButtonElement>("#toggle-map")!;
 const closeMapButton = document.querySelector<HTMLButtonElement>("#close-map")!;
@@ -287,6 +294,7 @@ const unavailableComposerPreferencesByThread = new Map<string, string[]>();
 let followLatest = true;
 let mapStatus: ConversationMapStatus | null = null;
 let projectMapStatus: ProjectMapStatus | null = null;
+let projectMapGovernanceProjection: ProjectMapGovernanceReferenceProjection | null = null;
 let mapOpen = false;
 let mapScope: "conversation" | "project" = "conversation";
 let draftThreadId: string | null | undefined;
@@ -965,6 +973,26 @@ function renderMapScopeReferences(): void {
   }
 }
 
+function renderMapGovernanceReferences(): void {
+  const projection = mapScope === "project" ? projectMapGovernanceProjection : null;
+  const references = projectMapGovernanceProjection?.references ?? [];
+  const unavailable = projection?.unavailableAutomationProjectIds ?? [];
+  mapGovernanceReferencesElement.replaceChildren();
+  mapGovernanceReferencesElement.hidden = mapScope !== "project" || (references.length === 0 && unavailable.length === 0);
+  for (const reference of references) {
+    const chip = document.createElement("span");
+    chip.className = "map-reference";
+    chip.textContent = `${reference.domain} · ${reference.entityType} · ${reference.entityId}`;
+    mapGovernanceReferencesElement.append(chip);
+  }
+  for (const automationProjectId of unavailable) {
+    const chip = document.createElement("span");
+    chip.className = "map-reference map-reference-unavailable";
+    chip.textContent = `automation · AutomationProject unavailable · ${automationProjectId}`;
+    mapGovernanceReferencesElement.append(chip);
+  }
+}
+
 function mapNodeMarker(status: MapNode["status"]): string {
   return { planned: "○", in_progress: "◉", completed: "●", blocked: "!" }[status];
 }
@@ -1066,6 +1094,7 @@ function renderMapPanel(): void {
   mapScopeProjectButton.setAttribute("aria-selected", String(mapScope === "project"));
   mapScopeProjectButton.disabled = !currentProjection?.projectId;
   renderMapScopeReferences();
+  renderMapGovernanceReferences();
   const activeStatus = mapScope === "project" ? projectMapStatus : mapStatus;
   const activeMap = activeStatus?.map ?? null;
   const activeTitle = mapScope === "project" ? "Project Map" : "Conversation Map";
@@ -1126,6 +1155,20 @@ function renderMapPanel(): void {
   if (root) mapTreeElement.append(createMapTreeItem(root, map.nodes, 1));
 }
 
+async function refreshProjectMapGovernanceReferences(
+  projectId: string,
+  generation = threadViewGeneration,
+  expectedThreadId = latestState?.nativeThreadId ?? null,
+): Promise<void> {
+  if (!mapOpen || mapScope !== "project" || currentProjection?.projectId !== projectId) {
+    projectMapGovernanceProjection = null;
+    return;
+  }
+  const result = await consume("project-map.governance-references", api.getProjectMapGovernanceReferences(projectId));
+  if (generation !== threadViewGeneration || latestState?.nativeThreadId !== expectedThreadId || currentProjection?.projectId !== projectId || !mapOpen || mapScope !== "project") return;
+  projectMapGovernanceProjection = result ?? null;
+}
+
 async function refreshMapStatus(generation = threadViewGeneration, expectedThreadId = latestState?.nativeThreadId ?? null, expectedProjectId = currentProjection?.projectId ?? null): Promise<void> {
   if (!expectedThreadId) {
     mapStatus = null;
@@ -1141,6 +1184,11 @@ async function refreshMapStatus(generation = threadViewGeneration, expectedThrea
     if (projectResult) projectMapStatus = projectResult;
   } else {
     projectMapStatus = null;
+  }
+  if (mapOpen && mapScope === "project" && expectedProjectId) {
+    await refreshProjectMapGovernanceReferences(expectedProjectId, generation, expectedThreadId);
+  } else {
+    projectMapGovernanceProjection = null;
   }
   renderMapPanel();
 }
