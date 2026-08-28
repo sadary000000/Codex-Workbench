@@ -13,6 +13,36 @@ main = main_path.read_text(encoding="utf-8")
 main = replace_once(main, '    command: undefined,\n', "", "dead ConversationMapCoordinator command injection")
 main_path.write_text(main, encoding="utf-8")
 
+pause_path = Path("scripts/real-map-pause-resume-smoke.ts")
+pause = pause_path.read_text(encoding="utf-8")
+pause = replace_once(
+    pause,
+    'const coordinator = new ConversationMapCoordinator({ userDataDirectory: root, command: resolveCodexCommand() });\n',
+    'const coordinator = new ConversationMapCoordinator({ userDataDirectory: root });\n',
+    "pause/resume coordinator command injection",
+)
+pause_path.write_text(pause, encoding="utf-8")
+
+resumed_path = Path("scripts/real-resumed-map-smoke.ts")
+resumed = resumed_path.read_text(encoding="utf-8")
+constructor = 'new ConversationMapCoordinator({ userDataDirectory: root, command: resolveCodexCommand() })'
+if resumed.count(constructor) != 2:
+    raise SystemExit(f"expected 2 resumed smoke command injections; found {resumed.count(constructor)}")
+resumed = resumed.replace(constructor, 'new ConversationMapCoordinator({ userDataDirectory: root })')
+resumed = replace_once(
+    resumed,
+    '''  assert.ok(statusAfter.map?.revision && statusAfter.map.revision >= 1, "compatibility fallback did not advance the Map revision");\n  assert.equal(statusAfter.map?.sync.lastProcessedTurnId, resumedTurnId);\n  assert.ok(restartedCoordinator.compatibilityFallbackToolCallCount >= 1, "fallback did not receive a real dynamic tool call");\n''',
+    '''  assert.equal(statusAfter.map?.revision, 0, "resumed Map must not fabricate a maintenance patch");\n  assert.equal(statusAfter.map?.sync.dirty, true);\n  assert.equal(statusAfter.map?.sync.status, "dirty");\n  assert.equal(statusAfter.map?.sync.lastProcessedTurnId, null);\n''',
+    "resumed fallback success assertions",
+)
+resumed = replace_once(
+    resumed,
+    '    compatibilityFallbackToolCallCount: restartedCoordinator.compatibilityFallbackToolCallCount,\n',
+    '    mapDirty: statusAfter.map?.sync.dirty ?? false,\n',
+    "resumed fallback metric",
+)
+resumed_path.write_text(resumed, encoding="utf-8")
+
 path = Path("src/main/map-coordinator.ts")
 text = path.read_text(encoding="utf-8")
 
