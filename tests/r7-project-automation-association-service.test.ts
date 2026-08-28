@@ -22,14 +22,14 @@ function automationProject(projectId: string, name = projectId): AutomationProje
   return {
     projectId,
     name,
-    lifecycle: "ACTIVE",
+    lifecycle: "READY",
     activeRequirementVersionId: null,
     activePlanVersionId: null,
     policyVersionId: null,
     revision: 1,
     createdAt: "2026-08-28T00:00:00.000Z",
     updatedAt: "2026-08-28T00:00:00.000Z",
-  } as AutomationProject;
+  };
 }
 
 function harness(options: { automationProjects?: AutomationProject[] } = {}) {
@@ -88,8 +88,8 @@ test("R7.4 candidate listing explicitly reads Automation truth without copying m
     automationProjects: [automationProject("b", "Zulu"), automationProject("a", "Alpha")],
   });
   assert.deepEqual(await service.listAutomationProjects(), [
-    { projectId: "a", name: "Alpha", lifecycle: "ACTIVE", activeRequirementVersionId: null, activePlanVersionId: null },
-    { projectId: "b", name: "Zulu", lifecycle: "ACTIVE", activeRequirementVersionId: null, activePlanVersionId: null },
+    { projectId: "a", name: "Alpha", lifecycle: "READY", activeRequirementVersionId: null, activePlanVersionId: null },
+    { projectId: "b", name: "Zulu", lifecycle: "READY", activeRequirementVersionId: null, activePlanVersionId: null },
   ]);
   assert.equal(automationLoads(), 1);
 });
