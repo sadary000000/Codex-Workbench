@@ -23,10 +23,11 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - name: Apply bounded PRE-R2 source-integrity patch
+      - name: Apply bounded PRE-R2 source-integrity patches
         run: |
           if [ -f scripts/repair-pre-r2-bootstrap.mjs ]; then node scripts/repair-pre-r2-bootstrap.mjs; fi
           node scripts/pre-r2-source-integrity-fix.mjs
+          if [ -f scripts/pre-r2-source-integrity-fix2.mjs ]; then node scripts/pre-r2-source-integrity-fix2.mjs; fi
       - name: Typecheck
         run: npm run typecheck
       - name: Targeted Planner tests
