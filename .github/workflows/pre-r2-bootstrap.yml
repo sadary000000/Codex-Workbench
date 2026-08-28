@@ -1,0 +1,45 @@
+name: PRE-R2 bootstrap
+
+on:
+  push:
+    branches:
+      - fix/pre-r2-planner-source-integrity
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: ${{ !contains(github.event.head_commit.message, 'fix: repair Planner logical retry lifecycle') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pre-r2-planner-source-integrity
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Apply bounded PRE-R2 source-integrity patch
+        run: node scripts/pre-r2-source-integrity-fix.mjs
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Targeted Planner tests
+        run: node --experimental-strip-types --test tests/stage-k1-c-planner-provider.test.ts
+      - name: Full tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Remove bootstrap workflow
+        run: rm .github/workflows/pre-r2-bootstrap.yml
+      - name: Commit verified repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: repair Planner logical retry lifecycle"
+          git push origin HEAD:fix/pre-r2-planner-source-integrity
