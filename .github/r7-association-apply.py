@@ -1,0 +1,205 @@
+from pathlib import Path
+
+
+def replace_once(path: str, old: str, new: str) -> None:
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"expected exactly one anchor in {path}; found {count}: {old[:100]!r}")
+    p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+replace_once(
+    "src/shared/runtime-types.ts",
+    """export interface ProjectRecord {\n  projectId: string;\n  name: string;\n  cwd: string;\n  createdAt: string;\n  updatedAt: string;\n  metadata: Record<string, string>;\n}\n""",
+    """export interface ProjectRecord {\n  projectId: string;\n  name: string;\n  cwd: string;\n  createdAt: string;\n  updatedAt: string;\n  metadata: Record<string, string>;\n}\n\n/**\n * Product-shell-owned identity association. AutomationProject lifecycle/state\n * remains owned by Automation persistence and is deliberately not copied here.\n */\nexport interface ProjectAutomationAssociation {\n  associationId: string;\n  productProjectId: string;\n  automationProjectId: string;\n  createdAt: string;\n}\n""",
+)
+
+replace_once(
+    "src/shared/runtime-types.ts",
+    """export interface WorkbenchPersistenceDocument {\n  version: 1;\n  updatedAt: string;\n  projects: ProjectRecord[];\n  threads: ThreadProjection[];\n  prompts: PromptRecoveryRecord[];\n  composerPreferences: ComposerPreferenceRecord[];\n}\n""",
+    """export interface WorkbenchPersistenceDocument {\n  version: 1;\n  updatedAt: string;\n  projects: ProjectRecord[];\n  projectAutomationAssociations: ProjectAutomationAssociation[];\n  threads: ThreadProjection[];\n  prompts: PromptRecoveryRecord[];\n  composerPreferences: ComposerPreferenceRecord[];\n}\n""",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    """  ProjectRecord,\n  RuntimeErrorInfo,\n""",
+    """  ProjectRecord,\n  ProjectAutomationAssociation,\n  RuntimeErrorInfo,\n""",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    "const MAX_ERROR_STDERR_LENGTH = 8_000;\n",
+    "const MAX_ERROR_STDERR_LENGTH = 8_000;\nconst MAX_PROJECT_AUTOMATION_ASSOCIATIONS = 512;\n",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    """  | \"PROJECT_CWD_CONFLICT\"\n  | \"PROJECT_NOT_FOUND\"\n""",
+    """  | \"PROJECT_CWD_CONFLICT\"\n  | \"PROJECT_NOT_FOUND\"\n  | \"PROJECT_AUTOMATION_ASSOCIATION_INVALID\"\n  | \"PROJECT_AUTOMATION_ASSOCIATION_CONFLICT\"\n  | \"PROJECT_AUTOMATION_ASSOCIATION_NOT_FOUND\"\n""",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    """export interface ProjectRemovalResult {\n  project: ProjectRecord;\n  detachedNativeThreadIds: string[];\n}\n""",
+    """export interface ProjectRemovalResult {\n  project: ProjectRecord;\n  detachedNativeThreadIds: string[];\n  /** Associations removed from Product Shell only; AutomationProject rows are never deleted here. */\n  detachedAutomationProjectIds: string[];\n}\n""",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    """function emptyDocument(now: string): WorkbenchPersistenceDocument {\n  return { version: 1, updatedAt: now, projects: [], threads: [], prompts: [], composerPreferences: [] };\n}\n""",
+    """function emptyDocument(now: string): WorkbenchPersistenceDocument {\n  return {\n    version: 1,\n    updatedAt: now,\n    projects: [],\n    projectAutomationAssociations: [],\n    threads: [],\n    prompts: [],\n    composerPreferences: [],\n  };\n}\n""",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    """function normalizeProject(value: unknown): ProjectRecord | null {\n  const candidate = record(value);\n  if (!candidate) return null;\n  const projectId = boundedString(candidate.projectId, MAX_ID_LENGTH);\n  const name = boundedString(candidate.name, MAX_NAME_LENGTH);\n  const cwd = boundedString(candidate.cwd, MAX_PATH_LENGTH);\n  const createdAt = timestamp(candidate.createdAt);\n  const updatedAt = timestamp(candidate.updatedAt);\n  const metadata = normalizedMetadata(candidate.metadata);\n  if (!projectId || !name || !cwd || !createdAt || !updatedAt || !metadata) return null;\n  return { projectId, name, cwd, createdAt, updatedAt, metadata };\n}\n""",
+    """function normalizeProject(value: unknown): ProjectRecord | null {\n  const candidate = record(value);\n  if (!candidate) return null;\n  const projectId = boundedString(candidate.projectId, MAX_ID_LENGTH);\n  const name = boundedString(candidate.name, MAX_NAME_LENGTH);\n  const cwd = boundedString(candidate.cwd, MAX_PATH_LENGTH);\n  const createdAt = timestamp(candidate.createdAt);\n  const updatedAt = timestamp(candidate.updatedAt);\n  const metadata = normalizedMetadata(candidate.metadata);\n  if (!projectId || !name || !cwd || !createdAt || !updatedAt || !metadata) return null;\n  return { projectId, name, cwd, createdAt, updatedAt, metadata };\n}\n\nfunction normalizeProjectAutomationAssociation(value: unknown): ProjectAutomationAssociation | null {\n  const candidate = record(value);\n  if (!candidate) return null;\n  const associationId = boundedString(candidate.associationId, MAX_ID_LENGTH);\n  const productProjectId = boundedString(candidate.productProjectId, MAX_ID_LENGTH);\n  const automationProjectId = boundedString(candidate.automationProjectId, MAX_ID_LENGTH);\n  const createdAt = timestamp(candidate.createdAt);\n  if (!associationId || !productProjectId || !automationProjectId || !createdAt) return null;\n  return { associationId, productProjectId, automationProjectId, createdAt };\n}\n""",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    """  // STAGE F adds this top-level collection. Missing on older v1 files means\n  // \"never saved\", not an invalid document and not a request to use a default.\n  if (candidate.composerPreferences !== undefined && !Array.isArray(candidate.composerPreferences)) return null;\n\n  const projects: ProjectRecord[] = [];\n""",
+    """  // Additive v1 collections are backward compatible: absence means an empty collection.\n  if (candidate.composerPreferences !== undefined && !Array.isArray(candidate.composerPreferences)) return null;\n  if (candidate.projectAutomationAssociations !== undefined && !Array.isArray(candidate.projectAutomationAssociations)) return null;\n\n  const projects: ProjectRecord[] = [];\n""",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    "  const threads: ThreadProjection[] = [];\n",
+    """  const projectAutomationAssociations: ProjectAutomationAssociation[] = [];\n  const associationIds = new Set<string>();\n  const automationProjectIds = new Set<string>();\n  const rawAssociations = candidate.projectAutomationAssociations ?? [];\n  if (!Array.isArray(rawAssociations) || rawAssociations.length > MAX_PROJECT_AUTOMATION_ASSOCIATIONS) return null;\n  for (const value of rawAssociations) {\n    const association = normalizeProjectAutomationAssociation(value);\n    if (\n      !association ||\n      associationIds.has(association.associationId) ||\n      automationProjectIds.has(association.automationProjectId) ||\n      !projectIds.has(association.productProjectId)\n    ) return null;\n    projectAutomationAssociations.push(association);\n    associationIds.add(association.associationId);\n    automationProjectIds.add(association.automationProjectId);\n  }\n\n  const threads: ThreadProjection[] = [];\n""",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    """    projects,\n    threads,\n    prompts,\n    composerPreferences,\n""",
+    """    projects,\n    projectAutomationAssociations,\n    threads,\n    prompts,\n    composerPreferences,\n""",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    """  async removeProject(projectId: string): Promise<ProjectRemovalResult> {\n    const id = boundedString(projectId, MAX_ID_LENGTH);\n    if (!id) throw new PersistenceStoreError(\"PROJECT_INVALID\", \"Project ID is invalid.\", this.filePath);\n    return this.mutate((document) => {\n      const projectIndex = document.projects.findIndex((candidate) => candidate.projectId === id);\n      if (projectIndex < 0) throw new PersistenceStoreError(\"PROJECT_NOT_FOUND\", \"Project does not exist.\", this.filePath);\n      const project = document.projects[projectIndex];\n      const detachedNativeThreadIds: string[] = [];\n      const now = this.now();\n      for (const thread of document.threads) {\n        if (thread.projectId !== id) continue;\n        thread.projectId = null;\n        thread.updatedAt = now;\n        detachedNativeThreadIds.push(thread.nativeThreadId);\n      }\n      document.projects.splice(projectIndex, 1);\n      return { project: clone(project), detachedNativeThreadIds };\n    });\n  }\n""",
+    """  async removeProject(projectId: string): Promise<ProjectRemovalResult> {\n    const id = boundedString(projectId, MAX_ID_LENGTH);\n    if (!id) throw new PersistenceStoreError(\"PROJECT_INVALID\", \"Project ID is invalid.\", this.filePath);\n    return this.mutate((document) => {\n      const projectIndex = document.projects.findIndex((candidate) => candidate.projectId === id);\n      if (projectIndex < 0) throw new PersistenceStoreError(\"PROJECT_NOT_FOUND\", \"Project does not exist.\", this.filePath);\n      const project = document.projects[projectIndex];\n      const detachedNativeThreadIds: string[] = [];\n      const detachedAutomationProjectIds = document.projectAutomationAssociations\n        .filter((association) => association.productProjectId === id)\n        .map((association) => association.automationProjectId);\n      const now = this.now();\n      for (const thread of document.threads) {\n        if (thread.projectId !== id) continue;\n        thread.projectId = null;\n        thread.updatedAt = now;\n        detachedNativeThreadIds.push(thread.nativeThreadId);\n      }\n      document.projectAutomationAssociations = document.projectAutomationAssociations\n        .filter((association) => association.productProjectId !== id);\n      document.projects.splice(projectIndex, 1);\n      return { project: clone(project), detachedNativeThreadIds, detachedAutomationProjectIds };\n    });\n  }\n""",
+)
+
+replace_once(
+    "src/shared/persistence-store.ts",
+    "  async listThreads(projectId?: string | null): Promise<ThreadProjection[]> {\n",
+    """  async listProjectAutomationAssociations(productProjectId?: string): Promise<ProjectAutomationAssociation[]> {\n    const id = productProjectId === undefined ? undefined : boundedString(productProjectId, MAX_ID_LENGTH);\n    if (productProjectId !== undefined && !id) {\n      throw new PersistenceStoreError(\"PROJECT_AUTOMATION_ASSOCIATION_INVALID\", \"Product Project ID is invalid.\", this.filePath);\n    }\n    const document = await this.read();\n    if (id !== undefined && !document.projects.some((project) => project.projectId === id)) {\n      throw new PersistenceStoreError(\"PROJECT_NOT_FOUND\", \"Project does not exist.\", this.filePath);\n    }\n    return clone(document.projectAutomationAssociations.filter((association) => id === undefined || association.productProjectId === id));\n  }\n\n  async getAutomationProjectAssociation(automationProjectId: string): Promise<ProjectAutomationAssociation | null> {\n    const id = boundedString(automationProjectId, MAX_ID_LENGTH);\n    if (!id) return null;\n    return clone((await this.read()).projectAutomationAssociations.find((association) => association.automationProjectId === id) ?? null);\n  }\n\n  async bindAutomationProject(productProjectId: string, automationProjectId: string): Promise<ProjectAutomationAssociation> {\n    const productId = boundedString(productProjectId, MAX_ID_LENGTH);\n    const automationId = boundedString(automationProjectId, MAX_ID_LENGTH);\n    if (!productId || !automationId) {\n      throw new PersistenceStoreError(\"PROJECT_AUTOMATION_ASSOCIATION_INVALID\", \"Project association identity is invalid.\", this.filePath);\n    }\n    return this.mutate((document) => {\n      if (!document.projects.some((project) => project.projectId === productId)) {\n        throw new PersistenceStoreError(\"PROJECT_NOT_FOUND\", \"Project does not exist.\", this.filePath);\n      }\n      const existing = document.projectAutomationAssociations.find((association) => association.automationProjectId === automationId);\n      if (existing) {\n        if (existing.productProjectId !== productId) {\n          throw new PersistenceStoreError(\n            \"PROJECT_AUTOMATION_ASSOCIATION_CONFLICT\",\n            \"AutomationProject is already associated with another Product Project.\",\n            this.filePath,\n          );\n        }\n        return clone(existing);\n      }\n      if (document.projectAutomationAssociations.length >= MAX_PROJECT_AUTOMATION_ASSOCIATIONS) {\n        throw new PersistenceStoreError(\"PROJECT_AUTOMATION_ASSOCIATION_INVALID\", \"Project association limit has been reached.\", this.filePath);\n      }\n      const association: ProjectAutomationAssociation = {\n        associationId: randomUUID(),\n        productProjectId: productId,\n        automationProjectId: automationId,\n        createdAt: this.now(),\n      };\n      document.projectAutomationAssociations.push(association);\n      return clone(association);\n    });\n  }\n\n  async unlinkAutomationProject(productProjectId: string, automationProjectId: string): Promise<ProjectAutomationAssociation> {\n    const productId = boundedString(productProjectId, MAX_ID_LENGTH);\n    const automationId = boundedString(automationProjectId, MAX_ID_LENGTH);\n    if (!productId || !automationId) {\n      throw new PersistenceStoreError(\"PROJECT_AUTOMATION_ASSOCIATION_INVALID\", \"Project association identity is invalid.\", this.filePath);\n    }\n    return this.mutate((document) => {\n      const index = document.projectAutomationAssociations.findIndex(\n        (association) => association.productProjectId === productId && association.automationProjectId === automationId,\n      );\n      if (index < 0) {\n        throw new PersistenceStoreError(\"PROJECT_AUTOMATION_ASSOCIATION_NOT_FOUND\", \"Project association does not exist.\", this.filePath);\n      }\n      const [association] = document.projectAutomationAssociations.splice(index, 1);\n      return clone(association);\n    });\n  }\n\n  async listThreads(projectId?: string | null): Promise<ThreadProjection[]> {\n""",
+)
+
+Path("tests/r7-product-automation-association.test.ts").write_text(
+    r'''import assert from "node:assert/strict";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { PersistenceStoreError, V1PersistenceStore } from "../src/shared/persistence-store.ts";
+
+async function createStore() {
+  const root = await mkdtemp(join(tmpdir(), "codex-workbench-r7-association-"));
+  const filePath = join(root, "workbench-state.json");
+  return { root, filePath, store: new V1PersistenceStore(filePath) };
+}
+
+test("R7 product shell persists explicit 1:N AutomationProject associations and never infers them from equal IDs", async () => {
+  const { filePath, store } = await createStore();
+  const first = await store.createProject({ projectId: "shared-id", name: "Product A", cwd: "C:/product-a" });
+  const second = await store.createProject({ projectId: "product-b", name: "Product B", cwd: "C:/product-b" });
+
+  assert.deepEqual(await store.listProjectAutomationAssociations(first.projectId), []);
+  assert.equal(await store.getAutomationProjectAssociation("shared-id"), null);
+
+  const bindingA = await store.bindAutomationProject(first.projectId, "shared-id");
+  const bindingB = await store.bindAutomationProject(first.projectId, "automation-b");
+  const repeated = await store.bindAutomationProject(first.projectId, "shared-id");
+  assert.equal(repeated.associationId, bindingA.associationId);
+  assert.deepEqual(
+    (await store.listProjectAutomationAssociations(first.projectId)).map((association) => association.automationProjectId).sort(),
+    ["automation-b", "shared-id"],
+  );
+
+  await assert.rejects(
+    store.bindAutomationProject(second.projectId, "shared-id"),
+    (error: unknown) => error instanceof PersistenceStoreError && error.code === "PROJECT_AUTOMATION_ASSOCIATION_CONFLICT",
+  );
+
+  const reopened = new V1PersistenceStore(filePath);
+  assert.deepEqual(await reopened.getAutomationProjectAssociation("shared-id"), bindingA);
+  assert.deepEqual(await reopened.getAutomationProjectAssociation("automation-b"), bindingB);
+
+  const raw = JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
+  const serialized = JSON.stringify(raw.projectAutomationAssociations);
+  assert.equal(serialized.includes("lifecycle"), false);
+  assert.equal(serialized.includes("status"), false);
+  assert.equal(serialized.includes("payload"), false);
+  assert.equal(serialized.includes("requirement"), false);
+});
+
+test("R7 association collection is additive for legacy v1 files", async () => {
+  const { filePath, store } = await createStore();
+  const project = await store.createProject({ name: "Legacy", cwd: "C:/legacy" });
+  const document = JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
+  delete document.projectAutomationAssociations;
+  await writeFile(filePath, JSON.stringify(document), "utf8");
+
+  const reopened = new V1PersistenceStore(filePath);
+  assert.deepEqual(await reopened.listProjectAutomationAssociations(project.projectId), []);
+  const association = await reopened.bindAutomationProject(project.projectId, "automation-legacy");
+  assert.equal(association.productProjectId, project.projectId);
+  assert.equal((await reopened.getAutomationProjectAssociation("automation-legacy"))?.associationId, association.associationId);
+});
+
+test("R7 unlink and Product Project removal detach associations without Automation lifecycle mutation", async () => {
+  const { store } = await createStore();
+  const project = await store.createProject({ name: "Detach", cwd: "C:/detach" });
+  await store.ensureThreadProjection({ nativeThreadId: "native-detach", cwd: project.cwd, projectId: project.projectId });
+  await store.bindAutomationProject(project.projectId, "automation-one");
+  await store.bindAutomationProject(project.projectId, "automation-two");
+
+  const unlinked = await store.unlinkAutomationProject(project.projectId, "automation-one");
+  assert.equal(unlinked.automationProjectId, "automation-one");
+  assert.equal(await store.getAutomationProjectAssociation("automation-one"), null);
+  assert.equal((await store.getProject(project.projectId))?.projectId, project.projectId);
+
+  const removal = await store.removeProject(project.projectId);
+  assert.deepEqual(removal.detachedNativeThreadIds, ["native-detach"]);
+  assert.deepEqual(removal.detachedAutomationProjectIds, ["automation-two"]);
+  assert.equal(await store.getAutomationProjectAssociation("automation-two"), null);
+  assert.equal((await store.getThreadProjection("native-detach"))?.projectId, null);
+});
+
+test("R7 persisted associations fail closed on orphan or duplicate AutomationProject identity", async () => {
+  const { filePath, store } = await createStore();
+  const project = await store.createProject({ name: "Validate", cwd: "C:/validate" });
+  await store.bindAutomationProject(project.projectId, "automation-one");
+  const valid = JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
+  const associations = valid.projectAutomationAssociations as Array<Record<string, unknown>>;
+
+  await writeFile(filePath, JSON.stringify({
+    ...valid,
+    projectAutomationAssociations: [
+      ...associations,
+      { associationId: "orphan", productProjectId: "missing-product", automationProjectId: "automation-orphan", createdAt: new Date().toISOString() },
+    ],
+  }), "utf8");
+  await assert.rejects(
+    store.read(),
+    (error: unknown) => error instanceof PersistenceStoreError && error.code === "PERSISTENCE_INVALID",
+  );
+
+  await writeFile(filePath, JSON.stringify({
+    ...valid,
+    projectAutomationAssociations: [
+      ...associations,
+      { associationId: "duplicate", productProjectId: project.projectId, automationProjectId: "automation-one", createdAt: new Date().toISOString() },
+    ],
+  }), "utf8");
+  await assert.rejects(
+    store.read(),
+    (error: unknown) => error instanceof PersistenceStoreError && error.code === "PERSISTENCE_INVALID",
+  );
+});
+''',
+    encoding="utf-8",
+)
