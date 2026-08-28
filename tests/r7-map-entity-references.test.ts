@@ -67,7 +67,7 @@ test("persists only typed projection identity and keeps Native sources unchanged
   await store.ensure(scope);
   await store.enable();
 
-  const patch = addPatch({ references: [requirementRef] });
+  const patch = addPatch({ references: [requirementRef] }) as MapPatch;
   const applied = await store.applyPatch(patch);
   const node = applied.document.nodes.find((candidate) => candidate.nodeId === "goal");
   assert.ok(node);
