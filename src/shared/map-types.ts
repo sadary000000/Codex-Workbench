@@ -12,6 +12,9 @@ export const MAP_LIMITS = Object.freeze({
   historyEntry: 1_000,
   historyEntries: 32,
   sources: 16,
+  references: 32,
+  referenceType: 64,
+  referenceId: 512,
   nodes: 256,
   operations: 64,
   recentPatches: 64,
@@ -42,6 +45,20 @@ export interface MapSourceRef {
   itemId: string | null;
 }
 
+export type MapEntityDomain =
+  | "workbench"
+  | "automation"
+  | "native_runtime"
+  | "external_action"
+  | "resource"
+  | "source_control";
+
+export interface MapEntityRef {
+  domain: MapEntityDomain;
+  entityType: string;
+  entityId: string;
+}
+
 export interface MapNode {
   nodeId: string;
   parentId: string | null;
@@ -50,6 +67,8 @@ export interface MapNode {
   details: string;
   history: string[];
   sources: MapSourceRef[];
+  /** Projection-only references. Authoritative entity state remains in the owning domain. */
+  references?: MapEntityRef[];
   ordering: number;
 }
 
@@ -110,6 +129,7 @@ export type MapPatchOperation =
     parentId?: string | null;
     ordering?: number;
     sources?: MapSourceRef[];
+    references?: MapEntityRef[];
     history?: string[];
   }
   | { op: "status"; nodeId: string; status: MapNodeStatus }
@@ -248,6 +268,31 @@ function sourceKey(source: MapSourceRef): string {
   return `${source.nativeThreadId}\u0000${source.turnId}\u0000${source.itemId ?? ""}`;
 }
 
+const MAP_ENTITY_DOMAINS: readonly MapEntityDomain[] = [
+  "workbench",
+  "automation",
+  "native_runtime",
+  "external_action",
+  "resource",
+  "source_control",
+];
+
+function normalizeEntityReference(value: unknown): MapEntityRef | null {
+  const candidate = record(value);
+  if (!candidate) return null;
+  const allowedKeys = new Set(["domain", "entityType", "entityId"]);
+  if (Object.keys(candidate).some((key) => !allowedKeys.has(key))) return null;
+  const domain = candidate.domain;
+  const entityType = boundedString(candidate.entityType, MAP_LIMITS.referenceType);
+  const entityId = boundedString(candidate.entityId, MAP_LIMITS.referenceId);
+  if (typeof domain !== "string" || !MAP_ENTITY_DOMAINS.includes(domain as MapEntityDomain) || !entityType || !validId(entityType, MAP_LIMITS.referenceType) || !entityId || entityId.includes("\u0000")) return null;
+  return { domain: domain as MapEntityDomain, entityType, entityId };
+}
+
+function referenceKey(reference: MapEntityRef): string {
+  return `${reference.domain}\u0000${reference.entityType}\u0000${reference.entityId}`;
+}
+
 function normalizeStatus(value: unknown): MapNodeStatus | null {
   return value === "planned" || value === "in_progress" || value === "completed" || value === "blocked" ? value : null;
 }
@@ -266,6 +311,11 @@ function normalizeNode(value: unknown): MapNode | null {
   const sources = Array.isArray(candidate.sources) && candidate.sources.length <= MAP_LIMITS.sources
     ? candidate.sources.map(normalizeSource)
     : null;
+  const references = candidate.references === undefined
+    ? undefined
+    : Array.isArray(candidate.references) && candidate.references.length <= MAP_LIMITS.references
+      ? candidate.references.map(normalizeEntityReference)
+      : null;
   const ordering = candidate.ordering;
   if (
     !nodeId || !validId(nodeId) ||
@@ -273,6 +323,7 @@ function normalizeNode(value: unknown): MapNode | null {
     !title || !status || details === null ||
     !history || history.some((entry) => entry === null) ||
     !sources || sources.some((source) => source === null) ||
+    (references !== undefined && (references === null || references.some((reference) => reference === null))) ||
     typeof ordering !== "number" || !Number.isSafeInteger(ordering) || ordering < 0
   ) return null;
   return {
@@ -283,6 +334,7 @@ function normalizeNode(value: unknown): MapNode | null {
     details,
     history: history as string[],
     sources: sources as MapSourceRef[],
+    ...(references === undefined ? {} : { references: references as MapEntityRef[] }),
     ordering,
   };
 }
@@ -358,6 +410,12 @@ function validateGraph(document: MapDocument): MapValidationResult {
       if (document.scope.kind === "conversation" && source.nativeThreadId !== document.scope.nativeThreadId) {
         return { ok: false, code: "MAP_SOURCE_SCOPE_MISMATCH", message: `Map source belongs to another Native Thread: ${source.nativeThreadId}.` };
       }
+    }
+    const seenReferences = new Set<string>();
+    for (const reference of node.references ?? []) {
+      const key = referenceKey(reference);
+      if (seenReferences.has(key)) return { ok: false, code: "MAP_REFERENCE_DUPLICATE", message: `Duplicate entity reference on Map node: ${node.nodeId}.` };
+      seenReferences.add(key);
     }
   }
   for (const node of document.nodes) {
@@ -535,6 +593,12 @@ function validateOperationShape(operation: unknown): MapPatchOperation {
       if (sources.some((source) => source === null)) throw new MapValidationError("MAP_SOURCE_INVALID", "Map update sources are invalid.");
       update.sources = sources as MapSourceRef[]; changed = true;
     }
+    if (candidate?.references !== undefined) {
+      if (!Array.isArray(candidate.references) || candidate.references.length > MAP_LIMITS.references) throw new MapValidationError("MAP_REFERENCE_INVALID", "Map update references are invalid.");
+      const references = candidate.references.map(normalizeEntityReference);
+      if (references.some((reference) => reference === null)) throw new MapValidationError("MAP_REFERENCE_INVALID", "Map update references are invalid.");
+      update.references = references as MapEntityRef[]; changed = true;
+    }
     if (candidate?.history !== undefined) {
       if (!Array.isArray(candidate.history) || candidate.history.length > MAP_LIMITS.historyEntries) throw new MapValidationError("MAP_HISTORY_INVALID", "Map update history is invalid.");
       const history = candidate.history.map((entry) => boundedString(entry, MAP_LIMITS.historyEntry));
@@ -553,6 +617,13 @@ function addSource(node: MapNode, source: MapSourceRef): void {
   node.sources.push(clone(source));
 }
 
+function addReference(node: MapNode, reference: MapEntityRef): void {
+  const references = node.references ?? (node.references = []);
+  if (references.some((candidate) => referenceKey(candidate) === referenceKey(reference))) return;
+  if (references.length >= MAP_LIMITS.references) throw new MapValidationError("MAP_REFERENCES_BOUNDS", "Map node entity reference count exceeds the limit.");
+  references.push(clone(reference));
+}
+
 function applyOperation(document: MapDocument, operation: MapPatchOperation): void {
   if (operation.op === "add") {
     if (document.nodes.some((node) => node.nodeId === operation.node.nodeId)) throw new MapValidationError("MAP_NODE_DUPLICATE", `Map node already exists: ${operation.node.nodeId}.`);
@@ -568,6 +639,7 @@ function applyOperation(document: MapDocument, operation: MapPatchOperation): vo
     for (const node of document.nodes) if (node.parentId === from.nodeId) node.parentId = into.nodeId;
     into.details = `${into.details}${into.details && from.details ? "\n" : ""}${from.details}`.slice(0, MAP_LIMITS.details);
     for (const source of from.sources) addSource(into, source);
+    for (const reference of from.references ?? []) addReference(into, reference);
     for (const entry of from.history) if (!into.history.includes(entry)) {
       if (into.history.length >= MAP_LIMITS.historyEntries) into.history.shift();
       into.history.push(entry);
@@ -608,6 +680,7 @@ function applyOperation(document: MapDocument, operation: MapPatchOperation): vo
     }
     if (operation.ordering !== undefined) node.ordering = operation.ordering;
     if (operation.sources !== undefined) node.sources = clone(operation.sources);
+    if (operation.references !== undefined) node.references = clone(operation.references);
     if (operation.history !== undefined) node.history = clone(operation.history);
   }
 }
