@@ -8,19 +8,43 @@ import type {
 } from "./adapters.ts";
 import { AutomationStore, AutomationStoreError } from "./store.ts";
 
-export const PERSISTED_PROVIDER_ID_KEY = "providerId" as const;
+export const PERSISTED_PROVIDER_EXECUTOR_PREFIX = "automation-provider-v1:" as const;
+
+function encodeProviderExecutorRef(provider: string): string {
+  const normalized = provider.trim();
+  if (!normalized || normalized.length > 128 || /[\r\n]/.test(normalized)) throw new Error("PROVIDER_ID_INVALID");
+  const encoded = `${PERSISTED_PROVIDER_EXECUTOR_PREFIX}${encodeURIComponent(normalized)}`;
+  if (encoded.length > 256) throw new Error("PROVIDER_ID_INVALID");
+  return encoded;
+}
 
 function boundProviderId(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
+  if (typeof value !== "string" || !value.startsWith(PERSISTED_PROVIDER_EXECUTOR_PREFIX)) return null;
+  try {
+    const decoded = decodeURIComponent(value.slice(PERSISTED_PROVIDER_EXECUTOR_PREFIX.length)).trim();
+    return decoded && decoded.length <= 128 && !/[\r\n]/.test(decoded) ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+function uniqueBoundProviderId(values: Array<string | null>): string | null {
+  const providers = [...new Set(values.filter((value): value is string => value !== null))];
+  if (providers.length > 1) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Logical request contains conflicting persisted provider bindings.");
+  return providers[0] ?? null;
 }
 
 /**
  * Decorates an executable provider with durable provider selection.
  *
- * The binding is written after ActionIntent/ActionAttempt creation but before
- * the provider's first external side effect. This closes the recovery window
- * where submit could become UNKNOWN before a provider request ref exists. A
- * logical request may not switch providers on retry/reconcile.
+ * The binding is written to the concrete ActionAttempt after the attempt is
+ * created but before the provider's first external side effect. ActionIntent
+ * is deliberately not mutated: its semanticSha256 remains the immutable hash
+ * of the canonical action descriptor.
+ *
+ * A later attempt for the same logical ActionIntent must reuse the same
+ * provider. The versioned executorRef binding closes the recovery window where
+ * submit can become UNKNOWN before a provider request reference exists.
  */
 export class PersistedProviderBindingPort implements AutomationProviderPort {
   readonly provider: AutomationProviderPort["provider"];
@@ -91,22 +115,33 @@ export class PersistedProviderBindingPort implements AutomationProviderPort {
         || intent.idempotencyRef !== correlation.idempotencyRef) {
         throw new AutomationStoreError("AUTOMATION_CONFLICT", "Provider binding correlation does not match the persisted ActionIntent/ActionAttempt.");
       }
-      const existing = boundProviderId(intent.executionOptions[PERSISTED_PROVIDER_ID_KEY]);
+
+      const attempts = tx.table("actionAttempts").filter((candidate) => candidate.intentId === intent.intentId);
+      const providerFromAttempts = attempts.map((candidate) => boundProviderId(candidate.executorRef));
+      const providerFromRequests = attempts.map((candidate) => {
+        if (!candidate.providerRequestRef) return null;
+        return tx.table("externalRefs").find((ref) => ref.externalRefId === candidate.providerRequestRef)?.provider ?? null;
+      });
+      const providerFromReceipts = tx.table("actionReceipts")
+        .filter((receipt) => attempts.some((candidate) => candidate.actionAttemptId === receipt.actionAttemptId))
+        .map((receipt) => receipt.provider ?? null);
+      const existing = uniqueBoundProviderId([...providerFromAttempts, ...providerFromRequests, ...providerFromReceipts]);
       if (existing && existing !== this.provider) {
         throw new AutomationStoreError("AUTOMATION_CONFLICT", `Logical request is already bound to provider ${existing}; provider switching is forbidden.`);
       }
-      if (existing === this.provider) return;
-      tx.replace("actionIntents", {
-        ...intent,
-        executionOptions: {
-          ...intent.executionOptions,
-          [PERSISTED_PROVIDER_ID_KEY]: this.provider,
-        },
-      });
+
+      const currentBound = boundProviderId(attempt.executorRef);
+      if (attempt.executorRef && !currentBound) {
+        throw new AutomationStoreError("AUTOMATION_CONFLICT", "ActionAttempt already has a non-provider executorRef; refusing to overwrite executor ownership.");
+      }
+      if (currentBound === this.provider) return;
+
+      const executorRef = encodeProviderExecutorRef(this.provider);
+      tx.replace("actionAttempts", { ...attempt, executorRef });
       tx.appendAudit({
         projectId: intent.projectId,
-        entityType: "ActionIntent",
-        entityId: intent.intentId,
+        entityType: "ActionAttempt",
+        entityId: attempt.actionAttemptId,
         eventType: "PROVIDER_BOUND_BEFORE_DISPATCH",
         actorType: "AUTOMATION",
         actorRef: null,
@@ -118,10 +153,11 @@ export class PersistedProviderBindingPort implements AutomationProviderPort {
   }
 
   private async assertBinding(correlation: ProviderCorrelation): Promise<void> {
-    if (!correlation.actionIntentId) throw new Error("PROVIDER_CORRELATION_REQUIRED");
+    if (!correlation.actionIntentId || !correlation.actionAttemptId) throw new Error("PROVIDER_CORRELATION_REQUIRED");
     const intent = await this.store.get("actionIntents", correlation.actionIntentId);
-    if (!intent || intent.projectId !== correlation.projectId) throw new Error("PROVIDER_ACTION_INTENT_CORRELATION_INVALID");
-    const existing = boundProviderId(intent.executionOptions[PERSISTED_PROVIDER_ID_KEY]);
+    const attempt = await this.store.get("actionAttempts", correlation.actionAttemptId);
+    if (!intent || !attempt || intent.projectId !== correlation.projectId || attempt.intentId !== intent.intentId) throw new Error("PROVIDER_ACTION_INTENT_CORRELATION_INVALID");
+    const existing = await persistedProviderIdForIntent(this.store, intent.intentId);
     if (!existing) throw new Error("PROVIDER_BINDING_REQUIRED");
     if (existing !== this.provider) throw new Error("PROVIDER_BINDING_MISMATCH");
   }
@@ -129,5 +165,17 @@ export class PersistedProviderBindingPort implements AutomationProviderPort {
 
 export async function persistedProviderIdForIntent(store: AutomationStore, actionIntentId: string): Promise<string | null> {
   const intent = await store.get("actionIntents", actionIntentId);
-  return intent ? boundProviderId(intent.executionOptions[PERSISTED_PROVIDER_ID_KEY]) : null;
+  if (!intent) return null;
+  const document = await store.snapshot();
+  const attempts = document.actionAttempts.filter((candidate) => candidate.intentId === actionIntentId);
+  const providers = attempts.flatMap((attempt) => {
+    const values: Array<string | null> = [boundProviderId(attempt.executorRef)];
+    if (attempt.providerRequestRef) {
+      values.push(document.externalRefs.find((ref) => ref.externalRefId === attempt.providerRequestRef)?.provider ?? null);
+    }
+    const receipt = document.actionReceipts.find((candidate) => candidate.actionAttemptId === attempt.actionAttemptId);
+    values.push(receipt?.provider ?? null);
+    return values;
+  });
+  return uniqueBoundProviderId(providers);
 }
