@@ -1,9 +1,40 @@
 node_modules/
 dist/
 dist-next/
+dist-review-*/
 coverage/
+release/
+
+# Environment / secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs / temporary files
 *.log
 *.tmp
+
+# Local/user runtime data
 user-data/
+userData/
 .real-smoke*/
+webgpt/session/
+webgpt/requests/
+role-sessions.json
+submissions.jsonl
+
+# Databases / runtime ledgers
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Generated review/build artifacts
+artifacts/
+*-REVIEW-PACKAGE.zip
+*-REVIEW-PACKAGE.sha256
+*.bundle
