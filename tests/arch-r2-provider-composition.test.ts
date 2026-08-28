@@ -49,7 +49,8 @@ test("ARCH-R2 production provider composition is Native-first with optional expl
 
     assert.equal(composition.providers.defaultProviderId, "NATIVE");
     assert.equal(composition.providers.get(), composition.nativeProvider);
-    assert.equal(composition.providers.get("WEBGPT"), external);
+    assert.equal(composition.providers.get("WEBGPT"), composition.webgptProvider);
+    assert.notEqual(composition.webgptProvider, external, "external providers are wrapped by the persisted pre-dispatch binding boundary");
     assert.equal(composition.services.services().providerId, "NATIVE");
     assert.equal(composition.services.services("WEBGPT").providerId, "WEBGPT");
   } finally {
