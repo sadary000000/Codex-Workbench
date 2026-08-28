@@ -29,113 +29,26 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
           path = Path('src/main/main.ts')
           text = path.read_text(encoding='utf-8')
-
-          def replace_once(old: str, new: str, label: str) -> None:
+          def replace_once(old, new, label):
               global text
               count = text.count(old)
               if count != 1:
                   raise SystemExit(f'{label}: expected exactly one match, found {count}')
               text = text.replace(old, new, 1)
-
-          replace_once(
-              'import { RequirementAutomationService } from "../automation/requirement-service.ts";\n',
-              '',
-              'remove legacy Requirement constructor import',
-          )
-          replace_once(
-              'import { createPlannerProviderIntegrationService, type PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";\n',
-              '',
-              'remove legacy Planner constructor import',
-          )
-          replace_once(
-              'import { createStartupPlan, runStartupPlan } from "./startup-policy.ts";\n',
-              'import { createStartupPlan, runStartupPlan } from "./startup-policy.ts";\nimport { createAutomationProviderHost, type AutomationProviderHost } from "./automation-provider-host.ts";\n',
-              'add provider host import',
-          )
-          replace_once(
-              'let webGptProviderPort: WebGptAutomationProviderPort | null = null;\nlet requirementAutomationService: RequirementAutomationService | null = null;\nlet plannerProviderIntegrationService: PlannerProviderIntegrationService | null = null;\n',
-              'let webGptProviderPort: WebGptAutomationProviderPort | null = null;\nlet automationProviderHost: AutomationProviderHost | null = null;\n',
-              'replace direct service singletons',
-          )
-          replace_once(
-              '    getWebGptProviderPort();\n    getRequirementAutomationService();\n    getPlannerProviderIntegrationService();\n',
-              '    getAutomationProviderHost();\n',
-              'materialize provider host',
-          )
-
-          old_comment = '''/**
- * Active Requirement production composition.  This is the only main-process
- * caller that creates RequirementAutomationService for live execution: it
- * shares the same provider port and process-owned InputRef registry, so an
- * opaque input reference cannot be resolved by a second, unrelated registry.
- * The paused AUT-2/AUT-3 harnesses remain legacy/test-only and are not routed
- * through this service.
- */
-'''
-          new_comment = '''/**
- * Native-first production Automation composition. The host consumes only the
- * already-owned RuntimeRegistry and registers WebGPT as an explicit optional
- * provider; it never creates a second Native runtime trunk.
- */
-function getAutomationProviderHost(): AutomationProviderHost {
-  if (automationProviderHost) return automationProviderHost;
-  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");
-  automationProviderHost = createAutomationProviderHost({
-    store: automationStore,
-    inputRefs: automationInputRefs,
-    nativeRuntimes: runtimes,
-    nativeRuntimeId: workbenchInstanceId,
-    webgptProvider: getWebGptProviderPort(),
-  });
-  return automationProviderHost;
-}
-
-/** Legacy webgpt.* Requirement commands stay explicitly pinned to WebGPT. */
-'''
-          replace_once(old_comment, new_comment, 'replace requirement composition comment with provider host')
-
-          old_requirement = '''function getRequirementAutomationService(): RequirementAutomationService {
-  if (requirementAutomationService) return requirementAutomationService;
-  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");
-  requirementAutomationService = new RequirementAutomationService({
-    store: automationStore,
-    provider: getWebGptProviderPort(),
-    inputRefs: automationInputRefs,
-  });
-  return requirementAutomationService;
-}
-
-/**
- * Production Planner composition uses the same provider port and policy/
- * InputRef boundaries as Requirement dispatch. The legacy WebGPT Planner
- * service is intentionally not constructed here.
- */
-function getPlannerProviderIntegrationService(): PlannerProviderIntegrationService {
-  if (plannerProviderIntegrationService) return plannerProviderIntegrationService;
-  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");
-  plannerProviderIntegrationService = createPlannerProviderIntegrationService({ store: automationStore, provider: getWebGptProviderPort() });
-  return plannerProviderIntegrationService;
-}
-'''
-          new_requirement = '''function getRequirementAutomationService() {
-  return getAutomationProviderHost().composition.services.requirement("WEBGPT");
-}
-
-/** Legacy webgpt.* Planner commands stay explicitly pinned to WebGPT. */
-function getPlannerProviderIntegrationService() {
-  return getAutomationProviderHost().composition.services.planner("WEBGPT");
-}
-'''
-          replace_once(old_requirement, new_requirement, 'route legacy WebGPT services through host')
-          replace_once(
-              '          webGptProviderPort = null;\n          webGptExternalActionBridge = null;\n',
-              '          webGptProviderPort = null;\n          automationProviderHost = null;\n          webGptExternalActionBridge = null;\n',
-              'clear provider host on shutdown',
-          )
-
+          replace_once('import { RequirementAutomationService } from "../automation/requirement-service.ts";\n', '', 'remove legacy Requirement import')
+          replace_once('import { createPlannerProviderIntegrationService, type PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";\n', '', 'remove legacy Planner import')
+          replace_once('import { createStartupPlan, runStartupPlan } from "./startup-policy.ts";\n', 'import { createStartupPlan, runStartupPlan } from "./startup-policy.ts";\nimport { createAutomationProviderHost, type AutomationProviderHost } from "./automation-provider-host.ts";\n', 'add provider host import')
+          replace_once('let webGptProviderPort: WebGptAutomationProviderPort | null = null;\nlet requirementAutomationService: RequirementAutomationService | null = null;\nlet plannerProviderIntegrationService: PlannerProviderIntegrationService | null = null;\n', 'let webGptProviderPort: WebGptAutomationProviderPort | null = null;\nlet automationProviderHost: AutomationProviderHost | null = null;\n', 'replace direct service singletons')
+          replace_once('    getWebGptProviderPort();\n    getRequirementAutomationService();\n    getPlannerProviderIntegrationService();\n', '    getAutomationProviderHost();\n', 'materialize provider host')
+          old_comment = '/**\n * Active Requirement production composition.  This is the only main-process\n * caller that creates RequirementAutomationService for live execution: it\n * shares the same provider port and process-owned InputRef registry, so an\n * opaque input reference cannot be resolved by a second, unrelated registry.\n * The paused AUT-2/AUT-3 harnesses remain legacy/test-only and are not routed\n * through this service.\n */\n'
+          new_comment = '/**\n * Native-first production Automation composition. The host consumes only the\n * already-owned RuntimeRegistry and registers WebGPT as an explicit optional\n * provider; it never creates a second Native runtime trunk.\n */\nfunction getAutomationProviderHost(): AutomationProviderHost {\n  if (automationProviderHost) return automationProviderHost;\n  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");\n  automationProviderHost = createAutomationProviderHost({\n    store: automationStore,\n    inputRefs: automationInputRefs,\n    nativeRuntimes: runtimes,\n    nativeRuntimeId: workbenchInstanceId,\n    webgptProvider: getWebGptProviderPort(),\n  });\n  return automationProviderHost;\n}\n\n/** Legacy webgpt.* Requirement commands stay explicitly pinned to WebGPT. */\n'
+          replace_once(old_comment, new_comment, 'insert provider host')
+          old_services = 'function getRequirementAutomationService(): RequirementAutomationService {\n  if (requirementAutomationService) return requirementAutomationService;\n  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");\n  requirementAutomationService = new RequirementAutomationService({\n    store: automationStore,\n    provider: getWebGptProviderPort(),\n    inputRefs: automationInputRefs,\n  });\n  return requirementAutomationService;\n}\n\n/**\n * Production Planner composition uses the same provider port and policy/\n * InputRef boundaries as Requirement dispatch. The legacy WebGPT Planner\n * service is intentionally not constructed here.\n */\nfunction getPlannerProviderIntegrationService(): PlannerProviderIntegrationService {\n  if (plannerProviderIntegrationService) return plannerProviderIntegrationService;\n  if (!automationStore) throw new Error("AUTOMATION_STORE_REQUIRED");\n  plannerProviderIntegrationService = createPlannerProviderIntegrationService({ store: automationStore, provider: getWebGptProviderPort() });\n  return plannerProviderIntegrationService;\n}\n'
+          new_services = 'function getRequirementAutomationService() {\n  return getAutomationProviderHost().composition.services.requirement("WEBGPT");\n}\n\n/** Legacy webgpt.* Planner commands stay explicitly pinned to WebGPT. */\nfunction getPlannerProviderIntegrationService() {\n  return getAutomationProviderHost().composition.services.planner("WEBGPT");\n}\n'
+          replace_once(old_services, new_services, 'route legacy WebGPT services through host')
+          replace_once('          webGptProviderPort = null;\n          webGptExternalActionBridge = null;\n', '          webGptProviderPort = null;\n          automationProviderHost = null;\n          webGptExternalActionBridge = null;\n', 'clear provider host on shutdown')
           path.write_text(text, encoding='utf-8')
           PY
       - name: Enforce bounded diff
