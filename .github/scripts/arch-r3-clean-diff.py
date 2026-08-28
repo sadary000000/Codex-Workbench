@@ -29,7 +29,7 @@ manager.write_bytes(data)
 for name in FILES[1:3]:
     path = Path(name)
     value = path.read_bytes()
-    pattern = re.compile(br'(^[^\r\n]*requestStatus\([^\r\n,()]+),\s*false\)[^\r\n]*)(?:\r\n|\n)', re.M)
+    pattern = re.compile(br'(^[^\r\n]*requestStatus\([^\r\n,()]+,\s*false\)[^\r\n]*)(?:\r\n|\n)', re.M)
     value, _ = pattern.subn(lambda match: re.sub(br',\s*false\)', b')', match.group(1)) + b'\n', value)
     if re.search(br'requestStatus\([^\r\n]*,\s*(?:true|false)\)', value):
         raise SystemExit(f"boolean requestStatus caller remains in {name}")
