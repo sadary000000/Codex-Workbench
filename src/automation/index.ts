@@ -10,6 +10,7 @@ export * from "./provider-reference.ts";
 export * from "./provider-v4-neutral-store.ts";
 export * from "./workflow-provider-reference.ts";
 export * from "./provider-workflow-store.ts";
+export * from "./provider-binding-port.ts";
 export * from "./types.ts";
 export * from "./requirement-egress-policy.ts";
 export * from "./requirement-service.ts";
