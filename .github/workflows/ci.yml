@@ -2,13 +2,19 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Optional branch, tag, or commit SHA to verify'
+        required: false
+        type: string
   push:
     branches:
       - codex/workbench-v1
-      - fix/**
+      - workbench/next
   pull_request:
     branches:
       - codex/workbench-v1
+      - workbench/next
 
 permissions:
   contents: read
@@ -18,7 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
