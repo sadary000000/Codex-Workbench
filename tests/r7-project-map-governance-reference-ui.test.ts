@@ -23,10 +23,12 @@ test("R7.6 governance references use an explicit lazy IPC surface", () => {
   assert.ok(helper.includes("new ProjectMapGovernanceReferenceService"));
 
   const statusStart = main.indexOf("ipcMain.handle(IPC.projectMapStatus");
-  const statusEnd = main.indexOf("ipcMain.handle(IPC.projectMapEnable", statusStart);
+  const statusEnd = main.indexOf("ipcMain.handle(IPC.projectMapGovernanceReferences", statusStart);
   assert.notEqual(statusStart, -1);
   assert.ok(statusEnd > statusStart);
-  assert.equal(main.slice(statusStart, statusEnd).includes("GovernanceReferenceService"), false, "ordinary Project Map status must not initialize Automation");
+  const statusHandler = main.slice(statusStart, statusEnd);
+  assert.equal(statusHandler.includes("GovernanceReferenceService"), false, "ordinary Project Map status must not resolve governance references");
+  assert.equal(statusHandler.includes("ensureAutomationPersistence"), false, "ordinary Project Map status must not initialize Automation");
 });
 
 test("R7.6 renderer only fetches governance refs while Project Map is explicitly open", () => {
