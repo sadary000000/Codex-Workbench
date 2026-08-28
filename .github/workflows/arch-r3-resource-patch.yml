@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch-and-verify:
-    if: github.event.head_commit.message == 'ARCH-R3: install resource reconcile patch runner'
+    if: startsWith(github.event.head_commit.message, 'ARCH-R3: repair resource reconcile patch runner')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact branch head
@@ -19,8 +19,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply exact resource reconcile patch
-        shell: python
+        shell: bash
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           path = Path('src/automation/webgpt-external-action.ts')
@@ -40,8 +41,10 @@ jobs:
               b'',
           ])
           path.write_bytes(raw.replace(old, new, 1))
+          PY
 
       - name: Enforce bounded source diff
+        shell: bash
         run: |
           git diff --check
           git diff --numstat -- src/automation/webgpt-external-action.ts
@@ -69,6 +72,7 @@ jobs:
         run: npm run build
 
       - name: Commit verified production patch
+        shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
