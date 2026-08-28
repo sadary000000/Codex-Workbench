@@ -22,6 +22,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           manager = Path('src/features/webgpt/runtime/webgpt-request-manager.ts')
           text = manager.read_text(encoding='utf-8')
@@ -38,13 +39,22 @@ jobs:
 
           for path in [Path('src/features/webgpt/automation/webgpt-provider-port.ts'), Path('src/main/main.ts')]:
               value = path.read_text(encoding='utf-8')
-              import re
               updated = re.sub(r'(requestStatus\([^\n,()]+),\s*false\)', r'\1)', value)
               if updated != value:
                   path.write_text(updated, encoding='utf-8')
               remaining = [line for line in updated.splitlines() if 'requestStatus(' in line and re.search(r',\s*(?:true|false)\)', line)]
               if remaining:
                   raise SystemExit(f'boolean requestStatus caller remains in {path}: {remaining}')
+
+          legacy_test = Path('tests/arch-v2-6-provider-boundary.test.ts')
+          legacy = legacy_test.read_text(encoding='utf-8')
+          old_fake = '    requestStatus: async (requestId: string, reconcile?: boolean) => {\n      calls.status += 1;\n      assert.equal(requestId, record.requestId);\n      assert.equal(reconcile, false);\n      return record;\n    },'
+          new_fake = '    requestStatus: async (requestId: string) => {\n      calls.status += 1;\n      assert.equal(requestId, record.requestId);\n      return record;\n    },'
+          if old_fake in legacy:
+              legacy = legacy.replace(old_fake, new_fake, 1)
+              legacy_test.write_text(legacy, encoding='utf-8')
+          elif new_fake not in legacy:
+              raise SystemExit('legacy provider boundary fake shape not found')
 
           test = Path('tests/arch-r3-query-reconcile-boundary.test.ts')
           expected = '\n'.join([
@@ -88,7 +98,7 @@ jobs:
           printf '%s\n' "${changed[@]}"
           for path in "${changed[@]}"; do
             case "$path" in
-              src/features/webgpt/runtime/webgpt-request-manager.ts|src/features/webgpt/automation/webgpt-provider-port.ts|src/main/main.ts|tests/arch-r3-query-reconcile-boundary.test.ts) ;;
+              src/features/webgpt/runtime/webgpt-request-manager.ts|src/features/webgpt/automation/webgpt-provider-port.ts|src/main/main.ts|tests/arch-v2-6-provider-boundary.test.ts|tests/arch-r3-query-reconcile-boundary.test.ts) ;;
               *) echo "Unexpected changed path: $path" >&2; exit 1 ;;
             esac
           done
@@ -96,6 +106,8 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: R3 boundary tests
+        run: node --experimental-strip-types --test tests/arch-r3-query-reconcile-boundary.test.ts tests/arch-v2-6-provider-boundary.test.ts tests/webgpt-request-manager.test.ts
       - name: Unit and integration tests
         run: npm test
       - name: Build
@@ -106,6 +118,6 @@ jobs:
           if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/features/webgpt/runtime/webgpt-request-manager.ts src/features/webgpt/automation/webgpt-provider-port.ts src/main/main.ts tests/arch-r3-query-reconcile-boundary.test.ts
+          git add src/features/webgpt/runtime/webgpt-request-manager.ts src/features/webgpt/automation/webgpt-provider-port.ts src/main/main.ts tests/arch-v2-6-provider-boundary.test.ts tests/arch-r3-query-reconcile-boundary.test.ts
           git commit -m "refactor(arch-r3): make request status query-only"
           git push origin HEAD:arch-r3/query-reconcile-boundary
