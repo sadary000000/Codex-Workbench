@@ -4,6 +4,7 @@ import type { PlannerProviderIntegrationService } from "../automation/planner-pr
 import type { ProviderAwareRequirementAutomationService } from "../automation/provider-aware-requirement-service.ts";
 import { AutomationProviderServiceRouter } from "../automation/provider-service-router.ts";
 import type { ExecuteStepInput, ReconcileStepInput } from "../automation/step-execution-service.ts";
+import { DeterministicStepVerificationService, type VerifyStepInput } from "../automation/step-verification-service.ts";
 import { AutomationStore } from "../automation/store.ts";
 
 export class AutomationExecutionRoutingError extends Error {
@@ -39,7 +40,12 @@ type PlannerResultInput = Parameters<PlannerProviderIntegrationService["plannerR
 function normalizeProviderId(value: AutomationProviderId | null | undefined): AutomationProviderId | null {
   if (value === null || value === undefined) return null;
   const normalized = value.trim();
-  if (!normalized) throw new AutomationExecutionRoutingError("AUTOMATION_PROVIDER_BINDING_REQUIRED", "Provider id must be bounded non-empty text.");
+  if (!normalized) {
+    throw new AutomationExecutionRoutingError(
+      "AUTOMATION_PROVIDER_BINDING_REQUIRED",
+      "Provider id must be bounded non-empty text.",
+    );
+  }
   return normalized as AutomationProviderId;
 }
 
@@ -53,14 +59,19 @@ function normalizeProviderId(value: AutomationProviderId | null | undefined): Au
  * resolves the provider from the persisted STEP_EXECUTION logical request.
  * An explicit conflicting provider is rejected instead of switching execution
  * backends mid-workflow.
+ *
+ * Deterministic Step verification is deliberately outside provider routing: it
+ * consumes only immutable Plan/workflow truth and never dispatches provider work.
  */
 export class AutomationExecutionFacade {
   readonly store: AutomationStore;
   readonly services: AutomationProviderServiceRouter;
+  readonly stepVerification: DeterministicStepVerificationService;
 
   constructor(options: { store: AutomationStore; services: AutomationProviderServiceRouter }) {
     this.store = options.store;
     this.services = options.services;
+    this.stepVerification = new DeterministicStepVerificationService({ store: options.store });
   }
 
   async startRequirement(input: RequirementStartInput, providerId?: AutomationProviderId | null) {
@@ -88,7 +99,12 @@ export class AutomationExecutionFacade {
 
   async retryPlan(input: PlannerRetryInput, providerId?: AutomationProviderId | null) {
     const logicalId = input.actionIntentId ?? input.logicalPlannerRequestId;
-    if (!logicalId) throw new AutomationExecutionRoutingError("AUTOMATION_PLANNER_INTENT_NOT_FOUND", "Planner retry has no logical request identity.");
+    if (!logicalId) {
+      throw new AutomationExecutionRoutingError(
+        "AUTOMATION_PLANNER_INTENT_NOT_FOUND",
+        "Planner retry has no logical request identity.",
+      );
+    }
     const provider = await this.providerForPlannerIntent(logicalId, providerId);
     return this.services.planner(provider).retryPlannerRequest(input);
   }
@@ -112,9 +128,21 @@ export class AutomationExecutionFacade {
     return this.services.stepExecution(provider).reconcile(input);
   }
 
-  async providerForRequirementSession(sessionId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
+  async verifyStep(input: VerifyStepInput) {
+    return this.stepVerification.verify(input);
+  }
+
+  async providerForRequirementSession(
+    sessionId: string,
+    requestedProviderId?: AutomationProviderId | null,
+  ): Promise<AutomationProviderId> {
     const session = await this.store.get("requirementAlignmentSessions", sessionId);
-    if (!session) throw new AutomationExecutionRoutingError("AUTOMATION_REQUIREMENT_SESSION_NOT_FOUND", `Requirement session was not found: ${sessionId}`);
+    if (!session) {
+      throw new AutomationExecutionRoutingError(
+        "AUTOMATION_REQUIREMENT_SESSION_NOT_FOUND",
+        `Requirement session was not found: ${sessionId}`,
+      );
+    }
     let persisted: AutomationProviderId | null = null;
     if (session.webgptProjectRef) {
       const ref = await this.store.get("externalRefs", session.webgptProjectRef);
@@ -123,15 +151,31 @@ export class AutomationExecutionFacade {
     return this.resolveContinuationProvider(persisted, requestedProviderId, `Requirement session ${sessionId}`);
   }
 
-  async providerForPlannerAttempt(actionAttemptId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
+  async providerForPlannerAttempt(
+    actionAttemptId: string,
+    requestedProviderId?: AutomationProviderId | null,
+  ): Promise<AutomationProviderId> {
     const attempt = await this.store.get("actionAttempts", actionAttemptId);
-    if (!attempt) throw new AutomationExecutionRoutingError("AUTOMATION_PLANNER_ATTEMPT_NOT_FOUND", `Planner ActionAttempt was not found: ${actionAttemptId}`);
+    if (!attempt) {
+      throw new AutomationExecutionRoutingError(
+        "AUTOMATION_PLANNER_ATTEMPT_NOT_FOUND",
+        `Planner ActionAttempt was not found: ${actionAttemptId}`,
+      );
+    }
     return this.providerForPlannerIntent(attempt.intentId, requestedProviderId);
   }
 
-  async providerForPlannerIntent(actionIntentId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
+  async providerForPlannerIntent(
+    actionIntentId: string,
+    requestedProviderId?: AutomationProviderId | null,
+  ): Promise<AutomationProviderId> {
     const intent = await this.store.get("actionIntents", actionIntentId);
-    if (!intent) throw new AutomationExecutionRoutingError("AUTOMATION_PLANNER_INTENT_NOT_FOUND", `Planner ActionIntent was not found: ${actionIntentId}`);
+    if (!intent) {
+      throw new AutomationExecutionRoutingError(
+        "AUTOMATION_PLANNER_INTENT_NOT_FOUND",
+        `Planner ActionIntent was not found: ${actionIntentId}`,
+      );
+    }
     let persisted = await persistedProviderIdForIntent(this.store, actionIntentId) as AutomationProviderId | null;
     if (!persisted) {
       // Legacy compatibility only: old successful/accepted attempts predate the
@@ -154,15 +198,26 @@ export class AutomationExecutionFacade {
     return this.resolveContinuationProvider(persisted, requestedProviderId, `Planner intent ${actionIntentId}`);
   }
 
-  async providerForStepExecutionAttempt(executionAttemptId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
+  async providerForStepExecutionAttempt(
+    executionAttemptId: string,
+    requestedProviderId?: AutomationProviderId | null,
+  ): Promise<AutomationProviderId> {
     const executionAttempt = await this.store.get("executionAttempts", executionAttemptId);
     if (!executionAttempt) {
-      throw new AutomationExecutionRoutingError("AUTOMATION_STEP_EXECUTION_ATTEMPT_NOT_FOUND", `Step ExecutionAttempt was not found: ${executionAttemptId}`);
+      throw new AutomationExecutionRoutingError(
+        "AUTOMATION_STEP_EXECUTION_ATTEMPT_NOT_FOUND",
+        `Step ExecutionAttempt was not found: ${executionAttemptId}`,
+      );
     }
     const snapshot = await this.store.snapshot();
-    const intent = snapshot.actionIntents.find((item) => item.actionType === "STEP_EXECUTION" && item.attemptId === executionAttempt.attemptId) ?? null;
+    const intent = snapshot.actionIntents.find(
+      (item) => item.actionType === "STEP_EXECUTION" && item.attemptId === executionAttempt.attemptId,
+    ) ?? null;
     if (!intent) {
-      throw new AutomationExecutionRoutingError("AUTOMATION_STEP_EXECUTION_INTENT_NOT_FOUND", `Step ExecutionAttempt ${executionAttemptId} has no persisted STEP_EXECUTION ActionIntent.`);
+      throw new AutomationExecutionRoutingError(
+        "AUTOMATION_STEP_EXECUTION_INTENT_NOT_FOUND",
+        `Step ExecutionAttempt ${executionAttemptId} has no persisted STEP_EXECUTION ActionIntent.`,
+      );
     }
     const persisted = await persistedProviderIdForIntent(this.store, intent.intentId) as AutomationProviderId | null;
     return this.resolveContinuationProvider(persisted, requestedProviderId, `Step execution intent ${intent.intentId}`);
@@ -175,12 +230,20 @@ export class AutomationExecutionFacade {
   ): AutomationProviderId {
     const requested = normalizeProviderId(requestedProviderId);
     if (!persistedProviderId) {
-      if (!requested) throw new AutomationExecutionRoutingError("AUTOMATION_PROVIDER_BINDING_REQUIRED", `${owner} has no persisted provider binding; recovery must not guess from the current default.`);
+      if (!requested) {
+        throw new AutomationExecutionRoutingError(
+          "AUTOMATION_PROVIDER_BINDING_REQUIRED",
+          `${owner} has no persisted provider binding; recovery must not guess from the current default.`,
+        );
+      }
       this.services.providers.get(requested);
       return requested;
     }
     if (requested && requested !== persistedProviderId) {
-      throw new AutomationExecutionRoutingError("AUTOMATION_PROVIDER_BINDING_MISMATCH", `${owner} is bound to provider ${persistedProviderId}; switching to ${requested} is forbidden.`);
+      throw new AutomationExecutionRoutingError(
+        "AUTOMATION_PROVIDER_BINDING_MISMATCH",
+        `${owner} is bound to provider ${persistedProviderId}; switching to ${requested} is forbidden.`,
+      );
     }
     this.services.providers.get(persistedProviderId);
     return persistedProviderId;
