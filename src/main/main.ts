@@ -97,6 +97,7 @@ const IPC = Object.freeze({
   automationStepReview: "automation:step:review",
   automationStageGate: "automation:stage:gate",
   automationStageAdvance: "automation:stage:advance",
+  automationProjectGovernance: "automation:project:governance",
   automationProjectComplete: "automation:project:complete",
   threadList: "persistence:threads:list",
   threadBind: "persistence:threads:bind",
@@ -1119,6 +1120,9 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "automation.stage.advance") {
       if (!request.projectId || !request.stageSpecId) response = controlFail(request.command, "STAGE_ADVANCE_INPUT_REQUIRED", "automation stage advance requires projectId and stageSpecId.");
       else response = controlOk(request.command, await getAutomationProviderHost().execution.advanceStage({ projectId: request.projectId, stageSpecId: request.stageSpecId }));
+    } else if (request.command === "automation.project.inspect") {
+      if (!request.projectId) response = controlFail(request.command, "PROJECT_INSPECT_INPUT_REQUIRED", "automation project inspect requires projectId.");
+      else response = controlOk(request.command, await getAutomationProviderHost().governance.inspect(request.projectId));
     } else if (request.command === "automation.project.complete") {
       if (!request.projectId) response = controlFail(request.command, "PROJECT_COMPLETION_INPUT_REQUIRED", "automation project complete requires projectId.");
       else response = controlOk(request.command, await getAutomationProviderHost().execution.completeProject({ projectId: request.projectId }));
@@ -2348,6 +2352,14 @@ function registerIpc(): void {
     try {
       if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof stageSpecId !== "string" || !stageSpecId.trim() || stageSpecId.length > 256) throw codedError("STAGE_ADVANCE_INPUT_REQUIRED", "Automation Stage advance requires bounded Project and Stage IDs.");
       return ok(await getAutomationProviderHost().execution.advanceStage({ projectId: projectId.trim(), stageSpecId: stageSpecId.trim() }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationProjectGovernance, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) throw codedError("PROJECT_INSPECT_INPUT_REQUIRED", "Automation governance read requires a bounded Project ID.");
+      return ok(await getAutomationProviderHost().governance.inspect(projectId.trim()));
     } catch (error) {
       return fail(error);
     }

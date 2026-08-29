@@ -96,6 +96,7 @@ export const WEBGPT_CONTROL_COMMANDS = [
   "automation.step.review",
   "automation.stage.gate",
   "automation.stage.advance",
+  "automation.project.inspect",
   "automation.project.complete",
 ] as const;
 
@@ -153,6 +154,7 @@ const COMMAND_REQUIRED_CAPABILITY: Readonly<Record<ControlPlaneCommandName, Cont
   "automation.step.review": "automation.step",
   "automation.stage.gate": "automation.stage",
   "automation.stage.advance": "automation.stage",
+  "automation.project.inspect": "automation.project",
   "automation.project.complete": "automation.project",
 });
 
