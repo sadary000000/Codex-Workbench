@@ -416,8 +416,14 @@ try {
   assert.equal(normalTurn.finalMessage?.trim(), "NORMAL_CODEX_OK workbench-e2e-fixture 0.0.1", "Normal Codex read did not return the exact fixture values");
   evidence.phases.push({ phase: "normal-codex", turnId: accepted.turnId, result: normalTurn.finalMessage });
 
-  const conversationMap = await invoke(instance.cdp, "getMapStatus", [nativeThreadId]);
-  const projectMap = await invoke(instance.cdp, "getProjectMapStatus", [productProject.projectId]);
+  const conversationMap = await invoke(instance.cdp, "enableMap", [nativeThreadId]);
+  assert.equal(conversationMap.available, true, "Conversation Map is unavailable after enable");
+  assert.equal(conversationMap.enabled, true, "Conversation Map did not become enabled");
+  assert.ok(conversationMap.map, "Conversation Map projection is missing after enable");
+  const projectMap = await invoke(instance.cdp, "enableProjectMap", [productProject.projectId]);
+  assert.equal(projectMap.available, true, "Project Map is unavailable after enable");
+  assert.equal(projectMap.enabled, true, "Project Map did not become enabled");
+  assert.ok(projectMap.map, "Project Map projection is missing after enable");
   evidence.phases.push({ phase: "maps", conversationMap, projectMap });
 
   const automationProject = await invoke(instance.cdp, "createAutomationProject", ["Workbench v0.1 E2E Automation"]);
