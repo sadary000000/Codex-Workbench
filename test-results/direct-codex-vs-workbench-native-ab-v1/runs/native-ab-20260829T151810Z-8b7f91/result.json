@@ -1,0 +1,302 @@
+{
+  "schemaVersion": 1,
+  "profile": "direct-codex-vs-workbench-native-ab",
+  "protocolVersion": "1.1.0",
+  "repository": "sadary000000/Codex-Workbench",
+  "harnessCommit": "8b7f91e98893bd5b098ca9df93190540ae3efc0d",
+  "testedCommit": "8b7f91e98893bd5b098ca9df93190540ae3efc0d",
+  "codexBinary": {
+    "command": "C:\\Users\\sadar\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+    "resolvedPath": "C:\\Users\\sadar\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+    "sha256": "935a1911ed2556e4ffcec995f4886ac2ac425863ba26fed264df62e30272ad9d",
+    "expectedSha256": "935a1911ed2556e4ffcec995f4886ac2ac425863ba26fed264df62e30272ad9d",
+    "verified": true
+  },
+  "model": "gpt-5.6-sol",
+  "effort": "medium",
+  "environment": {
+    "os": "Microsoft Windows 10.0.19045",
+    "architecture": "X64",
+    "cpu": "AMD Ryzen 9 5900X 12-Core Processor            ",
+    "nodeVersion": "v24.18.0",
+    "npmVersion": "11.16.0",
+    "gitVersion": "git version 2.44.0.windows.1"
+  },
+  "repositoryGate": {
+    "status": "PASS",
+    "evidencePaths": [
+      "repository-gate/npm-ci.command.json",
+      "repository-gate/commands.json",
+      "repository-gate/npm-ci.stdout.txt",
+      "repository-gate/typecheck.stdout.txt",
+      "repository-gate/targeted.stdout.txt",
+      "repository-gate/npm-test.stdout.txt",
+      "repository-gate/build.stdout.txt"
+    ],
+    "reason": "npm ci, typecheck, targeted A/B contracts (12/12), full repository tests (615/615), and build all passed exactly once."
+  },
+  "staticParityAudit": {
+    "status": "PASS",
+    "ordinaryNativeSharedHost": true,
+    "ordinaryNativeDynamicTools": false,
+    "ordinaryNativeWorkbenchDeveloperInstructions": false,
+    "conversationMapIndependentRuntime": false,
+    "projectMapDirectCompatClient": false,
+    "automationNativeCreatesRuntime": false,
+    "unclassifiedRuntimeOwnerCount": 0,
+    "evidencePaths": [
+      "static-audit/occurrences.txt",
+      "static-audit/focused-occurrences.txt",
+      "tests/ab-native-parity-contract.test.ts"
+    ]
+  },
+  "cases": [
+    {
+      "caseId": "AB-READ-001-exact-reply",
+      "required": true,
+      "comparability": "COMPARABLE",
+      "direct": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 4,
+        "taskSuccessRate": 1,
+        "medianInternalElapsedMs": 6397.9102,
+        "meanInternalElapsedMs": 6359.3118,
+        "medianThreadStartMs": 161.32214999999997,
+        "medianTurnStartAckMs": 0.8366500000000201,
+        "tokenUsageAvailable": true,
+        "tokenUsage": [
+          14865,
+          14865,
+          14865,
+          14865
+        ],
+        "toolCallCount": 0,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "trials/AB-READ-001-exact-reply/001-direct",
+          "trials/AB-READ-001-exact-reply/004-direct",
+          "trials/AB-READ-001-exact-reply/006-direct",
+          "trials/AB-READ-001-exact-reply/007-direct"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 4,
+        "taskSuccessRate": 1,
+        "medianInternalElapsedMs": 6296.05725,
+        "meanInternalElapsedMs": 6258.7737,
+        "medianThreadStartMs": 163.29275,
+        "medianTurnStartAckMs": 0.7078000000000202,
+        "tokenUsageAvailable": true,
+        "tokenUsage": [
+          14865,
+          14865,
+          14865,
+          14865
+        ],
+        "toolCallCount": 0,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "trials/AB-READ-001-exact-reply/002-workbench",
+          "trials/AB-READ-001-exact-reply/003-workbench",
+          "trials/AB-READ-001-exact-reply/005-workbench",
+          "trials/AB-READ-001-exact-reply/008-workbench"
+        ]
+      },
+      "medianDeltaMs": -101.85295000000042,
+      "medianRatio": 0.9840802782758657,
+      "successRateDelta": 0,
+      "envelopeParity": true,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "PASS",
+      "notes": []
+    },
+    {
+      "caseId": "AB-READ-002-package-contract",
+      "required": true,
+      "comparability": "INCONCLUSIVE",
+      "direct": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 3,
+        "taskSuccessRate": 0.75,
+        "medianInternalElapsedMs": 13865.1217,
+        "meanInternalElapsedMs": 13537.431949999998,
+        "medianThreadStartMs": 167.80260000000004,
+        "medianTurnStartAckMs": 1.0728500000000167,
+        "tokenUsageAvailable": true,
+        "tokenUsage": [
+          30952,
+          30297,
+          30976,
+          31172
+        ],
+        "toolCallCount": 4,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "trials/AB-READ-002-package-contract/001-direct",
+          "trials/AB-READ-002-package-contract/004-direct",
+          "trials/AB-READ-002-package-contract/006-direct",
+          "trials/AB-READ-002-package-contract/007-direct"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 3,
+        "taskSuccessRate": 0.75,
+        "medianInternalElapsedMs": 11267.165,
+        "meanInternalElapsedMs": 11493.942566666667,
+        "medianThreadStartMs": 161.91154999999998,
+        "medianTurnStartAckMs": 0.7735999999999876,
+        "tokenUsageAvailable": true,
+        "tokenUsage": [
+          31032,
+          30968,
+          30960,
+          14986
+        ],
+        "toolCallCount": 4,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "trials/AB-READ-002-package-contract/002-workbench",
+          "trials/AB-READ-002-package-contract/003-workbench",
+          "trials/AB-READ-002-package-contract/005-workbench",
+          "trials/AB-READ-002-package-contract/008-workbench"
+        ]
+      },
+      "medianDeltaMs": -2597.956699999999,
+      "medianRatio": 0.8126264769821675,
+      "successRateDelta": 0,
+      "envelopeParity": true,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "INCONCLUSIVE",
+      "notes": [
+        "Insufficient complete comparable observations; quota failure is preserved and not retried."
+      ]
+    },
+    {
+      "caseId": "AB-READ-003-source-contract",
+      "required": true,
+      "comparability": "INCONCLUSIVE",
+      "direct": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "analysis/paired/comparison.json"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "analysis/paired/comparison.json"
+        ]
+      },
+      "medianDeltaMs": null,
+      "medianRatio": null,
+      "successRateDelta": null,
+      "envelopeParity": false,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "INCONCLUSIVE",
+      "notes": [
+        "Insufficient complete comparable observations; quota failure is preserved and not retried."
+      ]
+    },
+    {
+      "caseId": "AB-WRITE-001-workspace-write",
+      "required": false,
+      "comparability": "NOT_COMPARABLE",
+      "direct": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "analysis/paired/comparison.json"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "analysis/paired/comparison.json"
+        ]
+      },
+      "medianDeltaMs": null,
+      "medianRatio": null,
+      "successRateDelta": null,
+      "envelopeParity": false,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "INCONCLUSIVE",
+      "notes": [
+        "Optional write stratum was not started after the authenticated workspace exhausted its credits; it is excluded from the required-case verdict."
+      ]
+    }
+  ],
+  "modelVisibleWorkbenchInjection": {
+    "detected": false,
+    "differences": [],
+    "evidencePaths": [
+      "trials/"
+    ]
+  },
+  "performanceAssessment": "INCONCLUSIVE",
+  "verdict": "INCONCLUSIVE",
+  "verdictReason": "The authenticated workspace exhausted its credits during AB-READ-002 trial 008-workbench (usageLimitExceeded, willRetry=false). The failed original was preserved and not retried; AB-READ-003 therefore has no formal observations. Case 1 passed comparably, but the required evidence set is insufficient for a semantic or performance conclusion.",
+  "releaseRecommendation": "RETEST_REQUIRED",
+  "protocolDeviations": [
+    "Non-material pre-timing deviation: the first read-only static-audit capture command had a PowerShell parser error; the error was preserved and the inventory was rerun once before classification without changing target or protocol.",
+    "Non-material post-timing deviation: the first analysis pass hit a PowerShell collection-conversion error; it was corrected and rerun only against immutable trial evidence.",
+    "The optional AB-WRITE-001-workspace-write stratum was not run; it is explicitly non-required and excluded from the primary verdict."
+  ],
+  "evidenceRoot": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T151810Z-8b7f91"
+}

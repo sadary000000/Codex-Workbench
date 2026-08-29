@@ -1,0 +1,51 @@
+{
+  "evidenceRoot": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T151810Z-8b7f91",
+  "retainedExternally": true,
+  "rawLogsPublished": false,
+  "keyEvidence": [
+    {
+      "relativePath": "bootstrap/repository.json",
+      "sha256": "44eb17a66dcafe8678323a16a690e869a2db1e54dd0a0b02566c211d5efaf86a"
+    },
+    {
+      "relativePath": "protocol/file-object-ids.json",
+      "sha256": "9a1a5340db9414ef47b9487acf790e0a6b5df57cc4734abdfd6dd74669f8290a"
+    },
+    {
+      "relativePath": "preflight/protocol-audit.json",
+      "sha256": "230378ee96a6e0f2c9ccb8fd9572401539accc1d58e96e9826e9810cb5792968"
+    },
+    {
+      "relativePath": "preflight/repository-gate.json",
+      "sha256": "9a79ba530a34b23d0a6717b54e4ba95286593ba6967c16f4c9dc5465f9c3e37e"
+    },
+    {
+      "relativePath": "preflight/native-parity-static-audit.json",
+      "sha256": "b4b2ea09420adef878fa2c4c73b40266d014d7a702b240d5b763e47e67046917"
+    },
+    {
+      "relativePath": "preflight/selection.json",
+      "sha256": "d0a739b0a08a4af5612cf6692092323fa5e139d164a57260863420392b9575f5"
+    },
+    {
+      "relativePath": "analysis/direct/summary.json",
+      "sha256": "473b3e7ca13134ae8203073008879c367e270c3efb919f777440d9495e5dc6c4"
+    },
+    {
+      "relativePath": "analysis/workbench/summary.json",
+      "sha256": "88d6f68bb9243936b3f63ad761a7404ef0f75e6dd38c151d8a908889ee050d19"
+    },
+    {
+      "relativePath": "analysis/paired/comparison.json",
+      "sha256": "4217c4b7cc2fbdb23da2bc3d76593126ed759b0000b0240db583cf7bfd6b3e16"
+    },
+    {
+      "relativePath": "review/independent-review.json",
+      "sha256": "101d98bacf1d9b16af7903793e77d52c98b17e4f778be923a92c3242299bb430"
+    },
+    {
+      "relativePath": "post-run-integrity.json",
+      "sha256": "4ee4f75f8a1d7dd6178a782e3c81e5b122e5f34b33e6adcd39a7426b29f7ce2b"
+    }
+  ]
+}

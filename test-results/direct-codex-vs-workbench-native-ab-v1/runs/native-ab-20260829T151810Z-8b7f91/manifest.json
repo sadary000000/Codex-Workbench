@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "repository": "sadary000000/Codex-Workbench",
+  "testId": "direct-codex-vs-workbench-native-ab-v1",
+  "runId": "native-ab-20260829T151810Z-8b7f91",
+  "executionClass": "deferred",
+  "controlPlaneCommit": "80b3df24b58a95a0d3b4cbebcb2963cd46f82dfe",
+  "definition": {
+    "kind": "deferred",
+    "sourcePath": "docs/testing/DEFERRED_TESTS.json",
+    "sourceObjectId": "eee251432a4dc88a09be6569500039de79d44ee3",
+    "selector": "tests entry with testId=direct-codex-vs-workbench-native-ab-v1",
+    "definitionSha256": "dcfa5b5f41b1ef322619549174f4ff570ed83ad02416560d8471c06a1cbc4aed"
+  },
+  "protocol": {
+    "sourceCommit": "8b7f91e98893bd5b098ca9df93190540ae3efc0d",
+    "resultSchemaPath": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_SCHEMA.json",
+    "resultSchemaObjectId": "bcde25fdf6c55c1545d371b878372f64db96a6f1"
+  },
+  "target": {
+    "locatorBranch": "test/native-ab-protocol-v1-1-clean",
+    "configuredCommit": "8b7f91e98893bd5b098ca9df93190540ae3efc0d",
+    "testedCommit": "8b7f91e98893bd5b098ca9df93190540ae3efc0d"
+  },
+  "result": {
+    "path": "result.json",
+    "sha256": "1f3f0e164f98d3787d4cfb86a0e606e104b4d196718fe5675ed5e4ff8a3b2f1e",
+    "verdict": "INCONCLUSIVE"
+  },
+  "completedAt": "2026-08-29T15:35:10.338Z",
+  "summaryPath": "summary.md",
+  "failuresPath": "failures.md",
+  "metricsPath": "metrics.json",
+  "evidenceIndexPath": "evidence-index.json"
+}

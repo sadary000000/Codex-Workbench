@@ -1,0 +1,82 @@
+{
+  "protocolVersion": "1.1.0",
+  "performanceAssessment": "INCONCLUSIVE",
+  "cases": [
+    {
+      "caseId": "AB-READ-001-exact-reply",
+      "required": true,
+      "comparability": "COMPARABLE",
+      "direct": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 4,
+        "medianInternalElapsedMs": 6397.9102
+      },
+      "workbench": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 4,
+        "medianInternalElapsedMs": 6296.05725
+      },
+      "medianDeltaMs": -101.85295000000042,
+      "medianRatio": 0.9840802782758657,
+      "successRateDelta": 0,
+      "caseVerdict": "PASS"
+    },
+    {
+      "caseId": "AB-READ-002-package-contract",
+      "required": true,
+      "comparability": "INCONCLUSIVE",
+      "direct": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 3,
+        "medianInternalElapsedMs": 13865.1217
+      },
+      "workbench": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 3,
+        "medianInternalElapsedMs": 11267.165
+      },
+      "medianDeltaMs": -2597.956699999999,
+      "medianRatio": 0.8126264769821675,
+      "successRateDelta": 0,
+      "caseVerdict": "INCONCLUSIVE"
+    },
+    {
+      "caseId": "AB-READ-003-source-contract",
+      "required": true,
+      "comparability": "INCONCLUSIVE",
+      "direct": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "medianInternalElapsedMs": null
+      },
+      "workbench": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "medianInternalElapsedMs": null
+      },
+      "medianDeltaMs": null,
+      "medianRatio": null,
+      "successRateDelta": null,
+      "caseVerdict": "INCONCLUSIVE"
+    },
+    {
+      "caseId": "AB-WRITE-001-workspace-write",
+      "required": false,
+      "comparability": "NOT_COMPARABLE",
+      "direct": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "medianInternalElapsedMs": null
+      },
+      "workbench": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "medianInternalElapsedMs": null
+      },
+      "medianDeltaMs": null,
+      "medianRatio": null,
+      "successRateDelta": null,
+      "caseVerdict": "INCONCLUSIVE"
+    }
+  ]
+}
