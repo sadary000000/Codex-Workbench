@@ -1,0 +1,125 @@
+name: Automation Step Verification Contract Gate
+
+on:
+  push:
+    branches:
+      - feature/automation-step-verification-contract
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Bounded diff guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='a9223d30e5cd5cfd2919994fa3a3802dc7250fa2'
+          allowed='^(src/automation/planner-validator\.ts|src/automation/store\.ts|tests/automation-step-verification-contract\.test\.ts|\.github/workflows/automation-step-verification-contract\.yml)$'
+          files="$(git diff --name-only "$base"...HEAD)"
+          printf '%s\n' "$files"
+          unexpected="$(printf '%s\n' "$files" | grep -Ev "$allowed" || true)"
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected files in bounded verifier-policy continuity slice:' >&2
+            printf '%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          for required in tests/automation-step-verification-contract.test.ts .github/workflows/automation-step-verification-contract.yml; do
+            printf '%s\n' "$files" | grep -Fx "$required" >/dev/null || { echo "Missing required initial diff: $required" >&2; exit 1; }
+          done
+
+      - name: Apply exact verifier-policy continuity patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          validator = Path('src/automation/planner-validator.ts')
+          text = validator.read_text()
+
+          replacements = [
+            (
+              '  RequirementVersion,\n  StageDetailLevel,\n} from "./types.ts";',
+              '  RequirementVersion,\n  StageDetailLevel,\n  PlannerVerificationClass,\n} from "./types.ts";'
+            ),
+            (
+              '  | "STEP_ACCEPTANCE_REQUIRED"\n  | "STEP_NOT_ACTIONABLE"',
+              '  | "STEP_ACCEPTANCE_REQUIRED"\n  | "STEP_VERIFICATION_PLAN_REQUIRED"\n  | "STEP_NOT_ACTIONABLE"'
+            ),
+            (
+              '  readonly riskClass: "LOW" | "MEDIUM" | "HIGH";\n  readonly sideEffectClass: "PURE" | "IDEMPOTENT" | "RECONCILABLE" | "NON_REPEATABLE";\n  readonly supersedes: string | null;',
+              '  readonly riskClass: "LOW" | "MEDIUM" | "HIGH";\n  readonly sideEffectClass: "PURE" | "IDEMPOTENT" | "RECONCILABLE" | "NON_REPEATABLE";\n  /** Optional immutable machine-verifier policy. Absence preserves legacy K1-B candidates but cannot later imply verifier PASS. */\n  readonly verificationClass?: PlannerVerificationClass;\n  readonly verificationPlan?: readonly string[];\n  readonly expectedArtifacts?: readonly string[];\n  readonly supersedes: string | null;'
+            ),
+            (
+              'const SIDE_EFFECT_CLASSES = new Set(["PURE", "IDEMPOTENT", "RECONCILABLE", "NON_REPEATABLE"]);',
+              'const SIDE_EFFECT_CLASSES = new Set(["PURE", "IDEMPOTENT", "RECONCILABLE", "NON_REPEATABLE"]);\nconst VERIFICATION_CLASSES = new Set<PlannerVerificationClass>(["BUILD", "TEST", "GIT_DIFF", "GIT_STATUS", "FILE_EXISTS", "HASH_MATCH", "JSON_SCHEMA", "CLI_SMOKE", "HARDWARE_SMOKE", "CUSTOM_APPROVED"]);'
+            ),
+            (
+              '  allowedKeys(item, ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "ordinal", "objective", "inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints", "riskClass", "sideEffectClass", "supersedes"], path);\n  return {',
+              '  allowedKeys(item, ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "ordinal", "objective", "inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints", "riskClass", "sideEffectClass", "verificationClass", "verificationPlan", "expectedArtifacts", "supersedes"], path);\n  const hasVerificationDescriptor = item.verificationClass !== undefined || item.verificationPlan !== undefined || item.expectedArtifacts !== undefined;\n  if (hasVerificationDescriptor && item.verificationClass === undefined) throw new PlanCandidateValidationError("REQUIRED_FIELD", `${path}.verificationClass`, `${path}.verificationClass is required when verifier policy is present.`);\n  if (hasVerificationDescriptor && item.verificationPlan === undefined) throw new PlanCandidateValidationError("REQUIRED_FIELD", `${path}.verificationPlan`, `${path}.verificationPlan is required when verifier policy is present.`);\n  const verificationClass = hasVerificationDescriptor ? enumValue<PlannerVerificationClass>(item.verificationClass, `${path}.verificationClass`, VERIFICATION_CLASSES) : undefined;\n  const verificationPlan = hasVerificationDescriptor ? boundedList(item.verificationPlan, `${path}.verificationPlan`, 32, 2_048) : undefined;\n  if (verificationPlan !== undefined && verificationPlan.length === 0) throw new PlanCandidateValidationError("STEP_VERIFICATION_PLAN_REQUIRED", `${path}.verificationPlan`, "A verifier-aware Step requires at least one bounded deterministic verification instruction.");\n  const expectedArtifacts = item.expectedArtifacts === undefined ? undefined : boundedList(item.expectedArtifacts, `${path}.expectedArtifacts`, 64, 2_048);\n  return {'
+            ),
+            (
+              '    riskClass: required(item, "riskClass", path, (input, fieldPath) => enumValue<PlanStepCandidate["riskClass"]>(input, fieldPath, RISK_CLASSES)),\n    sideEffectClass: required(item, "sideEffectClass", path, (input, fieldPath) => enumValue<PlanStepCandidate["sideEffectClass"]>(input, fieldPath, SIDE_EFFECT_CLASSES)),\n    supersedes: nullableText(item, "supersedes", path, 256),',
+              '    riskClass: required(item, "riskClass", path, (input, fieldPath) => enumValue<PlanStepCandidate["riskClass"]>(input, fieldPath, RISK_CLASSES)),\n    sideEffectClass: required(item, "sideEffectClass", path, (input, fieldPath) => enumValue<PlanStepCandidate["sideEffectClass"]>(input, fieldPath, SIDE_EFFECT_CLASSES)),\n    ...(verificationClass === undefined ? {} : { verificationClass }),\n    ...(verificationPlan === undefined ? {} : { verificationPlan }),\n    ...(expectedArtifacts === undefined ? {} : { expectedArtifacts }),\n    supersedes: nullableText(item, "supersedes", path, 256),'
+            ),
+          ]
+
+          for old, new in replacements:
+            if text.count(old) != 1:
+              raise SystemExit(f'planner-validator exact patch anchor mismatch: {old[:100]!r} count={text.count(old)}')
+            text = text.replace(old, new)
+          validator.write_text(text)
+
+          store = Path('src/automation/store.ts')
+          source = store.read_text()
+          old = '      const planVersion: PlanVersion = { planVersionId: c.planVersionId, projectId: c.projectId, requirementVersionId: c.requirementVersionId, version: c.version, status: "ACTIVE", createdBy: "planner-provider", origin: text(input.provider, "planner.provider", 256), requirementPayloadSha256: c.requirementPayloadSha256, planningMode: "JIT", plannerRole: "PLANNER", plannerChatRef: null, currentStageId: c.currentStageId, createdAt: timestamp, supersedes: c.supersedes };'
+          new = '      const canonicalPayload = canonicalize(c, "planner.validatedCandidate");\n      const payloadSha256 = sha256Hex(canonicalPayload);\n      const planVersion: PlanVersion = { planVersionId: c.planVersionId, projectId: c.projectId, requirementVersionId: c.requirementVersionId, version: c.version, status: "ACTIVE", createdBy: "planner-provider", origin: text(input.provider, "planner.provider", 256), canonicalPayload, payloadSha256, requirementPayloadSha256: c.requirementPayloadSha256, planningMode: "JIT", plannerRole: "PLANNER", plannerChatRef: null, currentStageId: c.currentStageId, createdAt: timestamp, supersedes: c.supersedes };'
+          if source.count(old) != 1:
+            raise SystemExit(f'store exact patch anchor mismatch count={source.count(old)}')
+          store.write_text(source.replace(old, new))
+          PY
+          git diff --check
+          git diff -- src/automation/planner-validator.ts src/automation/store.ts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Targeted verifier-policy continuity tests
+        run: node --experimental-strip-types --test tests/automation-step-verification-contract.test.ts tests/stage-k1-b-validator-jit.test.ts tests/stage-k1-c-planner-provider.test.ts
+
+      - name: Full repository tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit validated product patch and self-clean workflow
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/automation/planner-validator.ts src/automation/store.ts
+          git rm .github/workflows/automation-step-verification-contract.yml
+          git commit -m 'feat: persist Step verifier policy with Plan truth'
+          git push origin HEAD:feature/automation-step-verification-contract
