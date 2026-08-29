@@ -10,7 +10,7 @@ import type { JsonRpcMessage } from "../src/shared/runtime-types.ts";
 
 const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-map-pause-"));
 const cwd = process.env.CODEX_WORKBENCH_CWD ?? process.cwd();
-const coordinator = new ConversationMapCoordinator({ userDataDirectory: root, command: resolveCodexCommand() });
+const coordinator = new ConversationMapCoordinator({ userDataDirectory: root });
 let client: AppServerProcessClient | null = null;
 let nativeThreadId: string | null = null;
 let cleanupResult = "not_attempted";

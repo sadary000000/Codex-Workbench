@@ -69,21 +69,23 @@ test("Round 4: a negative initialize gate sends no initialized, thread, turn, or
   assert.deepEqual(notifications, []);
 });
 
-test("Round 4: production App Server paths retain shared bootstrap and capability gates", async () => {
-  const sources = await Promise.all([
+test("Round 4: App Server owners retain strict bootstrap while Conversation Map cannot spawn a runtime", async () => {
+  const [nativeRuntime, appServerHost, projectMapManager, conversationMap] = await Promise.all([
     readFile("src/codex/native-thread-runtime.ts", "utf8"),
     readFile("src/codex/app-server-host.ts", "utf8"),
-    readFile("src/main/map-coordinator.ts", "utf8"),
     readFile("src/main/project-map-manager.ts", "utf8"),
+    readFile("src/main/map-coordinator.ts", "utf8"),
   ]);
-  assert.match(sources[0]!, /startAndInitializeAppServerClient/);
-  assert.match(sources[0]!, /schemaProvenanceVerified/);
-  assert.match(sources[1]!, /startAndInitializeAppServerClient/);
-  assert.match(sources[1]!, /schemaProvenanceVerified/);
-  for (const source of sources.slice(2)) {
-    assert.match(source!, /startAndInitializeAppServerClient/);
-    assert.match(source!, /verifyBinaryProvenance:\s*true/);
-  }
+  assert.match(nativeRuntime, /startAndInitializeAppServerClient/);
+  assert.match(nativeRuntime, /schemaProvenanceVerified/);
+  assert.match(appServerHost, /startAndInitializeAppServerClient/);
+  assert.match(appServerHost, /schemaProvenanceVerified/);
+  assert.match(projectMapManager, /startAndInitializeAppServerClient/);
+  assert.match(projectMapManager, /verifyBinaryProvenance:\s*true/);
+  assert.doesNotMatch(conversationMap, /AppServerProcessClient/);
+  assert.doesNotMatch(conversationMap, /startAndInitializeAppServerClient/);
+  assert.doesNotMatch(conversationMap, /request\(\s*["'](?:thread\/start|turn\/start)["']/);
+
   const controlPlane = await readFile("src/main/webgpt-control.ts", "utf8");
   assert.match(controlPlane, /CAPABILITY_NOT_SUPPORTED/);
   assert.match(controlPlane, /authorizeControlPlaneCommand/);
