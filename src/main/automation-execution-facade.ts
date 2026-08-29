@@ -3,6 +3,7 @@ import { persistedProviderIdForIntent } from "../automation/provider-binding-por
 import type { PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
 import type { ProviderAwareRequirementAutomationService } from "../automation/provider-aware-requirement-service.ts";
 import { AutomationProviderServiceRouter } from "../automation/provider-service-router.ts";
+import { DeterministicStepVerifier, type VerifyStepInput } from "../automation/deterministic-verifier.ts";
 import type { ExecuteStepInput, ReconcileStepInput } from "../automation/step-execution-service.ts";
 import { AutomationStore } from "../automation/store.ts";
 
@@ -57,10 +58,12 @@ function normalizeProviderId(value: AutomationProviderId | null | undefined): Au
 export class AutomationExecutionFacade {
   readonly store: AutomationStore;
   readonly services: AutomationProviderServiceRouter;
+  readonly verifier: DeterministicStepVerifier;
 
   constructor(options: { store: AutomationStore; services: AutomationProviderServiceRouter }) {
     this.store = options.store;
     this.services = options.services;
+    this.verifier = new DeterministicStepVerifier(options.store);
   }
 
   async startRequirement(input: RequirementStartInput, providerId?: AutomationProviderId | null) {
@@ -110,6 +113,10 @@ export class AutomationExecutionFacade {
   async reconcileStep(input: ReconcileStepInput, providerId?: AutomationProviderId | null) {
     const provider = await this.providerForStepExecutionAttempt(input.executionAttemptId, providerId);
     return this.services.stepExecution(provider).reconcile(input);
+  }
+
+  async verifyStep(input: VerifyStepInput) {
+    return this.verifier.verify(input);
   }
 
   async providerForRequirementSession(sessionId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
