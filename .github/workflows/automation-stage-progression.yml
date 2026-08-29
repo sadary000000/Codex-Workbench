@@ -51,7 +51,7 @@ jobs:
           fi
           grep -F 'this.store.createCheckpoint' src/automation/stage-progression-service.ts >/dev/null
           grep -F 'existing = document.checkpoints.find' src/automation/stage-progression-service.ts >/dev/null
-          grep -F 'previous ? previous.currentStageSpecId' src/automation/stage-progression-service.ts >/dev/null
+          grep -F '? previous.currentStageSpecId' src/automation/stage-progression-service.ts >/dev/null
           grep -F 'gate.sha256 !== sha256Hex(descriptor)' src/automation/stage-progression-service.ts >/dev/null
           grep -F '"PLAN_COMPLETE_READY"' src/automation/stage-progression-service.ts >/dev/null
           grep -F 'without mutating immutable PlanVersion' tests/automation-stage-progression.test.ts >/dev/null
