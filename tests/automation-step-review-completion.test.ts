@@ -111,7 +111,7 @@ async function fixture(options: { verification?: "PASS" | "FAIL"; reviewing?: bo
       },
       correlation: {
         workflowActionId: null,
-        requestId: null,
+        requestId: `verification:${ATTEMPT_ID}`,
         nativeThreadId: null,
         nativeTurnId: null,
         resourceLeaseId: null,
