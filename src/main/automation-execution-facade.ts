@@ -3,6 +3,7 @@ import { persistedProviderIdForIntent } from "../automation/provider-binding-por
 import type { PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
 import type { ProviderAwareRequirementAutomationService } from "../automation/provider-aware-requirement-service.ts";
 import { AutomationProviderServiceRouter } from "../automation/provider-service-router.ts";
+import type { ExecuteStepInput, ReconcileStepInput } from "../automation/step-execution-service.ts";
 import { AutomationStore } from "../automation/store.ts";
 
 export class AutomationExecutionRoutingError extends Error {
@@ -11,7 +12,9 @@ export class AutomationExecutionRoutingError extends Error {
     | "AUTOMATION_PROVIDER_BINDING_MISMATCH"
     | "AUTOMATION_REQUIREMENT_SESSION_NOT_FOUND"
     | "AUTOMATION_PLANNER_INTENT_NOT_FOUND"
-    | "AUTOMATION_PLANNER_ATTEMPT_NOT_FOUND";
+    | "AUTOMATION_PLANNER_ATTEMPT_NOT_FOUND"
+    | "AUTOMATION_STEP_EXECUTION_ATTEMPT_NOT_FOUND"
+    | "AUTOMATION_STEP_EXECUTION_INTENT_NOT_FOUND";
 
   constructor(code: AutomationExecutionRoutingError["code"], message: string) {
     super(message);
@@ -45,10 +48,11 @@ function normalizeProviderId(value: AutomationProviderId | null | undefined): Au
  *
  * New logical work defaults to the registry default (Native). Continuations
  * never apply that default blindly: Requirement sessions recover provider id
- * from their persisted scope ExternalRef, while Planner recovery/retry uses
- * the pre-dispatch ActionAttempt provider binding (with legacy provider-request
- * refs as read-only compatibility evidence). An explicit conflicting provider
- * is rejected instead of switching execution backends mid-workflow.
+ * from their persisted scope ExternalRef, Planner recovery/retry uses the
+ * pre-dispatch ActionAttempt provider binding, and Step execution recovery
+ * resolves the provider from the persisted STEP_EXECUTION logical request.
+ * An explicit conflicting provider is rejected instead of switching execution
+ * backends mid-workflow.
  */
 export class AutomationExecutionFacade {
   readonly store: AutomationStore;
@@ -99,6 +103,15 @@ export class AutomationExecutionFacade {
     return this.services.planner(provider).plannerResult(input);
   }
 
+  async executeStep(input: ExecuteStepInput, providerId?: AutomationProviderId | null) {
+    return this.services.stepExecution(normalizeProviderId(providerId)).execute(input);
+  }
+
+  async reconcileStep(input: ReconcileStepInput, providerId?: AutomationProviderId | null) {
+    const provider = await this.providerForStepExecutionAttempt(input.executionAttemptId, providerId);
+    return this.services.stepExecution(provider).reconcile(input);
+  }
+
   async providerForRequirementSession(sessionId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
     const session = await this.store.get("requirementAlignmentSessions", sessionId);
     if (!session) throw new AutomationExecutionRoutingError("AUTOMATION_REQUIREMENT_SESSION_NOT_FOUND", `Requirement session was not found: ${sessionId}`);
@@ -139,6 +152,20 @@ export class AutomationExecutionFacade {
       }
     }
     return this.resolveContinuationProvider(persisted, requestedProviderId, `Planner intent ${actionIntentId}`);
+  }
+
+  async providerForStepExecutionAttempt(executionAttemptId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
+    const executionAttempt = await this.store.get("executionAttempts", executionAttemptId);
+    if (!executionAttempt) {
+      throw new AutomationExecutionRoutingError("AUTOMATION_STEP_EXECUTION_ATTEMPT_NOT_FOUND", `Step ExecutionAttempt was not found: ${executionAttemptId}`);
+    }
+    const snapshot = await this.store.snapshot();
+    const intent = snapshot.actionIntents.find((item) => item.actionType === "STEP_EXECUTION" && item.attemptId === executionAttempt.attemptId) ?? null;
+    if (!intent) {
+      throw new AutomationExecutionRoutingError("AUTOMATION_STEP_EXECUTION_INTENT_NOT_FOUND", `Step ExecutionAttempt ${executionAttemptId} has no persisted STEP_EXECUTION ActionIntent.`);
+    }
+    const persisted = await persistedProviderIdForIntent(this.store, intent.intentId) as AutomationProviderId | null;
+    return this.resolveContinuationProvider(persisted, requestedProviderId, `Step execution intent ${intent.intentId}`);
   }
 
   private resolveContinuationProvider(
