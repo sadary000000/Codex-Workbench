@@ -1,4 +1,5 @@
 import type { AutomationProviderId } from "../automation/adapters.ts";
+import { DEFAULT_HARD_CONSTRAINTS, POLICY_SCHEMA_VERSION, policyVersionPayload } from "../automation/effective-policy.ts";
 import { persistedProviderIdForIntent } from "../automation/provider-binding-port.ts";
 import type { PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
 import { ProjectCompletionService, type CompleteProjectInput } from "../automation/project-completion-service.ts";
@@ -18,6 +19,7 @@ export class AutomationExecutionRoutingError extends Error {
   readonly code:
     | "AUTOMATION_PROVIDER_BINDING_REQUIRED"
     | "AUTOMATION_PROVIDER_BINDING_MISMATCH"
+    | "AUTOMATION_POLICY_BOOTSTRAP_CONFLICT"
     | "AUTOMATION_REQUIREMENT_SESSION_NOT_FOUND"
     | "AUTOMATION_PLANNER_INTENT_NOT_FOUND"
     | "AUTOMATION_PLANNER_ATTEMPT_NOT_FOUND"
@@ -45,6 +47,7 @@ type PlannerStatusInput = Parameters<PlannerProviderIntegrationService["plannerS
 type PlannerResultInput = Parameters<PlannerProviderIntegrationService["plannerResult"]>[0];
 
 const NATIVE_TARGET_PREFIX = "native-thread-v1:";
+const DEFAULT_PROJECT_POLICY_PRESET = "v0.1-default-workflow";
 
 function normalizeProviderId(value: AutomationProviderId | null | undefined): AutomationProviderId | null {
   if (value === null || value === undefined) return null;
@@ -65,6 +68,59 @@ function normalizeNewWorkProviderTarget(provider: AutomationProviderId, provider
   return createNativeThreadTargetRef(normalized);
 }
 
+async function ensureProjectPolicyForNewRequirement(store: AutomationStore, projectId: string): Promise<void> {
+  const project = await store.get("automationProjects", projectId);
+  if (!project) return;
+  if (project.policyVersionId) {
+    const policy = await store.get("policyVersions", project.policyVersionId);
+    if (!policy || policy.projectId !== project.projectId) {
+      throw new AutomationExecutionRoutingError(
+        "AUTOMATION_POLICY_BOOTSTRAP_CONFLICT",
+        "Automation Project policy pointer does not resolve to policy truth in the same project.",
+      );
+    }
+    return;
+  }
+
+  const existing = (await store.snapshot()).policyVersions.filter((policy) => policy.projectId === project.projectId);
+  if (existing.length > 0) {
+    throw new AutomationExecutionRoutingError(
+      "AUTOMATION_POLICY_BOOTSTRAP_CONFLICT",
+      "Automation Project has persisted PolicyVersion truth but no current policy pointer; refusing to guess or repair history.",
+    );
+  }
+
+  try {
+    await store.createPolicyVersion({
+      projectId: project.projectId,
+      version: 1,
+      preset: DEFAULT_PROJECT_POLICY_PRESET,
+      payload: policyVersionPayload({
+        schemaVersion: POLICY_SCHEMA_VERSION,
+        maxPromptDispatches: DEFAULT_HARD_CONSTRAINTS.maxPromptDispatches,
+        maxRepairDispatches: DEFAULT_HARD_CONSTRAINTS.maxRepairDispatches,
+        maxRetryDispatches: DEFAULT_HARD_CONSTRAINTS.maxRetryDispatches,
+        maxNewChatDispatches: DEFAULT_HARD_CONSTRAINTS.maxNewChatDispatches,
+        allowedOperations: DEFAULT_HARD_CONSTRAINTS.allowedOperations,
+        requireHumanGateFor: DEFAULT_HARD_CONSTRAINTS.requireHumanGateFor,
+        allowDataEgress: DEFAULT_HARD_CONSTRAINTS.allowDataEgress,
+        allowSideEffects: DEFAULT_HARD_CONSTRAINTS.allowSideEffects,
+      }),
+      supersedes: null,
+    });
+  } catch (error) {
+    // Concurrent first-work attempts are serialized by the Store. If another
+    // caller won the version-1 bootstrap race, accept only the exact durable
+    // project pointer it produced; otherwise preserve the original failure.
+    const refreshed = await store.get("automationProjects", project.projectId);
+    if (refreshed?.policyVersionId) {
+      const policy = await store.get("policyVersions", refreshed.policyVersionId);
+      if (policy?.projectId === project.projectId) return;
+    }
+    throw error;
+  }
+}
+
 /**
  * Provider-neutral main-process workflow facade.
  *
@@ -81,6 +137,12 @@ function normalizeNewWorkProviderTarget(provider: AutomationProviderId, provider
  * versioned target reference before Requirement/Planner/Step workflow truth is
  * persisted. Already-versioned Native target refs remain idempotent; external
  * provider refs are never rewritten here.
+ *
+ * A freshly created Automation Project may intentionally have no policy until
+ * it becomes executable. Before the first Requirement session is persisted,
+ * this facade installs one conservative typed PolicyVersion using the existing
+ * product hard constraints. Existing policy truth is never replaced or
+ * guessed, and data egress/side effects remain disabled.
  *
  * Deterministic Step verification, explicit user review, Stage gating,
  * Stage progression, and final Project completion projection are deliberately
@@ -110,6 +172,7 @@ export class AutomationExecutionFacade {
 
   async startRequirement(input: RequirementStartInput, providerId?: AutomationProviderId | null) {
     const provider = normalizeProviderId(providerId) ?? this.services.providers.defaultProviderId;
+    await ensureProjectPolicyForNewRequirement(this.store, input.projectId);
     const providerTargetRef = input.providerTargetRef === undefined
       ? undefined
       : normalizeNewWorkProviderTarget(provider, input.providerTargetRef);
