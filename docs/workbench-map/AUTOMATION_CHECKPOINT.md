@@ -1,6 +1,6 @@
 # Automation Governance Checkpoint
 
-> Exact remote checkpoint captured on 2026-08-29 from the stacked Automation branches. This file records confirmed remote truth for continuation; older ROADMAP/HANDOFF text must not override newer exact branch/PR evidence.
+> Exact remote checkpoint captured on 2026-08-29 from the stacked Automation branches. This file records confirmed remote truth for continuation. Older ROADMAP/HANDOFF text must not override newer exact branch/PR evidence.
 
 ## 1. Non-negotiable ownership boundary
 
@@ -22,17 +22,18 @@ Truth boundaries:
 
 ## 2. Confirmed stacked execution-governance heads
 
-The following heads are exact remote commits observed during this checkpoint. All listed PRs remain stacked; no merge is implied by this document.
+All PRs below remain stacked Draft work; no merge is implied by this checkpoint.
 
-| PR | Branch | Exact head | Confirmed role |
+| PR | Branch | Exact final head | Confirmed role |
 | --- | --- | --- | --- |
 | #20 | `feature/automation-execution-to-verification` | `0baf6d1aadb2b64926d9a9867ce3ac9cbc161432` | ExecutionAttempt completion drives Step into verification/failure lifecycle correctly. |
 | #21 | `feature/automation-native-step-executor` | `a9223d30e5cd5cfd2919994fa3a3802dc7250fa2` | First bounded PURE/read-only Native Step executor; reuses existing Native runtime and exact reconcile identity. |
 | #22 | `feature/automation-step-verification-contract` | `f26e9700525e4095541e206016d77a7f6caaf2f4` | Persists optional typed verifier policy in immutable PlanVersion canonical truth. |
 | #24 | `feature/automation-step-verifier` | `a140d4d14abd9f451a7a10d567a16b01be883f5f` | Deterministic workflow-truth verifier; v1 executes only HASH_MATCH and advances PASS to REVIEWING. |
 | #25 | `feature/automation-step-review-completion` | `7bd5fbf40af95f66ff4709ae7b1526b0ff3877b1` | Explicit USER review Evidence completes or rejects a verified Step without rewriting execution truth. |
-
-PR #25 was explicitly observed as Draft, open, and unmerged at its exact final head.
+| #27 | `feature/automation-stage-gate` | `9be5cf73f2c68ea077c4406fd0ff6c2dc54fca72` | Separate Stage-level Gate consumes approved Step truth and dependency Stage PASS truth. |
+| #28 | `feature/automation-stage-progression` | `e61652f421b82c95a94191c85c5db4f8037ff67c` | Exact PASS Stage Gate advances runtime position via immutable Checkpoint; final Stage yields PLAN_COMPLETE_READY. |
+| #29 | `feature/automation-project-completion` | `bc06eec3b1d7bed89a3d03acd644aee551d9f45f` | Final governance truth projects RUNNING AutomationProject to COMPLETED without adding another approval gate. |
 
 ## 3. Confirmed validation checkpoints
 
@@ -58,89 +59,145 @@ PR #25 was explicitly observed as Draft, open, and unmerged at its exact final h
 
 ### PR #25 — explicit user Review completion
 
-Main Review chain validation:
-
-- workflow run: `33242609682`
-- job: `99074398135`
-- result: bounded/static ownership guard, TypeScript, targeted Review/Verifier/Executor tests, full repository tests, build, and self-clean all green
-
-Verifier-Evidence provenance hardening:
-
-- workflow run: `33242710265`
+- provenance-hardening workflow run: `33242710265`
 - job: `99074660530`
 - result: bounded provenance guard, TypeScript, targeted governance-chain tests, full repository tests, build, and self-clean all green
+- final diff against #24:
+  - `src/automation/step-review-service.ts`
+  - `src/main/automation-execution-facade.ts`
+  - `tests/automation-step-review-completion.test.ts`
 
-Final #25 diff against #24 contains only:
+### PR #27 — Stage Gate
 
-- `src/automation/step-review-service.ts`
-- `src/main/automation-execution-facade.ts`
-- `tests/automation-step-review-completion.test.ts`
+- workflow run: `33246870043`
+- job: `99085753190`
+- result: bounded/static ownership guard, TypeScript, targeted Stage governance tests, full repository tests, build, and self-clean all green
+- final diff against #25:
+  - `src/automation/stage-gate-service.ts`
+  - `src/main/automation-execution-facade.ts`
+  - `tests/automation-stage-gate.test.ts`
 
-The temporary validation workflow is absent from the final head.
+### PR #28 — Stage progression
 
-## 4. Current end-to-end governance chain
+- workflow run: `33247163432`
+- job: `99086523909`
+- result: bounded/static ownership guard, TypeScript, targeted Stage progression/governance tests, full repository tests, build, and self-clean all green
+- final diff against #27:
+  - `src/automation/stage-progression-service.ts`
+  - `src/main/automation-execution-facade.ts`
+  - `tests/automation-stage-progression.test.ts`
 
-The bounded v1 chain is now:
+### PR #29 — Project completion projection
 
-1. **Plan truth**
-   - Planner may attach optional typed verifier policy to a Step candidate.
-   - The exact normalized PlanCandidate is persisted in immutable `PlanVersion.canonicalPayload` and bound by `payloadSha256`.
-   - Verifier policy is not copied into StepSpec as a second truth source.
+- workflow run: `33247399934`
+- job: `99087150858`
+- result: bounded/static ownership guard, TypeScript, targeted Project-completion/governance tests, full repository tests, build, and self-clean all green
+- final diff against #28:
+  - `src/automation/project-completion-service.ts`
+  - `src/main/automation-execution-facade.ts`
+  - `tests/automation-project-completion.test.ts`
 
-2. **Execution truth**
-   - First executor slice is deliberately limited to `sideEffectClass=PURE` and existing attached Native Thread execution.
-   - Native runtime remains Codex-owned.
-   - Workbench persists opaque Native Turn identity / hashes / receipts, not raw transcript ownership.
-   - Accepted-but-unknown work is reconciled without a second submit.
-   - successful ExecutionAttempt truth advances the Step to `VERIFYING`.
+All temporary validation workflows above are absent from their final heads.
 
-3. **Verification truth**
-   - `DeterministicStepVerificationService` consumes immutable Plan policy plus already-persisted workflow truth only.
-   - It does not start Native Turns, invoke providers, run shell text, own a sandbox, or inspect a transcript.
-   - v1 auto-executes only `HASH_MATCH` with exact data instruction `result-sha256:<64 lowercase hex>`.
-   - PASS writes bounded `STEP_VERIFICATION` Evidence and advances `VERIFYING -> REVIEWING`.
-   - explicit mismatch writes FAIL Evidence and terminates the Step as failed.
-   - missing/malformed/unsupported verifier policy fails closed and leaves the Step in `VERIFYING`.
+## 4. Frozen v1 governance model
 
-4. **Review truth**
-   - `StepReviewCompletionService` requires exactly one PASS verifier Evidence bound to the exact project/stage/step/execution-attempt/active-plan identity.
-   - Accepted verifier Evidence must also have `source=WORKFLOW_TRUTH`, producer `workbench-step-verifier-v1`, and metadata `verifierProtocol=workbench-step-verifier-v1`.
-   - Review writes one immutable `STEP_REVIEW` Evidence before the terminal transition.
-   - `APPROVE` drives `REVIEWING -> TERMINAL/COMPLETED`.
-   - `REJECT` drives `REVIEWING -> TERMINAL/FAILED` while the already-successful ExecutionAttempt remains `COMPLETED/COMPLETED`.
-   - review Evidence identity deliberately does not include the decision, so one execution attempt has one immutable decision slot.
-   - same decision/provenance replay is idempotent; conflicting decision or reviewer provenance fails closed.
-   - `reviewerRef` is optional provenance only; authentication/authorization remains a caller/UI boundary concern.
+The architecture decision is now explicit:
 
-## 5. Important negative guarantees
+- **Step level:** execution -> deterministic verification -> explicit Review -> terminal.
+- **Stage level:** a separate Stage Gate decides whether the whole Stage may progress.
+- **Project level:** no third approval gate. Project completion is a non-interactive projection from already-proven final governance truth.
+
+This prevents a noisy `execute -> verify -> review -> gate` sequence on every Step while preserving a real Stage-level engineering gate.
+
+## 5. Current end-to-end governance chain
+
+### 5.1 Plan truth
+
+- Planner may attach optional typed verifier policy to a Step candidate.
+- The exact normalized PlanCandidate is persisted in immutable `PlanVersion.canonicalPayload` and bound by `payloadSha256`.
+- Verifier policy is not copied into StepSpec as a second truth source.
+
+### 5.2 Execution truth
+
+- First executor slice is deliberately limited to `sideEffectClass=PURE` and existing attached Native Thread execution.
+- Native runtime remains Codex-owned.
+- Workbench persists opaque Native Turn identity / hashes / receipts, not raw transcript ownership.
+- Accepted-but-unknown work is reconciled without a second submit.
+- Successful ExecutionAttempt truth advances the Step to `VERIFYING`.
+
+### 5.3 Verification truth
+
+- `DeterministicStepVerificationService` consumes immutable Plan policy plus already-persisted workflow truth only.
+- It does not start Native Turns, invoke providers, run shell text, own a sandbox, or inspect a transcript.
+- v1 auto-executes only `HASH_MATCH` with exact data instruction `result-sha256:<64 lowercase hex>`.
+- PASS writes bounded `STEP_VERIFICATION` Evidence and advances `VERIFYING -> REVIEWING`.
+- Explicit mismatch writes FAIL Evidence and terminates the Step as failed.
+- Missing/malformed/unsupported verifier policy fails closed and leaves the Step in `VERIFYING`.
+
+### 5.4 Review truth
+
+- `StepReviewCompletionService` requires exactly one PASS verifier Evidence bound to the exact project/stage/step/execution-attempt/active-plan identity.
+- Accepted verifier Evidence must have `source=WORKFLOW_TRUTH`, producer `workbench-step-verifier-v1`, and metadata `verifierProtocol=workbench-step-verifier-v1`.
+- Review writes one immutable `STEP_REVIEW` Evidence before the terminal transition.
+- `APPROVE` drives `REVIEWING -> TERMINAL/COMPLETED`.
+- `REJECT` drives `REVIEWING -> TERMINAL/FAILED` while the already-successful ExecutionAttempt remains successful execution truth.
+- Review decision replay is idempotent; conflicting decision/provenance fails closed.
+- `reviewerRef` is provenance only; authentication/authorization remains a caller/UI boundary concern.
+
+### 5.5 Stage Gate truth
+
+- A Stage PASS is never implied by Step completion or Review.
+- `StageGateService` requires every active Step in the Stage to be terminal COMPLETED with exact `APPROVE STEP_REVIEW` Evidence bound to the active Plan id/hash.
+- Every declared `dependsOn` Stage must already have exact PASS `STAGE_GATE` Evidence.
+- The Stage itself must be ACTIVE in the exact active PlanVersion.
+- One deterministic Stage/Plan decision slot records PASS or REJECT as immutable `STAGE_GATE` Evidence.
+- Same decision replay is idempotent; conflicting decision or gatekeeper provenance fails closed.
+- REJECT is durable governance truth and does not satisfy downstream dependencies.
+- Stage Gate owns no provider/runtime/sandbox capability and does not mutate PlanVersion or runtime position.
+
+### 5.6 Stage progression truth
+
+- `StageProgressionService` accepts only the deterministic PASS `STAGE_GATE` identity and revalidates its provenance, prerequisite refs, bounded counts, and digest.
+- Runtime Stage position lives in immutable `Checkpoint.currentStageSpecId`; immutable PlanVersion is never rewritten for runtime progress.
+- v1 progression is explicitly serial because the runtime model has one current Stage pointer.
+- The current runtime Stage is resolved from the latest same-Plan Checkpoint, then immutable `PlanVersion.currentStageId`, then the first active ordinal Stage for bootstrap.
+- A stale/non-current Stage cannot be advanced.
+- Progression Checkpoint ids are deterministic, so replay is idempotent.
+- Final Stage PASS creates a completion-ready Checkpoint with `currentStageSpecId=null`; it does not itself complete the AutomationProject.
+
+### 5.7 Project completion truth
+
+- `ProjectCompletionService` is not another approval gate.
+- It independently revalidates exact PASS Gate evidence for every active Stage in the active Plan.
+- It requires the deterministic final progression Checkpoint and a cleared runtime Stage/Step/Attempt position.
+- The final Checkpoint must correlate every active Stage PASS Gate.
+- Completion writes one bounded `PROJECT_COMPLETION_READY` Evidence record before projecting the existing project lifecycle `RUNNING -> COMPLETED`.
+- Same exact completion replay is idempotent.
+- A Project already marked COMPLETED by another path without the expected completion Evidence is rejected; the service does not fabricate historical provenance after the fact.
+
+## 6. Important negative guarantees
 
 The current execution-governance work intentionally does **not** add:
 
 - a second Codex runtime, transcript, context manager, sandbox, tool executor, or subagent system
 - a second provider transport
 - raw Native prompt/response persistence in Automation workflow truth
-- executable verification-plan text
-- a schema migration for Review
-- a durable `ReviewResult` or `GateDecision` entity
-- use of provider `REQUIRE_HUMAN_GATE` as reviewer approval truth
+- executable free-form verification-plan text
+- a schema migration for Review, Stage Gate, Stage progression, or Project completion
+- use of provider `REQUIRE_HUMAN_GATE` as reviewer or Stage Gate approval truth
+- a separate Gate after every Step Review
+- a separate Project completion approval click
+- mutation of immutable `PlanVersion.currentStageId` for runtime progress
+- automatic project completion directly from Step completion or Stage Gate alone
 
 `REQUIRE_HUMAN_GATE` remains dispatch authorization semantics; it must not be silently reinterpreted as post-execution Review/Gate evidence.
 
-## 6. Gate question that remains open
-
-The exact current schema/state machine has `REVIEWING` and `TERMINAL`, but no durable independent Gate entity/state. PR #25 currently terminalizes the Step from explicit Review.
-
-Before adding a separate Gate implementation, the next slice must decide from repository policy/requirements which of these is authoritative:
-
-1. **v1 Review-is-final-gate** — explicit USER Review is the final governance gate for the bounded Step chain; no second Gate entity is introduced unless a concrete policy requires it.
-2. **separate Gate truth** — a distinct policy/gate decision is required after Review. This cannot be bolted on after `TERMINAL`; it would require an explicit lifecycle/data contract change rather than an ad-hoc extra Evidence record.
-
-Do not solve this by reusing provider dispatch `REQUIRE_HUMAN_GATE` or by treating Verifier PASS as completion.
-
 ## 7. Next exact work
 
-1. Audit current PolicyVersion / risk / human-gate semantics at the #25 exact head.
-2. Search exact architecture/requirement docs for a normative independent Gate requirement.
-3. If no independent Gate requirement exists, freeze **Review-is-final-gate for v1** with an architecture contract test/documentation rather than inventing another state machine.
-4. If an independent Gate is explicitly required, design its lifecycle and durable truth first, then implement it as a separate bounded stacked PR.
-5. After Gate semantics are frozen, continue orchestration scheduling of the next eligible Step/Stage without changing Codex-native ownership.
+The core governance chain is now closed at the domain/service level. The next work must be **orchestration reachability**, not more isolated governance primitives:
+
+1. Audit exact production callers of `AutomationExecutionFacade` at PR #29 final head.
+2. Determine which lifecycle actions (`START`, Step scheduling, Verify, Review, Stage Gate, Stage advance, Project completion) are actually reachable from main-process/UI/product entrypoints.
+3. Add only the missing composition/orchestration edges needed to drive the existing services; do not invent duplicate execution engines.
+4. Keep unsupported verifier classes fail-closed until each deterministic verifier gets its own bounded implementation.
+5. Keep the real Direct Codex vs Workbench Native A/B benchmark deferred/non-blocking at its pinned exact target unless it becomes a release gate.
