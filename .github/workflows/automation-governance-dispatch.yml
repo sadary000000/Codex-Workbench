@@ -1,0 +1,124 @@
+name: Automation governance dispatch gate
+
+on:
+  push:
+    branches:
+      - feature/automation-governance-dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply bounded production dispatch patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/main/main.ts")
+          text = path.read_text(encoding="utf-8")
+          old = '''    } else if (request.command === "automation.planner.result") {
+      if (!request.projectId || !request.actionIntentId) response = controlFail(request.command, "PLANNER_QUERY_REQUIRED", "automation planner result 必须提供 Project ID 和 ActionIntent ID。");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.plannerResult({ projectId: request.projectId, actionIntentId: request.actionIntentId }));
+    } else if (request.command === "webgpt.requirement.start") {'''
+          new = '''    } else if (request.command === "automation.planner.result") {
+      if (!request.projectId || !request.actionIntentId) response = controlFail(request.command, "PLANNER_QUERY_REQUIRED", "automation planner result 必须提供 Project ID 和 ActionIntent ID。");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.plannerResult({ projectId: request.projectId, actionIntentId: request.actionIntentId }));
+    } else if (request.command === "automation.step.execute") {
+      if (!request.projectId || !request.stepSpecId || !request.providerTargetRef) response = controlFail(request.command, "STEP_EXECUTION_INPUT_REQUIRED", "automation step execute requires projectId, stepSpecId, and providerTargetRef.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.executeStep({ projectId: request.projectId, stepSpecId: request.stepSpecId, providerId: "native", providerTargetRef: request.providerTargetRef }));
+    } else if (request.command === "automation.step.reconcile") {
+      if (!request.projectId || !request.executionAttemptId) response = controlFail(request.command, "STEP_ATTEMPT_REQUIRED", "automation step reconcile requires projectId and executionAttemptId.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.reconcileStep({ projectId: request.projectId, executionAttemptId: request.executionAttemptId }));
+    } else if (request.command === "automation.step.verify") {
+      if (!request.projectId || !request.executionAttemptId) response = controlFail(request.command, "STEP_ATTEMPT_REQUIRED", "automation step verify requires projectId and executionAttemptId.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.verifyStep({ projectId: request.projectId, executionAttemptId: request.executionAttemptId }));
+    } else if (request.command === "automation.step.review") {
+      if (!request.projectId || !request.executionAttemptId || !request.reviewDecision) response = controlFail(request.command, "STEP_REVIEW_INPUT_REQUIRED", "automation step review requires projectId, executionAttemptId, and reviewDecision.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.reviewStep({ projectId: request.projectId, executionAttemptId: request.executionAttemptId, decision: request.reviewDecision, ...(request.reviewerRef ? { reviewerRef: request.reviewerRef } : {}) }));
+    } else if (request.command === "automation.stage.gate") {
+      if (!request.projectId || !request.stageSpecId || !request.stageGateDecision) response = controlFail(request.command, "STAGE_GATE_INPUT_REQUIRED", "automation stage gate requires projectId, stageSpecId, and stageGateDecision.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.gateStage({ projectId: request.projectId, stageSpecId: request.stageSpecId, decision: request.stageGateDecision, ...(request.gatekeeperRef ? { gatekeeperRef: request.gatekeeperRef } : {}) }));
+    } else if (request.command === "automation.stage.advance") {
+      if (!request.projectId || !request.stageSpecId) response = controlFail(request.command, "STAGE_ADVANCE_INPUT_REQUIRED", "automation stage advance requires projectId and stageSpecId.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.advanceStage({ projectId: request.projectId, stageSpecId: request.stageSpecId }));
+    } else if (request.command === "automation.project.complete") {
+      if (!request.projectId) response = controlFail(request.command, "PROJECT_COMPLETION_INPUT_REQUIRED", "automation project complete requires projectId.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.completeProject({ projectId: request.projectId }));
+    } else if (request.command === "webgpt.requirement.start") {'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"expected one production dispatch anchor, got {count}")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+          cat > tests/automation-governance-control-plane-dispatch.test.ts <<'EOF'
+          import assert from "node:assert/strict";
+          import { readFile } from "node:fs/promises";
+          import test from "node:test";
+
+          test("Automation governance Control Plane dispatch reuses the existing process-owned execution facade", async () => {
+            const main = await readFile(new URL("../src/main/main.ts", import.meta.url), "utf8");
+            const routes = [
+              ["automation.step.execute", "executeStep"],
+              ["automation.step.reconcile", "reconcileStep"],
+              ["automation.step.verify", "verifyStep"],
+              ["automation.step.review", "reviewStep"],
+              ["automation.stage.gate", "gateStage"],
+              ["automation.stage.advance", "advanceStage"],
+              ["automation.project.complete", "completeProject"],
+            ] as const;
+            for (const [command, method] of routes) {
+              assert.match(main, new RegExp(`request\\.command === "${command.replaceAll(".", "\\.")}"`));
+              assert.match(main, new RegExp(`getAutomationProviderHost\\(\\)\\.execution\\.${method}\\(`));
+            }
+            assert.doesNotMatch(main, /request\.providerId/);
+            assert.match(main, /executeStep\(\{ projectId: request\.projectId, stepSpecId: request\.stepSpecId, providerId: "native", providerTargetRef: request\.providerTargetRef \}\)/);
+          });
+
+          test("Review and Stage Gate provenance is forwarded without becoming authorization", async () => {
+            const main = await readFile(new URL("../src/main/main.ts", import.meta.url), "utf8");
+            assert.match(main, /reviewStep\(\{ projectId: request\.projectId, executionAttemptId: request\.executionAttemptId, decision: request\.reviewDecision, \.\.\.\(request\.reviewerRef \? \{ reviewerRef: request\.reviewerRef \} : \{\}\) \}\)/);
+            assert.match(main, /gateStage\(\{ projectId: request\.projectId, stageSpecId: request\.stageSpecId, decision: request\.stageGateDecision, \.\.\.\(request\.gatekeeperRef \? \{ gatekeeperRef: request\.gatekeeperRef \} : \{\}\) \}\)/);
+            assert.doesNotMatch(main, /reviewerRef[^\n]{0,120}(authorize|permission|role)/i);
+            assert.doesNotMatch(main, /gatekeeperRef[^\n]{0,120}(authorize|permission|role)/i);
+          });
+          EOF
+      - name: Bounded diff guard
+        shell: bash
+        run: |
+          allowed='^(.github/workflows/automation-governance-dispatch.yml|src/main/main.ts|tests/automation-governance-control-plane-dispatch.test.ts)$'
+          bad="$(git diff --name-only | grep -Ev "$allowed" || true)"
+          test -z "$bad" || { echo "$bad"; exit 1; }
+          ! git diff | grep -E '^\+.*(new NativeThreadRuntime|new AppServerProcessClient|createAutomationExecutionFacade|createAutomationProviderHost\(|CREATE TABLE|ALTER TABLE)'
+          grep -q 'execution.executeStep' src/main/main.ts
+          grep -q 'execution.completeProject' src/main/main.ts
+          grep -q 'providerId: "native"' src/main/main.ts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Focused governance reachability tests
+        run: node --experimental-strip-types --test tests/automation-governance-control-plane.test.ts tests/automation-governance-control-plane-dispatch.test.ts tests/arch-r2-automation-control-plane.test.ts tests/automation-native-step-executor.test.ts tests/automation-step-verifier.test.ts tests/automation-step-review-completion.test.ts tests/automation-stage-gate.test.ts tests/automation-stage-progression.test.ts tests/automation-project-completion.test.ts
+      - name: Full repository tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit bounded patch and self-clean
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/automation-governance-dispatch.yml
+          git add src/main/main.ts tests/automation-governance-control-plane-dispatch.test.ts
+          git diff --cached --name-only | grep -Ev '^(src/main/main.ts|tests/automation-governance-control-plane-dispatch.test.ts|.github/workflows/automation-governance-dispatch.yml)$' && exit 1 || true
+          git commit -m "Automation: route governance control-plane commands"
+          git push origin HEAD:feature/automation-governance-dispatch
