@@ -1,0 +1,81 @@
+name: Automation Project Completion
+
+on:
+  push:
+    branches:
+      - feature/automation-project-completion
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Bounded diff and Project completion boundary guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='e61652f421b82c95a94191c85c5db4f8037ff67c'
+          allowed='^(src/automation/project-completion-service\.ts|src/main/automation-execution-facade\.ts|tests/automation-project-completion\.test\.ts|\.github/workflows/automation-project-completion\.yml)$'
+          files="$(git diff --name-only "$base"...HEAD)"
+          printf '%s\n' "$files"
+          unexpected="$(printf '%s\n' "$files" | grep -Ev "$allowed" || true)"
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected files in bounded Project completion slice:' >&2
+            printf '%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          for required in src/automation/project-completion-service.ts src/main/automation-execution-facade.ts tests/automation-project-completion.test.ts .github/workflows/automation-project-completion.yml; do
+            printf '%s\n' "$files" | grep -Fx "$required" >/dev/null || { echo "Missing required Project completion diff: $required" >&2; exit 1; }
+          done
+          if grep -Eq 'from "\./(adapters|effective-policy|provider-policy-authority|provider-service-router)\.ts"|from "\.\./.*codex/|REQUIRE_HUMAN_GATE|startTurn\(|\.submit\(|child_process|spawn\(|exec\(|createCheckpoint\(|createPlanVersion\(' src/automation/project-completion-service.ts; then
+            echo 'Project completion must remain workflow-truth-only, consume the final Checkpoint, and never dispatch or create progression truth.' >&2
+            exit 1
+          fi
+          grep -F 'PROJECT_COMPLETION_READY' src/automation/project-completion-service.ts >/dev/null
+          grep -F 'this.store.transitionProject(project.projectId, "COMPLETE"' src/automation/project-completion-service.ts >/dev/null
+          grep -F 'finalCheckpoint.currentStageSpecId !== null' src/automation/project-completion-service.ts >/dev/null
+          grep -F 'stageGateEvidenceIds.some' src/automation/project-completion-service.ts >/dev/null
+          grep -F 'without the deterministic final progression Checkpoint' tests/automation-project-completion.test.ts >/dev/null
+          grep -F 'refuses to fabricate provenance' tests/automation-project-completion.test.ts >/dev/null
+          git diff --check "$base"...HEAD
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Targeted Project completion governance tests
+        run: node --experimental-strip-types --test tests/automation-project-completion.test.ts tests/automation-stage-progression.test.ts tests/automation-stage-gate.test.ts tests/automation-step-review-completion.test.ts tests/automation-step-verifier.test.ts tests/automation-native-step-executor.test.ts tests/automation-step-verification-contract.test.ts
+
+      - name: Full repository tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Self-clean validation workflow
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/automation-project-completion.yml
+          git commit -m 'test: remove Project completion validation workflow'
+          git push origin HEAD:feature/automation-project-completion
