@@ -1,4 +1,9 @@
-import type { AutomationProviderPort } from "./adapters.ts";
+import type {
+  AutomationProviderPort,
+  ProviderCorrelation,
+  ProviderObservation,
+  ProviderTargetRef,
+} from "./adapters.ts";
 import { InputRefRegistry } from "./input-ref.ts";
 import {
   RequirementAutomationService,
@@ -8,6 +13,7 @@ import {
 import { AutomationStore } from "./store.ts";
 import type { RequirementAlignmentSession } from "./types.ts";
 import {
+  decodeWorkflowProviderOpaqueId,
   encodeWorkflowProviderOpaqueId,
   workflowProviderCarrierKind,
   workflowProviderOpaqueId,
@@ -28,6 +34,113 @@ function bounded(value: string | undefined, code: string): string | null {
   return normalized;
 }
 
+function unwrapWorkflowRef(value: string, role: "SCOPE" | "TARGET"): { value: string; neutral: boolean } {
+  const decoded = decodeWorkflowProviderOpaqueId(value);
+  if (!decoded) return { value, neutral: false };
+  if (decoded.role !== role) {
+    throw new RequirementServiceError("ROLE_BINDING_INVALID", `Requirement ${role.toLowerCase()} carrier has the wrong workflow role.`);
+  }
+  return { value: decoded.providerOpaqueId, neutral: true };
+}
+
+function unwrapCorrelation(correlation: ProviderCorrelation): { correlation: ProviderCorrelation; neutral: boolean } {
+  const scope = correlation.providerScopeRef;
+  if (!scope) return { correlation, neutral: false };
+  const decoded = unwrapWorkflowRef(scope, "SCOPE");
+  if (!decoded.neutral) return { correlation, neutral: false };
+  return {
+    correlation: { ...correlation, providerScopeRef: decoded.value },
+    neutral: true,
+  };
+}
+
+function wrapTargetForWorkflow(value: ProviderTargetRef, neutral: boolean): ProviderTargetRef {
+  if (!neutral) return value;
+  const decoded = decodeWorkflowProviderOpaqueId(value);
+  if (decoded) {
+    if (decoded.role !== "TARGET") throw new RequirementServiceError("ROLE_BINDING_INVALID", "Requirement provider returned a non-target workflow carrier.");
+    return value;
+  }
+  return encodeWorkflowProviderOpaqueId("TARGET", value);
+}
+
+function wrapObservationForWorkflow(observation: ProviderObservation, neutral: boolean): ProviderObservation {
+  return neutral
+    ? { ...observation, providerTargetRef: wrapTargetForWorkflow(observation.providerTargetRef, true) }
+    : observation;
+}
+
+/**
+ * The frozen v4 Requirement tables persist provider-neutral workflow carriers
+ * in legacy ExternalRef slots. Those carriers are Automation truth, not
+ * provider-owned target identities. Decode them only while crossing the real
+ * provider boundary, then restore the carrier on returned observations so the
+ * frozen Action ledger can continue checking its exact persisted identity.
+ */
+function requirementProviderBoundary(provider: AutomationProviderPort): AutomationProviderPort {
+  return {
+    provider: provider.provider,
+    async resolveTarget(input) {
+      const target = unwrapWorkflowRef(input.providerTargetRef, "TARGET");
+      const resolved = await provider.resolveTarget({ ...input, providerTargetRef: target.value });
+      return { ...resolved, providerTargetRef: wrapTargetForWorkflow(resolved.providerTargetRef, target.neutral) };
+    },
+    capabilities: () => provider.capabilities(),
+    async submit(input) {
+      const target = unwrapWorkflowRef(input.providerTargetRef, "TARGET");
+      const scope = unwrapCorrelation(input.correlation);
+      if (input.correlation.providerScopeRef && target.neutral !== scope.neutral) {
+        throw new RequirementServiceError("ROLE_BINDING_INVALID", "Requirement provider scope and target must use the same workflow carrier generation.");
+      }
+      const accepted = await provider.submit({
+        ...input,
+        providerTargetRef: target.value,
+        correlation: scope.correlation,
+      });
+      return {
+        ...accepted,
+        providerTargetRef: wrapTargetForWorkflow(accepted.providerTargetRef, target.neutral),
+      };
+    },
+    async observe(input) {
+      const scope = input.correlation ? unwrapCorrelation(input.correlation) : { correlation: input.correlation, neutral: false };
+      const observation = await provider.observe({
+        ...input,
+        ...(scope.correlation ? { correlation: scope.correlation } : {}),
+      });
+      return wrapObservationForWorkflow(observation, scope.neutral);
+    },
+    async reconcile(input) {
+      const scope = unwrapCorrelation(input.correlation);
+      const observation = await provider.reconcile({ ...input, correlation: scope.correlation });
+      return wrapObservationForWorkflow(observation, scope.neutral);
+    },
+    ...(provider.resolveRequestByCorrelation
+      ? {
+          async resolveRequestByCorrelation(input) {
+            const scope = unwrapCorrelation(input.correlation);
+            return provider.resolveRequestByCorrelation!({ ...input, correlation: scope.correlation });
+          },
+        }
+      : {}),
+    ...(provider.readResult
+      ? { readResult: (input) => provider.readResult!(input) }
+      : {}),
+    ...(provider.waitResult
+      ? { waitResult: (input) => provider.waitResult!(input) }
+      : {}),
+    ...(provider.cancel
+      ? {
+          async cancel(input) {
+            const scope = unwrapCorrelation(input.correlation);
+            const observation = await provider.cancel!({ ...input, correlation: scope.correlation });
+            return wrapObservationForWorkflow(observation, scope.neutral);
+          },
+        }
+      : {}),
+  };
+}
+
 /**
  * Thin ARCH-R2 compatibility layer over the frozen Requirement state machine.
  *
@@ -41,8 +154,9 @@ export class ProviderAwareRequirementAutomationService extends RequirementAutoma
   private readonly providerStore: AutomationStore;
 
   constructor(options: { store: AutomationStore; provider: AutomationProviderPort; inputRefs: InputRefRegistry }) {
-    super(options);
-    this.provider = options.provider;
+    const provider = requirementProviderBoundary(options.provider);
+    super({ ...options, provider });
+    this.provider = provider;
     this.providerStore = options.store;
   }
 
