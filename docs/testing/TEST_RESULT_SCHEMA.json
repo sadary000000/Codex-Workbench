@@ -7,6 +7,7 @@
   "required": [
     "schemaVersion",
     "testId",
+    "definitionBinding",
     "protocolVersion",
     "executionClass",
     "repository",
@@ -23,8 +24,20 @@
     "evidenceRoot"
   ],
   "properties": {
-    "schemaVersion": {"const": 2},
+    "schemaVersion": {"const": 3},
     "testId": {"type": "string", "minLength": 1},
+    "definitionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sourcePath", "sourceObjectId", "selector", "definitionSha256"],
+      "properties": {
+        "kind": {"enum": ["active", "deferred"]},
+        "sourcePath": {"enum": ["docs/testing/ACTIVE_TEST.json", "docs/testing/DEFERRED_TESTS.json"]},
+        "sourceObjectId": {"$ref": "#/$defs/objectId"},
+        "selector": {"type": "string", "minLength": 1},
+        "definitionSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
     "protocolVersion": {"type": "string", "minLength": 1},
     "executionClass": {"enum": ["blocking", "deferred"]},
     "repository": {"const": "sadary000000/Codex-Workbench"},
@@ -45,7 +58,7 @@
             "required": ["path", "objectId"],
             "properties": {
               "path": {"type": "string", "minLength": 1},
-              "objectId": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}
+              "objectId": {"$ref": "#/$defs/objectId"}
             }
           }
         }
@@ -169,7 +182,7 @@
       "additionalProperties": false,
       "required": ["registryObjectId", "entries"],
       "properties": {
-        "registryObjectId": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+        "registryObjectId": {"$ref": "#/$defs/objectId"},
         "entries": {
           "type": "array",
           "items": {
@@ -178,7 +191,7 @@
             "required": ["testId", "status", "classification", "blocksMainline"],
             "properties": {
               "testId": {"type": "string", "minLength": 1},
-              "status": {"enum": ["planned", "pending", "running", "completed", "cancelled"]},
+              "status": {"enum": ["planned", "pending", "ready", "running", "completed", "cancelled"]},
               "classification": {"const": "deferred"},
               "blocksMainline": {"const": false}
             }
@@ -196,6 +209,8 @@
         {"type": "null"}
       ]
     },
+    "objectId": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "gateResult": {
       "type": "object",
       "additionalProperties": false,

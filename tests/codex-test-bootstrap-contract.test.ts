@@ -10,6 +10,8 @@ const deferredTestsPath = join(root, "docs/testing/DEFERRED_TESTS.json");
 const runbookPath = join(root, "docs/testing/CODEX_TEST_RUNBOOK.md");
 const agentPlanPath = join(root, "docs/testing/CODEX_AGENT_PLAN.md");
 const resultSchemaPath = join(root, "docs/testing/TEST_RESULT_SCHEMA.json");
+const resultPolicyPath = join(root, "docs/testing/TEST_RESULTS_POLICY.json");
+const resultManifestSchemaPath = join(root, "docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json");
 
 const agents = readFileSync(agentsPath, "utf8");
 const activeTest = JSON.parse(readFileSync(activeTestPath, "utf8"));
@@ -17,6 +19,8 @@ const deferredTests = JSON.parse(readFileSync(deferredTestsPath, "utf8"));
 const runbook = readFileSync(runbookPath, "utf8");
 const agentPlan = readFileSync(agentPlanPath, "utf8");
 const resultSchema = JSON.parse(readFileSync(resultSchemaPath, "utf8"));
+const resultPolicy = JSON.parse(readFileSync(resultPolicyPath, "utf8"));
+const resultManifestSchema = JSON.parse(readFileSync(resultManifestSchemaPath, "utf8"));
 
 const protocolPaths = [
   "docs/testing/ACTIVE_TEST.json",
@@ -24,6 +28,8 @@ const protocolPaths = [
   "docs/testing/CODEX_TEST_RUNBOOK.md",
   "docs/testing/CODEX_AGENT_PLAN.md",
   "docs/testing/TEST_RESULT_SCHEMA.json",
+  "docs/testing/TEST_RESULTS_POLICY.json",
+  "docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json",
 ];
 
 test("Codex repository test bootstrap routes through every required protocol file", () => {
@@ -33,13 +39,14 @@ test("Codex repository test bootstrap routes through every required protocol fil
   }
 
   assert.match(agents, /control-plane commit/i);
-  assert.match(agents, /never switch to a newer remote copy/i);
   assert.match(agents, /status=ready/);
   assert.match(agents, /protocol\.source=execution-target/);
-  assert.match(agents, /forward validation of newer code requires a versioned rebind/i);
+  assert.match(agents, /codex\/test-results/);
+  assert.match(agents, /Post-run publication/i);
+  assert.match(agents, /every run belongs to exactly one test project/i);
 });
 
-test("active blocking pointer freezes exact target and freshness policy", () => {
+test("active blocking pointer freezes exact target and exposes result publication contracts", () => {
   assert.equal(activeTest.schemaVersion, 2);
   assert.equal(activeTest.state, "active");
   assert.equal(activeTest.executionClass, "blocking");
@@ -54,11 +61,24 @@ test("active blocking pointer freezes exact target and freshness policy", () => 
   assert.equal(activeTest.controlPlanePolicy.snapshotBeforeExecution, true);
   assert.equal(activeTest.controlPlanePolicy.neverRereadRemoteDuringRun, true);
 
-  for (const key of ["runbook", "agentPlan", "resultSchema", "deferredRegistry"]) {
+  for (const key of [
+    "runbook",
+    "agentPlan",
+    "resultSchema",
+    "deferredRegistry",
+    "resultPublicationPolicy",
+    "resultManifestSchema",
+  ]) {
     const relativePath = activeTest.protocol[key];
     assert.equal(typeof relativePath, "string", `protocol.${key} must be a repository path`);
     assert.equal(existsSync(join(root, relativePath)), true, `protocol.${key} target must exist: ${relativePath}`);
   }
+});
+
+test("testId is a unique test-project primary key across active and deferred definitions", () => {
+  const ids = [activeTest.testId, ...deferredTests.tests.map((entry: { testId: string }) => entry.testId)];
+  assert.equal(ids.every((id) => typeof id === "string" && id.length > 0), true);
+  assert.equal(new Set(ids).size, ids.length, "testId must be unique across active and deferred test projects");
 });
 
 test("deferred test registry retains non-blocking work without granting current mainline PASS", () => {
@@ -111,7 +131,7 @@ test("Direct Codex vs Workbench Native deferred A/B is ready on one exact green 
   assert.equal(entry.executionPolicy.resultAppliesOnlyToExactExecutionTarget, true);
 });
 
-test("Runbook and agent plan use the same protocol version as ACTIVE_TEST", () => {
+test("Runbook and agent plan use the same active execution protocol version", () => {
   const version = activeTest.protocol.version;
   assert.equal(typeof version, "string");
   assert.equal(version.length > 0, true);
@@ -123,14 +143,35 @@ test("Runbook and agent plan use the same protocol version as ACTIVE_TEST", () =
   assert.match(agentPlan, /B-1_CONTROL_PLANE_FROZEN/);
 });
 
-test("result schema separates exact-target verdict from mainline gate applicability", () => {
+test("result publication policy is a narrow append-only remote-write exception", () => {
+  assert.equal(resultPolicy.schemaVersion, 1);
+  assert.equal(resultPolicy.repository, "sadary000000/Codex-Workbench");
+  assert.equal(resultPolicy.resultSink.branch, "codex/test-results");
+  assert.equal(resultPolicy.resultSink.root, "test-results");
+  assert.equal(resultPolicy.identity.testProjectKey, "testId");
+  assert.equal(resultPolicy.identity.runKey, "runId");
+  assert.equal(resultPolicy.identity.zeroDefinitionMatches, "BLOCKED");
+  assert.equal(resultPolicy.identity.multipleDefinitionMatches, "BLOCKED");
+  assert.equal(resultPolicy.publication.phase, "post-validation-after-independent-review");
+  assert.equal(resultPolicy.publication.fastForwardOnly, true);
+  assert.equal(resultPolicy.publication.forcePushAllowed, false);
+  assert.equal(resultPolicy.publication.existingRunMutationAllowed, false);
+  assert.equal(resultPolicy.publication.existingRunDeletionAllowed, false);
+  assert.equal(resultPolicy.publication.rerunProductTestOnPublicationConflict, false);
+  assert.equal(resultPolicy.allowedRunFiles.binaryFilesAllowed, false);
+  assert.equal(resultPolicy.allowedRunFiles.rawLogsAllowed, false);
+  assert.deepEqual(resultPolicy.allowedRunFiles.required, ["manifest.json", "result.json", "summary.md"]);
+});
+
+test("active result schema binds every result to one frozen test definition", () => {
   assert.equal(resultSchema.type, "object");
-  assert.equal(resultSchema.properties.schemaVersion.const, 2);
+  assert.equal(resultSchema.properties.schemaVersion.const, 3);
   assert.equal(resultSchema.properties.repository.const, "sadary000000/Codex-Workbench");
 
   const required = new Set(resultSchema.required);
   for (const field of [
     "testId",
+    "definitionBinding",
     "protocolVersion",
     "executionClass",
     "repository",
@@ -150,14 +191,32 @@ test("result schema separates exact-target verdict from mainline gate applicabil
   }
 
   assert.deepEqual(resultSchema.properties.verdict.enum, ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]);
-  assert.deepEqual(resultSchema.properties.mainlineGate.properties.status.enum, [
-    "SATISFIED",
-    "STALE",
-    "FAILED",
-    "BLOCKED",
-    "INCONCLUSIVE",
-    "NOT_APPLICABLE",
-  ]);
+  assert.equal(resultSchema.properties.definitionBinding.properties.definitionSha256.$ref, "#/$defs/sha256");
   assert.equal(resultSchema.$defs.sha.pattern, "^[0-9a-f]{40}$");
-  assert.equal(resultSchema.properties.ownershipAudit.properties.unclassifiedOccurrenceCount.minimum, 0);
+  assert.equal(resultSchema.$defs.sha256.pattern, "^[0-9a-f]{64}$");
+});
+
+test("universal publication manifest binds test project, run, definition, protocol and exact target", () => {
+  assert.equal(resultManifestSchema.type, "object");
+  assert.equal(resultManifestSchema.properties.schemaVersion.const, 1);
+  assert.equal(resultManifestSchema.properties.repository.const, "sadary000000/Codex-Workbench");
+
+  const required = new Set(resultManifestSchema.required);
+  for (const field of [
+    "testId",
+    "runId",
+    "executionClass",
+    "controlPlaneCommit",
+    "definition",
+    "protocol",
+    "target",
+    "result",
+    "completedAt",
+  ]) {
+    assert.equal(required.has(field), true, `manifest schema must require ${field}`);
+  }
+
+  assert.equal(resultManifestSchema.properties.definition.properties.definitionSha256.$ref, "#/$defs/sha256");
+  assert.equal(resultManifestSchema.properties.protocol.properties.resultSchemaObjectId.$ref, "#/$defs/objectId");
+  assert.equal(resultManifestSchema.properties.result.properties.path.const, "result.json");
 });

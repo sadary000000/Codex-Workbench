@@ -10,97 +10,94 @@ repository URL / checked-out repository
   -> freeze bootstrap control-plane commit
   -> /docs/testing/ACTIVE_TEST.json
   -> /docs/testing/DEFERRED_TESTS.json
-  -> /docs/testing/CODEX_TEST_RUNBOOK.md
-  -> /docs/testing/CODEX_AGENT_PLAN.md
-  -> /docs/testing/TEST_RESULT_SCHEMA.json
+  -> selected Runbook / agent plan / result schema
+  -> /docs/testing/TEST_RESULTS_POLICY.json
+  -> /docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json
   -> isolated exact-SHA execution
-  -> exact-commit verdict + mainline gate applicability
-  -> structured result + evidence
+  -> independent review
+  -> frozen result.json + manifest.json
+  -> fast-forward append to codex/test-results
 ```
 
-The root `AGENTS.md` stays intentionally small. It routes repository-test requests into this versioned control plane.
+## Test-project identity
+
+`testId` is the stable primary key for a test project.
+
+- The active blocking test is one test project.
+- Every entry in `DEFERRED_TESTS.json.tests` is one test project.
+- Test IDs must be unique across the frozen active definition and frozen deferred registry.
+- One test project may have many historical runs.
+- Every run belongs to exactly one test project.
+
+The durable result path is:
+
+```text
+test-results/<testId>/runs/<runId>/
+```
+
+For a published run, all of these must match:
+
+```text
+frozen test definition testId
+== path <testId>
+== manifest.json.testId
+== result.json.testId
+
+path <runId>
+== manifest.json.runId
+== result.json.run.runId
+```
+
+The publication manifest also binds the frozen definition source object ID and SHA-256 digest, so a result cannot be reassigned to another test project just by renaming a directory.
 
 ## Files
 
-- `ACTIVE_TEST.json` — authoritative pointer to the currently active test target, blocking class, freshness policy, and protocol version.
-- `DEFERRED_TESTS.json` — retained non-blocking test intents/backlog. These do not enter the active critical path unless explicitly activated or requested.
-- `CODEX_TEST_RUNBOOK.md` — exact execution procedure, control-plane freeze, exact-target isolation, freshness checks, evidence, retry rules, verdict semantics, and deferred replay rules.
-- `CODEX_AGENT_PLAN.md` — coordinator/subagent DAG, barriers, parallel waves, resource isolation, completion freshness, and deferred execution rules.
-- `TEST_RESULT_SCHEMA.json` — machine-readable final result contract separating exact-target verdict from mainline gate applicability.
+- `ACTIVE_TEST.json` — authoritative blocking test pointer and exact target.
+- `DEFERRED_TESTS.json` — retained non-blocking test projects/backlog.
+- `CODEX_TEST_RUNBOOK.md` — active correctness/architecture execution procedure.
+- `CODEX_AGENT_PLAN.md` — active coordinator/subagent DAG and barriers.
+- `TEST_RESULT_SCHEMA.json` — active test's machine-readable result contract.
+- `TEST_RESULTS_POLICY.json` — universal post-run publication/identity policy.
+- `TEST_RESULT_MANIFEST_SCHEMA.json` — universal manifest contract for every published run, including test-specific profiles such as A/B.
+
+A deferred test may point to a different result schema at its exact execution-target commit. The universal publication manifest still wraps that result and supplies the common `testId` / `runId` / definition / target binding.
+
+## Execution writes vs result publication
+
+Validation itself remains read-only with respect to GitHub and product/test source. The Runbook's no-push/no-edit rules remain in force through independent review and verdict calculation.
+
+After the final result is frozen, a separate publication phase is allowed. Its only remote-write authority is:
+
+```text
+branch: codex/test-results
+root:   test-results/
+```
+
+Publication is fast-forward and append-only. It cannot authorize product changes, test changes, branch deletion, tags, merges, or force-pushes.
+
+If another Codex run publishes concurrently, the publisher may fetch the newer result-branch head and re-apply the same new immutable run package on top, within the bounded retry policy. It must not rerun the tested product merely because the result branch moved.
 
 ## Why GitHub can keep changing while Codex tests
 
 A run freezes two independent things:
 
-1. **Control-plane truth** — the bootstrap checkout commit plus the exact protocol file objects from that commit.
+1. **Control-plane truth** — bootstrap commit plus frozen protocol/test-definition objects.
 2. **Test target truth** — the exact product/test commit executed in a detached worktree.
 
-Once both are pinned, later pushes do not mutate that run. Codex must not reread a newer Runbook or silently switch to a newer source commit.
+Later pushes cannot mutate either frozen input.
 
-For a **blocking** test, the target branch is checked again when the run finishes. If the branch moved, the exact tested commit can still PASS, but `mainlineGate` becomes `STALE` and the PASS cannot authorize the newer head.
+For blocking tests, branch freshness is checked separately from the exact-commit verdict. A stale PASS remains valid historical evidence for the tested SHA but cannot gate the newer branch head.
 
-For a **deferred** test, branch/mainline movement is expected. The result is historical evidence for the exact execution target and never blocks current work unless a future versioned control-plane change promotes that test to blocking.
+For deferred tests, branch movement is expected. Historical replay and forward validation are distinct runs with distinct exact target bindings.
 
-## Blocking vs deferred
+## Result retention
 
-### Blocking
+Published runs are durable repository evidence.
 
-Use when the result must gate the current milestone/branch head.
+- never overwrite an old run;
+- never delete an old run to hide a failure;
+- never reinterpret an old PASS as proof for a newer commit;
+- never publish two different results under the same `runId`;
+- large raw logs stay outside Git and are referenced by bounded `evidence-index.json` entries/digests.
 
-Properties:
-
-- listed in `ACTIVE_TEST.json`;
-- exact target must match branch head before execution;
-- exact target is rechecked against branch head at completion;
-- current mainline gate is satisfied only by PASS on the still-current exact target.
-
-### Deferred
-
-Use when the test is useful but does not need to pause mainline progress.
-
-Properties:
-
-- retained in `DEFERRED_TESTS.json`;
-- `blocksMainline = false`;
-- planned entries can wait for a future exact execution target;
-- pending entries must bind an exact commit before execution;
-- historical replay and forward validation are separate runs;
-- old results are append-only evidence and are never overwritten or promoted to newer commits.
-
-A deferred test may still declare `requiredBefore` a future milestone such as `release-candidate`.
-
-## Deferred-test retention rule
-
-Do not lose the only way to reconstruct a pending exact target. Until a deferred exact target is completed or rebound, keep at least one reachable locator/reference for it. If a branch is going to be deleted, first preserve another authorized locator or explicitly rebind the deferred entry.
-
-The test executor itself never creates/deletes remote refs because test execution is read-only with respect to repository state.
-
-## Design rules
-
-1. **Exact commit, not floating branch.** Branches are locators/freshness signals; execution is exact-SHA.
-2. **Frozen protocol.** One run uses one bootstrap control-plane commit from start to finish.
-3. **Original workspace is never prepared destructively.** Execution uses a detached isolated worktree.
-4. **Repository development may continue.** Other branches can move without corrupting a pinned run.
-5. **Gate applicability is separate from test verdict.** A stale blocking PASS remains valid historical evidence but does not gate a newer head.
-6. **Parallelism is explicit.** Safe work overlaps; shared-state or performance-sensitive work is serialized/isolated.
-7. **Product code is read-only during validation.** A failed gate is evidence, not permission to fix.
-8. **No blind retries.** Only Runbook-authorized retries are allowed and recorded.
-9. **Deferred tests are retained, not forgotten.** They may be replayed later without blocking current mainline.
-10. **Evidence precedes verdict.** PASS/FAIL/BLOCKED/INCONCLUSIVE comes from recorded evidence.
-
-## Updating the active test
-
-When a new blocking validation target is ready, update `ACTIVE_TEST.json` in a bounded repository change with both branch locator and exact target commit.
-
-Do not mutate a running test by pushing a new protocol and asking the executor to pick it up mid-run. A new protocol or active target applies only to a new run.
-
-## Adding a deferred test
-
-Add a stable entry to `DEFERRED_TESTS.json`.
-
-- `planned` is allowed without an execution target when the test intent is known but the harness/target is not ready.
-- before execution, bind an exact target and move it to an executable state such as `pending` through a normal reviewed repository change;
-- preserve `registeredAgainst` when later binding a newer forward-validation target;
-- keep previous run evidence/results instead of overwriting them.
-
-The Direct Codex vs Workbench Native A/B test is retained here as a planned deferred profile until its benchmark harness and exact execution target are ready.
+The result branch owns structured test evidence only; it is not a product-development branch.

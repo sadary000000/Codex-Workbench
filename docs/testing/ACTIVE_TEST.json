@@ -26,7 +26,9 @@
     "runbook": "docs/testing/CODEX_TEST_RUNBOOK.md",
     "agentPlan": "docs/testing/CODEX_AGENT_PLAN.md",
     "resultSchema": "docs/testing/TEST_RESULT_SCHEMA.json",
-    "deferredRegistry": "docs/testing/DEFERRED_TESTS.json"
+    "deferredRegistry": "docs/testing/DEFERRED_TESTS.json",
+    "resultPublicationPolicy": "docs/testing/TEST_RESULTS_POLICY.json",
+    "resultManifestSchema": "docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json"
   },
   "knownEvidence": {
     "workflowRunId": 33233413426,
