@@ -597,7 +597,7 @@ export class NativeStepExecutionService {
   }): Promise<ActionReceipt> {
     const document = await this.store.snapshot();
     const existing = receiptFor(document, input.actionAttempt.actionAttemptId);
-    const receiptInput = {
+    const receiptInput: Parameters<AutomationStore["createActionReceipt"]>[0] = {
       actionAttemptId: input.actionAttempt.actionAttemptId,
       status: input.status,
       externalStatus: input.externalStatus,
@@ -608,7 +608,7 @@ export class NativeStepExecutionService {
       providerObservationRef: input.observationExternal.externalRefId,
       outcomeCertainty: input.outcomeCertainty,
       evidenceRefs: [],
-    } as const;
+    };
     if (existing?.status === "UNKNOWN") return this.store.reconcileActionReceipt(receiptInput);
     if (existing) return existing;
     return this.store.createActionReceipt(receiptInput);
