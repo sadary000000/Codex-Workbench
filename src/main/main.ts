@@ -91,6 +91,8 @@ const IPC = Object.freeze({
   projectAutomationCandidateList: "automation:projects:association-candidates",
   projectAutomationBind: "persistence:project-automation-associations:bind",
   projectAutomationUnlink: "persistence:project-automation-associations:unlink",
+  automationRequirementInspect: "automation:requirement:inspect",
+  automationRequirementAnswer: "automation:requirement:answer",
   automationRequirementConfirm: "automation:requirement:confirm",
   automationStepExecute: "automation:step:execute",
   automationStepReconcile: "automation:step:reconcile",
@@ -2300,6 +2302,27 @@ function registerIpc(): void {
       if (typeof productProjectId !== "string" || typeof automationProjectId !== "string") throw new Error("Project association IDs are required.");
       // Product-owned unlink deliberately remains available without Automation initialization.
       return ok(await getProjectAutomationAssociationService().unlink(productProjectId, automationProjectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationRequirementInspect, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) throw codedError("REQUIREMENT_INSPECT_INPUT_REQUIRED", "Requirement inspection requires a bounded Project ID.");
+      return ok(await getAutomationProviderHost().requirements.inspect(projectId.trim()));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationRequirementAnswer, async (_event, sessionId: unknown, roundId: unknown, answers: unknown) => {
+    try {
+      if (typeof sessionId !== "string" || !sessionId.trim() || sessionId.length > 256) throw codedError("REQUIREMENT_ANSWER_INPUT_REQUIRED", "Requirement answers require a bounded alignment session ID.");
+      if (roundId !== undefined && roundId !== null && (typeof roundId !== "string" || !roundId.trim() || roundId.length > 256)) throw codedError("REQUIREMENT_ANSWER_INPUT_REQUIRED", "Requirement round ID must be bounded when supplied.");
+      if (!answers || typeof answers !== "object" || Array.isArray(answers)) throw codedError("REQUIREMENT_ANSWER_INPUT_REQUIRED", "Requirement answers must be a bounded question-to-answer object.");
+      const entries = Object.entries(answers as Record<string, unknown>);
+      if (entries.length === 0 || entries.length > 32 || entries.some(([questionId, answer]) => !questionId.trim() || questionId.length > 256 || typeof answer !== "string" || !answer.trim() || answer.length > 4_096)) throw codedError("REQUIREMENT_ANSWER_INPUT_REQUIRED", "Requirement answers contain invalid question IDs or answer text.");
+      const normalizedAnswers = Object.fromEntries(entries.map(([questionId, answer]) => [questionId.trim(), (answer as string).trim()]));
+      return ok(await getAutomationProviderHost().execution.answerRequirementQuestions({ sessionId: sessionId.trim(), ...(typeof roundId === "string" ? { roundId: roundId.trim() } : {}), answers: normalizedAnswers }));
     } catch (error) {
       return fail(error);
     }

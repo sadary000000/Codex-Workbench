@@ -2,6 +2,7 @@ import type { AutomationProviderPort } from "../automation/adapters.ts";
 import { InputRefRegistry } from "../automation/input-ref.ts";
 import { AutomationStore } from "../automation/store.ts";
 import { AutomationGovernanceProjectionService } from "../automation/governance-projection-service.ts";
+import { AutomationRequirementProjectionService } from "../automation/requirement-projection-service.ts";
 import { AutomationExecutionFacade } from "./automation-execution-facade.ts";
 import { createAutomationProviderComposition, type AutomationProviderComposition } from "./automation-provider-composition.ts";
 import { SharedNativeProviderRuntimeAdapter, type NativeRuntimeRegistryPort } from "./native-provider-runtime-adapter.ts";
@@ -11,6 +12,7 @@ export interface AutomationProviderHost {
   readonly composition: AutomationProviderComposition;
   readonly execution: AutomationExecutionFacade;
   readonly governance: AutomationGovernanceProjectionService;
+  readonly requirements: AutomationRequirementProjectionService;
 }
 
 /**
@@ -41,5 +43,6 @@ export function createAutomationProviderHost(options: {
     services: composition.services,
   });
   const governance = new AutomationGovernanceProjectionService({ store: options.store });
-  return Object.freeze({ nativeRuntime, composition, execution, governance });
+  const requirements = new AutomationRequirementProjectionService({ store: options.store });
+  return Object.freeze({ nativeRuntime, composition, execution, governance, requirements });
 }
