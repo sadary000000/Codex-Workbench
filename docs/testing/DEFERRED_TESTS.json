@@ -24,14 +24,14 @@
         "pullRequest": 17
       },
       "executionTarget": {
-        "branch": "test/native-ab-protocol-v1-1-clean",
-        "commit": "8b7f91e98893bd5b098ca9df93190540ae3efc0d",
-        "pullRequest": 44,
+        "branch": "test/native-ab-unresolved-v1-2-clean",
+        "commit": "95ac3c6358627dcbd7c8b486fae667d0c1e2d40f",
+        "pullRequest": 46,
         "productBaselineCommit": "7c6603f9fd205dddc1ba62758000e0b85de36d00"
       },
       "protocol": {
         "source": "execution-target",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "runbook": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_RUNBOOK.md",
         "agentPlan": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_AGENT_PLAN.md",
         "cases": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_CASES.json",
@@ -39,12 +39,12 @@
         "runner": "scripts/ab-native-arm.ts"
       },
       "knownHarnessEvidence": {
-        "workflowRunId": 33259480045,
-        "workflowJobId": 99118839473,
-        "sourceCommit": "d5d994e7f13c25be1af2c1a7ad16f6a4892d0b18",
-        "finalSelfCleanCommit": "4f9d61f36981133f121b5d1705ec9e58da769ae3",
+        "workflowRunId": 33261530680,
+        "workflowJobId": 99124204299,
+        "sourceCommit": "e214d49b1d47196409d3b3784da819ce4f382610",
+        "finalSelfCleanCommit": "7dc08e4e59a37a5c08dc5e36f6ec2aef256f836d",
         "conclusion": "success",
-        "note": "Protocol v1.1 validation: the full branch-local run passed Typecheck, focused A/B contract, full repository tests, build, and self-clean. Follow-up run 33259547130 / job 99119015584 normalized schema formatting and re-passed Typecheck plus the focused contract. The clean exact execution target 8b7f91e98893bd5b098ca9df93190540ae3efc0d was created from that verified final tree. This is harness/protocol validation, not a Direct-vs-Workbench model benchmark result."
+        "note": "Protocol v1.2 validation passed Typecheck, focused A/B contracts, full repository tests, build, and self-clean. The clean exact execution target 95ac3c6358627dcbd7c8b486fae667d0c1e2d40f was created from the verified final tree. Protocol v1.2 retires the formally resolved Case 1 into warmup-only evidence, retains unresolved Case 2/3 formal debt, and adds external-capacity pause/resume checkpoint semantics. Historical published runs remain immutable."
       },
       "executionPolicy": {
         "historicalReplayAllowed": true,
@@ -55,7 +55,7 @@
         "resultAppliesOnlyToExactExecutionTarget": true
       },
       "requiredBefore": "release-candidate",
-      "note": "Forward-validation rebound to protocol v1.1 after the completed v1.0.0 real run exposed a symmetric model-semantic failure in AB-READ-003-native-ownership: Direct and Workbench both inferred the same ownership fact incorrectly while deterministic static parity remained PASS. Protocol v1.1 replaces only that required model case with literal multi-file source extraction; deterministic static ownership audit remains authoritative. The product baseline is unchanged, and all completed v1.0.0 runs remain immutable historical evidence."
+      "note": "Forward-validation rebound to protocol v1.2 after run native-ab-20260829T151810Z-8b7f91 proved AB-READ-001-exact-reply on both arms (4/4 each) but left AB-READ-002-package-contract inconclusive and AB-READ-003-source-contract unstarted after external workspace-capacity exhaustion. The resolved Case 1 formal trial is retired from the queue and retained only as neutral warmup; unresolved Case 2/3 remain required. External-capacity interruption now checkpoints an unpublished frozen run for later user-driven continue/resume instead of forcing immediate terminal publication."
     }
   ]
 }
