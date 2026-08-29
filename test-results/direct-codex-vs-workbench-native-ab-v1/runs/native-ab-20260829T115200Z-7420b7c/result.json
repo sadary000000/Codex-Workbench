@@ -1,0 +1,270 @@
+{
+  "schemaVersion": 1,
+  "profile": "direct-codex-vs-workbench-native-ab",
+  "protocolVersion": "1.0.0",
+  "repository": "sadary000000/Codex-Workbench",
+  "harnessCommit": "7420b7c6ce93201641c7e79e33e05392602ebf01",
+  "testedCommit": "7420b7c6ce93201641c7e79e33e05392602ebf01",
+  "codexBinary": {
+    "command": "codex",
+    "resolvedPath": null,
+    "sha256": null,
+    "expectedSha256": "NOT_RESOLVED_P1_STOP",
+    "verified": false
+  },
+  "model": "NOT_RESOLVED_P1_STOP",
+  "effort": null,
+  "environment": {
+    "os": "Microsoft Windows NT 10.0.19045.0",
+    "architecture": "AMD64",
+    "cpu": null,
+    "nodeVersion": "v24.18.0",
+    "npmVersion": "11.16.0",
+    "gitVersion": "git version 2.44.0.windows.1"
+  },
+  "repositoryGate": {
+    "status": "FAIL",
+    "evidencePaths": [
+      "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\npm-ci.log",
+      "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\typecheck.log",
+      "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\targeted-parity-contract.log",
+      "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\npm-test.log",
+      "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\build.log",
+      "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\stop-decision.json"
+    ],
+    "reason": "Deterministic npm test failure: 571 tests passed and 1 failed at tests/workspace-layout-contract.test.ts:10:1 (workspace conversation shell must close)."
+  },
+  "staticParityAudit": {
+    "status": "PASS",
+    "ordinaryNativeSharedHost": true,
+    "ordinaryNativeDynamicTools": false,
+    "ordinaryNativeWorkbenchDeveloperInstructions": false,
+    "conversationMapIndependentRuntime": false,
+    "projectMapDirectCompatClient": false,
+    "automationNativeCreatesRuntime": false,
+    "unclassifiedRuntimeOwnerCount": 0,
+    "evidencePaths": [
+      "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\native-parity-static-audit.json",
+      "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\occurrence-inventory.json",
+      "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\native-parity-static.raw.txt"
+    ]
+  },
+  "cases": [
+    {
+      "caseId": "AB-READ-001-exact-reply",
+      "required": true,
+      "comparability": "INCONCLUSIVE",
+      "direct": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\stop-decision.json"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\stop-decision.json"
+        ]
+      },
+      "medianDeltaMs": null,
+      "medianRatio": null,
+      "successRateDelta": null,
+      "envelopeParity": false,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "INCONCLUSIVE",
+      "notes": [
+        "No arm was started because the deterministic repository gate failed before model discovery and formal trials."
+      ]
+    },
+    {
+      "caseId": "AB-READ-002-package-contract",
+      "required": true,
+      "comparability": "INCONCLUSIVE",
+      "direct": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\stop-decision.json"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\stop-decision.json"
+        ]
+      },
+      "medianDeltaMs": null,
+      "medianRatio": null,
+      "successRateDelta": null,
+      "envelopeParity": false,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "INCONCLUSIVE",
+      "notes": [
+        "No arm was started because the deterministic repository gate failed before model discovery and formal trials."
+      ]
+    },
+    {
+      "caseId": "AB-READ-003-native-ownership",
+      "required": true,
+      "comparability": "INCONCLUSIVE",
+      "direct": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\stop-decision.json"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\stop-decision.json"
+        ]
+      },
+      "medianDeltaMs": null,
+      "medianRatio": null,
+      "successRateDelta": null,
+      "envelopeParity": false,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "INCONCLUSIVE",
+      "notes": [
+        "No arm was started because the deterministic repository gate failed before model discovery and formal trials."
+      ]
+    },
+    {
+      "caseId": "AB-WRITE-001-workspace-write",
+      "required": false,
+      "comparability": "INCONCLUSIVE",
+      "direct": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\stop-decision.json"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\stop-decision.json"
+        ]
+      },
+      "medianDeltaMs": null,
+      "medianRatio": null,
+      "successRateDelta": null,
+      "envelopeParity": false,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "INCONCLUSIVE",
+      "notes": [
+        "No arm was started because the deterministic repository gate failed before model discovery and formal trials."
+      ]
+    }
+  ],
+  "modelVisibleWorkbenchInjection": {
+    "detected": false,
+    "differences": [],
+    "evidencePaths": [
+      "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight\\stop-decision.json"
+    ]
+  },
+  "performanceAssessment": "INCONCLUSIVE",
+  "verdict": "FAIL",
+  "verdictReason": "The deterministic repository gate failed before model discovery: npm test reported 572 tests, 571 pass, 1 fail at tests/workspace-layout-contract.test.ts:10:1. Per protocol, no A/B model trial was started.",
+  "releaseRecommendation": "DO_NOT_PROMOTE",
+  "protocolDeviations": [
+    "A pre-start tooling/preflight issue was corrected before P1; it executed no product gate or model trial and caused no duplicate measurement.",
+    "No measurement protocol deviation occurred after P1 began."
+  ],
+  "evidenceRoot": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c"
+}

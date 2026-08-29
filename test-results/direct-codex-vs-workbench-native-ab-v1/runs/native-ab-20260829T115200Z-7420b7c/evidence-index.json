@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "testId": "direct-codex-vs-workbench-native-ab-v1",
+  "runId": "native-ab-20260829T115200Z-7420b7c",
+  "exactTestedCommit": "7420b7c6ce93201641c7e79e33e05392602ebf01",
+  "externalEvidenceRoot": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c",
+  "entries": [
+    {
+      "name": "protocol",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\docs\\testing",
+      "retained": true
+    },
+    {
+      "name": "preflight",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\preflight",
+      "retained": true
+    },
+    {
+      "name": "post-run-integrity",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\post-run-integrity.json",
+      "retained": true
+    },
+    {
+      "name": "independent-review",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T115200Z-7420b7c\\review",
+      "retained": true
+    },
+    {
+      "name": "target-worktree",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-target\\native-ab-20260829T115200Z-7420b7c",
+      "retained": true
+    }
+  ]
+}

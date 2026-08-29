@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "repository": "sadary000000/Codex-Workbench",
+  "testId": "direct-codex-vs-workbench-native-ab-v1",
+  "runId": "native-ab-20260829T115200Z-7420b7c",
+  "executionClass": "deferred",
+  "controlPlaneCommit": "d98bfc82fb18ff9d27d63b2159b6eeb60d0c9638",
+  "definition": {
+    "kind": "deferred",
+    "sourcePath": "docs/testing/DEFERRED_TESTS.json",
+    "sourceObjectId": "011dcccc84dd4b6ebc6bb00f361acbeeb05591f1",
+    "selector": "tests entry with testId=direct-codex-vs-workbench-native-ab-v1",
+    "definitionSha256": "18810aae91ead64dbcecec57f6570c3bb6c95e092969e81a9dcb709b9973bd6b"
+  },
+  "protocol": {
+    "sourceCommit": "7420b7c6ce93201641c7e79e33e05392602ebf01",
+    "resultSchemaPath": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_SCHEMA.json",
+    "resultSchemaObjectId": "7a296fbfac558357584c9ec02e3449f17782efe7"
+  },
+  "target": {
+    "locatorBranch": "feature/ab-native-parity-validation",
+    "configuredCommit": "7420b7c6ce93201641c7e79e33e05392602ebf01",
+    "testedCommit": "7420b7c6ce93201641c7e79e33e05392602ebf01"
+  },
+  "result": {
+    "path": "result.json",
+    "sha256": "755ccf91a353f8f1f2c7fe17401a320f584e87520b96b3129bc9dfb8993ebf13",
+    "verdict": "FAIL"
+  },
+  "completedAt": "2026-08-29T12:08:32.6464521Z",
+  "summaryPath": "summary.md",
+  "failuresPath": "failures.md",
+  "evidenceIndexPath": "evidence-index.json"
+}
