@@ -57,10 +57,12 @@ class NativeRequirementDelegate implements AutomationProviderPort {
   }
 
   async observe(input: { providerRequestRef: string; correlation?: ProviderCorrelation }): Promise<ProviderObservation> {
+    const number = Number(input.providerRequestRef.split("-").at(-1) ?? "1");
+    const submitted = this.submitted[number - 1];
     return {
       provider: this.provider,
       providerRequestRef: input.providerRequestRef,
-      providerTargetRef: TARGET,
+      providerTargetRef: submitted?.providerTargetRef ?? TARGET,
       semanticRef: this.acceptedSemantics.get(input.providerRequestRef) ?? null,
       state: "COMPLETED",
       outcomeCertainty: "TERMINAL_CONFIRMED",
