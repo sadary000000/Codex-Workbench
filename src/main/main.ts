@@ -52,6 +52,7 @@ import { runAut3RealPlannerGate } from "../automation/aut3-real-planner-gate.ts"
 import { classifyWebGptActionReadiness, type WebGptActionScope } from "../automation/webgpt-action-readiness.ts";
 import { createStartupPlan, runStartupPlan } from "./startup-policy.ts";
 import { createAutomationProviderHost, type AutomationProviderHost } from "./automation-provider-host.ts";
+import { automationPlannerReceipt, automationPlannerResultReceipt, automationPlannerStatusReceipt, automationRequirementDraftReceipt, automationRequirementStartReceipt } from "./automation-renderer-orchestration.ts";
 import { createLazyExternalAutomationProviderPort, type FullAutomationProviderPort } from "./lazy-external-automation-provider-port.ts";
 
 const PAUSED_AUTOMATION_GATE_ENVIRONMENT_FLAGS = [
@@ -91,9 +92,17 @@ const IPC = Object.freeze({
   projectAutomationCandidateList: "automation:projects:association-candidates",
   projectAutomationBind: "persistence:project-automation-associations:bind",
   projectAutomationUnlink: "persistence:project-automation-associations:unlink",
+  automationRequirementStart: "automation:requirement:start",
+  automationRequirementDraft: "automation:requirement:draft",
+  automationRequirementReconcile: "automation:requirement:reconcile",
   automationRequirementInspect: "automation:requirement:inspect",
   automationRequirementAnswer: "automation:requirement:answer",
   automationRequirementConfirm: "automation:requirement:confirm",
+  automationPlannerCreate: "automation:planner:create",
+  automationPlannerReconcile: "automation:planner:reconcile",
+  automationPlannerRetry: "automation:planner:retry",
+  automationPlannerStatus: "automation:planner:status",
+  automationPlannerResult: "automation:planner:result",
   automationStepExecute: "automation:step:execute",
   automationStepReconcile: "automation:step:reconcile",
   automationStepVerify: "automation:step:verify",
@@ -2306,6 +2315,36 @@ function registerIpc(): void {
       return fail(error);
     }
   });
+  ipcMain.handle(IPC.automationRequirementStart, async (_event, projectId: unknown, goal: unknown, providerTargetRef: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) throw codedError("REQUIREMENT_START_INPUT_REQUIRED", "Requirement start requires a bounded Project ID.");
+      if (typeof goal !== "string" || !goal.trim() || goal.length > 4_096) throw codedError("REQUIREMENT_START_INPUT_REQUIRED", "Requirement start requires a bounded goal.");
+      if (typeof providerTargetRef !== "string" || !providerTargetRef.trim() || providerTargetRef.length > 384 || /[\r\n]/.test(providerTargetRef)) throw codedError("REQUIREMENT_START_INPUT_REQUIRED", "Requirement start requires an exact bounded opaque provider target.");
+      const result = await getAutomationProviderHost().execution.startRequirement({ projectId: projectId.trim(), goal: goal.trim(), questions: [], providerTargetRef: providerTargetRef.trim() });
+      return ok(automationRequirementStartReceipt(result));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationRequirementDraft, async (_event, sessionId: unknown) => {
+    try {
+      if (typeof sessionId !== "string" || !sessionId.trim() || sessionId.length > 256) throw codedError("REQUIREMENT_SESSION_REQUIRED", "Requirement draft requires a bounded alignment session ID.");
+      const result = await getAutomationProviderHost().execution.requestRequirementDraft({ sessionId: sessionId.trim() });
+      return ok(automationRequirementDraftReceipt(result));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationRequirementReconcile, async (_event, sessionId: unknown, roundId: unknown) => {
+    try {
+      if (typeof sessionId !== "string" || !sessionId.trim() || sessionId.length > 256) throw codedError("REQUIREMENT_SESSION_REQUIRED", "Requirement reconcile requires a bounded alignment session ID.");
+      if (roundId !== undefined && roundId !== null && (typeof roundId !== "string" || !roundId.trim() || roundId.length > 256)) throw codedError("REQUIREMENT_ROUND_INVALID", "Requirement round ID must be bounded when supplied.");
+      const result = await getAutomationProviderHost().execution.reconcileRequirement({ sessionId: sessionId.trim(), ...(typeof roundId === "string" ? { roundId: roundId.trim() } : {}) });
+      return ok(automationRequirementDraftReceipt(result));
+    } catch (error) {
+      return fail(error);
+    }
+  });
   ipcMain.handle(IPC.automationRequirementInspect, async (_event, projectId: unknown) => {
     try {
       if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) throw codedError("REQUIREMENT_INSPECT_INPUT_REQUIRED", "Requirement inspection requires a bounded Project ID.");
@@ -2332,6 +2371,49 @@ function registerIpc(): void {
       if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof requirementVersionId !== "string" || !requirementVersionId.trim() || requirementVersionId.length > 256) throw codedError("REQUIREMENT_CONFIRM_INPUT_REQUIRED", "Requirement confirmation requires bounded Project and RequirementVersion IDs.");
       if (typeof expectedPayloadSha256 !== "string" || !/^[a-f0-9]{64}$/i.test(expectedPayloadSha256.trim())) throw codedError("REQUIREMENT_PAYLOAD_SHA256_INVALID", "Requirement confirmation requires an exact 64-character SHA-256.");
       return ok(await getAutomationProviderHost().execution.confirmRequirement({ projectId: projectId.trim(), requirementVersionId: requirementVersionId.trim(), expectedPayloadSha256: expectedPayloadSha256.trim().toLowerCase(), actor: "USER" }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationPlannerCreate, async (_event, projectId: unknown, providerTargetRef: unknown, requirementVersionId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) throw codedError("PLANNER_CREATE_INPUT_REQUIRED", "Planner create requires a bounded Project ID.");
+      if (typeof providerTargetRef !== "string" || !providerTargetRef.trim() || providerTargetRef.length > 2_000 || /[\r\n]/.test(providerTargetRef)) throw codedError("PLANNER_CREATE_INPUT_REQUIRED", "Planner create requires an exact bounded opaque provider target.");
+      if (requirementVersionId !== undefined && requirementVersionId !== null && (typeof requirementVersionId !== "string" || !requirementVersionId.trim() || requirementVersionId.length > 256)) throw codedError("PLANNER_REQUIREMENT_INVALID", "Planner RequirementVersion ID must be bounded when supplied.");
+      const result = await getAutomationProviderHost().execution.createPlan({ projectId: projectId.trim(), providerTargetRef: providerTargetRef.trim(), ...(typeof requirementVersionId === "string" ? { requirementVersionId: requirementVersionId.trim() } : {}) });
+      return ok(automationPlannerReceipt(result));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationPlannerReconcile, async (_event, projectId: unknown, actionAttemptId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof actionAttemptId !== "string" || !actionAttemptId.trim() || actionAttemptId.length > 256) throw codedError("PLANNER_RECONCILE_INPUT_REQUIRED", "Planner reconcile requires bounded Project and ActionAttempt IDs.");
+      return ok(automationPlannerReceipt(await getAutomationProviderHost().execution.reconcilePlan({ projectId: projectId.trim(), actionAttemptId: actionAttemptId.trim() })));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationPlannerRetry, async (_event, projectId: unknown, actionIntentId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof actionIntentId !== "string" || !actionIntentId.trim() || actionIntentId.length > 256) throw codedError("PLANNER_RETRY_INPUT_REQUIRED", "Planner retry requires bounded Project and ActionIntent IDs.");
+      return ok(automationPlannerReceipt(await getAutomationProviderHost().execution.retryPlan({ projectId: projectId.trim(), actionIntentId: actionIntentId.trim() })));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationPlannerStatus, async (_event, projectId: unknown, actionIntentId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof actionIntentId !== "string" || !actionIntentId.trim() || actionIntentId.length > 256) throw codedError("PLANNER_QUERY_INPUT_REQUIRED", "Planner status requires bounded Project and ActionIntent IDs.");
+      return ok(automationPlannerStatusReceipt(await getAutomationProviderHost().execution.plannerStatus({ projectId: projectId.trim(), actionIntentId: actionIntentId.trim() })));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationPlannerResult, async (_event, projectId: unknown, actionIntentId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof actionIntentId !== "string" || !actionIntentId.trim() || actionIntentId.length > 256) throw codedError("PLANNER_QUERY_INPUT_REQUIRED", "Planner result requires bounded Project and ActionIntent IDs.");
+      return ok(automationPlannerResultReceipt(await getAutomationProviderHost().execution.plannerResult({ projectId: projectId.trim(), actionIntentId: actionIntentId.trim() })));
     } catch (error) {
       return fail(error);
     }
