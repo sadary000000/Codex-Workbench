@@ -34,6 +34,9 @@ test("Codex repository test bootstrap routes through every required protocol fil
 
   assert.match(agents, /control-plane commit/i);
   assert.match(agents, /never switch to a newer remote copy/i);
+  assert.match(agents, /status=ready/);
+  assert.match(agents, /protocol\.source=execution-target/);
+  assert.match(agents, /forward validation of newer code requires a versioned rebind/i);
 });
 
 test("active blocking pointer freezes exact target and freshness policy", () => {
@@ -80,6 +83,32 @@ test("deferred test registry retains non-blocking work without granting current 
       assert.match(entry.registeredAgainst.commit, /^[0-9a-f]{40}$/);
     }
   }
+});
+
+test("Direct Codex vs Workbench Native deferred A/B is ready on one exact green harness target", () => {
+  const entry = deferredTests.tests.find((candidate: { testId?: string }) => candidate.testId === "direct-codex-vs-workbench-native-ab-v1");
+  assert.ok(entry);
+  assert.equal(entry.status, "ready");
+  assert.equal(entry.blocksMainline, false);
+  assert.equal(entry.requiredBefore, "release-candidate");
+  assert.deepEqual(entry.executionTarget, {
+    branch: "feature/ab-native-parity-validation",
+    commit: "7420b7c6ce93201641c7e79e33e05392602ebf01",
+    pullRequest: 19,
+    productBaselineCommit: "af911e71ca3370c143d504e2923b122f827cac6c",
+  });
+  assert.equal(entry.protocol.source, "execution-target");
+  assert.equal(entry.protocol.version, "1.0.0");
+  for (const key of ["runbook", "agentPlan", "cases", "resultSchema", "runner"]) {
+    assert.equal(typeof entry.protocol[key], "string", `deferred A/B protocol.${key} must be a repository path`);
+    assert.equal(entry.protocol[key].length > 0, true);
+  }
+  assert.equal(entry.knownHarnessEvidence.workflowRunId, 33235545775);
+  assert.equal(entry.knownHarnessEvidence.workflowJobId, 99055770565);
+  assert.equal(entry.knownHarnessEvidence.finalSelfCleanCommit, entry.executionTarget.commit);
+  assert.equal(entry.knownHarnessEvidence.conclusion, "success");
+  assert.equal(entry.executionPolicy.timedTrialsMustNotShareContendedRuntimeResources, true);
+  assert.equal(entry.executionPolicy.resultAppliesOnlyToExactExecutionTarget, true);
 });
 
 test("Runbook and agent plan use the same protocol version as ACTIVE_TEST", () => {
