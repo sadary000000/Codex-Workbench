@@ -39,6 +39,7 @@ jobs:
           expected = {
               '.github/workflows/r8-remove-project-map-compat-runtime.yml',
               'src/main/project-map-manager.ts',
+              'tests/r8-project-map-context-read-boundary.test.ts',
               'tests/r8-project-map-no-compat-runtime.test.ts',
           }
           actual = set(filter(None, subprocess.check_output([
@@ -53,7 +54,7 @@ jobs:
         run: npm run typecheck
 
       - name: Targeted R8 tests
-        run: node --experimental-strip-types --test tests/project-map-manager.test.ts tests/r8-project-map-no-compat-runtime.test.ts tests/r8-map-no-maintenance-runtime.test.ts
+        run: node --experimental-strip-types --test tests/project-map-manager.test.ts tests/r8-project-map-context-read-boundary.test.ts tests/r8-project-map-no-compat-runtime.test.ts tests/r8-map-no-maintenance-runtime.test.ts
 
       - name: Test full repository
         run: npm test

@@ -16,7 +16,7 @@ test("R8 Project Map context reads do not own a private App Server process", () 
   assert.ok(projectMapManagerSource.includes("nativeThreadReader?: (projection: ThreadProjection) => Promise<ThreadReadView>"));
   assert.doesNotMatch(projectMapManagerSource, /codex-workbench-v1-context-reader/);
   const readerStart = projectMapManagerSource.indexOf("  private async readNativeThread");
-  const readerEnd = projectMapManagerSource.indexOf("  private async runCompatibilityMaintenance", readerStart);
+  const readerEnd = projectMapManagerSource.indexOf("  private async statusFromMap", readerStart);
   assert.ok(readerStart >= 0 && readerEnd > readerStart);
   const reader = projectMapManagerSource.slice(readerStart, readerEnd);
   assert.match(reader, /this\.nativeThreadReader\(projection\)/);
@@ -59,8 +59,16 @@ test("R8 Project Map membership is checked before the injected Native Thread rea
   try {
     await persistence.createProject({ projectId: "project-reader", name: "Reader", cwd: "C:/project" });
     await manager.enable("project-reader");
-    const fallbackScopes = Reflect.get(manager, "fallbackScopes") as Map<string, string>;
-    fallbackScopes.set("map-maintenance", "project-reader");
+    const runtimes = Reflect.get(manager, "runtimes") as Map<string, {
+      nativeThreadId: string;
+      snapshot: () => { activeTurnId: string };
+      close: () => Promise<void>;
+    }>;
+    runtimes.set("project-reader", {
+      nativeThreadId: "map-maintenance",
+      snapshot: () => ({ activeTurnId: "map-turn" }),
+      close: async () => undefined,
+    });
 
     const outside = await manager.handleServerRequest("project-reader", {
       method: "item/tool/call",
