@@ -1,6 +1,6 @@
 # Direct Codex vs Workbench Native A/B Agent Plan
 
-Protocol version: **1.0.0**
+Protocol version: **1.1.0**
 
 This file defines the Codex coordinator/subagent topology for the A/B profile. Do not improvise a different agent graph during execution.
 

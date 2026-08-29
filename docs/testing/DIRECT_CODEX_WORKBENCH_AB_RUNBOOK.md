@@ -1,8 +1,10 @@
 # Direct Codex vs Workbench Native A/B Runbook
 
-Protocol version: **1.0.0**
+Protocol version: **1.1.0**
 
 This protocol measures whether the ordinary Workbench Native path preserves Codex Native semantics and whether the Workbench adapter introduces material cost when optional Workbench features are not active. Codex executes this protocol; it does not redesign it during a run.
+
+Protocol 1.1.0 keeps architectural ownership truth in the deterministic static parity audit. Required model A/B cases may inspect source, but release gating must use mechanically extractable source facts or task outputs rather than asking both arms to infer architecture ownership semantics.
 
 ## 1. Operational definition
 
