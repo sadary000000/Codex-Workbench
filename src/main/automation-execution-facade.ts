@@ -4,6 +4,7 @@ import type { PlannerProviderIntegrationService } from "../automation/planner-pr
 import type { ProviderAwareRequirementAutomationService } from "../automation/provider-aware-requirement-service.ts";
 import { AutomationProviderServiceRouter } from "../automation/provider-service-router.ts";
 import type { ExecuteStepInput, ReconcileStepInput } from "../automation/step-execution-service.ts";
+import { StepReviewCompletionService, type ReviewStepInput } from "../automation/step-review-service.ts";
 import { DeterministicStepVerificationService, type VerifyStepInput } from "../automation/step-verification-service.ts";
 import { AutomationStore } from "../automation/store.ts";
 
@@ -60,18 +61,21 @@ function normalizeProviderId(value: AutomationProviderId | null | undefined): Au
  * An explicit conflicting provider is rejected instead of switching execution
  * backends mid-workflow.
  *
- * Deterministic Step verification is deliberately outside provider routing: it
- * consumes only immutable Plan/workflow truth and never dispatches provider work.
+ * Deterministic Step verification and explicit user review are deliberately
+ * outside provider routing: they consume only persisted workflow truth and
+ * never dispatch provider work.
  */
 export class AutomationExecutionFacade {
   readonly store: AutomationStore;
   readonly services: AutomationProviderServiceRouter;
   readonly stepVerification: DeterministicStepVerificationService;
+  readonly stepReview: StepReviewCompletionService;
 
   constructor(options: { store: AutomationStore; services: AutomationProviderServiceRouter }) {
     this.store = options.store;
     this.services = options.services;
     this.stepVerification = new DeterministicStepVerificationService({ store: options.store });
+    this.stepReview = new StepReviewCompletionService({ store: options.store });
   }
 
   async startRequirement(input: RequirementStartInput, providerId?: AutomationProviderId | null) {
@@ -130,6 +134,10 @@ export class AutomationExecutionFacade {
 
   async verifyStep(input: VerifyStepInput) {
     return this.stepVerification.verify(input);
+  }
+
+  async reviewStep(input: ReviewStepInput) {
+    return this.stepReview.review(input);
   }
 
   async providerForRequirementSession(
