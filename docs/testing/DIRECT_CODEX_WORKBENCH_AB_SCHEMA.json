@@ -28,7 +28,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "profile": { "const": "direct-codex-vs-workbench-native-ab" },
-    "protocolVersion": { "const": "1.1.0" },
+    "protocolVersion": { "const": "1.2.0" },
     "repository": { "const": "sadary000000/Codex-Workbench" },
     "harnessCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "testedCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },

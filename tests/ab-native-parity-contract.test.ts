@@ -18,10 +18,10 @@ const cases = JSON.parse(read("docs/testing/DIRECT_CODEX_WORKBENCH_AB_CASES.json
 const schema = JSON.parse(read("docs/testing/DIRECT_CODEX_WORKBENCH_AB_SCHEMA.json"));
 
 test("A/B protocol files share one version and a balanced counterbalanced schedule", () => {
-  assert.equal(cases.protocolVersion, "1.1.0");
-  assert.equal(schema.properties.protocolVersion.const, "1.1.0");
-  assert.ok(runbook.includes("Protocol version: **1.1.0**"));
-  assert.ok(agentPlan.includes("Protocol version: **1.1.0**"));
+  assert.equal(cases.protocolVersion, "1.2.0");
+  assert.equal(schema.properties.protocolVersion.const, "1.2.0");
+  assert.ok(runbook.includes("Protocol version: **1.2.0**"));
+  assert.ok(agentPlan.includes("Protocol version: **1.2.0**"));
 
   const sequence = cases.measurement.formalSequence as string[];
   assert.deepEqual(sequence, [
@@ -38,10 +38,15 @@ test("A/B protocol files share one version and a balanced counterbalanced schedu
   assert.equal(sequence.filter((arm) => arm === "workbench").length, 4);
   assert.equal(cases.measurement.formalTrialsPerArmPerCase, 4);
   assert.equal(new Set(cases.cases.map((entry: { caseId: string }) => entry.caseId)).size, cases.cases.length);
-  assert.ok(cases.cases.filter((entry: { required: boolean }) => entry.required).length >= 3);
+  assert.equal(cases.cases.some((entry: { caseId: string }) => entry.caseId === "AB-READ-001-exact-reply"), false);
+  assert.equal(cases.measurement.warmup.sourceCaseId, "AB-READ-001-exact-reply");
+  assert.equal(cases.resolvedCases[0].caseId, "AB-READ-001-exact-reply");
+  assert.equal(cases.resolvedCases[0].status, "PASS");
+  assert.equal(cases.resolvedCases[0].sourceRunId, "native-ab-20260829T151810Z-8b7f91");
+  assert.equal(cases.cases.filter((entry: { required: boolean }) => entry.required).length, 2);
 });
 
-test("required multi-file model case extracts literal source facts instead of architecture ownership semantics", () => {
+test("unresolved required multi-file model case extracts literal source facts instead of architecture ownership semantics", () => {
   const sourceCase = cases.cases.find((entry: { caseId: string }) => entry.caseId === "AB-READ-003-source-contract");
   assert.ok(sourceCase);
   assert.equal(sourceCase.required, true);
