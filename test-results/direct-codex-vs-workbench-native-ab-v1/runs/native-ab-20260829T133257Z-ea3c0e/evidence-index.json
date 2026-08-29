@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "testId": "direct-codex-vs-workbench-native-ab-v1",
+  "runId": "native-ab-20260829T133257Z-ea3c0e",
+  "exactTestedCommit": "ea3c0ead934bacd90e17c40a0bcafef7eb6e1e86",
+  "externalEvidenceRoot": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e",
+  "entries": [
+    {
+      "name": "protocol",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\protocol",
+      "retained": true
+    },
+    {
+      "name": "preflight",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\preflight",
+      "retained": true
+    },
+    {
+      "name": "warmup",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\warmup",
+      "retained": true
+    },
+    {
+      "name": "formal-trials",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal",
+      "retained": true
+    },
+    {
+      "name": "variance-escalation",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal-additional",
+      "retained": true
+    },
+    {
+      "name": "analysis",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\analysis",
+      "retained": true
+    },
+    {
+      "name": "independent-review",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\review",
+      "retained": true
+    },
+    {
+      "name": "post-run-integrity",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\post-run-integrity.json",
+      "retained": true
+    },
+    {
+      "name": "schema-validation",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\preflight\\schema-validation.json",
+      "retained": true
+    },
+    {
+      "name": "target-worktree",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-target\\native-ab-20260829T133257Z-ea3c0e",
+      "retained": true
+    }
+  ],
+  "bindings": {
+    "controlPlaneCommit": "649dab3f4ab9ff7fb384ac86a87fb4c56519dc2c",
+    "definitionSourceObjectId": "1e4342a544a3da5333de2f7d58e622e5895a0938",
+    "definitionSha256": "fa0c3ee8bba127135122e485bc393a01a62f3cf4e0dcb4aaddbc43a4533bdec6",
+    "protocolSourceCommit": "ea3c0ead934bacd90e17c40a0bcafef7eb6e1e86",
+    "protocolResultSchemaObjectId": "7a296fbfac558357584c9ec02e3449f17782efe7",
+    "targetBranch": "fix/windows-layout-contract-crlf",
+    "targetConfiguredCommit": "ea3c0ead934bacd90e17c40a0bcafef7eb6e1e86",
+    "targetObservedHeadAtStart": "ea3c0ead934bacd90e17c40a0bcafef7eb6e1e86",
+    "targetTestedCommit": "ea3c0ead934bacd90e17c40a0bcafef7eb6e1e86",
+    "binaryVerified": true,
+    "model": "gpt-5.6-sol",
+    "effort": "medium",
+    "formalTrialTotal": 32,
+    "warmupTrialTotal": 2
+  }
+}

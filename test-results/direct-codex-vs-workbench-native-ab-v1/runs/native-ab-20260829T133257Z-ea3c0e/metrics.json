@@ -1,0 +1,255 @@
+{
+  "cases": [
+    {
+      "caseId": "AB-READ-001-exact-reply",
+      "required": true,
+      "comparability": "COMPARABLE",
+      "direct": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 4,
+        "taskSuccessRate": 1,
+        "medianInternalElapsedMs": 5977.24225,
+        "meanInternalElapsedMs": 5775.243475,
+        "medianThreadStartMs": 166.76544999999993,
+        "medianTurnStartAckMs": 0.9443999999999733,
+        "tokenUsageAvailable": true,
+        "tokenUsage": [
+          14958,
+          14865,
+          14865,
+          14865
+        ],
+        "toolCallCount": 0,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal-additional",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\analysis"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 4,
+        "taskSuccessRate": 1,
+        "medianInternalElapsedMs": 5734.6628,
+        "meanInternalElapsedMs": 5575.68705,
+        "medianThreadStartMs": 162.86675000000002,
+        "medianTurnStartAckMs": 0.9234000000000151,
+        "tokenUsageAvailable": true,
+        "tokenUsage": [
+          14865,
+          14865,
+          14865,
+          14865
+        ],
+        "toolCallCount": 0,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal-additional",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\analysis"
+        ]
+      },
+      "medianDeltaMs": -242.57945000000018,
+      "medianRatio": 0.9594161588481711,
+      "successRateDelta": 0,
+      "envelopeParity": true,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "PASS"
+    },
+    {
+      "caseId": "AB-READ-002-package-contract",
+      "required": true,
+      "comparability": "COMPARABLE",
+      "direct": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 4,
+        "taskSuccessRate": 1,
+        "medianInternalElapsedMs": 10100.08715,
+        "meanInternalElapsedMs": 10340.32775,
+        "medianThreadStartMs": 154.42185,
+        "medianTurnStartAckMs": 0.9321999999999662,
+        "tokenUsageAvailable": true,
+        "tokenUsage": [
+          30970,
+          30978,
+          30966,
+          30970
+        ],
+        "toolCallCount": 4,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal-additional",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\analysis"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 4,
+        "taskSuccessCount": 4,
+        "taskSuccessRate": 1,
+        "medianInternalElapsedMs": 12011.92495,
+        "meanInternalElapsedMs": 12271.868775,
+        "medianThreadStartMs": 162.3247500000001,
+        "medianTurnStartAckMs": 0.8813999999999851,
+        "tokenUsageAvailable": true,
+        "tokenUsage": [
+          31134,
+          30331,
+          30968,
+          30990
+        ],
+        "toolCallCount": 4,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal-additional",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\analysis"
+        ]
+      },
+      "medianDeltaMs": 1911.8378000000012,
+      "medianRatio": 1.189289237964645,
+      "successRateDelta": 0,
+      "envelopeParity": true,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "PASS"
+    },
+    {
+      "caseId": "AB-READ-003-native-ownership",
+      "required": true,
+      "comparability": "COMPARABLE",
+      "direct": {
+        "formalTrialCount": 8,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": 0,
+        "medianInternalElapsedMs": 24311.52525,
+        "meanInternalElapsedMs": 23376.093775,
+        "medianThreadStartMs": 164.26564999999994,
+        "medianTurnStartAckMs": 0.9226500000000328,
+        "tokenUsageAvailable": true,
+        "tokenUsage": [
+          104795,
+          112088,
+          118213,
+          103573,
+          106501,
+          100881,
+          100649,
+          72531
+        ],
+        "toolCallCount": 23,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal-additional",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\analysis"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 8,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": 0,
+        "medianInternalElapsedMs": 20060.008950000003,
+        "meanInternalElapsedMs": 21915.4418875,
+        "medianThreadStartMs": 164.51715000000007,
+        "medianTurnStartAckMs": 0.7972499999999627,
+        "tokenUsageAvailable": true,
+        "tokenUsage": [
+          105358,
+          101691,
+          74667,
+          74532,
+          214429,
+          100045,
+          109836,
+          68815
+        ],
+        "toolCallCount": 23,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal-additional",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\analysis"
+        ]
+      },
+      "medianDeltaMs": -4251.516299999996,
+      "medianRatio": 0.8251234237144378,
+      "successRateDelta": 0,
+      "envelopeParity": true,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "FAIL",
+      "notes": [
+        "A required-case mechanical validator failed in at least one arm; the failed trial remains in the success-rate and latency evidence.",
+        "The failure was observed symmetrically in both arms; no Workbench-only success-rate regression was inferred."
+      ]
+    },
+    {
+      "caseId": "AB-WRITE-001-workspace-write",
+      "required": false,
+      "comparability": "NOT_COMPARABLE",
+      "direct": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal-additional",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\analysis"
+        ]
+      },
+      "workbench": {
+        "formalTrialCount": 0,
+        "taskSuccessCount": 0,
+        "taskSuccessRate": null,
+        "medianInternalElapsedMs": null,
+        "meanInternalElapsedMs": null,
+        "medianThreadStartMs": null,
+        "medianTurnStartAckMs": null,
+        "tokenUsageAvailable": false,
+        "tokenUsage": [],
+        "toolCallCount": null,
+        "compactionCount": null,
+        "retryCount": null,
+        "scopeDeviationCount": 0,
+        "evidencePaths": [
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\formal-additional",
+          "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\native-ab-20260829T133257Z-ea3c0e\\analysis"
+        ]
+      },
+      "medianDeltaMs": null,
+      "medianRatio": null,
+      "successRateDelta": null,
+      "envelopeParity": false,
+      "modelVisibleWorkbenchInjection": false,
+      "caseVerdict": "INCONCLUSIVE",
+      "notes": [
+        "Optional workspace-write stratum was not run; it is excluded from the primary required-case verdict."
+      ]
+    }
+  ],
+  "performanceAssessment": "MIXED",
+  "verdict": "FAIL"
+}

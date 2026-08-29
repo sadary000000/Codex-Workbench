@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "repository": "sadary000000/Codex-Workbench",
+  "testId": "direct-codex-vs-workbench-native-ab-v1",
+  "runId": "native-ab-20260829T133257Z-ea3c0e",
+  "executionClass": "deferred",
+  "controlPlaneCommit": "649dab3f4ab9ff7fb384ac86a87fb4c56519dc2c",
+  "definition": {
+    "kind": "deferred",
+    "sourcePath": "docs/testing/DEFERRED_TESTS.json",
+    "sourceObjectId": "1e4342a544a3da5333de2f7d58e622e5895a0938",
+    "selector": "tests entry with testId=direct-codex-vs-workbench-native-ab-v1",
+    "definitionSha256": "fa0c3ee8bba127135122e485bc393a01a62f3cf4e0dcb4aaddbc43a4533bdec6"
+  },
+  "protocol": {
+    "sourceCommit": "ea3c0ead934bacd90e17c40a0bcafef7eb6e1e86",
+    "resultSchemaPath": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_SCHEMA.json",
+    "resultSchemaObjectId": "7a296fbfac558357584c9ec02e3449f17782efe7"
+  },
+  "target": {
+    "locatorBranch": "fix/windows-layout-contract-crlf",
+    "configuredCommit": "ea3c0ead934bacd90e17c40a0bcafef7eb6e1e86",
+    "testedCommit": "ea3c0ead934bacd90e17c40a0bcafef7eb6e1e86"
+  },
+  "result": {
+    "path": "result.json",
+    "sha256": "82305b97d96b79f4153547d8372d7a1859edb2ae258f9d9ab9a89e713da93dea",
+    "verdict": "FAIL"
+  },
+  "completedAt": "2026-08-29T14:07:59.667Z",
+  "summaryPath": "summary.md",
+  "failuresPath": "failures.md",
+  "metricsPath": "metrics.json",
+  "evidenceIndexPath": "evidence-index.json"
+}
