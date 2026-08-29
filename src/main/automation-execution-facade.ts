@@ -3,6 +3,7 @@ import { persistedProviderIdForIntent } from "../automation/provider-binding-por
 import type { PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
 import { ProjectCompletionService, type CompleteProjectInput } from "../automation/project-completion-service.ts";
 import { RequirementAutomationService, type ConfirmRequirementInput } from "../automation/requirement-service.ts";
+import type { AnswerQuestionsInput } from "../automation/requirement-service.ts";
 import type { ProviderAwareRequirementAutomationService } from "../automation/provider-aware-requirement-service.ts";
 import { AutomationProviderServiceRouter } from "../automation/provider-service-router.ts";
 import { StageGateService, type GateStageInput } from "../automation/stage-gate-service.ts";
@@ -107,6 +108,10 @@ export class AutomationExecutionFacade {
 
   async confirmRequirement(input: ConfirmRequirementInput) {
     return this.requirementConfirmation.confirmRequirement(input);
+  }
+
+  async answerRequirementQuestions(input: AnswerQuestionsInput) {
+    return this.requirementConfirmation.answerQuestions(input);
   }
 
   async createPlan(input: PlannerCreateInput, providerId?: AutomationProviderId | null) {
