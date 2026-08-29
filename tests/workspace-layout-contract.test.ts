@@ -4,8 +4,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const html = readFileSync(resolve(root, "src/renderer/index.html"), "utf8");
-const renderer = readFileSync(resolve(root, "src/renderer/renderer.ts"), "utf8");
+const readNormalizedText = (path: string): string => readFileSync(path, "utf8").replace(/\r\n?/g, "\n");
+const html = readNormalizedText(resolve(root, "src/renderer/index.html"));
+const renderer = readNormalizedText(resolve(root, "src/renderer/renderer.ts"));
 
 test("workspace layout keeps the conversation container separate from the composer", () => {
   const conversationStart = html.indexOf('<section class="workspace-conversation"');
