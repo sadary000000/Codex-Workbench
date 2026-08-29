@@ -18,10 +18,10 @@ const cases = JSON.parse(read("docs/testing/DIRECT_CODEX_WORKBENCH_AB_CASES.json
 const schema = JSON.parse(read("docs/testing/DIRECT_CODEX_WORKBENCH_AB_SCHEMA.json"));
 
 test("A/B protocol files share one version and a balanced counterbalanced schedule", () => {
-  assert.equal(cases.protocolVersion, "1.0.0");
-  assert.equal(schema.properties.protocolVersion.const, "1.0.0");
-  assert.ok(runbook.includes("Protocol version: **1.0.0**"));
-  assert.ok(agentPlan.includes("Protocol version: **1.0.0**"));
+  assert.equal(cases.protocolVersion, "1.1.0");
+  assert.equal(schema.properties.protocolVersion.const, "1.1.0");
+  assert.ok(runbook.includes("Protocol version: **1.1.0**"));
+  assert.ok(agentPlan.includes("Protocol version: **1.1.0**"));
 
   const sequence = cases.measurement.formalSequence as string[];
   assert.deepEqual(sequence, [
@@ -39,6 +39,25 @@ test("A/B protocol files share one version and a balanced counterbalanced schedu
   assert.equal(cases.measurement.formalTrialsPerArmPerCase, 4);
   assert.equal(new Set(cases.cases.map((entry: { caseId: string }) => entry.caseId)).size, cases.cases.length);
   assert.ok(cases.cases.filter((entry: { required: boolean }) => entry.required).length >= 3);
+});
+
+test("required multi-file model case extracts literal source facts instead of architecture ownership semantics", () => {
+  const sourceCase = cases.cases.find((entry: { caseId: string }) => entry.caseId === "AB-READ-003-source-contract");
+  assert.ok(sourceCase);
+  assert.equal(sourceCase.required, true);
+  assert.equal(sourceCase.validator.type, "json-subset");
+  assert.deepEqual(sourceCase.validator.expected, {
+    projectMapRuntimeImport: "../codex/native-thread-runtime.ts",
+    projectMapManagerClass: "ProjectMapManager",
+    nativeProviderAdapterClass: "SharedNativeProviderRuntimeAdapter",
+    nativeProviderCapabilityVersion: "native-shared-runtime-v1",
+  });
+  assert.ok(sourceCase.prompt.includes("Copy each value literally from the current source"));
+  assert.equal(cases.cases.some((entry: { caseId: string }) => entry.caseId === "AB-READ-003-native-ownership"), false);
+  assert.ok(projectMap.includes('import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";'));
+  assert.ok(projectMap.includes("export class ProjectMapManager"));
+  assert.ok(nativeProvider.includes("export class SharedNativeProviderRuntimeAdapter"));
+  assert.ok(nativeProvider.includes('capabilityVersion: "native-shared-runtime-v1"'));
 });
 
 test("ordinary production Native composition uses the shared Host and has no model-visible Map tool injection", () => {

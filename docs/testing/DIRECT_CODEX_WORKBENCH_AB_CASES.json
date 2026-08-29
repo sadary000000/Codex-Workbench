@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "profile": "direct-codex-vs-workbench-native-ab",
-  "protocolVersion": "1.0.0",
+  "protocolVersion": "1.1.0",
   "armDefinitions": {
     "direct": "Raw verified Codex App Server process using the canonical initialize, thread/start and turn/start protocol without NativeThreadRuntime.",
     "workbench": "Production-isomorphic shared AppServerHost plus NativeThreadRuntime with no Map dynamic tools or Automation dispatch in the measured path."
@@ -28,7 +28,7 @@
     "varianceEscalation": {
       "enabled": true,
       "metric": "internalElapsedMs",
-      "coefficientOfVariationThreshold": 0.20,
+      "coefficientOfVariationThreshold": 0.2,
       "additionalSequence": [
         "direct",
         "workbench",
@@ -71,21 +71,21 @@
       "purpose": "Exercises one deterministic repository read/tool path with machine-verifiable output."
     },
     {
-      "caseId": "AB-READ-003-native-ownership",
+      "caseId": "AB-READ-003-source-contract",
       "required": true,
       "sandbox": "read-only",
       "fixture": "repository-target",
-      "prompt": "Do not modify files. Inspect src/main/main.ts, src/main/project-map-manager.ts, src/main/map-coordinator.ts, and src/main/native-provider-runtime-adapter.ts. Return exactly one compact JSON object with these boolean keys: ordinaryNativeUsesSharedHost, conversationMapOwnsFallbackRuntime, projectMapOwnsDirectCompatibilityClient, automationNativeCreatesRuntime. Set each value only from the current source. No Markdown and no extra keys.",
+      "prompt": "Do not modify files. Read src/main/project-map-manager.ts and src/main/native-provider-runtime-adapter.ts. Return exactly one compact JSON object with keys projectMapRuntimeImport, projectMapManagerClass, nativeProviderAdapterClass, nativeProviderCapabilityVersion. Copy each value literally from the current source: projectMapRuntimeImport is the module specifier that imports NativeThreadRuntime; projectMapManagerClass is the exported Project Map manager class name; nativeProviderAdapterClass is the exported Native provider adapter class name; nativeProviderCapabilityVersion is the capabilityVersion string returned by runtimeCapability(). No Markdown and no extra keys.",
       "validator": {
         "type": "json-subset",
         "expected": {
-          "ordinaryNativeUsesSharedHost": true,
-          "conversationMapOwnsFallbackRuntime": false,
-          "projectMapOwnsDirectCompatibilityClient": false,
-          "automationNativeCreatesRuntime": false
+          "projectMapRuntimeImport": "../codex/native-thread-runtime.ts",
+          "projectMapManagerClass": "ProjectMapManager",
+          "nativeProviderAdapterClass": "SharedNativeProviderRuntimeAdapter",
+          "nativeProviderCapabilityVersion": "native-shared-runtime-v1"
         }
       },
-      "purpose": "Exercises bounded multi-file source inspection while directly checking the R8 ownership invariant."
+      "purpose": "Exercises bounded multi-file source inspection using literal source extraction. Architectural ownership truth remains the deterministic static parity audit rather than a model-semantic release gate."
     },
     {
       "caseId": "AB-WRITE-001-workspace-write",
@@ -98,7 +98,9 @@
         "path": "AB_WRITE_RESULT.txt",
         "expectedFileText": "WORKBENCH_NATIVE_AB_WRITE_OK\n",
         "expectedFinalMessage": "WRITE_OK",
-        "allowedChangedPaths": ["AB_WRITE_RESULT.txt"]
+        "allowedChangedPaths": [
+          "AB_WRITE_RESULT.txt"
+        ]
       },
       "purpose": "Optional mutation stratum. It is excluded from the primary parity verdict if the host platform cannot provide equivalent workspace-write sandbox behavior to both arms."
     }
