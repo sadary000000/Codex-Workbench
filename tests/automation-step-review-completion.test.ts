@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { canonicalize } from "../src/automation/canonical.ts";
 import { AutomationStore } from "../src/automation/store.ts";
 import { AutomationExecutionFacade } from "../src/main/automation-execution-facade.ts";
 
@@ -25,7 +26,7 @@ async function fixture(options: { verification?: "PASS" | "FAIL"; reviewing?: bo
     version: 1,
     status: "CONFIRMED",
     origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:step-review" },
-    canonicalPayload: JSON.stringify({ goal: "complete verified work only after explicit user review" }),
+    canonicalPayload: canonicalize({ goal: "complete verified work only after explicit user review" }, "stepReviewRequirement"),
   });
   const plan = await store.createPlanVersion({
     planVersionId: PLAN_ID,
@@ -35,12 +36,12 @@ async function fixture(options: { verification?: "PASS" | "FAIL"; reviewing?: bo
     status: "ACTIVE",
     createdBy: "test",
     origin: "TEST",
-    canonicalPayload: JSON.stringify({
+    canonicalPayload: canonicalize({
       planVersionId: PLAN_ID,
       projectId: PROJECT_ID,
       requirementVersionId: REQUIREMENT_ID,
       steps: [{ stepSpecId: STEP_ID, stageSpecId: STAGE_ID, stepKey: "REVIEW_STEP", specVersion: 1 }],
-    }),
+    }, "stepReviewPlan"),
     requirementPayloadSha256: requirement.payloadSha256,
     planningMode: "JIT",
     plannerRole: "PLANNER",
