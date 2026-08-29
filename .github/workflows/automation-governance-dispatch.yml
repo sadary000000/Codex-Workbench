@@ -36,7 +36,7 @@ jobs:
           lines = [
               '    } else if (request.command === "automation.step.execute") {',
               '      if (!request.projectId || !request.stepSpecId || !request.providerTargetRef) response = controlFail(request.command, "STEP_EXECUTION_INPUT_REQUIRED", "automation step execute requires projectId, stepSpecId, and providerTargetRef.");',
-              '      else response = controlOk(request.command, await getAutomationProviderHost().execution.executeStep({ projectId: request.projectId, stepSpecId: request.stepSpecId, providerId: "native", providerTargetRef: request.providerTargetRef }));',
+              '      else response = controlOk(request.command, await getAutomationProviderHost().execution.executeStep({ projectId: request.projectId, stepSpecId: request.stepSpecId, providerTargetRef: request.providerTargetRef }));',
               '    } else if (request.command === "automation.step.reconcile") {',
               '      if (!request.projectId || !request.executionAttemptId) response = controlFail(request.command, "STEP_ATTEMPT_REQUIRED", "automation step reconcile requires projectId and executionAttemptId.");',
               '      else response = controlOk(request.command, await getAutomationProviderHost().execution.reconcileStep({ projectId: request.projectId, executionAttemptId: request.executionAttemptId }));',
@@ -79,7 +79,7 @@ jobs:
               assert.match(main, new RegExp(`getAutomationProviderHost\\(\\)\\.execution\\.${method}\\(`));
             }
             assert.doesNotMatch(main, /request\.providerId/);
-            assert.match(main, /executeStep\(\{ projectId: request\.projectId, stepSpecId: request\.stepSpecId, providerId: "native", providerTargetRef: request\.providerTargetRef \}\)/);
+            assert.match(main, /executeStep\(\{ projectId: request\.projectId, stepSpecId: request\.stepSpecId, providerTargetRef: request\.providerTargetRef \}\)/);
           });
 
           test("Review and Stage Gate provenance is forwarded without becoming authorization", async () => {
@@ -99,7 +99,7 @@ jobs:
           ! git diff | grep -E '^\+.*(new NativeThreadRuntime|new AppServerProcessClient|createAutomationExecutionFacade|createAutomationProviderHost\(|CREATE TABLE|ALTER TABLE)'
           grep -q 'execution.executeStep' src/main/main.ts
           grep -q 'execution.completeProject' src/main/main.ts
-          grep -q 'providerId: "native"' src/main/main.ts
+          ! grep -q 'request\.providerId' src/main/main.ts
       - name: Typecheck
         run: npm run typecheck
       - name: Focused governance reachability tests
