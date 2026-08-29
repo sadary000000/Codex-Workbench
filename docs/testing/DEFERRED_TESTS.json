@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "repository": "sadary000000/Codex-Workbench",
+  "policy": {
+    "deferredTestsBlockMainline": false,
+    "resultScope": "exact-tested-commit",
+    "preserveDefinitions": true,
+    "doNotOverwriteCompletedRuns": true,
+    "pendingTargetRetention": "keep-at-least-one-reachable-locator-until-completed-or-rebound",
+    "activationRule": "bind-an-exact-target-before-execution",
+    "defaultReplayMode": "historical-origin",
+    "forwardValidationRequiresNewExactTarget": true
+  },
+  "tests": [
+    {
+      "testId": "direct-codex-vs-workbench-native-ab-v1",
+      "profile": "direct-codex-vs-workbench-native-ab",
+      "classification": "deferred",
+      "status": "ready",
+      "blocksMainline": false,
+      "registeredAgainst": {
+        "branch": "feature/r8-remove-project-map-compat-runtime",
+        "commit": "af911e71ca3370c143d504e2923b122f827cac6c",
+        "pullRequest": 17
+      },
+      "executionTarget": {
+        "branch": "feature/ab-native-parity-validation",
+        "commit": "7420b7c6ce93201641c7e79e33e05392602ebf01",
+        "pullRequest": 19,
+        "productBaselineCommit": "af911e71ca3370c143d504e2923b122f827cac6c"
+      },
+      "protocol": {
+        "source": "execution-target",
+        "version": "1.0.0",
+        "runbook": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_RUNBOOK.md",
+        "agentPlan": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_AGENT_PLAN.md",
+        "cases": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_CASES.json",
+        "resultSchema": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_SCHEMA.json",
+        "runner": "scripts/ab-native-arm.ts"
+      },
+      "knownHarnessEvidence": {
+        "workflowRunId": 33235545775,
+        "workflowJobId": 99055770565,
+        "sourceCommit": "44b6b3886d139cf9181681803b7f2a5ac9f44604",
+        "finalSelfCleanCommit": "7420b7c6ce93201641c7e79e33e05392602ebf01",
+        "conclusion": "success",
+        "note": "Harness CI only: bounded diff, typecheck, targeted A/B parity tests, full repository tests, build, and self-clean passed. This is not a real Direct-vs-Workbench model benchmark result."
+      },
+      "executionPolicy": {
+        "historicalReplayAllowed": true,
+        "forwardValidationAllowed": true,
+        "timedTrialsMustNotShareContendedRuntimeResources": true,
+        "parallelizeIndependentAuditAndLogAnalysis": true,
+        "executionTargetBranchMayMoveAfterBinding": true,
+        "resultAppliesOnlyToExactExecutionTarget": true
+      },
+      "requiredBefore": "release-candidate",
+      "note": "The A/B harness is ready and pinned to an exact green execution target. Mainline may continue. Run this deferred test later using the protocol frozen from executionTarget.commit; a future validation of newer code must rebind a new exact execution target and must not reuse this target's eventual PASS."
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "policyVersion": "1.0.0",
+  "repository": "sadary000000/Codex-Workbench",
+  "resultSink": {
+    "branch": "codex/test-results",
+    "root": "test-results",
+    "indexPath": "test-results/INDEX.json",
+    "testProjectPathTemplate": "test-results/<testId>/TEST.json",
+    "runPathTemplate": "test-results/<testId>/runs/<runId>/"
+  },
+  "identity": {
+    "testProjectKey": "testId",
+    "runKey": "runId",
+    "testDefinitionSources": [
+      "docs/testing/ACTIVE_TEST.json",
+      "docs/testing/DEFERRED_TESTS.json"
+    ],
+    "activeDefinitionSelector": "entire-document",
+    "deferredDefinitionSelector": "exactly-one-tests-entry-with-matching-testId",
+    "zeroDefinitionMatches": "BLOCKED",
+    "multipleDefinitionMatches": "BLOCKED",
+    "definitionDigestAlgorithm": "sha256-canonical-json-sorted-keys-utf8",
+    "requiredEquality": [
+      "definition.testId == manifest.testId",
+      "manifest.testId == result.testId",
+      "manifest.testId == path.testId",
+      "manifest.runId == result.run.runId",
+      "manifest.runId == path.runId"
+    ]
+  },
+  "publication": {
+    "phase": "post-validation-after-independent-review",
+    "executionWorktreeRemainsReadOnly": true,
+    "allowedRemoteWriteBranch": "codex/test-results",
+    "allowedRemoteWriteRoot": "test-results/",
+    "fastForwardOnly": true,
+    "forcePushAllowed": false,
+    "branchDeletionAllowed": false,
+    "tagWriteAllowed": false,
+    "existingRunMutationAllowed": false,
+    "existingRunDeletionAllowed": false,
+    "existingTestProjectIdentityMutationAllowed": false,
+    "newTestProjectCreationAllowedOnlyForFrozenDefinition": true,
+    "newIndexEntryAllowedOnlyForFrozenDefinition": true,
+    "maxPublicationRetriesOnConcurrentResultBranchAdvance": 2,
+    "rerunProductTestOnPublicationConflict": false,
+    "existingRunPathCollision": "BLOCKED"
+  },
+  "allowedRunFiles": {
+    "required": [
+      "manifest.json",
+      "result.json",
+      "summary.md"
+    ],
+    "optional": [
+      "failures.md",
+      "metrics.json",
+      "evidence-index.json"
+    ],
+    "binaryFilesAllowed": false,
+    "rawLogsAllowed": false,
+    "maximumSingleFileBytes": 524288,
+    "maximumRunPackageBytes": 2097152
+  },
+  "manifest": {
+    "schemaPath": "docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json",
+    "mustBindFrozenControlPlaneCommit": true,
+    "mustBindDefinitionSourceObjectId": true,
+    "mustBindDefinitionDigest": true,
+    "mustBindResultSchemaObjectId": true,
+    "mustBindExactTestedCommitWhenKnown": true,
+    "mustBindVerdict": true
+  },
+  "resultDiscovery": {
+    "latestWithinTestProject": "sort-manifest-completedAt-descending",
+    "neverInferLatestFromCommitOrderAlone": true,
+    "historicalRunsRemainAuthoritativeForTheirExactTargets": true
+  }
+}
