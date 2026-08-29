@@ -91,6 +91,13 @@ const IPC = Object.freeze({
   projectAutomationCandidateList: "automation:projects:association-candidates",
   projectAutomationBind: "persistence:project-automation-associations:bind",
   projectAutomationUnlink: "persistence:project-automation-associations:unlink",
+  automationStepExecute: "automation:step:execute",
+  automationStepReconcile: "automation:step:reconcile",
+  automationStepVerify: "automation:step:verify",
+  automationStepReview: "automation:step:review",
+  automationStageGate: "automation:stage:gate",
+  automationStageAdvance: "automation:stage:advance",
+  automationProjectComplete: "automation:project:complete",
   threadList: "persistence:threads:list",
   threadBind: "persistence:threads:bind",
   threadUpdate: "persistence:threads:update",
@@ -2288,6 +2295,67 @@ function registerIpc(): void {
       if (typeof productProjectId !== "string" || typeof automationProjectId !== "string") throw new Error("Project association IDs are required.");
       // Product-owned unlink deliberately remains available without Automation initialization.
       return ok(await getProjectAutomationAssociationService().unlink(productProjectId, automationProjectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationStepExecute, async (_event, projectId: unknown, stepSpecId: unknown, providerTargetRef: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof stepSpecId !== "string" || !stepSpecId.trim() || stepSpecId.length > 256) throw codedError("STEP_EXECUTION_INPUT_REQUIRED", "Automation Step execution requires bounded Project and Step IDs.");
+      if (typeof providerTargetRef !== "string" || !providerTargetRef.trim() || providerTargetRef.length > 512 || /^https?:\/\//i.test(providerTargetRef.trim())) throw codedError("STEP_EXECUTION_INPUT_REQUIRED", "Automation Step execution requires a bounded opaque provider target reference.");
+      return ok(await getAutomationProviderHost().execution.executeStep({ projectId: projectId.trim(), stepSpecId: stepSpecId.trim(), providerTargetRef: providerTargetRef.trim() }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationStepReconcile, async (_event, projectId: unknown, executionAttemptId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof executionAttemptId !== "string" || !executionAttemptId.trim() || executionAttemptId.length > 256) throw codedError("STEP_ATTEMPT_REQUIRED", "Automation Step reconciliation requires bounded Project and ExecutionAttempt IDs.");
+      return ok(await getAutomationProviderHost().execution.reconcileStep({ projectId: projectId.trim(), executionAttemptId: executionAttemptId.trim() }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationStepVerify, async (_event, projectId: unknown, executionAttemptId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof executionAttemptId !== "string" || !executionAttemptId.trim() || executionAttemptId.length > 256) throw codedError("STEP_ATTEMPT_REQUIRED", "Automation Step verification requires bounded Project and ExecutionAttempt IDs.");
+      return ok(await getAutomationProviderHost().execution.verifyStep({ projectId: projectId.trim(), executionAttemptId: executionAttemptId.trim() }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationStepReview, async (_event, projectId: unknown, executionAttemptId: unknown, decision: unknown, reviewerRef: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof executionAttemptId !== "string" || !executionAttemptId.trim() || executionAttemptId.length > 256) throw codedError("STEP_REVIEW_INPUT_REQUIRED", "Automation Step review requires bounded Project and ExecutionAttempt IDs.");
+      if (decision !== "APPROVE" && decision !== "REJECT") throw codedError("STEP_REVIEW_DECISION_INVALID", "Automation Step review decision must be APPROVE or REJECT.");
+      if (reviewerRef !== undefined && (typeof reviewerRef !== "string" || !reviewerRef.trim() || reviewerRef.length > 256)) throw codedError("STEP_REVIEW_INPUT_REQUIRED", "Automation Step reviewerRef must be a bounded provenance reference.");
+      return ok(await getAutomationProviderHost().execution.reviewStep({ projectId: projectId.trim(), executionAttemptId: executionAttemptId.trim(), decision, ...(typeof reviewerRef === "string" ? { reviewerRef: reviewerRef.trim() } : {}) }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationStageGate, async (_event, projectId: unknown, stageSpecId: unknown, decision: unknown, gatekeeperRef: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof stageSpecId !== "string" || !stageSpecId.trim() || stageSpecId.length > 256) throw codedError("STAGE_GATE_INPUT_REQUIRED", "Automation Stage gate requires bounded Project and Stage IDs.");
+      if (decision !== "PASS" && decision !== "REJECT") throw codedError("STAGE_GATE_DECISION_INVALID", "Automation Stage gate decision must be PASS or REJECT.");
+      if (gatekeeperRef !== undefined && (typeof gatekeeperRef !== "string" || !gatekeeperRef.trim() || gatekeeperRef.length > 256)) throw codedError("STAGE_GATE_INPUT_REQUIRED", "Automation Stage gatekeeperRef must be a bounded provenance reference.");
+      return ok(await getAutomationProviderHost().execution.gateStage({ projectId: projectId.trim(), stageSpecId: stageSpecId.trim(), decision, ...(typeof gatekeeperRef === "string" ? { gatekeeperRef: gatekeeperRef.trim() } : {}) }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationStageAdvance, async (_event, projectId: unknown, stageSpecId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof stageSpecId !== "string" || !stageSpecId.trim() || stageSpecId.length > 256) throw codedError("STAGE_ADVANCE_INPUT_REQUIRED", "Automation Stage advance requires bounded Project and Stage IDs.");
+      return ok(await getAutomationProviderHost().execution.advanceStage({ projectId: projectId.trim(), stageSpecId: stageSpecId.trim() }));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationProjectComplete, async (_event, projectId: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) throw codedError("PROJECT_COMPLETION_INPUT_REQUIRED", "Automation Project completion requires a bounded Project ID.");
+      return ok(await getAutomationProviderHost().execution.completeProject({ projectId: projectId.trim() }));
     } catch (error) {
       return fail(error);
     }

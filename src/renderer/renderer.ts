@@ -68,6 +68,13 @@ interface V1Api {
   listAutomationProjectsForAssociation(): Promise<IpcEnvelope<AutomationProjectAssociationCandidate[]>>;
   bindAutomationProject(productProjectId: string, automationProjectId: string): Promise<IpcEnvelope<ProjectAutomationAssociation>>;
   unlinkAutomationProject(productProjectId: string, automationProjectId: string): Promise<IpcEnvelope<ProjectAutomationAssociation>>;
+  executeAutomationStep(projectId: string, stepSpecId: string, providerTargetRef: string): Promise<IpcEnvelope<unknown>>;
+  reconcileAutomationStep(projectId: string, executionAttemptId: string): Promise<IpcEnvelope<unknown>>;
+  verifyAutomationStep(projectId: string, executionAttemptId: string): Promise<IpcEnvelope<unknown>>;
+  reviewAutomationStep(projectId: string, executionAttemptId: string, decision: "APPROVE" | "REJECT", reviewerRef?: string | null): Promise<IpcEnvelope<unknown>>;
+  gateAutomationStage(projectId: string, stageSpecId: string, decision: "PASS" | "REJECT", gatekeeperRef?: string | null): Promise<IpcEnvelope<unknown>>;
+  advanceAutomationStage(projectId: string, stageSpecId: string): Promise<IpcEnvelope<unknown>>;
+  completeAutomationProject(projectId: string): Promise<IpcEnvelope<unknown>>;
   listThreads(projectId?: string | null): Promise<IpcEnvelope<ThreadProjection[]>>;
   bindThreadToProject(nativeThreadId: string, projectId: string | null): Promise<IpcEnvelope<ThreadProjection>>;
   updateThreadProjection(nativeThreadId: string, patch: unknown): Promise<IpcEnvelope<ThreadProjection>>;
