@@ -3,6 +3,7 @@ import { persistedProviderIdForIntent } from "../automation/provider-binding-por
 import type { PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
 import type { ProviderAwareRequirementAutomationService } from "../automation/provider-aware-requirement-service.ts";
 import { AutomationProviderServiceRouter } from "../automation/provider-service-router.ts";
+import { StageGateService, type GateStageInput } from "../automation/stage-gate-service.ts";
 import type { ExecuteStepInput, ReconcileStepInput } from "../automation/step-execution-service.ts";
 import { StepReviewCompletionService, type ReviewStepInput } from "../automation/step-review-service.ts";
 import { DeterministicStepVerificationService, type VerifyStepInput } from "../automation/step-verification-service.ts";
@@ -61,21 +62,23 @@ function normalizeProviderId(value: AutomationProviderId | null | undefined): Au
  * An explicit conflicting provider is rejected instead of switching execution
  * backends mid-workflow.
  *
- * Deterministic Step verification and explicit user review are deliberately
- * outside provider routing: they consume only persisted workflow truth and
- * never dispatch provider work.
+ * Deterministic Step verification, explicit user review, and Stage gating are
+ * deliberately outside provider routing: they consume only persisted workflow
+ * truth and never dispatch provider work.
  */
 export class AutomationExecutionFacade {
   readonly store: AutomationStore;
   readonly services: AutomationProviderServiceRouter;
   readonly stepVerification: DeterministicStepVerificationService;
   readonly stepReview: StepReviewCompletionService;
+  readonly stageGate: StageGateService;
 
   constructor(options: { store: AutomationStore; services: AutomationProviderServiceRouter }) {
     this.store = options.store;
     this.services = options.services;
     this.stepVerification = new DeterministicStepVerificationService({ store: options.store });
     this.stepReview = new StepReviewCompletionService({ store: options.store });
+    this.stageGate = new StageGateService({ store: options.store });
   }
 
   async startRequirement(input: RequirementStartInput, providerId?: AutomationProviderId | null) {
@@ -138,6 +141,10 @@ export class AutomationExecutionFacade {
 
   async reviewStep(input: ReviewStepInput) {
     return this.stepReview.review(input);
+  }
+
+  async gateStage(input: GateStageInput) {
+    return this.stageGate.gate(input);
   }
 
   async providerForRequirementSession(

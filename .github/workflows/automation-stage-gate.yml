@@ -1,0 +1,81 @@
+name: Automation Stage Gate
+
+on:
+  push:
+    branches:
+      - feature/automation-stage-gate
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Bounded diff and Stage gate boundary guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='7bd5fbf40af95f66ff4709ae7b1526b0ff3877b1'
+          allowed='^(src/automation/stage-gate-service\.ts|src/main/automation-execution-facade\.ts|tests/automation-stage-gate\.test\.ts|\.github/workflows/automation-stage-gate\.yml)$'
+          files="$(git diff --name-only "$base"...HEAD)"
+          printf '%s\n' "$files"
+          unexpected="$(printf '%s\n' "$files" | grep -Ev "$allowed" || true)"
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected files in bounded Stage gate slice:' >&2
+            printf '%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          for required in src/automation/stage-gate-service.ts src/main/automation-execution-facade.ts tests/automation-stage-gate.test.ts .github/workflows/automation-stage-gate.yml; do
+            printf '%s\n' "$files" | grep -Fx "$required" >/dev/null || { echo "Missing required Stage gate diff: $required" >&2; exit 1; }
+          done
+          if grep -Eq 'from "\./(adapters|effective-policy|provider-policy-authority|provider-service-router)\.ts"|from "\.\./.*codex/|REQUIRE_HUMAN_GATE|startTurn\(|\.submit\(|child_process|spawn\(|exec\(|createCheckpoint\(|currentStageId' src/automation/stage-gate-service.ts; then
+            echo 'Stage gate must remain workflow-truth-only and must not dispatch work or advance runtime position.' >&2
+            exit 1
+          fi
+          grep -F 'item.metadata.reviewProtocol === STEP_REVIEW_PROTOCOL' src/automation/stage-gate-service.ts >/dev/null
+          grep -F 'item.metadata.decision === "APPROVE"' src/automation/stage-gate-service.ts >/dev/null
+          grep -F 'item.metadata.gateProtocol === STAGE_GATE_PROTOCOL' src/automation/stage-gate-service.ts >/dev/null
+          grep -F 'item.metadata.decision === "PASS"' src/automation/stage-gate-service.ts >/dev/null
+          grep -F 'source: "USER"' src/automation/stage-gate-service.ts >/dev/null
+          grep -F 'Stage gate truth must not silently advance runtime position' tests/automation-stage-gate.test.ts >/dev/null
+          git diff --check "$base"...HEAD
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Targeted Stage governance tests
+        run: node --experimental-strip-types --test tests/automation-stage-gate.test.ts tests/automation-step-review-completion.test.ts tests/automation-step-verifier.test.ts tests/automation-native-step-executor.test.ts tests/automation-step-verification-contract.test.ts
+
+      - name: Full repository tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Self-clean validation workflow
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/automation-stage-gate.yml
+          git commit -m 'test: remove Stage gate validation workflow'
+          git push origin HEAD:feature/automation-stage-gate
