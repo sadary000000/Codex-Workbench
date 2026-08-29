@@ -151,7 +151,9 @@ function exactPassVerification(input: {
     && item.stepSpecId === input.stepSpecId
     && item.attemptId === input.executionAttemptId
     && item.type === STEP_VERIFICATION_EVIDENCE
+    && item.source === "WORKFLOW_TRUTH"
     && item.producer === STEP_VERIFIER_PROTOCOL
+    && item.metadata.verifierProtocol === STEP_VERIFIER_PROTOCOL
     && item.metadata.outcome === "PASS"
     && item.metadata.planVersionId === input.planVersionId
     && item.metadata.planPayloadSha256 === input.planPayloadSha256
