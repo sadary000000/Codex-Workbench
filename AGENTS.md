@@ -9,7 +9,7 @@ When the user asks Codex to test, validate, verify, audit, benchmark, review, or
 3. Read `docs/testing/DEFERRED_TESTS.json` so non-blocking work is visible. Do not auto-run deferred tests unless requested or explicitly activated.
 4. Read the complete `docs/testing/CODEX_TEST_RUNBOOK.md`.
 5. Read the complete `docs/testing/CODEX_AGENT_PLAN.md`.
-6. Read the result contract selected by the test definition and always read the universal publication contracts:
+6. Read the result contract selected by the test definition. For the active repository validation profile this is `docs/testing/TEST_RESULT_SCHEMA.json`. Always also read the universal publication contracts:
    - `docs/testing/TEST_RESULTS_POLICY.json`
    - `docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json`
 7. Snapshot the protocol files from the recorded control-plane commit into external evidence before target execution. After that snapshot, never switch to a newer remote copy of the protocol during the same run.
