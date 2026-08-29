@@ -16,6 +16,7 @@ import { parseThreadReadResponse } from "../shared/thread-read-model.ts";
 import { ConversationMapCoordinator } from "./map-coordinator.ts";
 import { ProjectMapManager } from "./project-map-manager.ts";
 import { ProjectAutomationAssociationService } from "./project-automation-association-service.ts";
+import { AutomationProjectCreationService } from "./automation-project-creation-service.ts";
 import { ProjectMapGovernanceReferenceService } from "./project-map-governance-reference-service.ts";
 import { RuntimeRegistry } from "./runtime-registry.ts";
 import { isConversationMapSidecarEnabled } from "./map-activation.ts";
@@ -90,6 +91,7 @@ const IPC = Object.freeze({
   projectOpen: "persistence:projects:open",
   projectAutomationAssociationList: "persistence:project-automation-associations:list",
   projectAutomationCandidateList: "automation:projects:association-candidates",
+  automationProjectCreate: "automation:project:create",
   projectAutomationBind: "persistence:project-automation-associations:bind",
   projectAutomationUnlink: "persistence:project-automation-associations:unlink",
   automationRequirementStart: "automation:requirement:start",
@@ -164,6 +166,7 @@ let persistence: V1PersistenceStore | null = null;
 let conversationMaps: ConversationMapCoordinator | null = null;
 let projectMaps: ProjectMapManager | null = null;
 let projectAutomationAssociationService: ProjectAutomationAssociationService | null = null;
+let automationProjectCreationService: AutomationProjectCreationService | null = null;
 let projectMapGovernanceReferenceService: ProjectMapGovernanceReferenceService | null = null;
 let webGptWorkspace: WebGptWorkspace | null = null;
 let quittingForExit = false;
@@ -1767,6 +1770,18 @@ function getPersistence(): V1PersistenceStore {
   return persistence;
 }
 
+function getAutomationProjectCreationService(): AutomationProjectCreationService {
+  if (automationProjectCreationService) return automationProjectCreationService;
+  automationProjectCreationService = new AutomationProjectCreationService({
+    async createAutomationProject(name) {
+      await ensureAutomationPersistence();
+      if (!automationStore) throw new Error("Automation persistence is unavailable.");
+      return automationStore.createAutomationProject({ name });
+    },
+  });
+  return automationProjectCreationService;
+}
+
 function getProjectAutomationAssociationService(): ProjectAutomationAssociationService {
   if (projectAutomationAssociationService) return projectAutomationAssociationService;
   projectAutomationAssociationService = new ProjectAutomationAssociationService(
@@ -2287,6 +2302,14 @@ function registerIpc(): void {
     try {
       if (typeof productProjectId !== "string") throw new Error("Product Project ID is required.");
       return ok(await getProjectAutomationAssociationService().listAssociations(productProjectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationProjectCreate, async (_event, name: unknown) => {
+    try {
+      if (typeof name !== "string") throw new Error("Automation Project name is required.");
+      return ok(await getAutomationProjectCreationService().create(name));
     } catch (error) {
       return fail(error);
     }

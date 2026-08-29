@@ -67,6 +67,7 @@ interface V1Api {
   openProject(projectId: string): Promise<IpcEnvelope<{ projectId: string; cwd: string }>>;
   listProjectAutomationAssociations(productProjectId: string): Promise<IpcEnvelope<ProjectAutomationAssociation[]>>;
   listAutomationProjectsForAssociation(): Promise<IpcEnvelope<AutomationProjectAssociationCandidate[]>>;
+  createAutomationProject(name: string): Promise<IpcEnvelope<{ projectId: string; name: string; lifecycle: string }>>;
   bindAutomationProject(productProjectId: string, automationProjectId: string): Promise<IpcEnvelope<ProjectAutomationAssociation>>;
   unlinkAutomationProject(productProjectId: string, automationProjectId: string): Promise<IpcEnvelope<ProjectAutomationAssociation>>;
   executeAutomationStep(projectId: string, stepSpecId: string, providerTargetRef: string): Promise<IpcEnvelope<unknown>>;
@@ -217,6 +218,8 @@ const projectAutomationDialog = document.querySelector<HTMLDialogElement>("#proj
 const projectAutomationForm = document.querySelector<HTMLFormElement>("#project-automation-form")!;
 const projectAutomationName = document.querySelector<HTMLElement>("#project-automation-name")!;
 const projectAutomationList = document.querySelector<HTMLElement>("#project-automation-list")!;
+const projectAutomationCreateName = document.querySelector<HTMLInputElement>("#project-automation-create-name")!;
+const projectAutomationCreateButton = document.querySelector<HTMLButtonElement>("#project-automation-create")!;
 const projectAutomationSelect = document.querySelector<HTMLSelectElement>("#project-automation-select")!;
 const projectAutomationBindButton = document.querySelector<HTMLButtonElement>("#project-automation-bind")!;
 const projectAutomationCloseButton = document.querySelector<HTMLButtonElement>("#project-automation-close")!;
@@ -1810,10 +1813,46 @@ async function refreshProjectAutomationDialog(projectId: string): Promise<void> 
 function openProjectAutomationDialog(project: ProjectRecord): void {
   projectAutomationTarget = project;
   projectAutomationName.textContent = `${project.name} · Product Project ${project.projectId}`;
+  projectAutomationCreateName.value = "";
   projectAutomationList.replaceChildren();
   projectAutomationError.hidden = true;
   projectAutomationDialog.showModal();
   void refreshProjectAutomationDialog(project.projectId);
+}
+
+async function createAndAssociateAutomationProject(): Promise<void> {
+  const project = projectAutomationTarget;
+  const name = projectAutomationCreateName.value.trim();
+  if (!project || !name) return;
+
+  projectAutomationCreateButton.disabled = true;
+  projectAutomationError.hidden = true;
+  projectAutomationError.textContent = "";
+
+  const created = await consume("project.automation.create", api.createAutomationProject(name));
+  if (!created) {
+    projectAutomationError.textContent = "创建 AutomationProject 失败。";
+    projectAutomationError.hidden = false;
+    projectAutomationCreateButton.disabled = false;
+    return;
+  }
+
+  // Workflow truth creation and Product-owned association are intentionally separate operations.
+  const bound = await consume(
+    "project.automation.association.bind-created",
+    api.bindAutomationProject(project.projectId, created.projectId),
+  );
+  if (!bound) {
+    await refreshProjectAutomationDialog(project.projectId);
+    projectAutomationError.textContent = `AutomationProject 已创建（${created.name} · ${created.projectId}），但关联失败。项目已保留，可从列表重试关联。`;
+    projectAutomationError.hidden = false;
+    projectAutomationCreateButton.disabled = false;
+    return;
+  }
+
+  projectAutomationCreateName.value = "";
+  await refreshProjectAutomationDialog(project.projectId);
+  projectAutomationCreateButton.disabled = false;
 }
 
 async function bindSelectedAutomationProject(): Promise<void> {
@@ -2332,6 +2371,9 @@ projectMenuAutomationButton.addEventListener("click", () => {
   closeProjectMenuDialog();
   if (project) openProjectAutomationDialog(project);
 });
+projectAutomationCreateButton.addEventListener("click", () => {
+  void createAndAssociateAutomationProject();
+});
 projectAutomationForm.addEventListener("submit", (event) => {
   event.preventDefault();
   void bindSelectedAutomationProject();
@@ -2339,6 +2381,7 @@ projectAutomationForm.addEventListener("submit", (event) => {
 projectAutomationCloseButton.addEventListener("click", () => projectAutomationDialog.close());
 projectAutomationDialog.addEventListener("close", () => {
   projectAutomationTarget = null;
+  projectAutomationCreateName.value = "";
   projectAutomationList.replaceChildren();
   projectAutomationSelect.replaceChildren();
   projectAutomationError.hidden = true;
