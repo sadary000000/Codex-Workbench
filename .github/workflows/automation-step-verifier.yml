@@ -28,7 +28,7 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Bounded diff guard
+      - name: Bounded diff and verifier boundary guard
         shell: bash
         run: |
           set -euo pipefail
@@ -42,56 +42,16 @@ jobs:
             printf '%s\n' "$unexpected" >&2
             exit 1
           fi
-          for required in tests/automation-step-verifier.test.ts .github/workflows/automation-step-verifier.yml; do
-            printf '%s\n' "$files" | grep -Fx "$required" >/dev/null || { echo "Missing required validation diff: $required" >&2; exit 1; }
+          for required in src/automation/step-verification-service.ts src/main/automation-execution-facade.ts tests/automation-step-verifier.test.ts .github/workflows/automation-step-verifier.yml; do
+            printf '%s\n' "$files" | grep -Fx "$required" >/dev/null || { echo "Missing required verifier diff: $required" >&2; exit 1; }
           done
-
-      - name: Replay frozen verifier patch and apply exact type narrowing
-        shell: bash
-        run: |
-          set -euo pipefail
-          git show 47a096c0c714fb9fc9411d2d1277f1872d718235:.github/workflows/automation-step-verifier.yml > /tmp/step-verifier-gate-v1.yml
-          python3 - <<'PY'
-          from pathlib import Path
-          lines = Path('/tmp/step-verifier-gate-v1.yml').read_text().splitlines()
-          start = lines.index('      - name: Apply exact Step verifier product patch')
-          run = next(i for i in range(start + 1, len(lines)) if lines[i] == '        run: |')
-          end = next(i for i in range(run + 1, len(lines)) if lines[i].startswith('      - name:'))
-          body = []
-          for line in lines[run + 1:end]:
-              if line.startswith('          '):
-                  body.append(line[10:])
-              else:
-                  body.append(line)
-          Path('/tmp/apply-step-verifier.sh').write_text('\n'.join(body) + '\n')
-          PY
-          bash /tmp/apply-step-verifier.sh
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('src/automation/step-verification-service.ts')
-          text = path.read_text()
-          old = '      const policy = policyRead.policy;\n      const fingerprint = policySha256(policy);'
-          new = '      const policy = policyRead.policy;\n      const planPayloadSha256 = plan.payloadSha256;\n      if (!planPayloadSha256) throw new StepVerificationError("STEP_VERIFICATION_PLAN_TRUTH_INVALID", "Structured verifier policy requires PlanVersion.payloadSha256.");\n      const fingerprint = policySha256(policy);'
-          if text.count(old) != 1:
-              raise SystemExit(f'policy narrowing anchor mismatch count={text.count(old)}')
-          text = text.replace(old, new)
-          replacements = {
-              'existing.metadata.planPayloadSha256 !== plan.payloadSha256': 'existing.metadata.planPayloadSha256 !== planPayloadSha256',
-              '${plan.payloadSha256}\\u0000${fingerprint}': '${planPayloadSha256}\\u0000${fingerprint}',
-              'planPayloadSha256: plan.payloadSha256,': 'planPayloadSha256,',
-          }
-          for old, new in replacements.items():
-              if text.count(old) != 1:
-                  raise SystemExit(f'type narrowing replacement mismatch: {old!r} count={text.count(old)}')
-              text = text.replace(old, new)
-          path.write_text(text)
-          PY
-          if grep -Eq 'from "\./adapters\.ts"|from "\.\./codex/|startTurn\(|\.submit\(' src/automation/step-verification-service.ts; then
+          if grep -Eq 'from "\./adapters\.ts"|from "\.\./.*codex/|startTurn\(|\.submit\(' src/automation/step-verification-service.ts; then
             echo 'Step verifier must not import provider/runtime execution seams or dispatch work.' >&2
             exit 1
           fi
-          git diff --check
-          git diff -- src/automation/step-verification-service.ts src/main/automation-execution-facade.ts
+          grep -F 'policy.verificationClass !== "HASH_MATCH"' src/automation/step-verification-service.ts >/dev/null
+          grep -F 'result-sha256:' src/automation/step-verification-service.ts >/dev/null
+          git diff --check "$base"...HEAD
 
       - name: Typecheck
         run: npm run typecheck
@@ -105,14 +65,13 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Commit validated verifier and self-clean workflow
+      - name: Self-clean validation workflow
         if: success()
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/automation/step-verification-service.ts src/main/automation-execution-facade.ts
           git rm .github/workflows/automation-step-verifier.yml
-          git commit -m 'feat: add deterministic Step verifier'
+          git commit -m 'test: remove deterministic Step verifier gate'
           git push origin HEAD:feature/automation-step-verifier
