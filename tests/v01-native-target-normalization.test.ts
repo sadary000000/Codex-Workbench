@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import type { AutomationProviderId, AutomationProviderPort } from "../src/automation/adapters.ts";
+import { policyVersionPayload, policyVersionViewFromRecord } from "../src/automation/effective-policy.ts";
 import { InputRefRegistry } from "../src/automation/input-ref.ts";
 import { AutomationProviderRegistry } from "../src/automation/provider-registry.ts";
 import { AutomationProviderServiceRouter } from "../src/automation/provider-service-router.ts";
@@ -43,10 +44,12 @@ async function persistedProviderRef(
   return workflowProviderOpaqueId(ref, role);
 }
 
-test("v0.1 renderer raw Native Thread id is canonicalized before Requirement workflow truth is persisted", async () => {
+test("v0.1 first Requirement work bootstraps conservative project policy and canonical Native target", async () => {
   const f = await fixture();
   try {
     const project = await f.store.createAutomationProject({ projectId: "project-v01-native-target", name: "v0.1 Native target" });
+    assert.equal(project.policyVersionId, null);
+
     const session = await f.facade.startRequirement({
       projectId: project.projectId,
       goal: "Keep the exact Native target durable",
@@ -56,6 +59,18 @@ test("v0.1 renderer raw Native Thread id is canonicalized before Requirement wor
 
     assert.equal(await persistedProviderRef(f.store, session.webgptProjectRef, "SCOPE"), "native-thread-v1:thread-v01-raw");
     assert.equal(await persistedProviderRef(f.store, session.requirementRoleBindingRef, "TARGET"), "native-thread-v1:thread-v01-raw");
+
+    const storedProject = await f.store.get("automationProjects", project.projectId);
+    assert.ok(storedProject?.policyVersionId, "first Requirement work must pin a project PolicyVersion before provider dispatch");
+    const policy = await f.store.get("policyVersions", storedProject.policyVersionId);
+    assert.ok(policy, "bootstrapped PolicyVersion must exist");
+    assert.equal(policy.projectId, project.projectId);
+    assert.equal(policy.preset, "v0.1-default-workflow");
+    const policyView = policyVersionViewFromRecord(policy);
+    assert.equal(policyView.allowDataEgress, false);
+    assert.equal(policyView.allowSideEffects, false);
+    assert.ok(policyView.allowedOperations.includes("PROMPT"));
+    assert.ok(policyView.allowedOperations.includes("VERIFY"));
   } finally {
     await f.store.close();
     await rm(f.root, { recursive: true, force: true });
@@ -74,6 +89,45 @@ test("already-versioned Native provider targets remain idempotent", async () => 
     });
 
     assert.equal(await persistedProviderRef(f.store, session.requirementRoleBindingRef, "TARGET"), "native-thread-v1:thread-v01-versioned");
+  } finally {
+    await f.store.close();
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("existing project PolicyVersion is preserved when Requirement work starts", async () => {
+  const f = await fixture();
+  try {
+    const project = await f.store.createAutomationProject({ projectId: "project-v01-existing-policy", name: "v0.1 existing policy" });
+    const existing = await f.store.createPolicyVersion({
+      policyVersionId: "policy-v01-existing",
+      projectId: project.projectId,
+      version: 1,
+      preset: "existing-reviewed-policy",
+      payload: policyVersionPayload({
+        maxPromptDispatches: 4,
+        maxRepairDispatches: 1,
+        maxRetryDispatches: 1,
+        maxNewChatDispatches: 0,
+        allowedOperations: ["PROMPT", "REPAIR", "RETRY", "VERIFY"],
+        requireHumanGateFor: [],
+        allowDataEgress: false,
+        allowSideEffects: false,
+      }),
+      supersedes: null,
+    });
+
+    await f.facade.startRequirement({
+      projectId: project.projectId,
+      goal: "Preserve reviewed policy",
+      questions: [],
+      providerTargetRef: "thread-v01-existing-policy",
+    });
+
+    const storedProject = await f.store.get("automationProjects", project.projectId);
+    assert.equal(storedProject?.policyVersionId, existing.policyVersionId);
+    const projectPolicies = (await f.store.snapshot()).policyVersions.filter((item) => item.projectId === project.projectId);
+    assert.deepEqual(projectPolicies.map((item) => item.policyVersionId), [existing.policyVersionId]);
   } finally {
     await f.store.close();
     await rm(f.root, { recursive: true, force: true });
