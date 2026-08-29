@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sadary000000/Codex-Workbench/docs/testing/DIRECT_CODEX_WORKBENCH_AB_SCHEMA.json",
+  "title": "Direct Codex vs Workbench Native A/B Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "profile",
+    "protocolVersion",
+    "repository",
+    "harnessCommit",
+    "testedCommit",
+    "codexBinary",
+    "model",
+    "effort",
+    "environment",
+    "repositoryGate",
+    "staticParityAudit",
+    "cases",
+    "modelVisibleWorkbenchInjection",
+    "performanceAssessment",
+    "verdict",
+    "releaseRecommendation",
+    "protocolDeviations",
+    "evidenceRoot"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "profile": { "const": "direct-codex-vs-workbench-native-ab" },
+    "protocolVersion": { "const": "1.0.0" },
+    "repository": { "const": "sadary000000/Codex-Workbench" },
+    "harnessCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "testedCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "codexBinary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "resolvedPath", "sha256", "expectedSha256", "verified"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "resolvedPath": { "type": ["string", "null"] },
+        "sha256": { "type": ["string", "null"] },
+        "expectedSha256": { "type": "string", "minLength": 1 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "model": { "type": "string", "minLength": 1 },
+    "effort": { "type": ["string", "null"] },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "architecture", "nodeVersion", "npmVersion", "gitVersion"],
+      "properties": {
+        "os": { "type": "string" },
+        "architecture": { "type": "string" },
+        "cpu": { "type": ["string", "null"] },
+        "nodeVersion": { "type": "string" },
+        "npmVersion": { "type": "string" },
+        "gitVersion": { "type": "string" }
+      }
+    },
+    "repositoryGate": { "$ref": "#/$defs/statusRecord" },
+    "staticParityAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "ordinaryNativeSharedHost",
+        "ordinaryNativeDynamicTools",
+        "ordinaryNativeWorkbenchDeveloperInstructions",
+        "conversationMapIndependentRuntime",
+        "projectMapDirectCompatClient",
+        "automationNativeCreatesRuntime",
+        "unclassifiedRuntimeOwnerCount",
+        "evidencePaths"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "ordinaryNativeSharedHost": { "type": "boolean" },
+        "ordinaryNativeDynamicTools": { "type": "boolean" },
+        "ordinaryNativeWorkbenchDeveloperInstructions": { "type": "boolean" },
+        "conversationMapIndependentRuntime": { "type": "boolean" },
+        "projectMapDirectCompatClient": { "type": "boolean" },
+        "automationNativeCreatesRuntime": { "type": "boolean" },
+        "unclassifiedRuntimeOwnerCount": { "type": "integer", "minimum": 0 },
+        "evidencePaths": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/caseResult" }
+    },
+    "modelVisibleWorkbenchInjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detected", "differences", "evidencePaths"],
+      "properties": {
+        "detected": { "type": "boolean" },
+        "differences": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "evidencePaths": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "performanceAssessment": {
+      "enum": ["EQUIVALENT_OR_BETTER", "MIXED", "MATERIAL_REGRESSION", "INCONCLUSIVE"]
+    },
+    "verdict": { "$ref": "#/$defs/status" },
+    "verdictReason": { "type": "string" },
+    "releaseRecommendation": {
+      "enum": ["PROCEED", "INVESTIGATE_WORKBENCH_OVERHEAD", "DO_NOT_PROMOTE", "RETEST_REQUIRED"]
+    },
+    "protocolDeviations": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "evidenceRoot": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "status": {
+      "enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]
+    },
+    "statusRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidencePaths"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "evidencePaths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "reason": { "type": ["string", "null"] }
+      }
+    },
+    "nullableNumber": {
+      "type": ["number", "null"]
+    },
+    "armSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formalTrialCount",
+        "taskSuccessCount",
+        "taskSuccessRate",
+        "medianInternalElapsedMs",
+        "meanInternalElapsedMs",
+        "medianThreadStartMs",
+        "medianTurnStartAckMs",
+        "tokenUsageAvailable",
+        "toolCallCount",
+        "compactionCount",
+        "retryCount",
+        "scopeDeviationCount",
+        "evidencePaths"
+      ],
+      "properties": {
+        "formalTrialCount": { "type": "integer", "minimum": 0 },
+        "taskSuccessCount": { "type": "integer", "minimum": 0 },
+        "taskSuccessRate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "medianInternalElapsedMs": { "$ref": "#/$defs/nullableNumber" },
+        "meanInternalElapsedMs": { "$ref": "#/$defs/nullableNumber" },
+        "medianThreadStartMs": { "$ref": "#/$defs/nullableNumber" },
+        "medianTurnStartAckMs": { "$ref": "#/$defs/nullableNumber" },
+        "tokenUsageAvailable": { "type": "boolean" },
+        "tokenUsage": {
+          "type": "array",
+          "items": { "type": ["number", "null"] }
+        },
+        "toolCallCount": { "type": ["integer", "null"], "minimum": 0 },
+        "compactionCount": { "type": ["integer", "null"], "minimum": 0 },
+        "retryCount": { "type": ["integer", "null"], "minimum": 0 },
+        "scopeDeviationCount": { "type": "integer", "minimum": 0 },
+        "evidencePaths": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "caseResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "required",
+        "comparability",
+        "direct",
+        "workbench",
+        "medianDeltaMs",
+        "medianRatio",
+        "successRateDelta",
+        "envelopeParity",
+        "modelVisibleWorkbenchInjection",
+        "caseVerdict"
+      ],
+      "properties": {
+        "caseId": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean" },
+        "comparability": {
+          "enum": ["COMPARABLE", "NOT_COMPARABLE", "NOT_COMPARABLE_ENVIRONMENT", "INCONCLUSIVE"]
+        },
+        "direct": { "$ref": "#/$defs/armSummary" },
+        "workbench": { "$ref": "#/$defs/armSummary" },
+        "medianDeltaMs": { "$ref": "#/$defs/nullableNumber" },
+        "medianRatio": { "$ref": "#/$defs/nullableNumber" },
+        "successRateDelta": { "$ref": "#/$defs/nullableNumber" },
+        "envelopeParity": { "type": "boolean" },
+        "modelVisibleWorkbenchInjection": { "type": "boolean" },
+        "caseVerdict": { "$ref": "#/$defs/status" },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
