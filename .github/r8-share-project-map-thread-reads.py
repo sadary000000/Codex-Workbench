@@ -208,9 +208,12 @@ const projectMapManagerSource = readFileSync(resolve(root, "src/main/project-map
 const mainSource = readFileSync(resolve(root, "src/main/main.ts"), "utf8");
 
 test("R8 Project Map context reads do not own a private App Server process", () => {
-  assert.match(projectMapManagerSource, /nativeThreadReader\?: \(projection: ThreadProjection\) => Promise<ThreadReadView>/);
+  assert.ok(projectMapManagerSource.includes("nativeThreadReader?: (projection: ThreadProjection) => Promise<ThreadReadView>"));
   assert.doesNotMatch(projectMapManagerSource, /codex-workbench-v1-context-reader/);
-  const reader = projectMapManagerSource.match(/private async readNativeThread[\\s\\S]*?\n  private async runCompatibilityMaintenance/)?.[0] ?? "";
+  const readerStart = projectMapManagerSource.indexOf("  private async readNativeThread");
+  const readerEnd = projectMapManagerSource.indexOf("  private async runCompatibilityMaintenance", readerStart);
+  assert.ok(readerStart >= 0 && readerEnd > readerStart);
+  const reader = projectMapManagerSource.slice(readerStart, readerEnd);
   assert.match(reader, /this\.nativeThreadReader\(projection\)/);
   assert.doesNotMatch(reader, /AppServerProcessClient|startAndInitializeAppServerClient|thread\\/resume|thread\\/read/);
 });
