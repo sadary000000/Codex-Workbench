@@ -1094,6 +1094,27 @@ async function handleWebGptControlRequest(request: WebGptControlRequest): Promis
     } else if (request.command === "automation.planner.result") {
       if (!request.projectId || !request.actionIntentId) response = controlFail(request.command, "PLANNER_QUERY_REQUIRED", "automation planner result 必须提供 Project ID 和 ActionIntent ID。");
       else response = controlOk(request.command, await getAutomationProviderHost().execution.plannerResult({ projectId: request.projectId, actionIntentId: request.actionIntentId }));
+    } else if (request.command === "automation.step.execute") {
+      if (!request.projectId || !request.stepSpecId || !request.providerTargetRef) response = controlFail(request.command, "STEP_EXECUTION_INPUT_REQUIRED", "automation step execute requires projectId, stepSpecId, and providerTargetRef.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.executeStep({ projectId: request.projectId, stepSpecId: request.stepSpecId, providerTargetRef: request.providerTargetRef }));
+    } else if (request.command === "automation.step.reconcile") {
+      if (!request.projectId || !request.executionAttemptId) response = controlFail(request.command, "STEP_ATTEMPT_REQUIRED", "automation step reconcile requires projectId and executionAttemptId.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.reconcileStep({ projectId: request.projectId, executionAttemptId: request.executionAttemptId }));
+    } else if (request.command === "automation.step.verify") {
+      if (!request.projectId || !request.executionAttemptId) response = controlFail(request.command, "STEP_ATTEMPT_REQUIRED", "automation step verify requires projectId and executionAttemptId.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.verifyStep({ projectId: request.projectId, executionAttemptId: request.executionAttemptId }));
+    } else if (request.command === "automation.step.review") {
+      if (!request.projectId || !request.executionAttemptId || !request.reviewDecision) response = controlFail(request.command, "STEP_REVIEW_INPUT_REQUIRED", "automation step review requires projectId, executionAttemptId, and reviewDecision.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.reviewStep({ projectId: request.projectId, executionAttemptId: request.executionAttemptId, decision: request.reviewDecision, ...(request.reviewerRef ? { reviewerRef: request.reviewerRef } : {}) }));
+    } else if (request.command === "automation.stage.gate") {
+      if (!request.projectId || !request.stageSpecId || !request.stageGateDecision) response = controlFail(request.command, "STAGE_GATE_INPUT_REQUIRED", "automation stage gate requires projectId, stageSpecId, and stageGateDecision.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.gateStage({ projectId: request.projectId, stageSpecId: request.stageSpecId, decision: request.stageGateDecision, ...(request.gatekeeperRef ? { gatekeeperRef: request.gatekeeperRef } : {}) }));
+    } else if (request.command === "automation.stage.advance") {
+      if (!request.projectId || !request.stageSpecId) response = controlFail(request.command, "STAGE_ADVANCE_INPUT_REQUIRED", "automation stage advance requires projectId and stageSpecId.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.advanceStage({ projectId: request.projectId, stageSpecId: request.stageSpecId }));
+    } else if (request.command === "automation.project.complete") {
+      if (!request.projectId) response = controlFail(request.command, "PROJECT_COMPLETION_INPUT_REQUIRED", "automation project complete requires projectId.");
+      else response = controlOk(request.command, await getAutomationProviderHost().execution.completeProject({ projectId: request.projectId }));
     } else if (request.command === "webgpt.requirement.start") {
       if (!request.projectId || !request.webgptProjectId || !request.providerTargetRef || !request.goal) response = controlFail(request.command, "REQUIREMENT_START_REQUIRED", "requirement start 必须提供 Automation project、provider project、opaque target 和 goal。");
       else response = controlOk(request.command, await getRequirementAutomationService().startAlignment({ projectId: request.projectId, goal: request.goal, questions: [], webgptProjectId: request.webgptProjectId, providerTargetRef: request.providerTargetRef }));
