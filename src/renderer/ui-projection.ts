@@ -77,5 +77,6 @@ export function userFacingErrorMessage(error: RuntimeErrorInfo): string {
 if (typeof document !== "undefined" && typeof window !== "undefined") {
   void import("./automation-governance-inspector.ts")
     .then(() => import("./automation-governance-actions.ts"))
-    .then(() => import("./automation-requirement-planner.ts"));
+    .then(() => import("./automation-requirement-planner.ts"))
+    .then(() => import("./automation-v01-guidance.ts"));
 }
