@@ -71,3 +71,9 @@ export function userFacingErrorMessage(error: RuntimeErrorInfo): string {
   }
   return error.message;
 }
+
+// renderer.ts is currently the single renderer entrypoint. Keep this UI-only
+// extension browser-gated so projection helpers remain safe in Node tests.
+if (typeof document !== "undefined" && typeof window !== "undefined") {
+  void import("./automation-governance-inspector.ts");
+}
