@@ -33,7 +33,7 @@ async function fixture() {
 
 async function persistedProviderRef(
   store: ProviderWorkflowAutomationStore,
-  externalRefId: string | null,
+  externalRefId: string | null | undefined,
   role: "SCOPE" | "TARGET",
 ): Promise<string | null> {
   assert.ok(externalRefId, `${role} ExternalRef is required`);
