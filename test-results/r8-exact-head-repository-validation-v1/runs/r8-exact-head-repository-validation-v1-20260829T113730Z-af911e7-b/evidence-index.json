@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "testId": "r8-exact-head-repository-validation-v1",
+  "runId": "r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b",
+  "exactTestedCommit": "af911e71ca3370c143d504e2923b122f827cac6c",
+  "externalEvidenceRoot": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b",
+  "entries": [
+    {
+      "name": "control-plane",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\bootstrap\\control-plane",
+      "retained": true
+    },
+    {
+      "name": "environment",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\environment",
+      "retained": true
+    },
+    {
+      "name": "ownership-audit",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\ownership-audit",
+      "retained": true
+    },
+    {
+      "name": "install",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\install",
+      "retained": true
+    },
+    {
+      "name": "typecheck",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\typecheck",
+      "retained": true
+    },
+    {
+      "name": "full-tests",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\full-tests",
+      "retained": true
+    },
+    {
+      "name": "build",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\build",
+      "retained": true
+    },
+    {
+      "name": "integrity",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\integrity",
+      "retained": true
+    },
+    {
+      "name": "freshness",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\freshness",
+      "retained": true
+    },
+    {
+      "name": "independent-review",
+      "path": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\review",
+      "retained": true
+    }
+  ]
+}

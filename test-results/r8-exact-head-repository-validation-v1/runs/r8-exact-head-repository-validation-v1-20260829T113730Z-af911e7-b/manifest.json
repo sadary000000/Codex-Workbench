@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "repository": "sadary000000/Codex-Workbench",
+  "testId": "r8-exact-head-repository-validation-v1",
+  "runId": "r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b",
+  "executionClass": "blocking",
+  "controlPlaneCommit": "d98bfc82fb18ff9d27d63b2159b6eeb60d0c9638",
+  "definition": {
+    "kind": "active",
+    "sourcePath": "docs/testing/ACTIVE_TEST.json",
+    "sourceObjectId": "f41e3f9e273ad53f2957672054e6674340a27669",
+    "selector": "entire-document",
+    "definitionSha256": "8af48d6cd60939ed6fdd8f7ce14c259eb9f90b76a2531cc6e8676598d09f8119"
+  },
+  "protocol": {
+    "sourceCommit": "d98bfc82fb18ff9d27d63b2159b6eeb60d0c9638",
+    "resultSchemaPath": "docs/testing/TEST_RESULT_SCHEMA.json",
+    "resultSchemaObjectId": "f3b01735ab2eafbfa7572a3c2b5e78659f2b7df0"
+  },
+  "target": {
+    "locatorBranch": "feature/r8-remove-project-map-compat-runtime",
+    "configuredCommit": "af911e71ca3370c143d504e2923b122f827cac6c",
+    "testedCommit": "af911e71ca3370c143d504e2923b122f827cac6c"
+  },
+  "result": {
+    "path": "result.json",
+    "sha256": "7504ca0094176245276c0104fd1a57296896917284dcf3ab2fb799a736bd0fa3",
+    "verdict": "FAIL"
+  },
+  "completedAt": "2026-08-29T11:44:25.863Z",
+  "summaryPath": "summary.md",
+  "failuresPath": "failures.md",
+  "evidenceIndexPath": "evidence-index.json"
+}

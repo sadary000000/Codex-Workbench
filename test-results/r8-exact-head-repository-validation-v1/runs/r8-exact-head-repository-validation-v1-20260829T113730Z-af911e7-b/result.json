@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 3,
+  "testId": "r8-exact-head-repository-validation-v1",
+  "definitionBinding": {
+    "kind": "active",
+    "sourcePath": "docs/testing/ACTIVE_TEST.json",
+    "sourceObjectId": "f41e3f9e273ad53f2957672054e6674340a27669",
+    "selector": "entire-document",
+    "definitionSha256": "8af48d6cd60939ed6fdd8f7ce14c259eb9f90b76a2531cc6e8676598d09f8119"
+  },
+  "protocolVersion": "1.1.0",
+  "executionClass": "blocking",
+  "repository": "sadary000000/Codex-Workbench",
+  "controlPlane": {
+    "bootstrapCommit": "d98bfc82fb18ff9d27d63b2159b6eeb60d0c9638",
+    "frozen": true,
+    "snapshotEvidence": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\bootstrap\\control-plane",
+    "files": [
+      {
+        "path": "AGENTS.md",
+        "objectId": "39d56e04fa8b2fa93fe152a1d12bd0fc12bbe674"
+      },
+      {
+        "path": "docs/testing/ACTIVE_TEST.json",
+        "objectId": "f41e3f9e273ad53f2957672054e6674340a27669"
+      },
+      {
+        "path": "docs/testing/DEFERRED_TESTS.json",
+        "objectId": "011dcccc84dd4b6ebc6bb00f361acbeeb05591f1"
+      },
+      {
+        "path": "docs/testing/CODEX_TEST_RUNBOOK.md",
+        "objectId": "7d9702eb7488996ac838bbbdb4eb80fce0d11993"
+      },
+      {
+        "path": "docs/testing/CODEX_AGENT_PLAN.md",
+        "objectId": "c55ce767291ec8bc8cfbb98078c00115d5202429"
+      },
+      {
+        "path": "docs/testing/TEST_RESULT_SCHEMA.json",
+        "objectId": "f3b01735ab2eafbfa7572a3c2b5e78659f2b7df0"
+      },
+      {
+        "path": "docs/testing/TEST_RESULTS_POLICY.json",
+        "objectId": "3ee36345a8f574bb5f6d1ce1f9547c278af3fc00"
+      },
+      {
+        "path": "docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json",
+        "objectId": "470cb450410be01efbeae7c6d6cda0e81b8fbf3c"
+      }
+    ]
+  },
+  "target": {
+    "branch": "feature/r8-remove-project-map-compat-runtime",
+    "configuredCommit": "af911e71ca3370c143d504e2923b122f827cac6c",
+    "observedBranchHeadAtStart": "af911e71ca3370c143d504e2923b122f827cac6c",
+    "observedBranchHeadAtCompletion": "af911e71ca3370c143d504e2923b122f827cac6c",
+    "testedCommit": "af911e71ca3370c143d504e2923b122f827cac6c",
+    "exactMatchAtStart": true,
+    "movedDuringRun": false
+  },
+  "run": {
+    "runId": "r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b",
+    "startedAt": "2026-08-29T11:37:30.000Z",
+    "finishedAt": "2026-08-29T11:44:25.863Z",
+    "originalWorktreeDirty": false,
+    "isolatedWorktree": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-target\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b"
+  },
+  "environment": {
+    "os": "Microsoft Windows 10.0.19045",
+    "architecture": "X64",
+    "gitVersion": "2.44.0.windows.1",
+    "nodeVersion": "v24.18.0",
+    "npmVersion": "11.16.0"
+  },
+  "agents": [
+    {
+      "agentId": "env-audit",
+      "status": "PASS",
+      "startedAt": "2026-08-29T11:38:15.4943552Z",
+      "finishedAt": "2026-08-29T11:38:15.9445192Z",
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\environment\\summary.txt",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\environment\\agent.json"
+      ],
+      "protocolDeviations": []
+    },
+    {
+      "agentId": "ownership-audit",
+      "status": "PASS",
+      "startedAt": "2026-08-29T11:38:15.4964375Z",
+      "finishedAt": "2026-08-29T11:42:25.312Z",
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\ownership-audit\\raw-occurrences.txt",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\ownership-audit\\inventory.json",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\ownership-audit\\classification.json",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\ownership-audit\\agent.json"
+      ],
+      "protocolDeviations": []
+    },
+    {
+      "agentId": "typecheck",
+      "status": "PASS",
+      "startedAt": "2026-08-29T11:41:12.9357882Z",
+      "finishedAt": "2026-08-29T11:41:21.4600973Z",
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\typecheck\\command.json",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\typecheck\\stdout.log",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\typecheck\\stderr.log",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\review\\command-identity.json"
+      ],
+      "protocolDeviations": []
+    },
+    {
+      "agentId": "full-tests",
+      "status": "FAIL",
+      "startedAt": "2026-08-29T11:41:12.9347815Z",
+      "finishedAt": "2026-08-29T11:41:20.8188883Z",
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\full-tests\\command.json",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\full-tests\\stdout.log",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\full-tests\\stderr.log",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\review\\command-identity.json"
+      ],
+      "protocolDeviations": []
+    },
+    {
+      "agentId": "build",
+      "status": "PASS",
+      "startedAt": "2026-08-29T11:41:12.9353022Z",
+      "finishedAt": "2026-08-29T11:41:18.8736444Z",
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\build\\command.json",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\build\\stdout.log",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\build\\stderr.log",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\review\\command-identity.json"
+      ],
+      "protocolDeviations": []
+    },
+    {
+      "agentId": "independent-review",
+      "status": "PASS",
+      "startedAt": "2026-08-29T11:44:25.000Z",
+      "finishedAt": "2026-08-29T11:44:25.863Z",
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\review\\review.json",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\review\\review.md"
+      ],
+      "protocolDeviations": []
+    }
+  ],
+  "gates": {
+    "dependencyInstall": {
+      "status": "PASS",
+      "attempts": 1,
+      "exitCode": 0,
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\install\\npm-ci.command.json",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\install\\npm-ci.stdout.log",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\install\\npm-ci.stderr.log"
+      ]
+    },
+    "typecheck": {
+      "status": "PASS",
+      "attempts": 1,
+      "exitCode": 0,
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\typecheck\\command.json",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\typecheck\\stdout.log",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\typecheck\\stderr.log"
+      ]
+    },
+    "tests": {
+      "status": "FAIL",
+      "attempts": 1,
+      "exitCode": 1,
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\full-tests\\command.json",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\full-tests\\stdout.log",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\full-tests\\stderr.log"
+      ]
+    },
+    "build": {
+      "status": "PASS",
+      "attempts": 1,
+      "exitCode": 0,
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\build\\command.json",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\build\\stdout.log",
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\build\\stderr.log"
+      ]
+    },
+    "postRunIntegrity": {
+      "status": "PASS",
+      "attempts": 1,
+      "exitCode": 0,
+      "evidencePaths": [
+        "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\integrity\\post-run.json"
+      ]
+    }
+  },
+  "ownershipAudit": {
+    "status": "PASS",
+    "secondAppServerOwnerDetected": false,
+    "conversationMapFallbackRuntimeDetected": false,
+    "projectMapDirectCompatFallbackDetected": false,
+    "perReadAppServerOwnerDetected": false,
+    "duplicateTranscriptOrToolRuntimeDetected": false,
+    "unclassifiedOccurrenceCount": 0,
+    "inventoryEvidence": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b\\ownership-audit\\classification.json"
+  },
+  "protocolDeviations": [],
+  "verdict": "FAIL",
+  "verdictReason": "The exact target is valid and reproducible, but npm test deterministically failed: 566 tests passed and 1 failed at tests\\workspace-layout-contract.test.ts:10:1 (workspace conversation shell must close).",
+  "mainlineGate": {
+    "required": true,
+    "status": "FAILED",
+    "satisfied": false,
+    "completionBranchHead": "af911e71ca3370c143d504e2923b122f827cac6c",
+    "reason": "The blocking target branch still points to the exact tested commit, but the exact-commit verdict is FAIL."
+  },
+  "deferredTests": {
+    "registryObjectId": "011dcccc84dd4b6ebc6bb00f361acbeeb05591f1",
+    "entries": [
+      {
+        "testId": "direct-codex-vs-workbench-native-ab-v1",
+        "status": "ready",
+        "classification": "deferred",
+        "blocksMainline": false
+      }
+    ]
+  },
+  "evidenceRoot": "C:\\Users\\sadar\\AppData\\Local\\Temp\\codex-workbench-tests\\r8-exact-head-repository-validation-v1-20260829T113730Z-af911e7-b"
+}
