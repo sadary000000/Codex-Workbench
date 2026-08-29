@@ -1,0 +1,74 @@
+name: R8 Project Map Shared Thread Reads
+
+on:
+  push:
+    branches:
+      - feature/r8-share-project-map-thread-reads
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Apply bounded R8 patch
+        run: python3 .github/r8-share-project-map-thread-reads.py
+
+      - name: Diff guard
+        shell: bash
+        run: |
+          git diff --check
+          python3 - <<'PY'
+          import subprocess
+          expected = {
+              'src/main/main.ts',
+              'src/main/project-map-manager.ts',
+              'tests/app-server-host.test.ts',
+              'tests/r8-project-map-context-read-boundary.test.ts',
+          }
+          actual = set(filter(None, subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines()))
+          if actual != expected:
+              raise SystemExit(f'unexpected patch files: actual={sorted(actual)} expected={sorted(expected)}')
+          PY
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Targeted R8 boundary tests
+        run: node --experimental-strip-types --test tests/app-server-host.test.ts tests/project-map-manager.test.ts tests/arch-v2-7-read-purity.test.ts tests/r8-project-map-context-read-boundary.test.ts
+
+      - name: Test full repository
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit verified patch and self-clean
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/main/main.ts src/main/project-map-manager.ts tests/app-server-host.test.ts tests/r8-project-map-context-read-boundary.test.ts
+          git rm .github/r8-share-project-map-thread-reads.py .github/workflows/r8-share-project-map-thread-reads.yml
+          git diff --cached --check
+          git commit -m "refactor: share Project Map Native thread reads"
+          git push origin HEAD:feature/r8-share-project-map-thread-reads
