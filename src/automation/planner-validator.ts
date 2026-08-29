@@ -3,6 +3,7 @@ import type {
   PlanVersion,
   RequirementVersion,
   StageDetailLevel,
+  PlannerVerificationClass,
 } from "./types.ts";
 
 /**
@@ -73,6 +74,7 @@ export type PlanValidationIssueCode =
   | "STEP_PREDECESSOR_INVALID"
   | "STEP_OBJECTIVE_REQUIRED"
   | "STEP_ACCEPTANCE_REQUIRED"
+  | "STEP_VERIFICATION_PLAN_REQUIRED"
   | "STEP_NOT_ACTIONABLE"
   | "REQUIREMENT_INPUT_REQUIRED"
   | "ASSUMPTIONS_PRESENT";
@@ -121,6 +123,10 @@ export interface PlanStepCandidate {
   readonly constraints: readonly string[];
   readonly riskClass: "LOW" | "MEDIUM" | "HIGH";
   readonly sideEffectClass: "PURE" | "IDEMPOTENT" | "RECONCILABLE" | "NON_REPEATABLE";
+  /** Optional immutable machine-verifier policy. Absence preserves legacy K1-B candidates but cannot later imply verifier PASS. */
+  readonly verificationClass?: PlannerVerificationClass;
+  readonly verificationPlan?: readonly string[];
+  readonly expectedArtifacts?: readonly string[];
   readonly supersedes: string | null;
 }
 
@@ -196,6 +202,7 @@ const DETAIL_LEVELS = new Set<StageDetailLevel>(["OUTLINE", "DETAILED"]);
 const STEP_KINDS = new Set(["PLANNER_STEP", "SYSTEM_STEP"]);
 const RISK_CLASSES = new Set(["LOW", "MEDIUM", "HIGH"]);
 const SIDE_EFFECT_CLASSES = new Set(["PURE", "IDEMPOTENT", "RECONCILABLE", "NON_REPEATABLE"]);
+const VERIFICATION_CLASSES = new Set<PlannerVerificationClass>(["BUILD", "TEST", "GIT_DIFF", "GIT_STATUS", "FILE_EXISTS", "HASH_MATCH", "JSON_SCHEMA", "CLI_SMOKE", "HARDWARE_SMOKE", "CUSTOM_APPROVED"]);
 const VAGUE_ACTIONS = /^(?:完成(?:一下|它|工作|任务|剩余工作|所有工作|所有任务)?|做(?:好|一下)?|处理(?:一下|它)?|优化(?:一下|代码|代码质量|系统)?|检查(?:一下|所有问题)?|修复(?:一下|问题|所有问题)?|继续(?:工作)?|搞定|解决(?:一下|问题)?|把代码做好|(?:finish|complete|do|handle|optimi[sz]e|check|fix)(?:\s+(?:it|this|the work|everything|all issues|code quality))?)$/i;
 
 type UnknownRecord = Record<string, unknown>;
@@ -292,7 +299,14 @@ function parseStage(value: unknown, index: number, candidatePlanVersionId: strin
 function parseStep(value: unknown, index: number): PlanStepCandidate {
   const path = `candidate.steps[${index}]`;
   const item = record(value, path);
-  allowedKeys(item, ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "ordinal", "objective", "inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints", "riskClass", "sideEffectClass", "supersedes"], path);
+  allowedKeys(item, ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "ordinal", "objective", "inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints", "riskClass", "sideEffectClass", "verificationClass", "verificationPlan", "expectedArtifacts", "supersedes"], path);
+  const hasVerificationDescriptor = item.verificationClass !== undefined || item.verificationPlan !== undefined || item.expectedArtifacts !== undefined;
+  if (hasVerificationDescriptor && item.verificationClass === undefined) throw new PlanCandidateValidationError("REQUIRED_FIELD", `${path}.verificationClass`, `${path}.verificationClass is required when verifier policy is present.`);
+  if (hasVerificationDescriptor && item.verificationPlan === undefined) throw new PlanCandidateValidationError("REQUIRED_FIELD", `${path}.verificationPlan`, `${path}.verificationPlan is required when verifier policy is present.`);
+  const verificationClass = hasVerificationDescriptor ? enumValue<PlannerVerificationClass>(item.verificationClass, `${path}.verificationClass`, VERIFICATION_CLASSES) : undefined;
+  const verificationPlan = hasVerificationDescriptor ? boundedList(item.verificationPlan, `${path}.verificationPlan`, 32, 2_048) : undefined;
+  if (verificationPlan !== undefined && verificationPlan.length === 0) throw new PlanCandidateValidationError("STEP_VERIFICATION_PLAN_REQUIRED", `${path}.verificationPlan`, "A verifier-aware Step requires at least one bounded deterministic verification instruction.");
+  const expectedArtifacts = item.expectedArtifacts === undefined ? undefined : boundedList(item.expectedArtifacts, `${path}.expectedArtifacts`, 64, 2_048);
   return {
     stepSpecId: required(item, "stepSpecId", path, (input, fieldPath) => text(input, fieldPath, 256)),
     stageSpecId: required(item, "stageSpecId", path, (input, fieldPath) => text(input, fieldPath, 256)),
@@ -308,6 +322,9 @@ function parseStep(value: unknown, index: number): PlanStepCandidate {
     constraints: required(item, "constraints", path, boundedList),
     riskClass: required(item, "riskClass", path, (input, fieldPath) => enumValue<PlanStepCandidate["riskClass"]>(input, fieldPath, RISK_CLASSES)),
     sideEffectClass: required(item, "sideEffectClass", path, (input, fieldPath) => enumValue<PlanStepCandidate["sideEffectClass"]>(input, fieldPath, SIDE_EFFECT_CLASSES)),
+    ...(verificationClass === undefined ? {} : { verificationClass }),
+    ...(verificationPlan === undefined ? {} : { verificationPlan }),
+    ...(expectedArtifacts === undefined ? {} : { expectedArtifacts }),
     supersedes: nullableText(item, "supersedes", path, 256),
   };
 }

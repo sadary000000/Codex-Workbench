@@ -1027,7 +1027,9 @@ export class AutomationStore {
       if ((previous?.planVersionId ?? null) !== c.supersedes) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner candidate predecessor does not match the active PlanVersion.");
       if (previous) tx.replace("planVersions", { ...previous, status: "SUPERSEDED" });
       const timestamp = now();
-      const planVersion: PlanVersion = { planVersionId: c.planVersionId, projectId: c.projectId, requirementVersionId: c.requirementVersionId, version: c.version, status: "ACTIVE", createdBy: "planner-provider", origin: text(input.provider, "planner.provider", 256), requirementPayloadSha256: c.requirementPayloadSha256, planningMode: "JIT", plannerRole: "PLANNER", plannerChatRef: null, currentStageId: c.currentStageId, createdAt: timestamp, supersedes: c.supersedes };
+      const canonicalPayload = canonicalize(c, "planner.validatedCandidate");
+      const payloadSha256 = sha256Hex(canonicalPayload);
+      const planVersion: PlanVersion = { planVersionId: c.planVersionId, projectId: c.projectId, requirementVersionId: c.requirementVersionId, version: c.version, status: "ACTIVE", createdBy: "planner-provider", origin: text(input.provider, "planner.provider", 256), canonicalPayload, payloadSha256, requirementPayloadSha256: c.requirementPayloadSha256, planningMode: "JIT", plannerRole: "PLANNER", plannerChatRef: null, currentStageId: c.currentStageId, createdAt: timestamp, supersedes: c.supersedes };
       tx.insert("planVersions", planVersion);
       const stageSpecs: StageSpec[] = c.stages.map((stage) => ({ stageSpecId: stage.stageSpecId, planVersionId: planVersion.planVersionId, stageKey: stage.stageKey, name: stage.name, objective: stage.objective, dependsOn: [...stage.dependsOn], acceptanceCriteria: [...stage.acceptanceCriteria], detailLevel: stage.detailLevel, assumptions: [...stage.assumptions], risks: [...stage.risks], specVersion: stage.specVersion, status: "ACTIVE", ordinal: stage.ordinal, goal: stage.objective, createdAt: timestamp, supersedes: stage.supersedes }));
       for (const stage of stageSpecs) tx.insert("stageSpecs", stage);
