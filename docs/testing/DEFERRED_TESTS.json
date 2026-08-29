@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "repository": "sadary000000/Codex-Workbench",
+  "policy": {
+    "deferredTestsBlockMainline": false,
+    "resultScope": "exact-tested-commit",
+    "preserveDefinitions": true,
+    "doNotOverwriteCompletedRuns": true,
+    "pendingTargetRetention": "keep-at-least-one-reachable-locator-until-completed-or-rebound",
+    "activationRule": "bind-an-exact-target-before-execution",
+    "defaultReplayMode": "historical-origin",
+    "forwardValidationRequiresNewExactTarget": true
+  },
+  "tests": [
+    {
+      "testId": "direct-codex-vs-workbench-native-ab-v1",
+      "profile": "direct-codex-vs-workbench-native-ab",
+      "classification": "deferred",
+      "status": "planned",
+      "blocksMainline": false,
+      "registeredAgainst": {
+        "branch": "feature/r8-remove-project-map-compat-runtime",
+        "commit": "af911e71ca3370c143d504e2923b122f827cac6c",
+        "pullRequest": 17
+      },
+      "executionTarget": null,
+      "executionPolicy": {
+        "historicalReplayAllowed": true,
+        "forwardValidationAllowed": true,
+        "timedTrialsMustNotShareContendedRuntimeResources": true,
+        "parallelizeIndependentAuditAndLogAnalysis": true
+      },
+      "requiredBefore": "release-candidate",
+      "note": "Retain this test intent while mainline work continues. When the A/B harness is ready, bind a new exact executionTarget without erasing registeredAgainst. Historical replay may still target the registration commit; forward validation must create a new exact target binding and may not reuse an old PASS for newer code."
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Codex repository test Runbook
 
-Protocol version: **1.0.0**
+Protocol version: **1.1.0**
 
 This file is the execution authority for repository-owned validation. Codex is the executor, not the test designer. Do not change the test method during a run.
 
@@ -10,28 +10,111 @@ The active profile `repository-exact-head-validation` verifies that the exact Gi
 
 This profile is a correctness/architecture gate. It is **not** a latency or throughput benchmark. Commands intentionally run in parallel where safe, so their wall-clock times must not be interpreted as product performance measurements.
 
-## 2. Authority and immutable inputs
+The protocol also defines how repository activity may continue while a test is running and how non-blocking tests are retained for later execution.
 
-Before running any command, read all of these files from the repository bootstrap checkout:
+## 2. Authority, control-plane freeze, and immutable inputs
+
+Before running target commands, read these files from one bootstrap checkout commit:
 
 1. `/AGENTS.md`
 2. `/docs/testing/ACTIVE_TEST.json`
-3. `/docs/testing/CODEX_TEST_RUNBOOK.md`
-4. `/docs/testing/CODEX_AGENT_PLAN.md`
-5. `/docs/testing/TEST_RESULT_SCHEMA.json`
+3. `/docs/testing/DEFERRED_TESTS.json`
+4. `/docs/testing/CODEX_TEST_RUNBOOK.md`
+5. `/docs/testing/CODEX_AGENT_PLAN.md`
+6. `/docs/testing/TEST_RESULT_SCHEMA.json`
 
-The following fields from `ACTIVE_TEST.json` are immutable inputs for the run:
+### 2.1 Freeze the control plane
+
+Coordinator records:
+
+```text
+git rev-parse HEAD
+```
+
+Call this immutable value `controlPlaneCommit`.
+
+Before target execution, copy the six protocol files listed above into the external evidence directory under `bootstrap/control-plane/` and record the Git object id for each file as observed at `controlPlaneCommit`.
+
+Recommended non-destructive Git identity operation for each file:
+
+```text
+git rev-parse <controlPlaneCommit>:<repository-relative-path>
+```
+
+After this snapshot is complete:
+
+- do not pull, checkout, or switch the bootstrap worktree to obtain newer protocol files;
+- do not reread `ACTIVE_TEST.json` or the Runbook from a moving remote ref;
+- do not let a later repository update alter the run's commands, agent plan, target, or verdict rules;
+- use only the frozen snapshot for the remainder of the run.
+
+If the control-plane files cannot all be read from one commit, verdict = `BLOCKED`.
+
+### 2.2 Immutable active inputs
+
+The following fields from the frozen `ACTIVE_TEST.json` are immutable for the run:
 
 - `repository`
 - `testId`
 - `profile`
+- `executionClass`
+- `blocksMainline`
 - `target.branch`
 - `target.commit`
+- `targetPolicy.*`
 - `protocol.version`
+- protocol file paths
 
 Do not replace a missing or inaccessible value with a guessed value.
 
-## 3. Hard prohibitions
+## 3. Repository-concurrency semantics
+
+Repository updates during a Codex test are allowed under these rules.
+
+### 3.1 Updates that do not corrupt a running test
+
+After `controlPlaneCommit` is frozen and barrier `B0_TARGET_PINNED` is reached, later pushes to GitHub do not change the already-running test because:
+
+- protocol inputs come from the frozen control-plane snapshot;
+- product/test execution happens in a detached worktree at the exact target SHA;
+- the original worktree is never switched or reset;
+- results are scoped to the exact tested SHA.
+
+Development may therefore continue on other branches while Codex tests the pinned target.
+
+### 3.2 Blocking target moved during the run
+
+A blocking test has two separate questions:
+
+1. **Did the exact tested commit pass?**
+2. **Does that result still satisfy the current mainline gate?**
+
+If the target branch advances after `B0_TARGET_PINNED`, continue the exact-SHA run. Do not restart automatically and do not alter the target.
+
+At completion, perform the freshness check in Section 10.
+
+If the branch no longer points to the tested commit:
+
+- the exact-commit verdict remains valid historical evidence;
+- `mainlineGate.status` MUST be `STALE`;
+- `mainlineGate.satisfied` MUST be `false`;
+- a PASS MUST NOT be used to unblock the newer head;
+- do not auto-run the newer head unless a new active-test snapshot authorizes it.
+
+### 3.3 Non-blocking/deferred tests
+
+Deferred tests do not block mainline progress. Their definitions live in `DEFERRED_TESTS.json`.
+
+A deferred result always applies only to its bound exact execution target.
+
+Two replay modes are permitted when an entry is executable:
+
+- **historical replay** — run the original retained exact target and preserve the result as historical evidence;
+- **forward validation** — bind a new exact target for current code while retaining the original registration context. A newer run is a new execution record; it does not overwrite the historical run.
+
+Never reinterpret an old PASS as proof for a newer commit.
+
+## 4. Hard prohibitions
 
 During this protocol the executor and every subagent MUST NOT:
 
@@ -48,34 +131,37 @@ During this protocol the executor and every subagent MUST NOT:
 - change model/configuration/test inputs during the run;
 - silently skip a required command;
 - retry a deterministic failure unless this Runbook explicitly permits that retry;
-- treat the historical green workflow recorded in `knownEvidence` as current PASS evidence.
+- treat historical CI or historical deferred results as current PASS evidence;
+- switch protocol versions or target SHAs after the control-plane freeze.
 
-If a required step cannot be executed under these rules, return `BLOCKED` or `INCONCLUSIVE` according to Section 11.
+If a required step cannot be executed under these rules, return `BLOCKED` or `INCONCLUSIVE` according to Section 12.
 
-## 4. Evidence location
+## 5. Evidence location
 
-Create a run identifier in the form:
+Create a run identifier:
 
 ```text
 <testId>-<UTC timestamp>-<short target SHA>
 ```
 
-Create an evidence directory in the operating system's temporary area, outside every Git worktree. Example logical layout:
+Create evidence outside every Git worktree, for example:
 
 ```text
 <OS temp>/codex-workbench-tests/<run-id>/
   bootstrap/
+    repository.txt
+    control-plane/
+    file-object-ids.json
   environment/
   install/
   ownership-audit/
   typecheck/
   tests/
   build/
+  freshness/
   review/
   result.json
 ```
-
-Do not make evidence storage part of the Git source tree.
 
 Every command record must contain:
 
@@ -88,11 +174,13 @@ Every command record must contain:
 - stderr path;
 - executor/agent id.
 
-## 5. Phase 0 — Bootstrap identity and target resolution
+Evidence is immutable input to the final reviewer. Do not rewrite failed command output after later steps succeed.
+
+## 6. Phase 0 — Bootstrap identity and target resolution
 
 Coordinator only.
 
-### 5.1 Record bootstrap repository identity
+### 6.1 Record original repository identity
 
 From the repository supplied by the user, record without modifying it:
 
@@ -106,13 +194,15 @@ git status --porcelain=v1
 
 A dirty original worktree is allowed. Record it; do not alter it.
 
-### 5.2 Validate repository identity
+The `git rev-parse HEAD` used for the frozen control plane must match the recorded `controlPlaneCommit`.
 
-The origin must resolve to the repository named by `ACTIVE_TEST.json` or an equivalent authenticated GitHub URL for that exact repository.
+### 6.2 Validate repository identity
+
+The origin must resolve to the repository named by frozen `ACTIVE_TEST.json` or an equivalent authenticated GitHub URL for that exact repository.
 
 If it refers to another repository, verdict = `BLOCKED`.
 
-### 5.3 Fetch the declared target branch
+### 6.3 Fetch and validate the declared blocking target
 
 Fetch only what is required to resolve the declared target. Do not update the current working branch.
 
@@ -122,27 +212,25 @@ Required logical operation:
 git fetch --no-tags origin <target.branch>
 ```
 
-Then resolve the fetched remote branch head and compare it to `target.commit`.
+Resolve the fetched branch head and compare it with `target.commit`.
 
-The fetched branch head MUST equal the exact commit in `ACTIVE_TEST.json`.
+For `targetPolicy.startFreshness = branch-head-must-match`:
 
 - equal -> continue;
 - branch does not exist / commit inaccessible -> `BLOCKED`;
 - branch exists but head != configured commit -> `BLOCKED` with reason `ACTIVE_TEST_STALE`.
 
-Do not silently test either the new branch head or the old configured commit when this mismatch occurs.
+This start-time stale check prevents beginning a blocking gate against a target already superseded before execution.
 
-### 5.4 Create isolated target worktree
+### 6.4 Create isolated target worktree
 
-Create a new detached Git worktree in a temporary directory at exactly `target.commit`:
+Create a detached Git worktree in a temporary directory at exactly `target.commit`:
 
 ```text
 git worktree add --detach <temporary-target-worktree> <target.commit>
 ```
 
-Do not switch, reset, clean, or otherwise prepare the user's original worktree.
-
-Inside the detached target worktree verify:
+Inside it verify:
 
 ```text
 git rev-parse HEAD
@@ -156,13 +244,15 @@ Required:
 
 If not, `BLOCKED`.
 
+Record the start branch head in result field `target.observedBranchHeadAtStart`.
+
 This completes barrier **B0_TARGET_PINNED**.
 
-## 6. Phase 1 — Environment and dependency preparation
+## 7. Phase 1 — Environment and dependency preparation
 
-After `B0_TARGET_PINNED`, execute the Wave 1 plan defined in `CODEX_AGENT_PLAN.md`.
+After `B0_TARGET_PINNED`, execute Wave 1 from `CODEX_AGENT_PLAN.md`.
 
-### 6.1 Environment evidence
+### 7.1 Environment evidence
 
 Capture at minimum:
 
@@ -172,13 +262,13 @@ node --version
 npm --version
 ```
 
-Also record OS/platform and CPU architecture using the platform's standard non-destructive command.
+Also record OS/platform and CPU architecture using a non-destructive platform command.
 
-Do not reject an environment merely because its version differs from historical evidence unless the repository itself declares an incompatible engine/tool requirement or a required command fails because of that incompatibility.
+Do not reject an environment merely because its version differs from historical evidence unless repository constraints require a different version or a command demonstrably fails because of incompatibility.
 
-### 6.2 Dependency installation
+### 7.2 Dependency installation
 
-Coordinator owns dependency installation in the isolated target worktree:
+Coordinator runs in the detached target worktree:
 
 ```text
 npm ci
@@ -188,21 +278,21 @@ Allowed retry policy:
 
 - at most **one** retry;
 - only if the first failure is clearly an external package-registry/network transport failure;
-- never retry dependency-resolution errors, lifecycle-script failures, integrity failures, or source/test errors;
-- record the first attempt and the retry as separate evidence records;
-- a retry is not a protocol deviation because it is predefined here.
+- never retry dependency-resolution errors, lifecycle-script failures, integrity failures, source errors, or test errors;
+- preserve first-attempt evidence;
+- record retry as a separate command record.
 
-If installation still cannot complete due to external infrastructure, verdict = `INCONCLUSIVE`.
+If install still cannot complete because of external infrastructure -> `INCONCLUSIVE`.
 
-If installation fails deterministically because of repository/dependency state, verdict = `FAIL`.
+If install fails deterministically because of repository/dependency state -> `FAIL`.
 
-Successful installation completes barrier **B1_DEPENDENCIES_READY**.
+Success completes **B1_DEPENDENCIES_READY**.
 
-## 7. Phase 2 — Native ownership static audit
+## 8. Phase 2 — Native ownership static audit
 
-This audit may begin after `B0_TARGET_PINNED` and may run in parallel with dependency installation.
+This may begin after `B0_TARGET_PINNED` and may run in parallel with `npm ci`.
 
-The ownership-audit agent MUST inspect production source under `src/`, not test fixtures, and create an occurrence inventory for at least:
+Search all production source under `src/` for at least:
 
 ```text
 new AppServerProcessClient
@@ -216,29 +306,33 @@ fallbackScopes
 fallbackPatchedProjects
 ```
 
-The inventory must include file path, line, containing class/function, and classification.
+Inventory each occurrence with:
 
-Classify each occurrence against these rules:
+- file path;
+- line;
+- containing class/function;
+- ownership classification;
+- reason the occurrence is allowed or violating.
+
+Allowed ownership rules:
 
 1. Codex Native runtime/host adapters may own App Server process/client transport where they are the actual runtime owner.
-2. Workbench Map coordinators must not create a second direct App Server client/process merely to perform compatibility fallback or reads.
+2. Workbench Map coordinators must not create a second direct App Server client/process merely for compatibility fallback or reads.
 3. Conversation Map must not own an independent fallback Native runtime for maintenance.
-4. Project Map may own its single dedicated maintenance `NativeThreadRuntime` where dynamic-tools registration requires a fresh Native thread; that runtime must not coexist with an additional direct App Server compatibility fallback.
+4. Project Map may own its single dedicated maintenance `NativeThreadRuntime` where dynamic-tools registration requires a fresh Native thread; that runtime must not coexist with an extra direct App Server compatibility fallback.
 5. Project Map context/read gathering must use the shared/registered Native read boundary rather than create per-read App Server process ownership.
 6. Workbench must not introduce a second transcript, sandbox, tool executor, subagent runtime, or context manager.
 
-Required focused files include, when present:
+Focused files include, when present:
 
 - `src/codex/native-thread-runtime.ts`
 - `src/codex/app-server-host.ts`
 - `src/main/project-map-manager.ts`
 - `src/main/map-coordinator.ts`
 
-The agent must also search the rest of `src/` so the audit is not limited to these known files.
+Also search the rest of `src/`.
 
-Any production occurrence that cannot be classified under an allowed owner is an audit failure. Do not edit it.
-
-The audit output must explicitly answer:
+Required output:
 
 ```text
 second_app_server_owner_detected: true|false
@@ -249,49 +343,45 @@ duplicate_transcript_or_tool_runtime_detected: true|false
 unclassified_occurrence_count: <integer>
 ```
 
-## 8. Phase 3 — Parallel correctness gates
+Any unclassified production ownership occurrence is an audit failure. Do not edit it.
 
-After `B1_DEPENDENCIES_READY`, launch the three independent gate agents defined in the Agent Plan at the same time.
+## 9. Phase 3 — Parallel correctness gates
+
+After `B1_DEPENDENCIES_READY`, start the following simultaneously unless a hard resource/safety limit requires recorded serialization.
 
 ### Gate C — Typecheck
-
-Run exactly:
 
 ```text
 npm run typecheck
 ```
 
-No retry for a non-zero exit.
+No retry for non-zero exit.
 
 ### Gate D — Full repository tests
-
-Run exactly:
 
 ```text
 npm test
 ```
 
-No retry for a non-zero exit.
-
-Do not replace the full test suite with only targeted tests.
+No retry for non-zero exit. Do not replace with a targeted subset.
 
 ### Gate E — Build
-
-Run exactly:
 
 ```text
 npm run build
 ```
 
-No retry for a non-zero exit.
+No retry for non-zero exit.
 
-The build is allowed to create ordinary ignored build output inside the isolated worktree. No source or test file may be edited.
+Build may create ordinary ignored/generated output. Source/test/protocol edits are forbidden.
 
-When C, D, and E have all terminated, complete barrier **B2_CORRECTNESS_GATES_DONE**.
+After all three terminate, complete **B2_CORRECTNESS_GATES_DONE**.
 
-## 9. Phase 4 — Post-run integrity check
+## 10. Phase 4 — Integrity and completion freshness
 
-Coordinator records:
+### 10.1 Post-run worktree integrity
+
+Coordinator records in the target worktree:
 
 ```text
 git status --porcelain=v1
@@ -301,108 +391,187 @@ git diff --cached --name-status
 
 Interpretation:
 
-- ignored/generated output created by normal install/build is allowed;
-- any modification to a tracked source, test, protocol, package manifest, lockfile, or configuration file caused during the run is a protocol failure unless the command itself is documented by the repository to generate that tracked file;
-- never clean the evidence by deleting tracked changes before recording them.
+- ignored/generated output from ordinary install/build is allowed;
+- any tracked source, test, protocol, package manifest, lockfile, or configuration mutation caused by the run is a protocol failure unless the repository explicitly declares that command as the generator;
+- never erase tracked changes before recording them.
 
-## 10. Phase 5 — Independent review
+### 10.2 Completion branch freshness
 
-Reviewer agent starts only after:
+For a blocking active test whose completion policy is `branch-head-must-match-for-mainline-gate`, fetch/resolve the target branch again without modifying the tested worktree.
+
+Record the observed end head as `target.observedBranchHeadAtCompletion`.
+
+Do **not** change the tested commit.
+
+Set `mainlineGate` mechanically:
+
+- if execution class is non-blocking -> `status = NOT_APPLICABLE`, `satisfied = false`;
+- if the run could not establish a valid tested target -> `status = BLOCKED`, `satisfied = false`;
+- if end branch head != tested commit -> `status = STALE`, `satisfied = false`;
+- if end branch head == tested commit and exact-commit verdict is PASS -> `status = SATISFIED`, `satisfied = true`;
+- if end branch head == tested commit and exact-commit verdict is FAIL -> `status = FAILED`, `satisfied = false`;
+- if end branch head == tested commit and exact-commit verdict is INCONCLUSIVE -> `status = INCONCLUSIVE`, `satisfied = false`.
+
+A stale gate is **not** a failed test. It means the test result is valid for an older exact commit but does not authorize the current branch head.
+
+## 11. Phase 5 — Independent review
+
+Reviewer starts only after:
 
 - ownership audit finished;
 - install outcome is known;
 - typecheck finished;
 - full tests finished;
 - build finished;
-- post-run integrity evidence exists.
-
-The reviewer MUST NOT rerun failed product gates and MUST NOT modify source.
+- post-run integrity evidence exists;
+- completion freshness evidence exists or is proven unavailable.
 
 Reviewer checks:
 
-1. target SHA was exact;
-2. active branch head matched configured SHA;
-3. original user worktree was not destructively prepared;
-4. every required command has evidence;
-5. retry policy was obeyed;
-6. ownership audit has no unclassified production constructor/path;
-7. no required gate was silently skipped;
-8. no tracked product/test change was used to influence outcome;
-9. final verdict follows Section 11 mechanically.
+1. control plane was frozen to one bootstrap commit;
+2. protocol snapshot/object identities were captured before target execution;
+3. target SHA was exact;
+4. start-time target freshness obeyed active target policy;
+5. original worktree was not destructively prepared;
+6. every required command has evidence;
+7. retry policy was obeyed;
+8. ownership audit has no unclassified production constructor/path;
+9. no required gate was silently skipped;
+10. no tracked product/test mutation influenced outcome;
+11. completion freshness and `mainlineGate` are calculated independently from the exact-commit verdict;
+12. later remote repository updates were never allowed to mutate the frozen run definition;
+13. final verdict follows Section 12 mechanically.
 
-## 11. Verdict rules
+Reviewer MUST NOT rerun failed product gates or modify source.
 
-Use exactly one top-level verdict.
+## 12. Exact-commit verdict rules
+
+Use exactly one top-level `verdict` for the exact tested commit.
 
 ### PASS
 
-All of the following are true:
+All are true:
 
-- target branch/SHA identity verified;
+- valid exact target was pinned at start;
 - dependency preparation succeeded;
 - ownership audit passed all six rules;
 - `npm run typecheck` exit code 0;
 - `npm test` exit code 0;
 - `npm run build` exit code 0;
 - no disallowed tracked modifications;
-- all required evidence is present;
+- required evidence is present;
+- control-plane freeze was preserved;
 - no material protocol deviation occurred.
+
+PASS says only that the exact tested commit passed. Consult `mainlineGate` to determine whether that PASS still gates the current branch head.
 
 ### FAIL
 
-Use `FAIL` when the target was valid and runnable but a deterministic repository/product gate failed, including:
+Use when the exact target was valid/runnable but a deterministic repository/product gate failed, including:
 
-- source ownership violation;
+- ownership violation;
 - typecheck failure;
 - test failure;
 - build failure;
-- deterministic dependency/repository integrity failure;
+- deterministic dependency/integrity failure;
 - tracked source/test mutation used during validation.
 
 Do not auto-fix before reporting FAIL.
 
 ### BLOCKED
 
-Use `BLOCKED` when the test cannot safely start because required identity/access/preconditions cannot be established, including:
+Use when the test cannot safely establish its frozen inputs or start target, including:
 
 - wrong repository;
+- missing control-plane file;
+- inconsistent control-plane snapshot;
 - missing target branch/commit;
-- branch head does not equal configured exact commit (`ACTIVE_TEST_STALE`);
-- unable to create a safe isolated worktree;
-- missing required protocol file.
+- start branch head != configured commit for a blocking target (`ACTIVE_TEST_STALE`);
+- unable to create safe isolated worktree.
 
 ### INCONCLUSIVE
 
-Use `INCONCLUSIVE` when the target is valid but external infrastructure prevents reliable completion after the predefined retry policy, or required evidence is irretrievably incomplete for reasons not shown to be a repository defect.
+Use when exact target is valid but external infrastructure prevents reliable completion after the predefined retry policy, or required evidence is irretrievably incomplete for reasons not shown to be a repository defect.
 
-## 12. Protocol deviations
+## 13. Deferred-test retention and later replay
 
-A protocol deviation is any execution that differs from this document or `CODEX_AGENT_PLAN.md` and is not explicitly allowed there.
+`DEFERRED_TESTS.json` is the repository's non-blocking test ledger.
+
+### 13.1 Registration
+
+A deferred entry records at least:
+
+- stable `testId`;
+- profile;
+- classification = `deferred`;
+- status;
+- whether it blocks mainline (must be false for this ledger);
+- registration context (`registeredAgainst`);
+- execution policy;
+- release/milestone deadline if any.
+
+A `planned` entry may have no execution target yet.
+
+A `pending` entry must be bound to an exact executable commit before Codex runs it.
+
+### 13.2 Retention requirement
+
+While a deferred test is `planned`, `pending`, or `running`, do not intentionally discard the only information needed to reconstruct it.
+
+If an exact execution target is bound, keep at least one reachable locator/reference for that target until the run is completed or the entry is explicitly rebound. If a branch is about to be deleted, first preserve another reachable locator or record a replacement exact target through an authorized repository-maintenance change.
+
+The Codex test executor itself does not create or delete retention refs because remote mutation is prohibited during test execution.
+
+### 13.3 Historical replay
+
+Historical replay uses a retained exact original target. Its result remains scoped to that commit forever.
+
+### 13.4 Forward validation
+
+Forward validation creates a new exact execution target for the same retained test intent. It must preserve the registration context and previous run history. Never overwrite an older run or rename an old result as if it tested the new target.
+
+### 13.5 Mainline behavior
+
+Deferred tests do not pause ordinary mainline work unless their classification is explicitly promoted to blocking by a versioned control-plane change.
+
+A deferred test may still be marked `requiredBefore` a later milestone such as `release-candidate`. That deadline is a future gate, not a current mainline block.
+
+## 14. Protocol deviations
+
+A protocol deviation is any execution differing from this Runbook or `CODEX_AGENT_PLAN.md` and not explicitly allowed.
 
 Examples:
 
 - substituting a different command;
-- changing the target SHA;
+- changing target SHA mid-run;
+- rereading a newer remote protocol after freeze;
 - adding an unplanned retry;
-- serializing a declared parallel wave without a resource/safety reason;
-- running performance-sensitive tasks concurrently when the profile prohibits it;
+- serializing a declared parallel wave without resource/safety reason;
+- running performance-sensitive A/B tasks concurrently on contended resources;
 - editing source/tests;
-- using a different test suite.
+- using a different suite;
+- treating a stale blocking PASS as current gate satisfaction;
+- silently dropping a deferred test definition or old run result.
 
 Every deviation must be recorded. A material deviation prevents PASS.
 
-## 13. Cleanup
+## 15. Cleanup
 
-After result/evidence finalization, the Coordinator may remove only the temporary detached worktree that it created for this run using the normal Git worktree removal mechanism.
+After result/evidence finalization, Coordinator may remove only the temporary detached worktree created for this run using normal Git worktree removal.
 
 Never remove or clean the user's original worktree.
 
-Evidence must remain available at the path reported in the final result unless the execution environment itself is ephemeral.
+Evidence must remain at the path reported in final result unless the execution environment itself is ephemeral.
 
-## 14. Final output
+## 16. Final output
 
 Write `result.json` in the external evidence directory and emit the same logical object in the final response, conforming to `TEST_RESULT_SCHEMA.json`.
 
-The final response may include a short human summary, but it must not replace the structured result.
+The final response must distinguish:
 
-Do not provide remediation commits during the validation run. If the user later asks for fixes, that is a separate implementation task.
+- exact-commit verdict;
+- mainline gate status;
+- whether repository movement occurred during the run;
+- pending deferred tests known from the frozen deferred registry.
+
+Do not provide remediation commits during validation. Fixes are a separate implementation task.
