@@ -471,7 +471,9 @@ export class PlannerProviderIntegrationService {
       policyVersionId: project.policyVersionId ?? null,
     });
     await this.store.markActionIntentDispatchEligible(intent.intentId, { actorType: "AUTOMATION", correlationId: idempotencyRef });
-    const attempt = await this.store.createActionAttempt({ intentId: intent.intentId, policyVersionId: intent.policyVersionId ?? null, executorRef: "automation.planner-provider" });
+    // PersistedProviderBindingPort owns executorRef and binds the exact provider
+    // immediately before the first external side effect.
+    const attempt = await this.store.createActionAttempt({ intentId: intent.intentId, policyVersionId: intent.policyVersionId ?? null });
     await this.store.transitionActionAttempt(attempt.actionAttemptId, "START", { actorType: "AUTOMATION", correlationId: intent.intentId });
 
     let accepted: ProviderRequestAccepted;
@@ -551,7 +553,9 @@ export class PlannerProviderIntegrationService {
     }
 
     await this.store.transitionActionIntent(intent.intentId, "REAUTHORIZE_RETRY", { actorType: "AUTOMATION", correlationId: intent.intentId, causationId: latest.actionAttemptId, boundedPayload: { previousDispatchNumber: latest.dispatchNumber } });
-    const attempt = await this.store.createActionAttempt({ intentId: intent.intentId, policyVersionId: intent.policyVersionId, executorRef: "automation.planner-provider" });
+    // Retry uses the same durable provider-binding seam as the first dispatch;
+    // Planner never preclaims executorRef with a service-local label.
+    const attempt = await this.store.createActionAttempt({ intentId: intent.intentId, policyVersionId: intent.policyVersionId });
     await this.store.transitionActionAttempt(attempt.actionAttemptId, "START", { actorType: "AUTOMATION", correlationId: intent.intentId, causationId: latest.actionAttemptId });
     let accepted: ProviderRequestAccepted;
     const requestCorrelation = correlation(intent, attempt, request);
