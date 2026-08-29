@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "profile": "direct-codex-vs-workbench-native-ab",
+  "protocolVersion": "1.0.0",
+  "armDefinitions": {
+    "direct": "Raw verified Codex App Server process using the canonical initialize, thread/start and turn/start protocol without NativeThreadRuntime.",
+    "workbench": "Production-isomorphic shared AppServerHost plus NativeThreadRuntime with no Map dynamic tools or Automation dispatch in the measured path."
+  },
+  "modelPolicy": {
+    "discoverFromSameVerifiedCodexBinary": true,
+    "pinOneExplicitModelForAllFormalTrials": true,
+    "reasoningEffort": "pin-discovered-default-when-present",
+    "allowModelAliasSubstitution": false
+  },
+  "measurement": {
+    "warmupTrialsPerArm": 1,
+    "formalSequence": [
+      "direct",
+      "workbench",
+      "workbench",
+      "direct",
+      "workbench",
+      "direct",
+      "direct",
+      "workbench"
+    ],
+    "formalTrialsPerArmPerCase": 4,
+    "varianceEscalation": {
+      "enabled": true,
+      "metric": "internalElapsedMs",
+      "coefficientOfVariationThreshold": 0.20,
+      "additionalSequence": [
+        "direct",
+        "workbench",
+        "workbench",
+        "direct",
+        "workbench",
+        "direct",
+        "direct",
+        "workbench"
+      ]
+    }
+  },
+  "cases": [
+    {
+      "caseId": "AB-READ-001-exact-reply",
+      "required": true,
+      "sandbox": "read-only",
+      "fixture": "repository-target",
+      "prompt": "Reply with exactly NATIVE_AB_OK and nothing else. Do not use tools and do not modify any file.",
+      "validator": {
+        "type": "exact-final-message",
+        "expected": "NATIVE_AB_OK"
+      },
+      "purpose": "Measures minimum Native runtime overhead and detects model-visible instruction/tool contamination in the simplest possible turn."
+    },
+    {
+      "caseId": "AB-READ-002-package-contract",
+      "required": true,
+      "sandbox": "read-only",
+      "fixture": "repository-target",
+      "prompt": "Do not modify files. Read package.json and return exactly one compact JSON object with keys name, testScript, typecheckScript. Use the literal package name and the literal command strings from package.json. No Markdown and no extra keys.",
+      "validator": {
+        "type": "json-subset",
+        "expected": {
+          "name": "codex-workbench-v1",
+          "testScript": "node --experimental-strip-types --test \"tests/**/*.test.ts\"",
+          "typecheckScript": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit"
+        }
+      },
+      "purpose": "Exercises one deterministic repository read/tool path with machine-verifiable output."
+    },
+    {
+      "caseId": "AB-READ-003-native-ownership",
+      "required": true,
+      "sandbox": "read-only",
+      "fixture": "repository-target",
+      "prompt": "Do not modify files. Inspect src/main/main.ts, src/main/project-map-manager.ts, src/main/map-coordinator.ts, and src/main/native-provider-runtime-adapter.ts. Return exactly one compact JSON object with these boolean keys: ordinaryNativeUsesSharedHost, conversationMapOwnsFallbackRuntime, projectMapOwnsDirectCompatibilityClient, automationNativeCreatesRuntime. Set each value only from the current source. No Markdown and no extra keys.",
+      "validator": {
+        "type": "json-subset",
+        "expected": {
+          "ordinaryNativeUsesSharedHost": true,
+          "conversationMapOwnsFallbackRuntime": false,
+          "projectMapOwnsDirectCompatibilityClient": false,
+          "automationNativeCreatesRuntime": false
+        }
+      },
+      "purpose": "Exercises bounded multi-file source inspection while directly checking the R8 ownership invariant."
+    },
+    {
+      "caseId": "AB-WRITE-001-workspace-write",
+      "required": false,
+      "sandbox": "workspace-write",
+      "fixture": "throwaway-copy",
+      "prompt": "In this throwaway benchmark workspace only, create AB_WRITE_RESULT.txt containing exactly WORKBENCH_NATIVE_AB_WRITE_OK followed by one newline. Do not modify any other file. Then reply with exactly WRITE_OK.",
+      "validator": {
+        "type": "file-and-exact-final-message",
+        "path": "AB_WRITE_RESULT.txt",
+        "expectedFileText": "WORKBENCH_NATIVE_AB_WRITE_OK\n",
+        "expectedFinalMessage": "WRITE_OK",
+        "allowedChangedPaths": ["AB_WRITE_RESULT.txt"]
+      },
+      "purpose": "Optional mutation stratum. It is excluded from the primary parity verdict if the host platform cannot provide equivalent workspace-write sandbox behavior to both arms."
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+name: A/B Native Parity Validation
+
+on:
+  push:
+    branches:
+      - feature/ab-native-parity-validation
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Bounded diff guard
+        shell: bash
+        run: |
+          git diff --check af911e71ca3370c143d504e2923b122f827cac6c...HEAD
+          python3 - <<'PY'
+          import subprocess
+          expected = {
+              '.github/workflows/ab-native-parity-gate.yml',
+              'docs/testing/DIRECT_CODEX_WORKBENCH_AB_AGENT_PLAN.md',
+              'docs/testing/DIRECT_CODEX_WORKBENCH_AB_CASES.json',
+              'docs/testing/DIRECT_CODEX_WORKBENCH_AB_RUNBOOK.md',
+              'docs/testing/DIRECT_CODEX_WORKBENCH_AB_SCHEMA.json',
+              'scripts/ab-native-arm.ts',
+              'tests/ab-native-parity-contract.test.ts',
+          }
+          actual = set(filter(None, subprocess.check_output([
+              'git', 'diff', '--name-only',
+              'af911e71ca3370c143d504e2923b122f827cac6c...HEAD',
+          ], text=True).splitlines()))
+          if actual != expected:
+              raise SystemExit(f'unexpected bounded diff: actual={sorted(actual)} expected={sorted(expected)}')
+          PY
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Targeted A/B parity tests
+        run: node --experimental-strip-types --test tests/ab-native-parity-contract.test.ts tests/r8-shared-native-runtime-composition.test.ts tests/app-server-host.test.ts tests/native-thread-runtime.test.ts
+
+      - name: Test full repository
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Self-clean validation workflow
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/ab-native-parity-gate.yml
+          git diff --cached --check
+          git commit -m "test: remove A/B Native parity gate"
+          git push origin HEAD:feature/ab-native-parity-validation
