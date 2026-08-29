@@ -43,16 +43,16 @@ test("FIX-05 covers every persisted collection identity, including alignment rec
   assert.throws(() => assertMigrationIdentityPreserved(before, duplicate), /MIGRATION_IDENTITY_CONFLICT/);
 });
 
-test("FIX-01/FIX-02 production App Server paths use the shared strict bootstrap", async () => {
-  const sources = await Promise.all([
-    readFile("src/main/map-coordinator.ts", "utf8"),
-    readFile("src/main/project-map-manager.ts", "utf8"),
-  ]);
-  for (const source of sources) {
-    assert.match(source, /startAndInitializeAppServerClient/);
-    assert.match(source, /verifyBinaryProvenance:\s*true/);
-    assert.doesNotMatch(source, /await\s+client\.request\(\s*["']initialize["']/);
-  }
+test("FIX-01/FIX-02 App Server owners use the shared strict bootstrap while Conversation Map stays projection-only", async () => {
+  const projectMapManager = await readFile("src/main/project-map-manager.ts", "utf8");
+  assert.match(projectMapManager, /startAndInitializeAppServerClient/);
+  assert.match(projectMapManager, /verifyBinaryProvenance:\s*true/);
+  assert.doesNotMatch(projectMapManager, /await\s+client\.request\(\s*["']initialize["']/);
+
+  const conversationMap = await readFile("src/main/map-coordinator.ts", "utf8");
+  assert.doesNotMatch(conversationMap, /AppServerProcessClient/);
+  assert.doesNotMatch(conversationMap, /startAndInitializeAppServerClient/);
+  assert.doesNotMatch(conversationMap, /request\(\s*["'](?:thread\/start|turn\/start)["']/);
 });
 
 test("FIX-04 production composition materializes the provider bridge without enabling a second submit path", async () => {
