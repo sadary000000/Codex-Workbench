@@ -1626,7 +1626,7 @@ const dispatchNumber = previous.length + 1;
         tx.replace("executionAttempts", updated);
         const runtime = tx.table("stepRuntimes").find((candidate) => candidate.stepSpecId === updated.stepSpecId && candidate.currentAttemptId === updated.attemptId);
         if (runtime) {
-          const runtimeLifecycle = event === "START" ? "RUNNING" : ["COMPLETED", "FAILED", "BLOCK", "CANCEL"].includes(event) ? "TERMINAL" : runtime.lifecycle;
+          const runtimeLifecycle = event === "START" ? "RUNNING" : event === "COMPLETE" ? "VERIFYING" : ["FAIL", "BLOCK", "CANCEL"].includes(event) ? "TERMINAL" : runtime.lifecycle;
           const runtimeResult = runtimeLifecycle === "TERMINAL"
             ? event === "COMPLETE" ? "COMPLETED" : event === "FAIL" ? "FAILED" : event === "BLOCK" ? "BLOCKED" : event === "CANCEL" ? "CANCELLED" : runtime.terminalResult
             : runtime.terminalResult;
