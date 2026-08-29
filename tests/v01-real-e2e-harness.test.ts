@@ -16,8 +16,8 @@ test("v0.1 real E2E harness is syntactically valid and drives production rendere
     "openProject",
     "createThread",
     "startTurn",
-    "getMapStatus",
-    "getProjectMapStatus",
+    "enableMap",
+    "enableProjectMap",
     "createAutomationProject",
     "bindAutomationProject",
     "startAutomationRequirement",
@@ -37,6 +37,10 @@ test("v0.1 real E2E harness is syntactically valid and drives production rendere
     "getProjectMapGovernanceReferences",
   ]) assert.match(harness, new RegExp(`\\"${method}\\"`));
 
+  assert.match(harness, /Conversation Map did not become enabled/);
+  assert.match(harness, /Project Map did not become enabled/);
+  assert.match(harness, /Conversation Map projection is missing after enable/);
+  assert.match(harness, /Project Map projection is missing after enable/);
   assert.match(harness, /--remote-debugging-port=/);
   assert.match(harness, /window\.codexWorkbenchV1/);
   assert.match(harness, /HASH_MATCH/);
