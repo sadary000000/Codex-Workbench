@@ -5,7 +5,6 @@ import { startAndInitializeAppServerClient } from "../codex/app-server-bootstrap
 import { MAP_CONTEXT_REQUEST_LIMITS, MAP_CONTEXT_REQUEST_TOOL_SPEC, MAP_DYNAMIC_TOOL_SPEC, contextRequestResponse, dynamicToolResponse, isMapContextRequestCall, isMapToolCall } from "../codex/map-tool.ts";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
 import { resolveCodexCommand } from "../codex/codex-command.ts";
-import { parseThreadReadResponse } from "../shared/thread-read-model.ts";
 import type { JsonRpcMessage, ThreadProjection, ThreadReadView, TurnResult } from "../shared/runtime-types.ts";
 import { MapValidationError, type MapDocument, type MapEntityRef, type ProjectMapMaintenanceView, type ProjectMapStatus } from "../shared/map-types.ts";
 import { MapStore, mapFilePath } from "../shared/map-store.ts";
@@ -17,6 +16,7 @@ export interface ProjectMapManagerOptions {
   persistence: V1PersistenceStore;
   command?: string;
   validateProjectDirectory?: (cwd: string) => Promise<string>;
+  nativeThreadReader?: (projection: ThreadProjection) => Promise<ThreadReadView>;
   onChanged?: (status: ProjectMapStatus) => void;
 }
 
@@ -150,6 +150,7 @@ export class ProjectMapManager {
   private readonly persistence: V1PersistenceStore;
   private readonly command: string;
   private readonly validateProjectDirectory: (cwd: string) => Promise<string>;
+  private readonly nativeThreadReader: ProjectMapManagerOptions["nativeThreadReader"];
   private readonly onChanged: ProjectMapManagerOptions["onChanged"];
   private readonly stores = new Map<string, MapStore>();
   private readonly runtimes = new Map<string, NativeThreadRuntime>();
@@ -165,6 +166,7 @@ export class ProjectMapManager {
     this.persistence = options.persistence;
     this.command = options.command ?? resolveCodexCommand();
     this.validateProjectDirectory = options.validateProjectDirectory ?? (async (cwd) => cwd);
+    this.nativeThreadReader = options.nativeThreadReader;
     this.onChanged = options.onChanged;
   }
 
@@ -459,35 +461,10 @@ export class ProjectMapManager {
   }
 
   private async readNativeThread(projection: ThreadProjection): Promise<ThreadReadView> {
-    const client = new AppServerProcessClient({ command: this.command, cwd: projection.cwd, args: ["app-server", "--stdio"], verifyBinaryProvenance: true });
-    try {
-      await startAndInitializeAppServerClient(client, {
-        clientInfo: { name: "codex-workbench-v1-context-reader", title: "Codex Workbench Context Reader", version: "0.1.0" },
-        experimentalApi: false,
-        timeoutMs: 120_000,
-      });
-      await client.request("thread/resume", { threadId: projection.nativeThreadId }, 120_000);
-      const response = await client.request("thread/read", { threadId: projection.nativeThreadId, includeTurns: true }, 120_000);
-      const model = parseThreadReadResponse(response);
-      return {
-        nativeThreadId: projection.nativeThreadId,
-        status: model.status,
-        title: null,
-        cwd: projection.cwd,
-        error: model.error,
-        turns: model.turns.map((turn) => ({
-          id: turn.turnId,
-          status: turn.status,
-          error: null,
-          items: turn.items.map((item) => ({ id: item.itemId, type: item.type, status: item.status, kind: item.kind, text: item.text, input: item.input, output: item.output, error: null, raw: null })),
-          itemCount: turn.items.length,
-          raw: null,
-        })),
-        raw: null,
-      };
-    } finally {
-      await client.close().catch(() => undefined);
+    if (!this.nativeThreadReader) {
+      throw new MapValidationError("PROJECT_MAP_CONTEXT_READER_UNAVAILABLE", "Project Map Native Thread context reader is unavailable.");
     }
+    return this.nativeThreadReader(projection);
   }
 
   private async runCompatibilityMaintenance(projectId: string, cwd: string, prompt: string): Promise<TurnResult> {
