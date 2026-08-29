@@ -16,7 +16,12 @@ const RUNTIME_ID = `runtime:${STEP_ID}`;
 const ATTEMPT_ID = "step-review-attempt";
 const VERIFICATION_EVIDENCE_ID = "step-review-verification-pass";
 
-async function fixture(options: { verification?: "PASS" | "FAIL"; reviewing?: boolean } = {}) {
+async function fixture(options: {
+  verification?: "PASS" | "FAIL";
+  reviewing?: boolean;
+  verificationSource?: string;
+  verifierProtocol?: string;
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-step-review-"));
   const store = new AutomationStore(join(root, "automation.db"));
   await store.createAutomationProject({ projectId: PROJECT_ID, name: "Step Review" });
@@ -97,7 +102,7 @@ async function fixture(options: { verification?: "PASS" | "FAIL"; reviewing?: bo
       stepSpecId: STEP_ID,
       attemptId: ATTEMPT_ID,
       type: "STEP_VERIFICATION",
-      source: "WORKFLOW_TRUTH",
+      source: options.verificationSource ?? "WORKFLOW_TRUTH",
       producer: "workbench-step-verifier-v1",
       exitCode: null,
       sha256: "a".repeat(64),
@@ -107,7 +112,7 @@ async function fixture(options: { verification?: "PASS" | "FAIL"; reviewing?: bo
         planPayloadSha256: plan.payloadSha256!,
         planVersionId: PLAN_ID,
         verificationClass: "HASH_MATCH",
-        verifierProtocol: "workbench-step-verifier-v1",
+        verifierProtocol: options.verifierProtocol ?? "workbench-step-verifier-v1",
       },
       correlation: {
         workflowActionId: null,
@@ -259,6 +264,31 @@ test("review fails closed without one exact PASS verifier Evidence", async () =>
       const snapshot = await value.store.snapshot();
       assert.equal(snapshot.evidences.some((item) => item.type === "STEP_REVIEW"), false);
       assert.equal(snapshot.stepRuntimes.find((item) => item.stepRuntimeId === RUNTIME_ID)?.lifecycle, "VERIFYING");
+    } finally {
+      await cleanup(value);
+    }
+  }
+});
+
+test("review rejects PASS Evidence without exact verifier provenance even if runtime is REVIEWING", async () => {
+  for (const overrides of [
+    { verificationSource: "USER" },
+    { verifierProtocol: "forged-verifier-v1" },
+  ]) {
+    const value = await fixture({ verification: "PASS", ...overrides });
+    try {
+      await assert.rejects(
+        value.facade.reviewStep({
+          projectId: PROJECT_ID,
+          executionAttemptId: ATTEMPT_ID,
+          decision: "APPROVE",
+          reviewerRef: "user:alice",
+        }),
+        { code: "STEP_REVIEW_VERIFICATION_REQUIRED" },
+      );
+      const snapshot = await value.store.snapshot();
+      assert.equal(snapshot.evidences.some((item) => item.type === "STEP_REVIEW"), false);
+      assert.equal(snapshot.stepRuntimes.find((item) => item.stepRuntimeId === RUNTIME_ID)?.lifecycle, "REVIEWING");
     } finally {
       await cleanup(value);
     }
