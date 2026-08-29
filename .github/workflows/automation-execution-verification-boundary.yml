@@ -1,0 +1,102 @@
+name: Automation Execution Verification Boundary
+
+on:
+  push:
+    branches:
+      - feature/automation-execution-to-verification
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Guard initial bounded diff
+        shell: bash
+        run: |
+          git diff --check 7420b7c6ce93201641c7e79e33e05392602ebf01...HEAD
+          python3 - <<'PY'
+          import subprocess
+          expected = {
+              '.github/workflows/automation-execution-verification-boundary.yml',
+              'tests/automation-execution-verification-boundary.test.ts',
+          }
+          actual = set(filter(None, subprocess.check_output([
+              'git', 'diff', '--name-only',
+              '7420b7c6ce93201641c7e79e33e05392602ebf01...HEAD',
+          ], text=True).splitlines()))
+          if actual != expected:
+              raise SystemExit(f'unexpected initial diff: actual={sorted(actual)} expected={sorted(expected)}')
+          PY
+
+      - name: Apply exact execution-to-verification patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/automation/store.ts')
+          text = path.read_text(encoding='utf-8')
+          old = 'const runtimeLifecycle = event === "START" ? "RUNNING" : ["COMPLETED", "FAILED", "BLOCK", "CANCEL"].includes(event) ? "TERMINAL" : runtime.lifecycle;'
+          new = 'const runtimeLifecycle = event === "START" ? "RUNNING" : event === "COMPLETE" ? "VERIFYING" : ["FAILED", "BLOCK", "CANCEL"].includes(event) ? "TERMINAL" : runtime.lifecycle;'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exactly one execution runtime sync expression, found {count}')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = "src/automation/store.ts"
+          grep -F 'event === "COMPLETE" ? "VERIFYING"' src/automation/store.ts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Targeted execution boundary tests
+        run: node --experimental-strip-types --test tests/automation-execution-verification-boundary.test.ts tests/automation-foundation.test.ts
+
+      - name: Test full repository
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit product patch and self-clean workflow
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/automation/store.ts
+          git rm .github/workflows/automation-execution-verification-boundary.yml
+          git diff --cached --check
+          python3 - <<'PY'
+          import subprocess
+          expected = {
+              '.github/workflows/automation-execution-verification-boundary.yml',
+              'src/automation/store.ts',
+          }
+          actual = set(filter(None, subprocess.check_output([
+              'git', 'diff', '--cached', '--name-only'
+          ], text=True).splitlines()))
+          if actual != expected:
+              raise SystemExit(f'unexpected staged cleanup diff: actual={sorted(actual)} expected={sorted(expected)}')
+          PY
+          git commit -m "fix: route completed execution attempts to verification"
+          git push origin HEAD:feature/automation-execution-to-verification
