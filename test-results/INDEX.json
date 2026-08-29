@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "repository": "sadary000000/Codex-Workbench",
+  "branch": "codex/test-results",
+  "root": "test-results",
+  "discovery": {
+    "testProject": "test-results/<testId>/TEST.json",
+    "run": "test-results/<testId>/runs/<runId>/manifest.json",
+    "latestRule": "Compare manifest.completedAt timestamps within one testId; do not infer latest from branch order alone."
+  },
+  "identity": {
+    "testProjectKey": "testId",
+    "runKey": "runId",
+    "runBelongsToExactlyOneTestProject": true,
+    "testIdMustMatchFrozenDefinition": true,
+    "runDirectoryAppendOnly": true,
+    "existingRunMayBeOverwritten": false
+  },
+  "testProjects": [
+    {
+      "testId": "r8-exact-head-repository-validation-v1",
+      "path": "test-results/r8-exact-head-repository-validation-v1/TEST.json"
+    },
+    {
+      "testId": "direct-codex-vs-workbench-native-ab-v1",
+      "path": "test-results/direct-codex-vs-workbench-native-ab-v1/TEST.json"
+    }
+  ],
+  "indexPolicy": {
+    "existingEntriesImmutable": true,
+    "newTestProjectMayAppendEntryOnlyAfterFrozenDefinitionValidation": true,
+    "runPublicationDoesNotRequireIndexMutationForExistingTestProject": true
+  }
+}

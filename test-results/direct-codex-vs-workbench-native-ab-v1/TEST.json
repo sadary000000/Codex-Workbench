@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "repository": "sadary000000/Codex-Workbench",
+  "testId": "direct-codex-vs-workbench-native-ab-v1",
+  "resultRoot": "test-results/direct-codex-vs-workbench-native-ab-v1",
+  "identityPolicy": {
+    "authoritativeDefinition": "frozen-repository-test-control-plane",
+    "definitionMustContainSameTestId": true,
+    "runsAreAppendOnly": true,
+    "oneRunBelongsToExactlyOneTestId": true
+  }
+}

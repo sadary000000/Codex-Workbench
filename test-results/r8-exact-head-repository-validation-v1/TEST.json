@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "repository": "sadary000000/Codex-Workbench",
+  "testId": "r8-exact-head-repository-validation-v1",
+  "resultRoot": "test-results/r8-exact-head-repository-validation-v1",
+  "identityPolicy": {
+    "authoritativeDefinition": "frozen-repository-test-control-plane",
+    "definitionMustContainSameTestId": true,
+    "runsAreAppendOnly": true,
+    "oneRunBelongsToExactlyOneTestId": true
+  }
+}
