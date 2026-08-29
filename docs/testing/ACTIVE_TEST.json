@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "state": "active",
+  "testId": "r8-exact-head-repository-validation-v1",
+  "profile": "repository-exact-head-validation",
+  "repository": "sadary000000/Codex-Workbench",
+  "target": {
+    "branch": "feature/r8-remove-project-map-compat-runtime",
+    "commit": "af911e71ca3370c143d504e2923b122f827cac6c",
+    "pullRequest": 17
+  },
+  "protocol": {
+    "version": "1.0.0",
+    "runbook": "docs/testing/CODEX_TEST_RUNBOOK.md",
+    "agentPlan": "docs/testing/CODEX_AGENT_PLAN.md",
+    "resultSchema": "docs/testing/TEST_RESULT_SCHEMA.json"
+  },
+  "knownEvidence": {
+    "workflowRunId": 33233413426,
+    "workflowJobId": 99050107477,
+    "knownGreenCommit": "af911e71ca3370c143d504e2923b122f827cac6c",
+    "note": "Historical evidence only. The executor must rerun the active protocol and must not convert this prior green result into a PASS."
+  },
+  "nextPlannedProfile": "direct-codex-vs-workbench-native-ab"
+}

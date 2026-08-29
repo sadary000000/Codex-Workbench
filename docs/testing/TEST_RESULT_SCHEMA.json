@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sadary000000/Codex-Workbench/docs/testing/TEST_RESULT_SCHEMA.json",
+  "title": "Codex-Workbench Repository Test Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "testId",
+    "protocolVersion",
+    "repository",
+    "target",
+    "run",
+    "agents",
+    "gates",
+    "ownershipAudit",
+    "protocolDeviations",
+    "verdict",
+    "evidenceRoot"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "testId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "protocolVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository": {
+      "const": "sadary000000/Codex-Workbench"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["branch", "configuredCommit", "observedBranchHead", "testedCommit", "exactMatch"],
+      "properties": {
+        "branch": {"type": "string", "minLength": 1},
+        "configuredCommit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "observedBranchHead": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "testedCommit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "exactMatch": {"type": "boolean"}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "startedAt", "finishedAt", "originalWorktreeDirty", "isolatedWorktree"],
+      "properties": {
+        "runId": {"type": "string", "minLength": 1},
+        "startedAt": {"type": "string", "format": "date-time"},
+        "finishedAt": {"type": "string", "format": "date-time"},
+        "originalWorktreeDirty": {"type": "boolean"},
+        "isolatedWorktree": {"type": ["string", "null"]}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "os": {"type": "string"},
+        "architecture": {"type": "string"},
+        "gitVersion": {"type": "string"},
+        "nodeVersion": {"type": "string"},
+        "npmVersion": {"type": "string"}
+      }
+    },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["agentId", "status", "startedAt", "finishedAt", "evidencePaths", "protocolDeviations"],
+        "properties": {
+          "agentId": {"type": "string", "minLength": 1},
+          "status": {"enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]},
+          "startedAt": {"type": "string", "format": "date-time"},
+          "finishedAt": {"type": "string", "format": "date-time"},
+          "evidencePaths": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "protocolDeviations": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dependencyInstall", "typecheck", "tests", "build", "postRunIntegrity"],
+      "properties": {
+        "dependencyInstall": {"$ref": "#/$defs/gateResult"},
+        "typecheck": {"$ref": "#/$defs/gateResult"},
+        "tests": {"$ref": "#/$defs/gateResult"},
+        "build": {"$ref": "#/$defs/gateResult"},
+        "postRunIntegrity": {"$ref": "#/$defs/gateResult"}
+      }
+    },
+    "ownershipAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "secondAppServerOwnerDetected",
+        "conversationMapFallbackRuntimeDetected",
+        "projectMapDirectCompatFallbackDetected",
+        "perReadAppServerOwnerDetected",
+        "duplicateTranscriptOrToolRuntimeDetected",
+        "unclassifiedOccurrenceCount",
+        "inventoryEvidence"
+      ],
+      "properties": {
+        "status": {"enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]},
+        "secondAppServerOwnerDetected": {"type": "boolean"},
+        "conversationMapFallbackRuntimeDetected": {"type": "boolean"},
+        "projectMapDirectCompatFallbackDetected": {"type": "boolean"},
+        "perReadAppServerOwnerDetected": {"type": "boolean"},
+        "duplicateTranscriptOrToolRuntimeDetected": {"type": "boolean"},
+        "unclassifiedOccurrenceCount": {"type": "integer", "minimum": 0},
+        "inventoryEvidence": {"type": "string", "minLength": 1}
+      }
+    },
+    "protocolDeviations": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "verdict": {
+      "enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]
+    },
+    "verdictReason": {
+      "type": "string"
+    },
+    "evidenceRoot": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "gateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "attempts", "evidencePaths"],
+      "properties": {
+        "status": {"enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]},
+        "attempts": {"type": "integer", "minimum": 0},
+        "exitCode": {"type": ["integer", "null"]},
+        "evidencePaths": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    }
+  }
+}
