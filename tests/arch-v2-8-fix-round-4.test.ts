@@ -69,7 +69,7 @@ test("Round 4: a negative initialize gate sends no initialized, thread, turn, or
   assert.deepEqual(notifications, []);
 });
 
-test("Round 4: App Server owners retain strict bootstrap while Conversation Map cannot spawn a runtime", async () => {
+test("Round 4: App Server owners retain strict bootstrap while Map coordination does not spawn compatibility clients", async () => {
   const [nativeRuntime, appServerHost, projectMapManager, conversationMap] = await Promise.all([
     readFile("src/codex/native-thread-runtime.ts", "utf8"),
     readFile("src/codex/app-server-host.ts", "utf8"),
@@ -80,8 +80,11 @@ test("Round 4: App Server owners retain strict bootstrap while Conversation Map 
   assert.match(nativeRuntime, /schemaProvenanceVerified/);
   assert.match(appServerHost, /startAndInitializeAppServerClient/);
   assert.match(appServerHost, /schemaProvenanceVerified/);
-  assert.match(projectMapManager, /startAndInitializeAppServerClient/);
-  assert.match(projectMapManager, /verifyBinaryProvenance:\s*true/);
+  assert.match(projectMapManager, /new NativeThreadRuntime/);
+  assert.match(projectMapManager, /dynamicTools:\s*\[MAP_DYNAMIC_TOOL_SPEC,\s*MAP_CONTEXT_REQUEST_TOOL_SPEC\]/);
+  assert.doesNotMatch(projectMapManager, /AppServerProcessClient/);
+  assert.doesNotMatch(projectMapManager, /startAndInitializeAppServerClient/);
+  assert.doesNotMatch(projectMapManager, /request\(\s*["'](?:thread\/start|turn\/start)["']/);
   assert.doesNotMatch(conversationMap, /AppServerProcessClient/);
   assert.doesNotMatch(conversationMap, /startAndInitializeAppServerClient/);
   assert.doesNotMatch(conversationMap, /request\(\s*["'](?:thread\/start|turn\/start)["']/);
