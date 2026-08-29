@@ -35,6 +35,7 @@ export class StageGateError extends Error {
   readonly code:
     | "STAGE_GATE_PROJECT_NOT_FOUND"
     | "STAGE_GATE_STAGE_NOT_FOUND"
+    | "STAGE_GATE_STAGE_NOT_ACTIVE"
     | "STAGE_GATE_PLAN_NOT_ACTIVE"
     | "STAGE_GATE_STEPS_REQUIRED"
     | "STAGE_GATE_STEP_NOT_APPROVED"
@@ -193,6 +194,12 @@ export class StageGateService {
       throw new StageGateError(
         "STAGE_GATE_STAGE_NOT_FOUND",
         `StageSpec was not found: ${input.stageSpecId}`,
+      );
+    }
+    if (stage.status !== "ACTIVE") {
+      throw new StageGateError(
+        "STAGE_GATE_STAGE_NOT_ACTIVE",
+        `Stage gate refuses a non-active StageSpec: ${stage.stageSpecId}.`,
       );
     }
     const plan = document.planVersions.find((item) => item.planVersionId === stage.planVersionId);

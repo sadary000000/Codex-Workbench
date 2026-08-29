@@ -66,6 +66,7 @@ async function fixture() {
     assumptions: [],
     risks: [],
     specVersion: 1,
+    status: "ACTIVE",
     ordinal: 0,
   });
   await store.createStageSpec({
@@ -80,6 +81,7 @@ async function fixture() {
     assumptions: [],
     risks: [],
     specVersion: 1,
+    status: "ACTIVE",
     ordinal: 1,
   });
   await createStep(store, STAGE_A_ID, STEP_A_ID, "BUILD_STEP", 0);
