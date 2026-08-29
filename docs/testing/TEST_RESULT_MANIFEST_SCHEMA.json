@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sadary000000/Codex-Workbench/docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json",
+  "title": "Codex-Workbench Test Result Publication Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "repository",
+    "testId",
+    "runId",
+    "executionClass",
+    "controlPlaneCommit",
+    "definition",
+    "protocol",
+    "target",
+    "result",
+    "completedAt"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "repository": {"const": "sadary000000/Codex-Workbench"},
+    "testId": {"type": "string", "minLength": 1},
+    "runId": {"type": "string", "minLength": 1},
+    "executionClass": {"enum": ["blocking", "deferred"]},
+    "controlPlaneCommit": {"$ref": "#/$defs/sha"},
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sourcePath", "sourceObjectId", "selector", "definitionSha256"],
+      "properties": {
+        "kind": {"enum": ["active", "deferred"]},
+        "sourcePath": {"enum": ["docs/testing/ACTIVE_TEST.json", "docs/testing/DEFERRED_TESTS.json"]},
+        "sourceObjectId": {"$ref": "#/$defs/objectId"},
+        "selector": {"type": "string", "minLength": 1},
+        "definitionSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceCommit", "resultSchemaPath", "resultSchemaObjectId"],
+      "properties": {
+        "sourceCommit": {"$ref": "#/$defs/sha"},
+        "resultSchemaPath": {"type": "string", "minLength": 1},
+        "resultSchemaObjectId": {"$ref": "#/$defs/objectId"}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locatorBranch", "configuredCommit", "testedCommit"],
+      "properties": {
+        "locatorBranch": {"type": ["string", "null"]},
+        "configuredCommit": {"$ref": "#/$defs/nullableSha"},
+        "testedCommit": {"$ref": "#/$defs/nullableSha"}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "verdict"],
+      "properties": {
+        "path": {"const": "result.json"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "verdict": {"enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]}
+      }
+    },
+    "completedAt": {"type": "string", "format": "date-time"},
+    "summaryPath": {"const": "summary.md"},
+    "failuresPath": {"const": "failures.md"},
+    "metricsPath": {"const": "metrics.json"},
+    "evidenceIndexPath": {"const": "evidence-index.json"}
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "nullableSha": {
+      "anyOf": [
+        {"$ref": "#/$defs/sha"},
+        {"type": "null"}
+      ]
+    },
+    "objectId": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sadary000000/Codex-Workbench/docs/testing/TEST_RESULT_SCHEMA.json",
+  "title": "Codex-Workbench Repository Test Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "testId",
+    "definitionBinding",
+    "protocolVersion",
+    "executionClass",
+    "repository",
+    "controlPlane",
+    "target",
+    "run",
+    "agents",
+    "gates",
+    "ownershipAudit",
+    "protocolDeviations",
+    "verdict",
+    "mainlineGate",
+    "deferredTests",
+    "evidenceRoot"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "testId": {"type": "string", "minLength": 1},
+    "definitionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sourcePath", "sourceObjectId", "selector", "definitionSha256"],
+      "properties": {
+        "kind": {"enum": ["active", "deferred"]},
+        "sourcePath": {"enum": ["docs/testing/ACTIVE_TEST.json", "docs/testing/DEFERRED_TESTS.json"]},
+        "sourceObjectId": {"$ref": "#/$defs/objectId"},
+        "selector": {"type": "string", "minLength": 1},
+        "definitionSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "protocolVersion": {"type": "string", "minLength": 1},
+    "executionClass": {"enum": ["blocking", "deferred"]},
+    "repository": {"const": "sadary000000/Codex-Workbench"},
+    "controlPlane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bootstrapCommit", "frozen", "snapshotEvidence", "files"],
+      "properties": {
+        "bootstrapCommit": {"$ref": "#/$defs/sha"},
+        "frozen": {"const": true},
+        "snapshotEvidence": {"type": "string", "minLength": 1},
+        "files": {
+          "type": "array",
+          "minItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "objectId"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "objectId": {"$ref": "#/$defs/objectId"}
+            }
+          }
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch",
+        "configuredCommit",
+        "observedBranchHeadAtStart",
+        "observedBranchHeadAtCompletion",
+        "testedCommit",
+        "exactMatchAtStart",
+        "movedDuringRun"
+      ],
+      "properties": {
+        "branch": {"type": "string", "minLength": 1},
+        "configuredCommit": {"$ref": "#/$defs/sha"},
+        "observedBranchHeadAtStart": {"$ref": "#/$defs/nullableSha"},
+        "observedBranchHeadAtCompletion": {"$ref": "#/$defs/nullableSha"},
+        "testedCommit": {"$ref": "#/$defs/nullableSha"},
+        "exactMatchAtStart": {"type": "boolean"},
+        "movedDuringRun": {"type": "boolean"}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "startedAt", "finishedAt", "originalWorktreeDirty", "isolatedWorktree"],
+      "properties": {
+        "runId": {"type": "string", "minLength": 1},
+        "startedAt": {"type": "string", "format": "date-time"},
+        "finishedAt": {"type": "string", "format": "date-time"},
+        "originalWorktreeDirty": {"type": "boolean"},
+        "isolatedWorktree": {"type": ["string", "null"]}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "os": {"type": "string"},
+        "architecture": {"type": "string"},
+        "gitVersion": {"type": "string"},
+        "nodeVersion": {"type": "string"},
+        "npmVersion": {"type": "string"}
+      }
+    },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["agentId", "status", "startedAt", "finishedAt", "evidencePaths", "protocolDeviations"],
+        "properties": {
+          "agentId": {"type": "string", "minLength": 1},
+          "status": {"enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]},
+          "startedAt": {"type": "string", "format": "date-time"},
+          "finishedAt": {"type": "string", "format": "date-time"},
+          "evidencePaths": {"type": "array", "items": {"type": "string"}},
+          "protocolDeviations": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dependencyInstall", "typecheck", "tests", "build", "postRunIntegrity"],
+      "properties": {
+        "dependencyInstall": {"$ref": "#/$defs/gateResult"},
+        "typecheck": {"$ref": "#/$defs/gateResult"},
+        "tests": {"$ref": "#/$defs/gateResult"},
+        "build": {"$ref": "#/$defs/gateResult"},
+        "postRunIntegrity": {"$ref": "#/$defs/gateResult"}
+      }
+    },
+    "ownershipAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "secondAppServerOwnerDetected",
+        "conversationMapFallbackRuntimeDetected",
+        "projectMapDirectCompatFallbackDetected",
+        "perReadAppServerOwnerDetected",
+        "duplicateTranscriptOrToolRuntimeDetected",
+        "unclassifiedOccurrenceCount",
+        "inventoryEvidence"
+      ],
+      "properties": {
+        "status": {"enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]},
+        "secondAppServerOwnerDetected": {"type": "boolean"},
+        "conversationMapFallbackRuntimeDetected": {"type": "boolean"},
+        "projectMapDirectCompatFallbackDetected": {"type": "boolean"},
+        "perReadAppServerOwnerDetected": {"type": "boolean"},
+        "duplicateTranscriptOrToolRuntimeDetected": {"type": "boolean"},
+        "unclassifiedOccurrenceCount": {"type": "integer", "minimum": 0},
+        "inventoryEvidence": {"type": "string", "minLength": 1}
+      }
+    },
+    "protocolDeviations": {"type": "array", "items": {"type": "string"}},
+    "verdict": {"enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]},
+    "verdictReason": {"type": "string"},
+    "mainlineGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "status", "satisfied", "completionBranchHead"],
+      "properties": {
+        "required": {"type": "boolean"},
+        "status": {"enum": ["SATISFIED", "STALE", "FAILED", "BLOCKED", "INCONCLUSIVE", "NOT_APPLICABLE"]},
+        "satisfied": {"type": "boolean"},
+        "completionBranchHead": {"$ref": "#/$defs/nullableSha"},
+        "reason": {"type": "string"}
+      }
+    },
+    "deferredTests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["registryObjectId", "entries"],
+      "properties": {
+        "registryObjectId": {"$ref": "#/$defs/objectId"},
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["testId", "status", "classification", "blocksMainline"],
+            "properties": {
+              "testId": {"type": "string", "minLength": 1},
+              "status": {"enum": ["planned", "pending", "ready", "running", "completed", "cancelled"]},
+              "classification": {"const": "deferred"},
+              "blocksMainline": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    "evidenceRoot": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "nullableSha": {
+      "anyOf": [
+        {"$ref": "#/$defs/sha"},
+        {"type": "null"}
+      ]
+    },
+    "objectId": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "gateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "attempts", "evidencePaths"],
+      "properties": {
+        "status": {"enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"]},
+        "attempts": {"type": "integer", "minimum": 0},
+        "exitCode": {"type": ["integer", "null"]},
+        "evidencePaths": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
