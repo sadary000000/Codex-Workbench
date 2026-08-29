@@ -45,7 +45,6 @@ async function fixture(options: { verification?: "PASS" | "FAIL"; reviewing?: bo
     requirementPayloadSha256: requirement.payloadSha256,
     planningMode: "JIT",
     plannerRole: "PLANNER",
-    currentStageId: STAGE_ID,
   });
   assert.ok(plan.payloadSha256);
   await store.createStageSpec({
