@@ -43,13 +43,25 @@ test("FIX-05 covers every persisted collection identity, including alignment rec
   assert.throws(() => assertMigrationIdentityPreserved(before, duplicate), /MIGRATION_IDENTITY_CONFLICT/);
 });
 
-test("FIX-01/FIX-02 App Server owners use the shared strict bootstrap while Conversation Map stays projection-only", async () => {
-  const projectMapManager = await readFile("src/main/project-map-manager.ts", "utf8");
-  assert.match(projectMapManager, /startAndInitializeAppServerClient/);
-  assert.match(projectMapManager, /verifyBinaryProvenance:\s*true/);
-  assert.doesNotMatch(projectMapManager, /await\s+client\.request\(\s*["']initialize["']/);
+test("FIX-01/FIX-02 App Server owners use strict bootstrap while Map coordination stays runtime/projection-only", async () => {
+  const [nativeRuntime, appServerHost, projectMapManager, conversationMap] = await Promise.all([
+    readFile("src/codex/native-thread-runtime.ts", "utf8"),
+    readFile("src/codex/app-server-host.ts", "utf8"),
+    readFile("src/main/project-map-manager.ts", "utf8"),
+    readFile("src/main/map-coordinator.ts", "utf8"),
+  ]);
 
-  const conversationMap = await readFile("src/main/map-coordinator.ts", "utf8");
+  assert.match(nativeRuntime, /startAndInitializeAppServerClient/);
+  assert.match(nativeRuntime, /schemaProvenanceVerified/);
+  assert.match(appServerHost, /startAndInitializeAppServerClient/);
+  assert.match(appServerHost, /schemaProvenanceVerified/);
+
+  assert.match(projectMapManager, /new NativeThreadRuntime/);
+  assert.match(projectMapManager, /dynamicTools:\s*\[MAP_DYNAMIC_TOOL_SPEC,\s*MAP_CONTEXT_REQUEST_TOOL_SPEC\]/);
+  assert.doesNotMatch(projectMapManager, /AppServerProcessClient/);
+  assert.doesNotMatch(projectMapManager, /startAndInitializeAppServerClient/);
+  assert.doesNotMatch(projectMapManager, /request\(\s*["'](?:thread\/start|turn\/start)["']/);
+
   assert.doesNotMatch(conversationMap, /AppServerProcessClient/);
   assert.doesNotMatch(conversationMap, /startAndInitializeAppServerClient/);
   assert.doesNotMatch(conversationMap, /request\(\s*["'](?:thread\/start|turn\/start)["']/);
