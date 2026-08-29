@@ -11,7 +11,8 @@ import { createLogger, logError, type Logger } from "../shared/logger.ts";
 import { isNativeApprovalMethod, isValidNativeApprovalResponse, noAdditionalPermissions } from "../shared/native-approval.ts";
 import { PersistenceStoreError, V1PersistenceStore } from "../shared/persistence-store.ts";
 import { inspectThreadBinding, saveThreadBinding } from "../shared/thread-state-store.ts";
-import type { JsonRpcMessage, NativeTurnCompletionEvent, RuntimeSnapshot, ThreadNavigationResult } from "../shared/runtime-types.ts";
+import type { JsonRpcMessage, NativeTurnCompletionEvent, RuntimeSnapshot, ThreadNavigationResult, ThreadProjection, ThreadReadView } from "../shared/runtime-types.ts";
+import { parseThreadReadResponse } from "../shared/thread-read-model.ts";
 import { ConversationMapCoordinator } from "./map-coordinator.ts";
 import { ProjectMapManager } from "./project-map-manager.ts";
 import { ProjectAutomationAssociationService } from "./project-automation-association-service.ts";
@@ -1319,12 +1320,61 @@ function getConversationMaps(): ConversationMapCoordinator {
   return conversationMaps;
 }
 
+function projectMapThreadReadView(projection: ThreadProjection, response: unknown): ThreadReadView {
+  const model = parseThreadReadResponse(response);
+  return {
+    nativeThreadId: projection.nativeThreadId,
+    status: model.status,
+    title: null,
+    cwd: projection.cwd,
+    error: model.error,
+    turns: model.turns.map((turn) => ({
+      id: turn.turnId,
+      status: turn.status,
+      error: null,
+      items: turn.items.map((item) => ({
+        id: item.itemId,
+        type: item.type,
+        status: item.status,
+        kind: item.kind,
+        text: item.text,
+        input: item.input,
+        output: item.output,
+        error: null,
+        raw: null,
+      })),
+      itemCount: turn.items.length,
+      raw: null,
+    })),
+    raw: null,
+  };
+}
+
+async function readProjectMapNativeThread(projection: ThreadProjection): Promise<ThreadReadView> {
+  const existing = runtimes.get(projection.nativeThreadId);
+  // Never create a second handle for an already-owned Native Thread. If the
+  // existing runtime cannot answer a read, surface that failure to the bounded
+  // Map context request instead of stealing or duplicating Thread ownership.
+  if (existing) return existing.readThread();
+
+  const client = getNativeAppServerHost().createThreadClient();
+  try {
+    await client.start();
+    await client.request("thread/resume", { threadId: projection.nativeThreadId }, 120_000);
+    const response = await client.request("thread/read", { threadId: projection.nativeThreadId, includeTurns: true }, 120_000);
+    return projectMapThreadReadView(projection, response);
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
 function getProjectMaps(): ProjectMapManager {
   if (projectMaps) return projectMaps;
   projectMaps = new ProjectMapManager({
     userDataDirectory: app.getPath("userData"),
     persistence: getPersistence(),
     validateProjectDirectory,
+    nativeThreadReader: readProjectMapNativeThread,
     onChanged: (status) => send(IPC.projectMapState, status),
   });
   return projectMaps;

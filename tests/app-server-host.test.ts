@@ -43,6 +43,11 @@ class FakeTransport implements AppServerClientPort {
       queueMicrotask(() => this.emit({ method: "thread/started", params: { thread: { id } } }));
       return { thread: { id } };
     }
+    if (method === "thread/resume") {
+      const id = (params as { threadId: string }).threadId;
+      this.threads.add(id);
+      return { thread: { id } };
+    }
     if (method === "thread/read") return { thread: { id: (params as { threadId: string }).threadId, turns: [] } };
     if (method === "turn/start") {
       const input = params as { threadId: string };
@@ -179,4 +184,29 @@ test("shared ThreadHandle exposes initialized ownership for skipInitialize calle
   });
   await host.close();
   assert.equal(handle.initialized, false);
+});
+
+
+test("closing a shared ThreadHandle releases a resumed Native Thread binding", async () => {
+  FakeTransport.created = 0;
+  FakeTransport.initialized = 0;
+  FakeTransport.closed = 0;
+  const host = new AppServerHost({
+    command: "codex",
+    cwd: process.cwd(),
+    clientFactory: (options) => new FakeTransport(options),
+  });
+  const first = host.createThreadClient();
+  await first.start();
+  await first.request("thread/resume", { threadId: "native-existing" }, 1_000);
+  assert.equal(first.threadId, "native-existing");
+  await first.close();
+  assert.equal(FakeTransport.closed, 0);
+
+  const second = host.createThreadClient();
+  await second.request("thread/resume", { threadId: "native-existing" }, 1_000);
+  assert.equal(second.threadId, "native-existing");
+  await second.close();
+  await host.close();
+  assert.equal(FakeTransport.closed, 1);
 });
