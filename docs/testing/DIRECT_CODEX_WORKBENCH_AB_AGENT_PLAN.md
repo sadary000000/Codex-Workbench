@@ -1,6 +1,6 @@
 # Direct Codex vs Workbench Native A/B Agent Plan
 
-Protocol version: **1.1.0**
+Protocol version: **1.2.0**
 
 This file defines the Codex coordinator/subagent topology for the A/B profile. Do not improvise a different agent graph during execution.
 
@@ -163,14 +163,22 @@ Starts after: **B3_EXPERIMENT_READY**.
 
 Responsibilities:
 
-1. run the required warmup pair;
-2. execute required cases in cases-file order;
+1. run the frozen warmup-only exact-reply pair from `measurement.warmup`;
+2. execute only unresolved required cases in cases-file order; resolved cases listed in `resolvedCases` are not reopened;
 3. execute each case's formal arm sequence exactly;
 4. capture trial files and validators;
 5. calculate only the minimal coefficient-of-variation value required to decide whether the predefined additional sequence is needed;
 6. run at most the one predefined variance-escalation sequence;
 7. run authorized external-transient replacement trials only at the end of a case;
 8. optionally run the workspace-write stratum if its equivalence preflight passes.
+
+External-capacity checkpoint rule:
+
+- on `usageLimitExceeded` / exhausted workspace credits with no provider retry, preserve the interrupted trial and write the frozen run checkpoint;
+- stop all model turns without publishing a terminal result;
+- on a later user `继续` / `continue`, revalidate frozen identity and resume only the unfinished slots/cases;
+- never rerun already completed successful formal trials merely because capacity was restored;
+- never resume or mutate a run after terminal publication.
 
 Important isolation rule:
 

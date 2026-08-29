@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "profile": "direct-codex-vs-workbench-native-ab",
-  "protocolVersion": "1.1.0",
+  "protocolVersion": "1.2.0",
   "armDefinitions": {
     "direct": "Raw verified Codex App Server process using the canonical initialize, thread/start and turn/start protocol without NativeThreadRuntime.",
     "workbench": "Production-isomorphic shared AppServerHost plus NativeThreadRuntime with no Map dynamic tools or Automation dispatch in the measured path."
@@ -39,21 +39,19 @@
         "direct",
         "workbench"
       ]
-    }
-  },
-  "cases": [
-    {
-      "caseId": "AB-READ-001-exact-reply",
-      "required": true,
+    },
+    "warmup": {
+      "sourceCaseId": "AB-READ-001-exact-reply",
       "sandbox": "read-only",
       "fixture": "repository-target",
       "prompt": "Reply with exactly NATIVE_AB_OK and nothing else. Do not use tools and do not modify any file.",
       "validator": {
         "type": "exact-final-message",
         "expected": "NATIVE_AB_OK"
-      },
-      "purpose": "Measures minimum Native runtime overhead and detects model-visible instruction/tool contamination in the simplest possible turn."
-    },
+      }
+    }
+  },
+  "cases": [
     {
       "caseId": "AB-READ-002-package-contract",
       "required": true,
@@ -103,6 +101,16 @@
         ]
       },
       "purpose": "Optional mutation stratum. It is excluded from the primary parity verdict if the host platform cannot provide equivalent workspace-write sandbox behavior to both arms."
+    }
+  ],
+  "resolvedCases": [
+    {
+      "caseId": "AB-READ-001-exact-reply",
+      "status": "PASS",
+      "sourceProtocolVersion": "1.1.0",
+      "sourceRunId": "native-ab-20260829T151810Z-8b7f91",
+      "sourceTestedCommit": "8b7f91e98893bd5b098ca9df93190540ae3efc0d",
+      "reason": "Both Direct and Workbench completed 4/4 successful formal trials with envelope parity and no model-visible Workbench injection. The formal case is retired from the unresolved queue; its exact-reply prompt remains warmup-only."
     }
   ]
 }

@@ -1,10 +1,10 @@
 # Direct Codex vs Workbench Native A/B Runbook
 
-Protocol version: **1.1.0**
+Protocol version: **1.2.0**
 
 This protocol measures whether the ordinary Workbench Native path preserves Codex Native semantics and whether the Workbench adapter introduces material cost when optional Workbench features are not active. Codex executes this protocol; it does not redesign it during a run.
 
-Protocol 1.1.0 keeps architectural ownership truth in the deterministic static parity audit. Required model A/B cases may inspect source, but release gating must use mechanically extractable source facts or task outputs rather than asking both arms to infer architecture ownership semantics.
+Protocol 1.2.0 keeps architectural ownership truth in the deterministic static parity audit and treats the model benchmark as an incremental unresolved-test queue. AB-READ-001-exact-reply is retired from formal required trials because protocol 1.1.0 produced 4/4 successful Direct and Workbench observations with envelope parity on the unchanged Native runtime baseline; the same exact-reply prompt is retained only as a neutral warmup. Required model A/B cases may inspect source, but release gating must use mechanically extractable source facts or task outputs rather than asking both arms to infer architecture ownership semantics.
 
 ## 1. Operational definition
 
@@ -215,7 +215,7 @@ A trial with a non-zero process exit is a failed trial unless Section 13 classif
 
 Warmup exists only to remove one-time process/cache effects from formal results.
 
-Use `AB-READ-001-exact-reply` once per arm in this fixed order:
+Use the frozen `measurement.warmup` exact-reply prompt once per arm in this fixed order. This warmup is not a formal case and does not reopen the retired AB-READ-001 result:
 
 ```text
 direct
@@ -268,6 +268,22 @@ Requirements:
 - exclude the external-transient original from latency summaries but include it in infrastructure-reliability reporting.
 
 More than one external-transient replacement for the same arm/case makes that case `INCONCLUSIVE`.
+
+## 13.5 External-capacity pause / resume
+
+`usageLimitExceeded` with `willRetry=false`, exhausted workspace credits, and equivalent authenticated-capacity failures are external-capacity interruptions rather than task failures.
+
+When the first such interruption occurs during required timed work:
+
+- preserve the original interrupted trial and all completed evidence;
+- write a bounded checkpoint under the external evidence root containing runId, current case/slot, exact target, protocol file hashes, Codex binary SHA-256, model, effort, prompt hashes, and completed trial IDs;
+- do **not** publish a terminal result to `codex/test-results`;
+- do **not** create a new run merely because capacity is temporarily unavailable;
+- stop model turns and report that the run is paused for external capacity.
+
+When the user later says `继续` / `continue`, resume the same frozen run only after re-validating exact target SHA, frozen protocol hashes, Codex binary SHA-256, model, effort, sandbox/approval settings, and prompt hashes. Already completed successful trials are not rerun. The interrupted original remains immutable; if Section 13 permits a replacement, run that replacement at the end of its case and then continue the remaining unresolved cases.
+
+If frozen identity cannot be re-established, if the evidence checkpoint is missing/corrupt, or if a second non-recoverable capacity interruption prevents completion, terminate the run as `INCONCLUSIVE` and publish once. A published terminal run is never resumed or mutated.
 
 ## 14. Optional workspace-write stratum
 
