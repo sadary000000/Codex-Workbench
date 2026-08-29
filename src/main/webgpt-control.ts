@@ -310,6 +310,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (command === "automation.step.review" && (typeof record.projectId !== "string" || typeof record.executionAttemptId !== "string" || (record.reviewDecision !== "APPROVE" && record.reviewDecision !== "REJECT"))) return controlError("STEP_REVIEW_INPUT_REQUIRED", "automation step review requires projectId, executionAttemptId, and reviewDecision.", command, requestId);
   if (command === "automation.stage.gate" && (typeof record.projectId !== "string" || typeof record.stageSpecId !== "string" || (record.stageGateDecision !== "PASS" && record.stageGateDecision !== "REJECT"))) return controlError("STAGE_GATE_INPUT_REQUIRED", "automation stage gate requires projectId, stageSpecId, and stageGateDecision.", command, requestId);
   if (command === "automation.stage.advance" && (typeof record.projectId !== "string" || typeof record.stageSpecId !== "string")) return controlError("STAGE_ADVANCE_INPUT_REQUIRED", "automation stage advance requires projectId and stageSpecId.", command, requestId);
+  if (command === "automation.project.inspect" && typeof record.projectId !== "string") return controlError("PROJECT_INSPECT_INPUT_REQUIRED", "automation project inspect requires projectId.", command, requestId);
   if (command === "automation.project.complete" && typeof record.projectId !== "string") return controlError("PROJECT_COMPLETION_INPUT_REQUIRED", "automation project complete requires projectId.", command, requestId);
   if (["webgpt.project.inspect", "webgpt.project.open", "webgpt.project.create", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
   if (record.idempotencyKey !== undefined && command !== "webgpt.send" && command !== "webgpt.review-submit") return controlError("CONTROL_IDEMPOTENCY_UNSUPPORTED", "idempotencyKey 只支持 send/review-submit。", command, requestId);
@@ -365,6 +366,7 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "automation.step.review": ["projectId", "executionAttemptId", "reviewDecision", "reviewerRef"],
     "automation.stage.gate": ["projectId", "stageSpecId", "stageGateDecision", "gatekeeperRef"],
     "automation.stage.advance": ["projectId", "stageSpecId"],
+    "automation.project.inspect": ["projectId"],
     "automation.project.complete": ["projectId"],
   };
   const allowedFields = new Set(["version", "protocolVersion", "requestId", "command", "clientInfo", "sessionId", ...(allowedByCommand[command] ?? [])]);

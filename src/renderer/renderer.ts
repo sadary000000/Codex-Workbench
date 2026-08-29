@@ -16,6 +16,7 @@ import type {
   ComposerRequestDiagnostics,
 } from "../shared/runtime-types.ts";
 import type { ConversationMapStatus, MapEntityRef, MapNode, MapSourceRef, ProjectMapMaintenanceView, ProjectMapStatus } from "../shared/map-types.ts";
+import type { AutomationGovernanceProjectView } from "../shared/automation-governance-types.ts";
 import { normalizeNativeEvent, type NormalizedNativeEvent } from "../shared/native-event-normalizer.ts";
 import { buildNavigationModel, type NavigationModel } from "./navigation-model.ts";
 import { isComposerTargetValid } from "../shared/thread-target.ts";
@@ -74,6 +75,7 @@ interface V1Api {
   reviewAutomationStep(projectId: string, executionAttemptId: string, decision: "APPROVE" | "REJECT", reviewerRef?: string | null): Promise<IpcEnvelope<unknown>>;
   gateAutomationStage(projectId: string, stageSpecId: string, decision: "PASS" | "REJECT", gatekeeperRef?: string | null): Promise<IpcEnvelope<unknown>>;
   advanceAutomationStage(projectId: string, stageSpecId: string): Promise<IpcEnvelope<unknown>>;
+  getAutomationGovernanceProject(projectId: string): Promise<IpcEnvelope<AutomationGovernanceProjectView>>;
   completeAutomationProject(projectId: string): Promise<IpcEnvelope<unknown>>;
   listThreads(projectId?: string | null): Promise<IpcEnvelope<ThreadProjection[]>>;
   bindThreadToProject(nativeThreadId: string, projectId: string | null): Promise<IpcEnvelope<ThreadProjection>>;
