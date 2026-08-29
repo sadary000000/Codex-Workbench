@@ -1314,7 +1314,6 @@ function getConversationMaps(): ConversationMapCoordinator {
   if (conversationMaps) return conversationMaps;
   conversationMaps = new ConversationMapCoordinator({
     userDataDirectory: app.getPath("userData"),
-    command: undefined,
     onChanged: (status) => send(IPC.mapState, status),
   });
   return conversationMaps;

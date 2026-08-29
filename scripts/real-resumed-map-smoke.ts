@@ -10,7 +10,7 @@ import type { JsonRpcMessage } from "../src/shared/runtime-types.ts";
 const root = await mkdtemp(join(tmpdir(), "codex-workbench-v1-resumed-map-"));
 const cwd = join(root, "project");
 await mkdir(cwd, { recursive: true });
-const coordinator = new ConversationMapCoordinator({ userDataDirectory: root, command: resolveCodexCommand() });
+const coordinator = new ConversationMapCoordinator({ userDataDirectory: root });
 let originalThreadId: string | null = null;
 let cleanupResult = "not_attempted";
 let firstClient: AppServerProcessClient | null = null;
@@ -75,7 +75,7 @@ try {
   await initialize(resumedClient);
   const resumed = object(await resumedClient.request("thread/resume", resumeParams, 120_000));
   assert.equal(text(object(resumed?.thread)?.id) ?? text(resumed?.threadId), originalThreadId);
-  const restartedCoordinator = new ConversationMapCoordinator({ userDataDirectory: root, command: resolveCodexCommand() });
+  const restartedCoordinator = new ConversationMapCoordinator({ userDataDirectory: root });
   const statusAfterMapRestart = await restartedCoordinator.status(originalThreadId);
   assert.equal(statusAfterMapRestart.map?.revision, 0, "Map sidecar did not survive coordinator restart");
   restartedCoordinator.markResumedThread(originalThreadId, cwd);
@@ -84,9 +84,10 @@ try {
   const resumedTurnId = await runTurn(resumedClient, originalThreadId, "Reply exactly RESUMED_MAP_TURN_OK. This current bounded change is a real progress update; do not call tools and do not modify files.");
   await restartedCoordinator.markTurnCompleted(originalThreadId, resumedTurnId, { turnId: resumedTurnId, status: "completed" });
   const statusAfter = await restartedCoordinator.status(originalThreadId);
-  assert.ok(statusAfter.map?.revision && statusAfter.map.revision >= 1, "compatibility fallback did not advance the Map revision");
-  assert.equal(statusAfter.map?.sync.lastProcessedTurnId, resumedTurnId);
-  assert.ok(restartedCoordinator.compatibilityFallbackToolCallCount >= 1, "fallback did not receive a real dynamic tool call");
+  assert.equal(statusAfter.map?.revision, 0, "resumed Map must not fabricate a maintenance patch");
+  assert.equal(statusAfter.map?.sync.dirty, true);
+  assert.equal(statusAfter.map?.sync.status, "dirty");
+  assert.equal(statusAfter.map?.sync.lastProcessedTurnId, null);
 
   try {
     await resumedClient.request("thread/delete", { threadId: originalThreadId }, 30_000);
@@ -101,7 +102,7 @@ try {
     mapRevisionAfterCoordinatorRestart: statusAfterMapRestart.map?.revision ?? null,
     resumeParamsHadDynamicTools: Object.prototype.hasOwnProperty.call(resumeParams, "dynamicTools"),
     sameTurn: statusAfter.sameTurn,
-    compatibilityFallbackToolCallCount: restartedCoordinator.compatibilityFallbackToolCallCount,
+    mapDirty: statusAfter.map?.sync.dirty ?? false,
     mapRevision: statusAfter.map?.revision ?? null,
     mapCursor: statusAfter.map?.sync.lastProcessedTurnId ?? null,
     mapSourceCursors: statusAfter.map?.sync.sourceCursors ?? {},
