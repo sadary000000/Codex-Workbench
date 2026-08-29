@@ -91,6 +91,7 @@ const IPC = Object.freeze({
   projectAutomationCandidateList: "automation:projects:association-candidates",
   projectAutomationBind: "persistence:project-automation-associations:bind",
   projectAutomationUnlink: "persistence:project-automation-associations:unlink",
+  automationRequirementConfirm: "automation:requirement:confirm",
   automationStepExecute: "automation:step:execute",
   automationStepReconcile: "automation:step:reconcile",
   automationStepVerify: "automation:step:verify",
@@ -2299,6 +2300,15 @@ function registerIpc(): void {
       if (typeof productProjectId !== "string" || typeof automationProjectId !== "string") throw new Error("Project association IDs are required.");
       // Product-owned unlink deliberately remains available without Automation initialization.
       return ok(await getProjectAutomationAssociationService().unlink(productProjectId, automationProjectId));
+    } catch (error) {
+      return fail(error);
+    }
+  });
+  ipcMain.handle(IPC.automationRequirementConfirm, async (_event, projectId: unknown, requirementVersionId: unknown, expectedPayloadSha256: unknown) => {
+    try {
+      if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof requirementVersionId !== "string" || !requirementVersionId.trim() || requirementVersionId.length > 256) throw codedError("REQUIREMENT_CONFIRM_INPUT_REQUIRED", "Requirement confirmation requires bounded Project and RequirementVersion IDs.");
+      if (typeof expectedPayloadSha256 !== "string" || !/^[a-f0-9]{64}$/i.test(expectedPayloadSha256.trim())) throw codedError("REQUIREMENT_PAYLOAD_SHA256_INVALID", "Requirement confirmation requires an exact 64-character SHA-256.");
+      return ok(await getAutomationProviderHost().execution.confirmRequirement({ projectId: projectId.trim(), requirementVersionId: requirementVersionId.trim(), expectedPayloadSha256: expectedPayloadSha256.trim().toLowerCase(), actor: "USER" }));
     } catch (error) {
       return fail(error);
     }

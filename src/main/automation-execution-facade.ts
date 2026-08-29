@@ -2,6 +2,7 @@ import type { AutomationProviderId } from "../automation/adapters.ts";
 import { persistedProviderIdForIntent } from "../automation/provider-binding-port.ts";
 import type { PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
 import { ProjectCompletionService, type CompleteProjectInput } from "../automation/project-completion-service.ts";
+import { RequirementAutomationService, type ConfirmRequirementInput } from "../automation/requirement-service.ts";
 import type { ProviderAwareRequirementAutomationService } from "../automation/provider-aware-requirement-service.ts";
 import { AutomationProviderServiceRouter } from "../automation/provider-service-router.ts";
 import { StageGateService, type GateStageInput } from "../automation/stage-gate-service.ts";
@@ -72,6 +73,7 @@ function normalizeProviderId(value: AutomationProviderId | null | undefined): Au
 export class AutomationExecutionFacade {
   readonly store: AutomationStore;
   readonly services: AutomationProviderServiceRouter;
+  readonly requirementConfirmation: RequirementAutomationService;
   readonly stepVerification: DeterministicStepVerificationService;
   readonly stepReview: StepReviewCompletionService;
   readonly stageGate: StageGateService;
@@ -81,6 +83,7 @@ export class AutomationExecutionFacade {
   constructor(options: { store: AutomationStore; services: AutomationProviderServiceRouter }) {
     this.store = options.store;
     this.services = options.services;
+    this.requirementConfirmation = new RequirementAutomationService({ store: options.store });
     this.stepVerification = new DeterministicStepVerificationService({ store: options.store });
     this.stepReview = new StepReviewCompletionService({ store: options.store });
     this.stageGate = new StageGateService({ store: options.store });
@@ -100,6 +103,10 @@ export class AutomationExecutionFacade {
   async reconcileRequirement(input: RequirementReconcileCommand, providerId?: AutomationProviderId | null) {
     const provider = await this.providerForRequirementSession(input.sessionId, providerId);
     return this.services.requirement(provider).reconcileProviderRequest(input);
+  }
+
+  async confirmRequirement(input: ConfirmRequirementInput) {
+    return this.requirementConfirmation.confirmRequirement(input);
   }
 
   async createPlan(input: PlannerCreateInput, providerId?: AutomationProviderId | null) {
