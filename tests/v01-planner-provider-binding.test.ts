@@ -204,8 +204,11 @@ async function fixture() {
     requirementVersionId: "requirement-v01-planner-binding",
     version: 1,
     status: "CONFIRMED",
-    origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:v01-planner-provider-binding" },
-    canonicalPayload: JSON.stringify({ goal: "Exercise production Planner provider ownership." }),
+    origin: { originType: "INITIAL", source: "USER", sourceRef: "user-confirmed-v01-planner-provider-binding" },
+    canonicalPayload: JSON.stringify({
+      goal: "Exercise production Planner provider ownership.",
+      acceptanceCriteria: ["Planner provider ownership remains durable across retry."],
+    }),
   });
   const delegate = new NativePlannerDelegate();
   const provider = new PersistedProviderBindingPort({ store, provider: delegate });
@@ -221,6 +224,13 @@ async function dispose(value: Awaited<ReturnType<typeof fixture>>) {
 test("v0.1 Planner initial dispatch and explicit retry use durable provider ownership", async () => {
   const value = await fixture();
   try {
+    const before = await value.store.snapshot();
+    const storedProject = before.automationProjects.find((item) => item.projectId === PROJECT_ID);
+    const storedRequirement = before.requirementVersions.find((item) => item.requirementVersionId === value.requirement.requirementVersionId);
+    assert.equal(storedProject?.activeRequirementVersionId, value.requirement.requirementVersionId, "confirmed fixture Requirement must be the exact active project requirement before Planner dispatch");
+    assert.equal(storedRequirement?.status, "CONFIRMED");
+    assert.equal(storedRequirement?.projectId, PROJECT_ID);
+
     const valid = candidate(value.requirement.requirementVersionId, value.requirement.payloadSha256);
     value.delegate.response = { ...valid, nativeThreadId: "must-be-rejected-by-planner-validator" };
 
