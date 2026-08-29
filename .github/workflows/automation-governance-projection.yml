@@ -1,0 +1,552 @@
+name: Automation governance projection gate
+
+on:
+  push:
+    branches:
+      - feature/automation-governance-projection
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply bounded governance projection patch
+        shell: bash
+        run: |
+          cat > src/shared/automation-governance-types.ts <<'EOF'
+          export interface AutomationGovernanceEvidenceView {
+            evidenceId: string;
+            type: "STEP_VERIFICATION" | "STEP_REVIEW" | "STAGE_GATE";
+            state: "PASS" | "FAIL" | "APPROVE" | "REJECT";
+            source: string;
+            producer: string;
+            timestamp: string;
+            sha256: string | null;
+            actorRef: string | null;
+            verificationClass: string | null;
+          }
+
+          export interface AutomationGovernanceAttemptView {
+            attemptId: string;
+            attemptNumber: number;
+            lifecycle: string;
+            terminalResult: string | null;
+            startedAt: string | null;
+            completedAt: string | null;
+          }
+
+          export interface AutomationGovernanceStepView {
+            stepSpecId: string;
+            stepKey: string;
+            ordinal: number | null;
+            objective: string;
+            riskClass: string;
+            sideEffectClass: string;
+            runtime: null | {
+              stepRuntimeId: string;
+              lifecycle: string;
+              terminalResult: string | null;
+              waitReason: string;
+              currentAttemptId: string | null;
+            };
+            attempt: AutomationGovernanceAttemptView | null;
+            verification: AutomationGovernanceEvidenceView | null;
+            review: AutomationGovernanceEvidenceView | null;
+          }
+
+          export interface AutomationGovernanceStageView {
+            stageSpecId: string;
+            stageKey: string;
+            name: string;
+            objective: string;
+            ordinal: number;
+            dependsOn: string[];
+            detailLevel: string | null;
+            isCurrent: boolean;
+            gate: AutomationGovernanceEvidenceView | null;
+            steps: AutomationGovernanceStepView[];
+          }
+
+          export interface AutomationGovernanceProjectView {
+            project: {
+              projectId: string;
+              name: string;
+              lifecycle: string;
+              activeRequirementVersionId: string | null;
+              activePlanVersionId: string | null;
+              policyVersionId: string | null;
+            };
+            plan: null | {
+              planVersionId: string;
+              requirementVersionId: string;
+              version: number;
+              status: string;
+              payloadSha256: string | null;
+            };
+            runtimePosition: null | {
+              source: "CHECKPOINT" | "PLAN_INITIAL" | "FIRST_ACTIVE_STAGE" | "NONE";
+              checkpointId: string | null;
+              currentStageSpecId: string | null;
+              createdAt: string | null;
+            };
+            stages: AutomationGovernanceStageView[];
+            integrity: {
+              status: "OK" | "DEGRADED";
+              issues: string[];
+            };
+          }
+          EOF
+
+          cat > src/automation/governance-projection-service.ts <<'EOF'
+          import { AutomationStore } from "./store.ts";
+          import type { AutomationDocument, Evidence, PlanVersion, StageSpec, StepSpec } from "./types.ts";
+          import type {
+            AutomationGovernanceEvidenceView,
+            AutomationGovernanceProjectView,
+            AutomationGovernanceStageView,
+            AutomationGovernanceStepView,
+          } from "../shared/automation-governance-types.ts";
+
+          const VERIFIER_PROTOCOL = "workbench-step-verifier-v1";
+          const REVIEW_PROTOCOL = "workbench-step-review-v1";
+          const GATE_PROTOCOL = "workbench-stage-gate-v1";
+
+          function metaString(evidence: Evidence, key: string): string | null {
+            const value = evidence.metadata[key];
+            return typeof value === "string" ? value : null;
+          }
+
+          function evidenceView(
+            evidence: Evidence,
+            state: AutomationGovernanceEvidenceView["state"],
+            actorRef: string | null,
+          ): AutomationGovernanceEvidenceView {
+            return {
+              evidenceId: evidence.evidenceId,
+              type: evidence.type as AutomationGovernanceEvidenceView["type"],
+              state,
+              source: evidence.source,
+              producer: evidence.producer,
+              timestamp: evidence.timestamp,
+              sha256: evidence.sha256,
+              actorRef,
+              verificationClass: metaString(evidence, "verificationClass"),
+            };
+          }
+
+          function exactlyOne(
+            values: Evidence[],
+            issue: string,
+            issues: string[],
+          ): Evidence | null {
+            if (values.length === 1) return values[0]!;
+            if (values.length > 1) issues.push(issue);
+            return null;
+          }
+
+          function currentVerification(
+            document: AutomationDocument,
+            input: { projectId: string; plan: PlanVersion; planHash: string; stage: StageSpec; step: StepSpec; attemptId: string },
+            issues: string[],
+          ): AutomationGovernanceEvidenceView | null {
+            const evidence = exactlyOne(document.evidences.filter((item) =>
+              item.projectId === input.projectId
+              && item.stageSpecId === input.stage.stageSpecId
+              && item.stepSpecId === input.step.stepSpecId
+              && item.attemptId === input.attemptId
+              && item.type === "STEP_VERIFICATION"
+              && item.source === "WORKFLOW_TRUTH"
+              && item.producer === VERIFIER_PROTOCOL
+              && item.metadata.verifierProtocol === VERIFIER_PROTOCOL
+              && item.metadata.planVersionId === input.plan.planVersionId
+              && item.metadata.planPayloadSha256 === input.planHash
+              && (item.metadata.outcome === "PASS" || item.metadata.outcome === "FAIL")
+            ), `MULTIPLE_CURRENT_STEP_VERIFICATION:${input.step.stepSpecId}`, issues);
+            if (!evidence) return null;
+            return evidenceView(evidence, evidence.metadata.outcome as "PASS" | "FAIL", null);
+          }
+
+          function currentReview(
+            document: AutomationDocument,
+            input: { projectId: string; plan: PlanVersion; planHash: string; stage: StageSpec; step: StepSpec; attemptId: string },
+            issues: string[],
+          ): AutomationGovernanceEvidenceView | null {
+            const evidence = exactlyOne(document.evidences.filter((item) =>
+              item.projectId === input.projectId
+              && item.stageSpecId === input.stage.stageSpecId
+              && item.stepSpecId === input.step.stepSpecId
+              && item.attemptId === input.attemptId
+              && item.type === "STEP_REVIEW"
+              && item.source === "USER"
+              && item.producer === REVIEW_PROTOCOL
+              && item.metadata.reviewProtocol === REVIEW_PROTOCOL
+              && item.metadata.planVersionId === input.plan.planVersionId
+              && item.metadata.planPayloadSha256 === input.planHash
+              && (item.metadata.decision === "APPROVE" || item.metadata.decision === "REJECT")
+            ), `MULTIPLE_CURRENT_STEP_REVIEW:${input.step.stepSpecId}`, issues);
+            if (!evidence) return null;
+            return evidenceView(
+              evidence,
+              evidence.metadata.decision as "APPROVE" | "REJECT",
+              metaString(evidence, "reviewerRef"),
+            );
+          }
+
+          function currentGate(
+            document: AutomationDocument,
+            projectId: string,
+            plan: PlanVersion,
+            planHash: string,
+            stage: StageSpec,
+            issues: string[],
+          ): AutomationGovernanceEvidenceView | null {
+            const evidence = exactlyOne(document.evidences.filter((item) =>
+              item.projectId === projectId
+              && item.stageSpecId === stage.stageSpecId
+              && item.stepSpecId === null
+              && item.attemptId === null
+              && item.type === "STAGE_GATE"
+              && item.source === "USER"
+              && item.producer === GATE_PROTOCOL
+              && item.metadata.gateProtocol === GATE_PROTOCOL
+              && item.metadata.planVersionId === plan.planVersionId
+              && item.metadata.planPayloadSha256 === planHash
+              && item.metadata.stageSpecId === stage.stageSpecId
+              && (item.metadata.decision === "PASS" || item.metadata.decision === "REJECT")
+            ), `MULTIPLE_CURRENT_STAGE_GATE:${stage.stageSpecId}`, issues);
+            if (!evidence) return null;
+            return evidenceView(
+              evidence,
+              evidence.metadata.decision as "PASS" | "REJECT",
+              metaString(evidence, "gatekeeperRef"),
+            );
+          }
+
+          function position(document: AutomationDocument, projectId: string, plan: PlanVersion, stages: StageSpec[], issues: string[]) {
+            const checkpoint = document.checkpoints
+              .filter((item) => item.projectId === projectId && item.planVersionId === plan.planVersionId)
+              .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.checkpointId.localeCompare(left.checkpointId))[0] ?? null;
+            if (checkpoint) {
+              if (checkpoint.currentStageSpecId && !stages.some((stage) => stage.stageSpecId === checkpoint.currentStageSpecId)) {
+                issues.push(`CHECKPOINT_STAGE_OUTSIDE_ACTIVE_PLAN:${checkpoint.currentStageSpecId}`);
+              }
+              return {
+                source: "CHECKPOINT" as const,
+                checkpointId: checkpoint.checkpointId,
+                currentStageSpecId: checkpoint.currentStageSpecId,
+                createdAt: checkpoint.createdAt,
+              };
+            }
+            if (plan.currentStageId) {
+              if (stages.some((stage) => stage.stageSpecId === plan.currentStageId)) {
+                return { source: "PLAN_INITIAL" as const, checkpointId: null, currentStageSpecId: plan.currentStageId, createdAt: null };
+              }
+              issues.push(`PLAN_INITIAL_STAGE_OUTSIDE_ACTIVE_PLAN:${plan.currentStageId}`);
+            }
+            if (stages[0]) return { source: "FIRST_ACTIVE_STAGE" as const, checkpointId: null, currentStageSpecId: stages[0].stageSpecId, createdAt: null };
+            return { source: "NONE" as const, checkpointId: null, currentStageSpecId: null, createdAt: null };
+          }
+
+          /** Provider/runtime-neutral read projection over Automation workflow truth only. */
+          export class AutomationGovernanceProjectionService {
+            readonly store: AutomationStore;
+
+            constructor(options: { readonly store: AutomationStore }) {
+              this.store = options.store;
+            }
+
+            async inspect(projectId: string): Promise<AutomationGovernanceProjectView> {
+              const document = await this.store.snapshot();
+              const project = document.automationProjects.find((item) => item.projectId === projectId);
+              if (!project) throw new Error(`AUTOMATION_GOVERNANCE_PROJECT_NOT_FOUND:${projectId}`);
+              const issues: string[] = [];
+              const base = {
+                project: {
+                  projectId: project.projectId,
+                  name: project.name,
+                  lifecycle: project.lifecycle,
+                  activeRequirementVersionId: project.activeRequirementVersionId,
+                  activePlanVersionId: project.activePlanVersionId,
+                  policyVersionId: project.policyVersionId,
+                },
+              };
+              if (!project.activePlanVersionId) {
+                return { ...base, plan: null, runtimePosition: null, stages: [], integrity: { status: "OK", issues: [] } };
+              }
+              const plan = document.planVersions.find((item) => item.planVersionId === project.activePlanVersionId) ?? null;
+              if (!plan || plan.projectId !== projectId || plan.status !== "ACTIVE") {
+                issues.push(`ACTIVE_PLAN_INVALID:${project.activePlanVersionId}`);
+                return { ...base, plan: null, runtimePosition: null, stages: [], integrity: { status: "DEGRADED", issues } };
+              }
+              const planHash = plan.payloadSha256 ?? null;
+              if (!planHash) issues.push(`ACTIVE_PLAN_PAYLOAD_SHA256_MISSING:${plan.planVersionId}`);
+              const stages = document.stageSpecs
+                .filter((item) => item.planVersionId === plan.planVersionId && item.status === "ACTIVE")
+                .sort((left, right) => left.ordinal - right.ordinal || left.stageSpecId.localeCompare(right.stageSpecId));
+              for (let index = 1; index < stages.length; index += 1) {
+                if (stages[index - 1]!.ordinal === stages[index]!.ordinal) issues.push(`DUPLICATE_ACTIVE_STAGE_ORDINAL:${stages[index]!.ordinal}`);
+              }
+              const runtimePosition = position(document, projectId, plan, stages, issues);
+              const stageViews: AutomationGovernanceStageView[] = stages.map((stage) => {
+                const steps = document.stepSpecs
+                  .filter((item) => item.stageSpecId === stage.stageSpecId && item.specStatus === "ACTIVE")
+                  .sort((left, right) => (left.ordinal ?? Number.MAX_SAFE_INTEGER) - (right.ordinal ?? Number.MAX_SAFE_INTEGER) || left.stepSpecId.localeCompare(right.stepSpecId));
+                const stepViews: AutomationGovernanceStepView[] = steps.map((step) => {
+                  const runtimes = document.stepRuntimes.filter((item) => item.stepSpecId === step.stepSpecId);
+                  if (runtimes.length > 1) issues.push(`MULTIPLE_STEP_RUNTIME:${step.stepSpecId}`);
+                  const runtime = runtimes.length === 1 ? runtimes[0]! : null;
+                  let attempt = null;
+                  if (runtime?.currentAttemptId) {
+                    const candidate = document.executionAttempts.find((item) => item.attemptId === runtime.currentAttemptId) ?? null;
+                    if (!candidate || candidate.projectId !== projectId || candidate.stageSpecId !== stage.stageSpecId || candidate.stepSpecId !== step.stepSpecId) {
+                      issues.push(`CURRENT_ATTEMPT_CORRELATION_INVALID:${step.stepSpecId}`);
+                    } else {
+                      attempt = {
+                        attemptId: candidate.attemptId,
+                        attemptNumber: candidate.attemptNumber,
+                        lifecycle: candidate.lifecycle,
+                        terminalResult: candidate.terminalResult,
+                        startedAt: candidate.startedAt,
+                        completedAt: candidate.completedAt,
+                      };
+                    }
+                  }
+                  const evidenceInput = runtime?.currentAttemptId && planHash
+                    ? { projectId, plan, planHash, stage, step, attemptId: runtime.currentAttemptId }
+                    : null;
+                  return {
+                    stepSpecId: step.stepSpecId,
+                    stepKey: step.stepKey,
+                    ordinal: step.ordinal ?? null,
+                    objective: step.objective ?? step.goal,
+                    riskClass: step.riskClass,
+                    sideEffectClass: step.sideEffectClass,
+                    runtime: runtime ? {
+                      stepRuntimeId: runtime.stepRuntimeId,
+                      lifecycle: runtime.lifecycle,
+                      terminalResult: runtime.terminalResult,
+                      waitReason: runtime.waitReason,
+                      currentAttemptId: runtime.currentAttemptId,
+                    } : null,
+                    attempt,
+                    verification: evidenceInput ? currentVerification(document, evidenceInput, issues) : null,
+                    review: evidenceInput ? currentReview(document, evidenceInput, issues) : null,
+                  };
+                });
+                return {
+                  stageSpecId: stage.stageSpecId,
+                  stageKey: stage.stageKey,
+                  name: stage.name ?? stage.stageKey,
+                  objective: stage.objective ?? stage.goal,
+                  ordinal: stage.ordinal,
+                  dependsOn: [...(stage.dependsOn ?? [])],
+                  detailLevel: stage.detailLevel ?? null,
+                  isCurrent: runtimePosition.currentStageSpecId === stage.stageSpecId,
+                  gate: planHash ? currentGate(document, projectId, plan, planHash, stage, issues) : null,
+                  steps: stepViews,
+                };
+              });
+              return {
+                ...base,
+                plan: {
+                  planVersionId: plan.planVersionId,
+                  requirementVersionId: plan.requirementVersionId,
+                  version: plan.version,
+                  status: plan.status,
+                  payloadSha256: planHash,
+                },
+                runtimePosition,
+                stages: stageViews,
+                integrity: { status: issues.length === 0 ? "OK" : "DEGRADED", issues },
+              };
+            }
+          }
+          EOF
+
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/main/automation-provider-host.ts")
+          text = path.read_text(encoding="utf-8")
+          old = 'import { AutomationStore } from "../automation/store.ts";\n'
+          new = old + 'import { AutomationGovernanceProjectionService } from "../automation/governance-projection-service.ts";\n'
+          if text.count(old) != 1: raise SystemExit("host import anchor mismatch")
+          text = text.replace(old, new)
+          old = '  readonly execution: AutomationExecutionFacade;\n}'
+          new = '  readonly execution: AutomationExecutionFacade;\n  readonly governance: AutomationGovernanceProjectionService;\n}'
+          if text.count(old) != 1: raise SystemExit("host interface anchor mismatch")
+          text = text.replace(old, new)
+          old = '  const execution = new AutomationExecutionFacade({\n    store: options.store,\n    services: composition.services,\n  });\n  return Object.freeze({ nativeRuntime, composition, execution });'
+          new = '  const execution = new AutomationExecutionFacade({\n    store: options.store,\n    services: composition.services,\n  });\n  const governance = new AutomationGovernanceProjectionService({ store: options.store });\n  return Object.freeze({ nativeRuntime, composition, execution, governance });'
+          if text.count(old) != 1: raise SystemExit("host composition anchor mismatch")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+
+          cat > tests/automation-governance-projection.test.ts <<'EOF'
+          import assert from "node:assert/strict";
+          import { mkdtemp, rm } from "node:fs/promises";
+          import { tmpdir } from "node:os";
+          import { join } from "node:path";
+          import test from "node:test";
+          import { canonicalize } from "../src/automation/canonical.ts";
+          import { AutomationGovernanceProjectionService } from "../src/automation/governance-projection-service.ts";
+          import { AutomationStore } from "../src/automation/store.ts";
+          import { AutomationExecutionFacade } from "../src/main/automation-execution-facade.ts";
+
+          const PROJECT = "governance-projection-project";
+          const PLAN = "governance-projection-plan";
+          const STAGE_A = "governance-stage-a";
+          const STAGE_B = "governance-stage-b";
+          const STEP_A = "governance-step-a";
+          const STEP_B = "governance-step-b";
+
+          async function fixture() {
+            const root = await mkdtemp(join(tmpdir(), "codex-workbench-governance-projection-"));
+            const store = new AutomationStore(join(root, "automation.db"));
+            await store.createAutomationProject({ projectId: PROJECT, name: "Governance projection" });
+            const requirement = await store.createRequirementVersion({
+              requirementVersionId: "governance-requirement",
+              projectId: PROJECT,
+              version: 1,
+              status: "CONFIRMED",
+              origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:projection" },
+              canonicalPayload: canonicalize({ goal: "project governance truth" }, "governanceRequirement"),
+            });
+            const plan = await store.createPlanVersion({
+              planVersionId: PLAN,
+              projectId: PROJECT,
+              requirementVersionId: requirement.requirementVersionId,
+              version: 1,
+              status: "ACTIVE",
+              canonicalPayload: canonicalize({ planVersionId: PLAN, stages: [STAGE_A, STAGE_B], steps: [STEP_A, STEP_B] }, "governancePlan"),
+              requirementPayloadSha256: requirement.payloadSha256,
+              planningMode: "JIT",
+              plannerRole: "PLANNER",
+            });
+            await store.createStageSpec({ stageSpecId: STAGE_A, planVersionId: PLAN, stageKey: "BUILD", name: "Build", objective: "Build safely", dependsOn: [], detailLevel: "DETAILED", specVersion: 1, status: "ACTIVE", ordinal: 0 });
+            await store.createStageSpec({ stageSpecId: STAGE_B, planVersionId: PLAN, stageKey: "SHIP", name: "Ship", objective: "Ship after build", dependsOn: ["BUILD"], detailLevel: "DETAILED", specVersion: 1, status: "ACTIVE", ordinal: 1 });
+            for (const [stageSpecId, stepSpecId, stepKey] of [[STAGE_A, STEP_A, "BUILD_STEP"], [STAGE_B, STEP_B, "SHIP_STEP"]] as const) {
+              await store.createStepSpec({ stepSpecId, stageSpecId, stepKey, specVersion: 1, kind: "SYSTEM_STEP", ordinal: 0, objective: stepKey, riskClass: "LOW", sideEffectClass: "PURE" });
+            }
+            return { root, store, planHash: plan.payloadSha256! };
+          }
+
+          async function approveFirstStep(value: Awaited<ReturnType<typeof fixture>>) {
+            const runtimeId = `runtime:${STEP_A}`;
+            const attemptId = "governance-attempt-a";
+            await value.store.transitionStepRuntime(runtimeId, "READY", { actorType: "TEST" });
+            await value.store.createExecutionAttempt({ attemptId, projectId: PROJECT, stageSpecId: STAGE_A, stepSpecId: STEP_A, attemptNumber: 1 });
+            await value.store.transitionExecutionAttempt(attemptId, "START", { actorType: "TEST" });
+            await value.store.transitionExecutionAttempt(attemptId, "COMPLETE", { actorType: "TEST" });
+            const verification = await value.store.createEvidence({
+              evidenceId: "governance-verification-a", projectId: PROJECT, stageSpecId: STAGE_A, stepSpecId: STEP_A, attemptId,
+              type: "STEP_VERIFICATION", source: "WORKFLOW_TRUTH", producer: "workbench-step-verifier-v1", exitCode: null,
+              sha256: "a".repeat(64), artifactRefId: null,
+              metadata: { outcome: "PASS", planPayloadSha256: value.planHash, planVersionId: PLAN, verificationClass: "HASH_MATCH", verifierProtocol: "workbench-step-verifier-v1" },
+              correlation: { workflowActionId: null, requestId: `verification:${attemptId}`, nativeThreadId: null, nativeTurnId: null, resourceLeaseId: null, artifactRefs: [], evidenceRefs: [] },
+            });
+            await value.store.transitionStepRuntime(runtimeId, "REVIEW", { actorType: "AUTOMATION", actorRef: "workbench-step-verifier-v1", correlationId: attemptId, causationId: verification.evidenceId });
+            const facade = new AutomationExecutionFacade({ store: value.store, services: {} as never });
+            await facade.reviewStep({ projectId: PROJECT, executionAttemptId: attemptId, decision: "APPROVE", reviewerRef: "user:reviewer" });
+            await facade.gateStage({ projectId: PROJECT, stageSpecId: STAGE_A, decision: "PASS", gatekeeperRef: "user:gatekeeper" });
+            await facade.advanceStage({ projectId: PROJECT, stageSpecId: STAGE_A });
+            return attemptId;
+          }
+
+          test("governance projection exposes current active-plan workflow truth without raw payloads", async () => {
+            const value = await fixture();
+            try {
+              const service = new AutomationGovernanceProjectionService({ store: value.store });
+              let view = await service.inspect(PROJECT);
+              assert.equal(view.integrity.status, "OK");
+              assert.equal(view.runtimePosition?.source, "FIRST_ACTIVE_STAGE");
+              assert.equal(view.runtimePosition?.currentStageSpecId, STAGE_A);
+              assert.equal(view.stages[0]?.isCurrent, true);
+              assert.equal(view.stages[0]?.steps[0]?.runtime?.lifecycle, "NOT_STARTED");
+              assert.equal(JSON.stringify(view).includes("canonicalPayload"), false);
+              assert.equal(JSON.stringify(view).match(/prompt|transcript|raw.?body/i), null);
+
+              await approveFirstStep(value);
+              view = await service.inspect(PROJECT);
+              assert.equal(view.integrity.status, "OK");
+              assert.equal(view.runtimePosition?.source, "CHECKPOINT");
+              assert.equal(view.runtimePosition?.currentStageSpecId, STAGE_B);
+              assert.equal(view.stages[0]?.steps[0]?.runtime?.terminalResult, "COMPLETED");
+              assert.equal(view.stages[0]?.steps[0]?.verification?.state, "PASS");
+              assert.equal(view.stages[0]?.steps[0]?.review?.state, "APPROVE");
+              assert.equal(view.stages[0]?.steps[0]?.review?.actorRef, "user:reviewer");
+              assert.equal(view.stages[0]?.gate?.state, "PASS");
+              assert.equal(view.stages[0]?.gate?.actorRef, "user:gatekeeper");
+              assert.equal(view.stages[1]?.isCurrent, true);
+            } finally {
+              await value.store.close();
+              await rm(value.root, { recursive: true, force: true });
+            }
+          });
+
+          test("projection ignores stale-plan evidence and fails closed on duplicate current evidence", async () => {
+            const value = await fixture();
+            try {
+              const attemptId = await approveFirstStep(value);
+              await value.store.createEvidence({
+                evidenceId: "stale-review", projectId: PROJECT, stageSpecId: STAGE_A, stepSpecId: STEP_A, attemptId,
+                type: "STEP_REVIEW", source: "USER", producer: "workbench-step-review-v1", exitCode: null, sha256: "b".repeat(64), artifactRefId: null,
+                metadata: { decision: "REJECT", planPayloadSha256: "f".repeat(64), planVersionId: "old-plan", reviewProtocol: "workbench-step-review-v1", reviewerRef: "stale" },
+                correlation: { workflowActionId: null, requestId: `review:${attemptId}`, nativeThreadId: null, nativeTurnId: null, resourceLeaseId: null, artifactRefs: [], evidenceRefs: [] },
+              });
+              let view = await new AutomationGovernanceProjectionService({ store: value.store }).inspect(PROJECT);
+              assert.equal(view.stages[0]?.steps[0]?.review?.state, "APPROVE", "stale Plan evidence must not replace current review truth");
+              assert.equal(view.integrity.status, "OK");
+
+              await value.store.createEvidence({
+                evidenceId: "duplicate-current-verification", projectId: PROJECT, stageSpecId: STAGE_A, stepSpecId: STEP_A, attemptId,
+                type: "STEP_VERIFICATION", source: "WORKFLOW_TRUTH", producer: "workbench-step-verifier-v1", exitCode: null, sha256: "c".repeat(64), artifactRefId: null,
+                metadata: { outcome: "PASS", planPayloadSha256: value.planHash, planVersionId: PLAN, verificationClass: "HASH_MATCH", verifierProtocol: "workbench-step-verifier-v1" },
+                correlation: { workflowActionId: null, requestId: `verification-duplicate:${attemptId}`, nativeThreadId: null, nativeTurnId: null, resourceLeaseId: null, artifactRefs: [], evidenceRefs: [] },
+              });
+              view = await new AutomationGovernanceProjectionService({ store: value.store }).inspect(PROJECT);
+              assert.equal(view.integrity.status, "DEGRADED");
+              assert.equal(view.stages[0]?.steps[0]?.verification, null, "ambiguous current evidence must fail closed");
+              assert.equal(view.integrity.issues.includes(`MULTIPLE_CURRENT_STEP_VERIFICATION:${STEP_A}`), true);
+            } finally {
+              await value.store.close();
+              await rm(value.root, { recursive: true, force: true });
+            }
+          });
+          EOF
+      - name: Bounded diff guard
+        shell: bash
+        run: |
+          allowed='^(.github/workflows/automation-governance-projection.yml|src/shared/automation-governance-types.ts|src/automation/governance-projection-service.ts|src/main/automation-provider-host.ts|tests/automation-governance-projection.test.ts)$'
+          bad="$(git diff --name-only | grep -Ev "$allowed" || true)"
+          test -z "$bad" || { echo "$bad"; exit 1; }
+          ! git diff | grep -E '^\+.*(new NativeThreadRuntime|new AppServerProcessClient|createAutomationProviderComposition\(|CREATE TABLE|ALTER TABLE|canonicalPayload: plan\.canonicalPayload)'
+          grep -q 'AutomationGovernanceProjectionService' src/main/automation-provider-host.ts
+          grep -q 'MULTIPLE_CURRENT_STEP_VERIFICATION' src/automation/governance-projection-service.ts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Focused projection and governance tests
+        run: node --experimental-strip-types --test tests/automation-governance-projection.test.ts tests/automation-step-review-completion.test.ts tests/automation-stage-gate.test.ts tests/automation-stage-progression.test.ts tests/automation-project-completion.test.ts
+      - name: Full repository tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit bounded patch and self-clean
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/automation-governance-projection.yml
+          git add src/shared/automation-governance-types.ts src/automation/governance-projection-service.ts src/main/automation-provider-host.ts tests/automation-governance-projection.test.ts
+          git diff --cached --name-only | grep -Ev '^(src/shared/automation-governance-types.ts|src/automation/governance-projection-service.ts|src/main/automation-provider-host.ts|tests/automation-governance-projection.test.ts|.github/workflows/automation-governance-projection.yml)$' && exit 1 || true
+          git commit -m "Automation: project governance workflow truth"
+          git push origin HEAD:feature/automation-governance-projection
