@@ -1,7 +1,5 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { AppServerProcessClient } from "../codex/app-server-client.ts";
-import { startAndInitializeAppServerClient } from "../codex/app-server-bootstrap.ts";
 import { MAP_CONTEXT_REQUEST_LIMITS, MAP_CONTEXT_REQUEST_TOOL_SPEC, MAP_DYNAMIC_TOOL_SPEC, contextRequestResponse, dynamicToolResponse, isMapContextRequestCall, isMapToolCall } from "../codex/map-tool.ts";
 import { NativeThreadRuntime } from "../codex/native-thread-runtime.ts";
 import { resolveCodexCommand } from "../codex/codex-command.ts";
@@ -156,8 +154,6 @@ export class ProjectMapManager {
   private readonly runtimes = new Map<string, NativeThreadRuntime>();
   private readonly patchedTurnIds = new Map<string, string>();
   private readonly contextStates = new Map<string, ContextTurnState>();
-  private readonly fallbackScopes = new Map<string, string>();
-  private readonly fallbackPatchedProjects = new Set<string>();
   private readonly lastErrors = new Map<string, { code: string; message: string }>();
   private contextRequestCalls = 0;
 
@@ -329,11 +325,6 @@ export class ProjectMapManager {
       `Current bounded delta: ${boundedJson(delta, 12_000)}`,
     ].join("\n");
     try {
-      if (!runtime.dynamicToolsRegistered) {
-        const turn = await this.runCompatibilityMaintenance(id, project.cwd, prompt);
-        if (!this.fallbackPatchedProjects.delete(id)) await this.store(id).updateSync({ dirty: true, status: "dirty" });
-        return { status: await this.emitStatus(id), turn };
-      }
       const turn = await runtime.startTurn(prompt);
       if (this.patchedTurnIds.get(id) !== turn.turnId) await this.store(id).updateSync({ dirty: true, status: "dirty" });
       return { status: await this.emitStatus(id), turn };
@@ -358,15 +349,12 @@ export class ProjectMapManager {
 
   async handleServerRequest(projectId: string, message: JsonRpcMessage): Promise<unknown> {
     if (message.method !== "item/tool/call") return undefined;
-    const requestedThreadId = record(message.params)?.threadId;
-    const fallbackProjectId = typeof requestedThreadId === "string" ? this.fallbackScopes.get(requestedThreadId) : undefined;
-    if (isMapContextRequestCall(message.params)) return this.handleContextRequest(projectId, message.params, fallbackProjectId === projectId);
+    if (isMapContextRequestCall(message.params)) return this.handleContextRequest(projectId, message.params);
     if (!isMapToolCall(message.params)) return undefined;
     const id = projectId.trim();
     const params = message.params;
     const runtime = this.runtimes.get(id);
-    const fallback = fallbackProjectId === id;
-    if ((!fallback && (!runtime || runtime.nativeThreadId !== params.threadId || runtime.snapshot().activeTurnId !== params.turnId)) || (fallback && !this.fallbackScopes.has(params.threadId))) {
+    if (!runtime || runtime.nativeThreadId !== params.threadId || runtime.snapshot().activeTurnId !== params.turnId) {
       return dynamicToolResponse(false, "Project Map maintenance identity is invalid; no patch was applied.");
     }
     const status = await this.status(id);
@@ -385,8 +373,7 @@ export class ProjectMapManager {
     try {
       const result = await this.store(id).applyPatch(patchArguments as never);
       this.lastErrors.delete(id);
-      if (fallback) this.fallbackPatchedProjects.add(id);
-      else this.patchedTurnIds.set(id, params.turnId);
+      this.patchedTurnIds.set(id, params.turnId);
       this.onChanged?.(await this.status(id));
       return dynamicToolResponse(true, result.idempotent ? "Project Map patch was already applied." : "Project Map patch accepted.");
     } catch (error) {
@@ -397,13 +384,13 @@ export class ProjectMapManager {
     }
   }
 
-  private async handleContextRequest(projectId: string, params: { threadId: string; turnId: string; arguments: unknown }, fallback = false): Promise<unknown> {
+  private async handleContextRequest(projectId: string, params: { threadId: string; turnId: string; arguments: unknown }): Promise<unknown> {
     this.contextRequestCalls += 1;
     const id = projectId.trim();
     const runtime = this.runtimes.get(id);
     const args = record(params.arguments);
     const scope = record(args?.scope);
-    if ((!fallback && (!runtime || runtime.nativeThreadId !== params.threadId || runtime.snapshot().activeTurnId !== params.turnId)) || (fallback && this.fallbackScopes.get(params.threadId) !== id)) {
+    if (!runtime || runtime.nativeThreadId !== params.threadId || runtime.snapshot().activeTurnId !== params.turnId) {
       return contextRequestResponse(false, { error: "CONTEXT_CALL_IDENTITY_INVALID" });
     }
     if (args?.schemaVersion !== 1 || typeof args.requestId !== "string" || args.requestId.length < 1 || args.requestId.length > 128 ||
@@ -467,40 +454,6 @@ export class ProjectMapManager {
     return this.nativeThreadReader(projection);
   }
 
-  private async runCompatibilityMaintenance(projectId: string, cwd: string, prompt: string): Promise<TurnResult> {
-    const client = new AppServerProcessClient({ command: this.command, cwd, args: ["app-server", "--stdio"], verifyBinaryProvenance: true, onServerRequest: (message) => this.handleServerRequest(projectId, message) });
-    let fallbackThreadId: string | null = null;
-    try {
-      await startAndInitializeAppServerClient(client, {
-        clientInfo: { name: "codex-workbench-v1-project-map-fallback", title: "Codex Workbench Project Map Compatibility Fallback", version: "0.1.0" },
-        experimentalApi: true,
-        timeoutMs: 120_000,
-      });
-      const started = record(await client.request("thread/start", { cwd, approvalPolicy: "never", sandbox: "read-only", ephemeral: true, dynamicTools: [MAP_DYNAMIC_TOOL_SPEC, MAP_CONTEXT_REQUEST_TOOL_SPEC], developerInstructions: "This is a Project Map compatibility maintenance Thread after resume. Call the supplied Workbench tools only with the bounded Project scope and keep the normal answer out of this side channel." }, 120_000));
-      fallbackThreadId = typeof record(started?.thread)?.id === "string" ? record(started?.thread)?.id as string : typeof started?.threadId === "string" ? started.threadId : null;
-      if (!fallbackThreadId) throw new Error("Project Map compatibility maintenance Thread ID is missing.");
-      this.fallbackScopes.set(fallbackThreadId, projectId);
-      const response = record(await client.request("turn/start", { threadId: fallbackThreadId, input: [{ type: "text", text: prompt }] }, 120_000));
-      const turn = record(response?.turn);
-      const turnId = typeof turn?.id === "string" ? turn.id : typeof response?.turnId === "string" ? response.turnId : null;
-      if (!turnId) throw new Error("Project Map compatibility maintenance Turn ID is missing.");
-      const completed = await client.waitForNotification("turn/completed", (message) => {
-        const params = record(message.params);
-        const terminal = record(params?.turn);
-        return (typeof params?.threadId === "string" ? params.threadId : typeof terminal?.threadId === "string" ? terminal.threadId : null) === fallbackThreadId
-          && (typeof params?.turnId === "string" ? params.turnId : typeof terminal?.id === "string" ? terminal.id : null) === turnId;
-      }, 120_000);
-      const params = record(completed.params);
-      const terminal = record(params?.turn);
-      const status = typeof terminal?.status === "string" ? terminal.status : typeof params?.status === "string" ? params.status : "completed";
-      if (status !== "completed") throw new Error(`Project Map compatibility maintenance Turn ended with ${status}.`);
-      return { localRunId: `project-map-fallback-${turnId}`, nativeThreadId: fallbackThreadId, turnId, status: "completed", terminalStatus: status, finalMessage: null, error: null };
-    } finally {
-      if (fallbackThreadId) this.fallbackScopes.delete(fallbackThreadId);
-      await client.close().catch(() => undefined);
-    }
-  }
-
   private async statusFromMap(projectId: string, map: MapDocument): Promise<ProjectMapStatus> {
     const runtime = this.runtimes.get(projectId);
     return {
@@ -532,11 +485,7 @@ export class ProjectMapManager {
     this.contextStates.forEach((_state, key) => {
       if (key.startsWith(`${id}\u0000`)) this.contextStates.delete(key);
     });
-    this.fallbackPatchedProjects.delete(id);
     this.lastErrors.delete(id);
-    this.fallbackScopes.forEach((scope, threadId) => {
-      if (scope === id) this.fallbackScopes.delete(threadId);
-    });
     await Promise.all([
       rm(mapFilePath(join(this.userDataDirectory, "maps", "project"), { kind: "project", projectId: id }), { force: true }),
       rm(this.bindingPath(id), { force: true }),
@@ -550,6 +499,7 @@ export class ProjectMapManager {
       this.runtimes.delete(projectId);
       await existing.close().catch(() => undefined);
     }
+    const bindingState = await inspectThreadBinding(this.bindingPath(projectId));
     const runtime = new NativeThreadRuntime({
       cwd,
       stateFile: this.bindingPath(projectId),
@@ -559,7 +509,9 @@ export class ProjectMapManager {
     });
     this.runtimes.set(projectId, runtime);
     try {
-      await runtime.start();
+      if (bindingState.binding) await runtime.startNewThread();
+      else await runtime.start();
+      if (!runtime.dynamicToolsRegistered) throw new Error("Project Map maintenance runtime started without dynamic tools.");
       return runtime;
     } catch (error) {
       this.runtimes.delete(projectId);
