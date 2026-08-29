@@ -12,7 +12,8 @@ test("governance actions load after the read-only inspector", () => {
   assert.match(uiProjection, /\.then\(\(\) => import\("\.\/automation-governance-actions\.ts"\)\)/);
 });
 
-test("governance actions use only existing post-execution command bridges", () => {
+test("governance actions use only existing narrow command bridges", () => {
+  assert.match(actions, /executeAutomationStep/);
   assert.match(actions, /reconcileAutomationStep/);
   assert.match(actions, /verifyAutomationStep/);
   assert.match(actions, /reviewAutomationStep/);
@@ -21,8 +22,6 @@ test("governance actions use only existing post-execution command bridges", () =
   assert.match(actions, /completeAutomationProject/);
   assert.match(actions, /getAutomationGovernanceProject/);
 
-  assert.doesNotMatch(actions, /executeAutomationStep/);
-  assert.doesNotMatch(actions, /providerTargetRef/);
   assert.doesNotMatch(actions, /AutomationStore/);
   assert.doesNotMatch(actions, /canonicalPayload/);
   assert.doesNotMatch(actions, /transcript/i);
@@ -36,9 +35,4 @@ test("governance actions do not implement a renderer lifecycle state machine", (
   assert.doesNotMatch(actions, /switch\s*\(\s*view\.project\.lifecycle/);
   assert.match(actions, /await refresh\(\)/);
   assert.match(actions, /后端重新校验 workflow truth/);
-});
-
-test("fresh execution is explicitly deferred until exact Native target selection exists", () => {
-  assert.match(actions, /fresh Execute 需要显式 Native thread target/);
-  assert.match(actions, /独立 target-selector slice/);
 });
