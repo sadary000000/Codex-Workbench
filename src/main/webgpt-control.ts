@@ -85,6 +85,13 @@ export interface WebGptControlRequest {
   logicalPlannerRequestId?: string;
   plannerRequirementPayloadSha256?: string;
   policyVersionId?: string;
+  stepSpecId?: string;
+  executionAttemptId?: string;
+  stageSpecId?: string;
+  reviewDecision?: "APPROVE" | "REJECT";
+  reviewerRef?: string;
+  stageGateDecision?: "PASS" | "REJECT";
+  gatekeeperRef?: string;
 }
 
 export interface WebGptControlError {
@@ -253,6 +260,12 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     const value = record[field];
     if (value !== undefined && (typeof value !== "string" || !value.trim() || value.length > 256)) return controlError("PLANNER_FIELD_INVALID", `Planner field ${field} is invalid.`, record.command, requestId);
   }
+  for (const field of ["stepSpecId", "executionAttemptId", "stageSpecId", "reviewerRef", "gatekeeperRef"] as const) {
+    const value = record[field];
+    if (value !== undefined && (typeof value !== "string" || !value.trim() || value.length > 256)) return controlError("AUTOMATION_GOVERNANCE_FIELD_INVALID", `Automation governance field ${field} is invalid.`, record.command, requestId);
+  }
+  if (record.reviewDecision !== undefined && record.reviewDecision !== "APPROVE" && record.reviewDecision !== "REJECT") return controlError("STEP_REVIEW_DECISION_INVALID", "Step review decision must be APPROVE or REJECT.", record.command, requestId);
+  if (record.stageGateDecision !== undefined && record.stageGateDecision !== "PASS" && record.stageGateDecision !== "REJECT") return controlError("STAGE_GATE_DECISION_INVALID", "Stage gate decision must be PASS or REJECT.", record.command, requestId);
   if (record.operation !== undefined && record.operation !== "PLAN_REQUIREMENT" && record.operation !== "DETAIL_STAGE") return controlError("PLANNER_OPERATION_INVALID", "Planner operation is invalid.", record.command, requestId);
   for (const field of ["planningConstraints", "inputRefs"] as const) {
     const value = record[field];
@@ -292,6 +305,12 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
   if (command === "automation.requirement.start" && (typeof record.projectId !== "string" || typeof record.providerTargetRef !== "string" || typeof record.goal !== "string")) return controlError("REQUIREMENT_START_REQUIRED", "automation requirement start 必须提供 projectId、providerTargetRef 和 goal。", command, requestId);
   if ((command === "webgpt.requirement.draft" || command === "automation.requirement.draft") && typeof record.requirementSessionId !== "string") return controlError("REQUIREMENT_SESSION_REQUIRED", "requirement draft 必须提供 sessionId。", command, requestId);
   if ((command === "webgpt.requirement.reconcile" || command === "automation.requirement.reconcile") && typeof record.requirementSessionId !== "string") return controlError("REQUIREMENT_SESSION_REQUIRED", "requirement reconcile 必须提供 sessionId。", command, requestId);
+  if (command === "automation.step.execute" && (typeof record.projectId !== "string" || typeof record.stepSpecId !== "string" || typeof record.providerTargetRef !== "string")) return controlError("STEP_EXECUTION_INPUT_REQUIRED", "automation step execute requires projectId, stepSpecId, and providerTargetRef.", command, requestId);
+  if ((command === "automation.step.reconcile" || command === "automation.step.verify") && (typeof record.projectId !== "string" || typeof record.executionAttemptId !== "string")) return controlError("STEP_ATTEMPT_REQUIRED", `${command} requires projectId and executionAttemptId.`, command, requestId);
+  if (command === "automation.step.review" && (typeof record.projectId !== "string" || typeof record.executionAttemptId !== "string" || (record.reviewDecision !== "APPROVE" && record.reviewDecision !== "REJECT"))) return controlError("STEP_REVIEW_INPUT_REQUIRED", "automation step review requires projectId, executionAttemptId, and reviewDecision.", command, requestId);
+  if (command === "automation.stage.gate" && (typeof record.projectId !== "string" || typeof record.stageSpecId !== "string" || (record.stageGateDecision !== "PASS" && record.stageGateDecision !== "REJECT"))) return controlError("STAGE_GATE_INPUT_REQUIRED", "automation stage gate requires projectId, stageSpecId, and stageGateDecision.", command, requestId);
+  if (command === "automation.stage.advance" && (typeof record.projectId !== "string" || typeof record.stageSpecId !== "string")) return controlError("STAGE_ADVANCE_INPUT_REQUIRED", "automation stage advance requires projectId and stageSpecId.", command, requestId);
+  if (command === "automation.project.complete" && typeof record.projectId !== "string") return controlError("PROJECT_COMPLETION_INPUT_REQUIRED", "automation project complete requires projectId.", command, requestId);
   if (["webgpt.project.inspect", "webgpt.project.open", "webgpt.project.create", "webgpt.project.new-chat"].includes(command) && typeof record.projectName !== "string") return controlError("PROJECT_NAME_REQUIRED", "Project 命令必须提供 projectName。", command, requestId);
   if (record.idempotencyKey !== undefined && command !== "webgpt.send" && command !== "webgpt.review-submit") return controlError("CONTROL_IDEMPOTENCY_UNSUPPORTED", "idempotencyKey 只支持 send/review-submit。", command, requestId);
   if (record.replace !== undefined && command !== "webgpt.role.new" && command !== "webgpt.role.bind") return controlError("CONTROL_REPLACE_INVALID", "replace 只支持 role new/bind。", command, requestId);
@@ -340,6 +359,13 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     "automation.planner.retry": ["projectId", "actionIntentId", "logicalPlannerRequestId", "requirementVersionId", "plannerRequirementPayloadSha256", "policyVersionId"],
     "automation.planner.status": ["projectId", "actionIntentId"],
     "automation.planner.result": ["projectId", "actionIntentId"],
+    "automation.step.execute": ["projectId", "stepSpecId", "providerTargetRef"],
+    "automation.step.reconcile": ["projectId", "executionAttemptId"],
+    "automation.step.verify": ["projectId", "executionAttemptId"],
+    "automation.step.review": ["projectId", "executionAttemptId", "reviewDecision", "reviewerRef"],
+    "automation.stage.gate": ["projectId", "stageSpecId", "stageGateDecision", "gatekeeperRef"],
+    "automation.stage.advance": ["projectId", "stageSpecId"],
+    "automation.project.complete": ["projectId"],
   };
   const allowedFields = new Set(["version", "protocolVersion", "requestId", "command", "clientInfo", "sessionId", ...(allowedByCommand[command] ?? [])]);
   const unexpectedField = Object.keys(record).find((field) => !allowedFields.has(field));
@@ -382,6 +408,13 @@ export function parseWebGptControlRequest(value: unknown): WebGptControlRequest 
     ...(typeof record.logicalPlannerRequestId === "string" ? { logicalPlannerRequestId: record.logicalPlannerRequestId.trim() } : {}),
     ...(typeof record.plannerRequirementPayloadSha256 === "string" ? { plannerRequirementPayloadSha256: record.plannerRequirementPayloadSha256.trim() } : {}),
     ...(typeof record.policyVersionId === "string" ? { policyVersionId: record.policyVersionId.trim() } : {}),
+    ...(typeof record.stepSpecId === "string" ? { stepSpecId: record.stepSpecId.trim() } : {}),
+    ...(typeof record.executionAttemptId === "string" ? { executionAttemptId: record.executionAttemptId.trim() } : {}),
+    ...(typeof record.stageSpecId === "string" ? { stageSpecId: record.stageSpecId.trim() } : {}),
+    ...(record.reviewDecision === "APPROVE" || record.reviewDecision === "REJECT" ? { reviewDecision: record.reviewDecision } : {}),
+    ...(typeof record.reviewerRef === "string" ? { reviewerRef: record.reviewerRef.trim() } : {}),
+    ...(record.stageGateDecision === "PASS" || record.stageGateDecision === "REJECT" ? { stageGateDecision: record.stageGateDecision } : {}),
+    ...(typeof record.gatekeeperRef === "string" ? { gatekeeperRef: record.gatekeeperRef.trim() } : {}),
   };
 }
 
