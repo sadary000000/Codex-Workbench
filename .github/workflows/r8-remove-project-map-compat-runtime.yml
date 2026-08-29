@@ -1,0 +1,72 @@
+name: R8 Remove Project Map Compatibility Runtime
+
+on:
+  push:
+    branches:
+      - feature/r8-remove-project-map-compat-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Bounded diff guard
+        shell: bash
+        run: |
+          git diff --check 2fdcad15b93257c5d8fac40af33de5e8a128c6a6...HEAD
+          python3 - <<'PY'
+          import subprocess
+          expected = {
+              '.github/workflows/r8-remove-project-map-compat-runtime.yml',
+              'src/main/project-map-manager.ts',
+              'tests/r8-project-map-no-compat-runtime.test.ts',
+          }
+          actual = set(filter(None, subprocess.check_output([
+              'git', 'diff', '--name-only',
+              '2fdcad15b93257c5d8fac40af33de5e8a128c6a6...HEAD',
+          ], text=True).splitlines()))
+          if actual != expected:
+              raise SystemExit(f'unexpected bounded diff: actual={sorted(actual)} expected={sorted(expected)}')
+          PY
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Targeted R8 tests
+        run: node --experimental-strip-types --test tests/project-map-manager.test.ts tests/r8-project-map-no-compat-runtime.test.ts tests/r8-map-no-maintenance-runtime.test.ts
+
+      - name: Test full repository
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Self-clean validation workflow
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/r8-remove-project-map-compat-runtime.yml
+          git diff --cached --check
+          git commit -m "test: remove R8 Project Map compatibility runtime gate"
+          git push origin HEAD:feature/r8-remove-project-map-compat-runtime
