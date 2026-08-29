@@ -24,14 +24,14 @@
         "pullRequest": 17
       },
       "executionTarget": {
-        "branch": "fix/windows-layout-contract-crlf",
-        "commit": "ea3c0ead934bacd90e17c40a0bcafef7eb6e1e86",
-        "pullRequest": 35,
+        "branch": "test/native-ab-protocol-v1-1-clean",
+        "commit": "8b7f91e98893bd5b098ca9df93190540ae3efc0d",
+        "pullRequest": 44,
         "productBaselineCommit": "7c6603f9fd205dddc1ba62758000e0b85de36d00"
       },
       "protocol": {
         "source": "execution-target",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "runbook": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_RUNBOOK.md",
         "agentPlan": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_AGENT_PLAN.md",
         "cases": "docs/testing/DIRECT_CODEX_WORKBENCH_AB_CASES.json",
@@ -39,12 +39,12 @@
         "runner": "scripts/ab-native-arm.ts"
       },
       "knownHarnessEvidence": {
-        "workflowRunId": 33235545775,
-        "workflowJobId": 99055770565,
-        "sourceCommit": "44b6b3886d139cf9181681803b7f2a5ac9f44604",
-        "finalSelfCleanCommit": "7420b7c6ce93201641c7e79e33e05392602ebf01",
+        "workflowRunId": 33259480045,
+        "workflowJobId": 99118839473,
+        "sourceCommit": "d5d994e7f13c25be1af2c1a7ad16f6a4892d0b18",
+        "finalSelfCleanCommit": "4f9d61f36981133f121b5d1705ec9e58da769ae3",
         "conclusion": "success",
-        "note": "Harness CI only: bounded diff, typecheck, targeted A/B parity tests, full repository tests, build, and self-clean passed. This is not a real Direct-vs-Workbench model benchmark result."
+        "note": "Protocol v1.1 validation: the full branch-local run passed Typecheck, focused A/B contract, full repository tests, build, and self-clean. Follow-up run 33259547130 / job 99119015584 normalized schema formatting and re-passed Typecheck plus the focused contract. The clean exact execution target 8b7f91e98893bd5b098ca9df93190540ae3efc0d was created from that verified final tree. This is harness/protocol validation, not a Direct-vs-Workbench model benchmark result."
       },
       "executionPolicy": {
         "historicalReplayAllowed": true,
@@ -55,7 +55,7 @@
         "resultAppliesOnlyToExactExecutionTarget": true
       },
       "requiredBefore": "release-candidate",
-      "note": "Forward-validation target rebound after the published Windows repository-gate false failure. The exact target contains the existing A/B protocol plus a test-only CRLF normalization fix; productBaselineCommit records the unchanged PR #34 product tree. Run the deferred test from this exact target and do not reuse the prior failed run as a performance result."
+      "note": "Forward-validation rebound to protocol v1.1 after the completed v1.0.0 real run exposed a symmetric model-semantic failure in AB-READ-003-native-ownership: Direct and Workbench both inferred the same ownership fact incorrectly while deterministic static parity remained PASS. Protocol v1.1 replaces only that required model case with literal multi-file source extraction; deterministic static ownership audit remains authoritative. The product baseline is unchanged, and all completed v1.0.0 runs remain immutable historical evidence."
     }
   ]
 }
