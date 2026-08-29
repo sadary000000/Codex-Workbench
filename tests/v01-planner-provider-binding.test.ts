@@ -206,8 +206,8 @@ async function fixture() {
     status: "CONFIRMED",
     origin: { originType: "INITIAL", source: "USER", sourceRef: "user-confirmed-v01-planner-provider-binding" },
     canonicalPayload: JSON.stringify({
-      goal: "Exercise production Planner provider ownership.",
       acceptanceCriteria: ["Planner provider ownership remains durable across retry."],
+      goal: "Exercise production Planner provider ownership.",
     }),
   });
   const delegate = new NativePlannerDelegate();
