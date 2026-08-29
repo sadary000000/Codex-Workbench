@@ -12,6 +12,7 @@ import type { ExecuteStepInput, ReconcileStepInput } from "../automation/step-ex
 import { StepReviewCompletionService, type ReviewStepInput } from "../automation/step-review-service.ts";
 import { DeterministicStepVerificationService, type VerifyStepInput } from "../automation/step-verification-service.ts";
 import { AutomationStore } from "../automation/store.ts";
+import { createNativeThreadTargetRef } from "../codex/automation/native-provider-port.ts";
 
 export class AutomationExecutionRoutingError extends Error {
   readonly code:
@@ -43,6 +44,8 @@ type PlannerRetryInput = Parameters<PlannerProviderIntegrationService["retryPlan
 type PlannerStatusInput = Parameters<PlannerProviderIntegrationService["plannerStatus"]>[0];
 type PlannerResultInput = Parameters<PlannerProviderIntegrationService["plannerResult"]>[0];
 
+const NATIVE_TARGET_PREFIX = "native-thread-v1:";
+
 function normalizeProviderId(value: AutomationProviderId | null | undefined): AutomationProviderId | null {
   if (value === null || value === undefined) return null;
   const normalized = value.trim();
@@ -55,6 +58,13 @@ function normalizeProviderId(value: AutomationProviderId | null | undefined): Au
   return normalized as AutomationProviderId;
 }
 
+function normalizeNewWorkProviderTarget(provider: AutomationProviderId, providerTargetRef: string): string {
+  if (provider !== "NATIVE") return providerTargetRef;
+  const normalized = providerTargetRef.trim();
+  if (normalized.startsWith(NATIVE_TARGET_PREFIX)) return normalized;
+  return createNativeThreadTargetRef(normalized);
+}
+
 /**
  * Provider-neutral main-process workflow facade.
  *
@@ -65,6 +75,12 @@ function normalizeProviderId(value: AutomationProviderId | null | undefined): Au
  * resolves the provider from the persisted STEP_EXECUTION logical request.
  * An explicit conflicting provider is rejected instead of switching execution
  * backends mid-workflow.
+ *
+ * Renderer-facing Native work supplies Runtime Truth as the exact raw Native
+ * Thread id. This facade canonicalizes that id into the provider-owned,
+ * versioned target reference before Requirement/Planner/Step workflow truth is
+ * persisted. Already-versioned Native target refs remain idempotent; external
+ * provider refs are never rewritten here.
  *
  * Deterministic Step verification, explicit user review, Stage gating,
  * Stage progression, and final Project completion projection are deliberately
@@ -93,7 +109,14 @@ export class AutomationExecutionFacade {
   }
 
   async startRequirement(input: RequirementStartInput, providerId?: AutomationProviderId | null) {
-    return this.services.requirement(normalizeProviderId(providerId)).startAlignment(input);
+    const provider = normalizeProviderId(providerId) ?? this.services.providers.defaultProviderId;
+    const providerTargetRef = input.providerTargetRef === undefined
+      ? undefined
+      : normalizeNewWorkProviderTarget(provider, input.providerTargetRef);
+    return this.services.requirement(provider).startAlignment({
+      ...input,
+      ...(providerTargetRef === undefined ? {} : { providerTargetRef }),
+    });
   }
 
   async requestRequirementDraft(input: RequirementDraftInput, providerId?: AutomationProviderId | null) {
@@ -115,7 +138,11 @@ export class AutomationExecutionFacade {
   }
 
   async createPlan(input: PlannerCreateInput, providerId?: AutomationProviderId | null) {
-    return this.services.planner(normalizeProviderId(providerId)).createPlanFromRequirement(input);
+    const provider = normalizeProviderId(providerId) ?? this.services.providers.defaultProviderId;
+    return this.services.planner(provider).createPlanFromRequirement({
+      ...input,
+      providerTargetRef: normalizeNewWorkProviderTarget(provider, input.providerTargetRef),
+    });
   }
 
   async reconcilePlan(input: PlannerReconcileInput, providerId?: AutomationProviderId | null) {
@@ -146,7 +173,11 @@ export class AutomationExecutionFacade {
   }
 
   async executeStep(input: ExecuteStepInput, providerId?: AutomationProviderId | null) {
-    return this.services.stepExecution(normalizeProviderId(providerId)).execute(input);
+    const provider = normalizeProviderId(providerId) ?? this.services.providers.defaultProviderId;
+    return this.services.stepExecution(provider).execute({
+      ...input,
+      providerTargetRef: normalizeNewWorkProviderTarget(provider, input.providerTargetRef),
+    });
   }
 
   async reconcileStep(input: ReconcileStepInput, providerId?: AutomationProviderId | null) {
