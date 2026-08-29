@@ -31,6 +31,9 @@ export const CONTROL_PLANE_CAPABILITIES = [
   { name: "webgpt.planner", status: "STABLE", description: "Explicit WebGPT Planner compatibility create, retry, reconcile, status, and result lifecycle." },
   { name: "automation.requirement", status: "STABLE", description: "Provider-neutral Requirement lifecycle; new work defaults to Native and continuations restore persisted provider identity." },
   { name: "automation.planner", status: "STABLE", description: "Provider-neutral Planner lifecycle; new work defaults to Native and recovery preserves persisted provider identity." },
+  { name: "automation.step", status: "STABLE", description: "Provider-neutral Step execution, reconciliation, verification, and explicit user review lifecycle." },
+  { name: "automation.stage", status: "STABLE", description: "Provider-neutral Stage gate and progression lifecycle." },
+  { name: "automation.project", status: "STABLE", description: "Provider-neutral Automation Project completion projection." },
   { name: "webgpt.review-submit", status: "STABLE", description: "Idempotent Review ZIP plus summary submission through the existing WebGPT browser runtime." },
   { name: "webgpt.read-latest", status: "STABLE", description: "Targeted metadata/result reads without prompt submission." },
   { name: "webgpt.browser-screenshot", status: "EXPERIMENTAL", description: "Explicit screenshot output through the existing WebGPT runtime." },
@@ -87,6 +90,13 @@ export const WEBGPT_CONTROL_COMMANDS = [
   "automation.planner.retry",
   "automation.planner.status",
   "automation.planner.result",
+  "automation.step.execute",
+  "automation.step.reconcile",
+  "automation.step.verify",
+  "automation.step.review",
+  "automation.stage.gate",
+  "automation.stage.advance",
+  "automation.project.complete",
 ] as const;
 
 export type ControlPlaneCommandName = typeof WEBGPT_CONTROL_COMMANDS[number];
@@ -137,6 +147,13 @@ const COMMAND_REQUIRED_CAPABILITY: Readonly<Record<ControlPlaneCommandName, Cont
   "automation.planner.retry": "automation.planner",
   "automation.planner.status": "automation.planner",
   "automation.planner.result": "automation.planner",
+  "automation.step.execute": "automation.step",
+  "automation.step.reconcile": "automation.step",
+  "automation.step.verify": "automation.step",
+  "automation.step.review": "automation.step",
+  "automation.stage.gate": "automation.stage",
+  "automation.stage.advance": "automation.stage",
+  "automation.project.complete": "automation.project",
 });
 
 export function requiredControlPlaneCapability(command: string): ControlPlaneCapabilityName | null {
@@ -248,6 +265,13 @@ export function buildControlPlaneSchema(workbenchVersion = "runtime-supplied"): 
           target: { type: "string", minLength: 1, maxLength: 2048 },
           projectName: { type: "string", maxLength: 256 },
           projectId: { type: "string", maxLength: 256 },
+          stepSpecId: { type: "string", minLength: 1, maxLength: 256 },
+          executionAttemptId: { type: "string", minLength: 1, maxLength: 256 },
+          stageSpecId: { type: "string", minLength: 1, maxLength: 256 },
+          reviewDecision: { type: "string", enum: ["APPROVE", "REJECT"] },
+          reviewerRef: { type: "string", minLength: 1, maxLength: 256 },
+          stageGateDecision: { type: "string", enum: ["PASS", "REJECT"] },
+          gatekeeperRef: { type: "string", minLength: 1, maxLength: 256 },
           role: { type: "string", enum: ["REQUIREMENT", "PLANNER", "REVIEWER"] },
           replace: { type: "boolean" },
           idempotencyKey: { type: "string", maxLength: 256 },
