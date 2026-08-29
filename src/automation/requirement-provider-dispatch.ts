@@ -72,18 +72,24 @@ function boundedErrorMessage(error: unknown): string {
 /**
  * Provider-neutral Requirement dispatch.  It owns the Action ledger wiring;
  * the provider port remains the only side-effect boundary.
+ *
+ * executorRef is deliberately left unset by default. Production executable
+ * providers are decorated by PersistedProviderBindingPort, which owns that
+ * versioned slot and writes the durable provider identity immediately before
+ * the first external side effect. An explicit executorRef remains available
+ * only for legacy/unwrapped callers that intentionally own the field.
  */
 export class RequirementProviderDispatch {
   readonly store: AutomationStore;
   readonly provider: AutomationProviderPort;
   readonly inputRefs: InputRefRegistry;
-  readonly executorRef: string;
+  readonly executorRef: string | null;
 
   constructor(options: { store: AutomationStore; provider: AutomationProviderPort; inputRefs: InputRefRegistry; executorRef?: string }) {
     this.store = options.store;
     this.provider = options.provider;
     this.inputRefs = options.inputRefs;
-    this.executorRef = options.executorRef ?? "automation.requirement-provider";
+    this.executorRef = options.executorRef?.trim() || null;
   }
 
   async submit(input: RequirementProviderDispatchInput): Promise<RequirementProviderDispatchResult> {
@@ -118,7 +124,11 @@ export class RequirementProviderDispatch {
     });
     if (!intent.policyVersionId) throw new RequirementProviderDispatchError("REQUIREMENT_POLICY_REQUIRED", "Requirement provider dispatch requires a pinned PolicyVersion.");
     await this.store.markActionIntentDispatchEligible(intent.intentId, { actorType: "AUTOMATION", correlationId: input.idempotencyRef });
-    const attempt = await this.store.createActionAttempt({ intentId: intent.intentId, policyVersionId: intent.policyVersionId, executorRef: this.executorRef });
+    const attempt = await this.store.createActionAttempt({
+      intentId: intent.intentId,
+      policyVersionId: intent.policyVersionId,
+      ...(this.executorRef ? { executorRef: this.executorRef } : {}),
+    });
     await this.store.transitionActionAttempt(attempt.actionAttemptId, "START", { actorType: "AUTOMATION", correlationId: intent.intentId });
     try {
       await input.onActionPrepared?.({ actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId });
