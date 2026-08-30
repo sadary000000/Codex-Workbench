@@ -7,6 +7,8 @@ import { AutomationExecutionFacade } from "./automation-execution-facade.ts";
 import { createAutomationProviderComposition, type AutomationProviderComposition } from "./automation-provider-composition.ts";
 import { SharedNativeProviderRuntimeAdapter, type NativeRuntimeRegistryPort } from "./native-provider-runtime-adapter.ts";
 
+export const V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS = 1_000;
+
 export interface AutomationProviderHost {
   readonly nativeRuntime: SharedNativeProviderRuntimeAdapter;
   readonly composition: AutomationProviderComposition;
@@ -20,6 +22,11 @@ export interface AutomationProviderHost {
  * function: it starts no App Server, creates no NativeThreadRuntime, opens no
  * WebGPT workspace and mutates no workflow state. Runtime owners must already
  * exist and are passed in as narrow ports.
+ *
+ * Product-facing provider waits are capped so an accepted long-running model
+ * request returns to Workbench quickly with its durable recovery identity.
+ * The underlying provider/domain defaults remain unchanged outside this host,
+ * and progress after the cap continues only through explicit reconcile paths.
  */
 export function createAutomationProviderHost(options: {
   readonly store: AutomationStore;
@@ -37,6 +44,7 @@ export function createAutomationProviderHost(options: {
     inputRefs: options.inputRefs,
     nativeRuntime,
     webgptProvider: options.webgptProvider ?? null,
+    synchronousWaitCapMs: V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS,
   });
   const execution = new AutomationExecutionFacade({
     store: options.store,
