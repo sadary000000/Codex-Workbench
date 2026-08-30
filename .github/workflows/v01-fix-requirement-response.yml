@@ -27,7 +27,11 @@ jobs:
       - name: Apply bounded Requirement response repair
         shell: python
         run: |
+          import base64
           from pathlib import Path
+
+          def decode(value: str) -> str:
+              return base64.b64decode(value).decode("utf-8")
 
           def replace_once(path: str, old: str, new: str) -> None:
               target = Path(path)
@@ -37,202 +41,19 @@ jobs:
                   raise SystemExit(f"{path}: expected exactly one target block, found {count}")
               target.write_text(text.replace(old, new), encoding="utf-8")
 
-          Path("src/automation/requirement-response-repair.ts").write_text(r'''import { MAX_REQUIREMENT_JSON_BYTES } from "./requirement-webgpt-contract.ts";
+          helper_b64 = "aW1wb3J0IHsgTUFYX1JFUVVJUkVNRU5UX0pTT05fQllURVMgfSBmcm9tICIuL3JlcXVpcmVtZW50LXdlYmdwdC1jb250cmFjdC50cyI7CgovKioKICogUHJvZHVjZXMgb25lIGxvY2FsIHJlcGFpciBjYW5kaWRhdGUgZm9yIHRoZSBuYXJyb3cgdHJ1bmNhdGlvbiBvYnNlcnZlZCBmcm9tCiAqIGEgY29tcGxldGVkIFJlcXVpcmVtZW50IHByb3ZpZGVyIHR1cm46IGV2ZXJ5IG5lc3RlZCBKU09OIHN0cnVjdHVyZSBhbmQKICogc3RyaW5nIGlzIGFscmVhZHkgY2xvc2VkLCBidXQgdGhlIHJvb3Qgb2JqZWN0IGlzIG1pc3NpbmcgaXRzIGZpbmFsIGB9YC4KICoKICogVGhpcyBoZWxwZXIgbmV2ZXIgcGVyZm9ybXMgSS9PLCBuZXZlciBjaGFuZ2VzIHNlbWFudGljIGNvbnRlbnQsIGFuZCByZWplY3RzCiAqIGV2ZXJ5IG90aGVyIG1hbGZvcm1lZCBzaGFwZS4gVGhlIGNhbmRpZGF0ZSBtdXN0IHN0aWxsIHBhc3MgdGhlIGV4aXN0aW5nCiAqIFJlcXVpcmVtZW50IHBhcnNlciwgc2NoZW1hLCBhbmQgc2VtYW50aWMgdmFsaWRhdGlvbiBiZWZvcmUgaXQgY2FuIGJlIHVzZWQuCiAqLwpleHBvcnQgZnVuY3Rpb24gY3JlYXRlRGV0ZXJtaW5pc3RpY1JlcXVpcmVtZW50UmVwYWlyQ2FuZGlkYXRlKHJhd1Jlc3BvbnNlOiBzdHJpbmcpOiBzdHJpbmcgfCBudWxsIHsKICBjb25zdCB0cmltbWVkID0gcmF3UmVzcG9uc2UudHJpbSgpOwogIGlmICghdHJpbW1lZC5zdGFydHNXaXRoKCJ7IikgfHwgQnVmZmVyLmJ5dGVMZW5ndGgodHJpbW1lZCwgInV0ZjgiKSA+PSBNQVhfUkVRVUlSRU1FTlRfSlNPTl9CWVRFUykgcmV0dXJuIG51bGw7CgogIGNvbnN0IHN0YWNrOiBBcnJheTwieyIgfCAiWyI+ID0gW107CiAgbGV0IGluU3RyaW5nID0gZmFsc2U7CiAgbGV0IGVzY2FwZWQgPSBmYWxzZTsKCiAgZm9yIChsZXQgaW5kZXggPSAwOyBpbmRleCA8IHRyaW1tZWQubGVuZ3RoOyBpbmRleCArPSAxKSB7CiAgICBjb25zdCBjaGFyYWN0ZXIgPSB0cmltbWVkW2luZGV4XSE7CiAgICBpZiAoaW5TdHJpbmcpIHsKICAgICAgaWYgKGVzY2FwZWQpIGVzY2FwZWQgPSBmYWxzZTsKICAgICAgZWxzZSBpZiAoY2hhcmFjdGVyID09PSAiXFwiKSBlc2NhcGVkID0gdHJ1ZTsKICAgICAgZWxzZSBpZiAoY2hhcmFjdGVyID09PSAnIicpIGluU3RyaW5nID0gZmFsc2U7CiAgICAgIGNvbnRpbnVlOwogICAgfQoKICAgIGlmIChjaGFyYWN0ZXIgPT09ICciJykgewogICAgICBpblN0cmluZyA9IHRydWU7CiAgICAgIGNvbnRpbnVlOwogICAgfQogICAgaWYgKGNoYXJhY3RlciA9PT0gInsiIHx8IGNoYXJhY3RlciA9PT0gIlsiKSB7CiAgICAgIHN0YWNrLnB1c2goY2hhcmFjdGVyKTsKICAgICAgY29udGludWU7CiAgICB9CiAgICBpZiAoY2hhcmFjdGVyICE9PSAifSIgJiYgY2hhcmFjdGVyICE9PSAiXSIpIGNvbnRpbnVlOwoKICAgIGNvbnN0IGV4cGVjdGVkID0gY2hhcmFjdGVyID09PSAifSIgPyAieyIgOiAiWyI7CiAgICBpZiAoc3RhY2subGVuZ3RoID09PSAwIHx8IHN0YWNrW3N0YWNrLmxlbmd0aCAtIDFdICE9PSBleHBlY3RlZCkgcmV0dXJuIG51bGw7CiAgICBzdGFjay5wb3AoKTsKICAgIC8vIEEgY29tcGxldGUgcm9vdCBmb2xsb3dlZCBieSBhbnkgbm9uLXdoaXRlc3BhY2UgY29udGVudCBpcyBub3QgdGhlCiAgICAvLyBzaW5nbGUtbWlzc2luZy1yb290LWJyYWNlIHRydW5jYXRpb24gdGhpcyByZXBhaXIgaXMgYWxsb3dlZCB0byBoYW5kbGUuCiAgICBpZiAoc3RhY2subGVuZ3RoID09PSAwICYmIGluZGV4ICE9PSB0cmltbWVkLmxlbmd0aCAtIDEpIHJldHVybiBudWxsOwogIH0KCiAgaWYgKGluU3RyaW5nIHx8IHN0YWNrLmxlbmd0aCAhPT0gMSB8fCBzdGFja1swXSAhPT0gInsiKSByZXR1cm4gbnVsbDsKCiAgY29uc3QgY2FuZGlkYXRlID0gYCR7dHJpbW1lZH19YDsKICBpZiAoQnVmZmVyLmJ5dGVMZW5ndGgoY2FuZGlkYXRlLCAidXRmOCIpID4gTUFYX1JFUVVJUkVNRU5UX0pTT05fQllURVMpIHJldHVybiBudWxsOwogIHRyeSB7CiAgICBjb25zdCBwYXJzZWQgPSBKU09OLnBhcnNlKGNhbmRpZGF0ZSkgYXMgdW5rbm93bjsKICAgIGlmIChwYXJzZWQgPT09IG51bGwgfHwgdHlwZW9mIHBhcnNlZCAhPT0gIm9iamVjdCIgfHwgQXJyYXkuaXNBcnJheShwYXJzZWQpKSByZXR1cm4gbnVsbDsKICB9IGNhdGNoIHsKICAgIHJldHVybiBudWxsOwogIH0KICByZXR1cm4gY2FuZGlkYXRlOwp9Cg=="
+          test_b64 = "aW1wb3J0IGFzc2VydCBmcm9tICJub2RlOmFzc2VydC9zdHJpY3QiOwppbXBvcnQgdGVzdCBmcm9tICJub2RlOnRlc3QiOwppbXBvcnQgeyBjcmVhdGVEZXRlcm1pbmlzdGljUmVxdWlyZW1lbnRSZXBhaXJDYW5kaWRhdGUgfSBmcm9tICIuLi9zcmMvYXV0b21hdGlvbi9yZXF1aXJlbWVudC1yZXNwb25zZS1yZXBhaXIudHMiOwppbXBvcnQgewogIHBhcnNlUmVxdWlyZW1lbnRTZW1hbnRpY1Jlc3BvbnNlLAogIHRyeVBhcnNlUmVxdWlyZW1lbnRSZXNwb25zZSwKICB0eXBlIFJlcXVpcmVtZW50RW52ZWxvcGVDb250ZXh0LAp9IGZyb20gIi4uL3NyYy9hdXRvbWF0aW9uL3JlcXVpcmVtZW50LXdlYmdwdC1jb250cmFjdC50cyI7Cgpjb25zdCBjb250ZXh0OiBSZXF1aXJlbWVudEVudmVsb3BlQ29udGV4dCA9IHsKICBwcm9qZWN0SWQ6ICJwcm9qZWN0LXJlcGFpci10ZXN0IiwKICByZXF1ZXN0SWQ6ICJyZXF1ZXN0LXJlcGFpci10ZXN0IiwKICBpZGVtcG90ZW5jeUtleTogImlkZW1wb3RlbmN5LXJlcGFpci10ZXN0IiwKICBzZW1hbnRpY1NoYTI1NjogIjEiLnJlcGVhdCg2NCksCiAgcm9sZTogIlJFUVVJUkVNRU5UIiwKfTsKCmNvbnN0IHZhbGlkID0gSlNPTi5zdHJpbmdpZnkoewogIHJlcXVpcmVtZW50UHJvdG9jb2xWZXJzaW9uOiAxLAogIHN0YXR1czogIlJFQURZX0ZPUl9EUkFGVCIsCiAgcGF5bG9hZDogewogICAgZHJhZnQ6IHsKICAgICAgZ29hbDogIuWIm+W7uuS4gOS4quWPr+S7peebtOaOpei/kOihjOeahOe7j+WFuOi0quWQg+ibh+Wwj+a4uOaIj+OAgiIsCiAgICAgIGNvbnN0cmFpbnRzOiBbIuS4jeS+nei1luWklumDqOacjeWKoeOAgiJdLAogICAgICBhY2NlcHRhbmNlQ3JpdGVyaWE6IFsi5pa55ZCR6ZSu5Y+v5Lul5o6n5Yi26JuH56e75Yqo44CCIl0sCiAgICAgIG5vbkdvYWxzOiBbIuS4jeWunueOsOWkjeadguinhuinieaViOaenOOAgemfs+aViOaIluWFtuS7luaJqeWxleeOqeazleOAgiJdLAogICAgfSwKICB9LAp9KTsKCnRlc3QoInJlcGFpcnMgb25seSBhIGNvbXBsZXRlZCBSZXF1aXJlbWVudCBKU09OIG9iamVjdCBtaXNzaW5nIGl0cyBmaW5hbCByb290IGJyYWNlIiwgKCkgPT4gewogIGNvbnN0IHRydW5jYXRlZCA9IHZhbGlkLnNsaWNlKDAsIC0xKTsKICBjb25zdCByZXBhaXJSZXNwb25zZSA9IGNyZWF0ZURldGVybWluaXN0aWNSZXF1aXJlbWVudFJlcGFpckNhbmRpZGF0ZSh0cnVuY2F0ZWQpOwogIGFzc2VydC5lcXVhbChyZXBhaXJSZXNwb25zZSwgdmFsaWQpOwoKICBjb25zdCByZXN1bHQgPSB0cnlQYXJzZVJlcXVpcmVtZW50UmVzcG9uc2UodHJ1bmNhdGVkLCBjb250ZXh0LCB7IHJlcGFpckJ1ZGdldDogMSwgcmVwYWlyUmVzcG9uc2U6IHJlcGFpclJlc3BvbnNlISB9KTsKICBhc3NlcnQuZXF1YWwocmVzdWx0Lm9rLCB0cnVlKTsKICBpZiAocmVzdWx0Lm9rKSB7CiAgICBhc3NlcnQuZXF1YWwocmVzdWx0LnNvdXJjZSwgInJlcGFpciIpOwogICAgYXNzZXJ0LmVxdWFsKHJlc3VsdC5yZXBhaXJBdHRlbXB0cywgMSk7CiAgICBhc3NlcnQuZXF1YWwocmVzdWx0LmVudmVsb3BlLnN0YXR1cywgIlJFQURZX0ZPUl9EUkFGVCIpOwogIH0KfSk7Cgp0ZXN0KCJkZXRlcm1pbmlzdGljIFJlcXVpcmVtZW50IHJlcGFpciBzdGF5cyBmYWlsLWNsb3NlZCBmb3IgZXZlcnkgd2lkZXIgbWFsZm9ybWVkIHNoYXBlIiwgKCkgPT4gewogIGNvbnN0IGNhc2VzID0gWwogICAgdmFsaWQsCiAgICB2YWxpZC5zbGljZSgwLCAtMiksCiAgICBgJHt2YWxpZC5zbGljZSgwLCAtMSl9IHRyYWlsaW5nYCwKICAgIGBwcmVmaXggJHt2YWxpZC5zbGljZSgwLCAtMSl9YCwKICAgIGBcYFxgXGBqc29uXG4ke3ZhbGlkLnNsaWNlKDAsIC0xKX1cblxgXGBcYGAsCiAgICAneyJyZXF1aXJlbWVudFByb3RvY29sVmVyc2lvbiI6MSwic3RhdHVzIjoiUkVBRFlfRk9SX0RSQUZUIiwicGF5bG9hZCI6eyJkcmFmdCI6eyJnb2FsIjoidW50ZXJtaW5hdGVkfX0nLAogICAgJ3sicmVxdWlyZW1lbnRQcm90b2NvbFZlcnNpb24iOjEsInN0YXR1cyI6IlJFQURZX0ZPUl9EUkFGVCIsInBheWxvYWQiOnsiZHJhZnQiOnsiZ29hbCI6IngifV0sJywKICAgICd7InJlcXVpcmVtZW50UHJvdG9jb2xWZXJzaW9uIjoxLCJzdGF0dXMiOiJSRUFEWV9GT1JfRFJBRlQiLCJwYXlsb2FkIjp7ImRyYWZ0Ijp7ImdvYWwiOiJ4In19LCcsCiAgXTsKICBmb3IgKGNvbnN0IG1hbGZvcm1lZCBvZiBjYXNlcykgYXNzZXJ0LmVxdWFsKGNyZWF0ZURldGVybWluaXN0aWNSZXF1aXJlbWVudFJlcGFpckNhbmRpZGF0ZShtYWxmb3JtZWQpLCBudWxsLCBtYWxmb3JtZWQpOwp9KTsKCnRlc3QoImEgbG9jYWxseSByZXBhaXJlZCBjYW5kaWRhdGUgc3RpbGwgbXVzdCBwYXNzIHRoZSB1bmNoYW5nZWQgUmVxdWlyZW1lbnQgc2NoZW1hIGFuZCBzZW1hbnRpY3MiLCAoKSA9PiB7CiAgY29uc3QgaW52YWxpZFNlbWFudGljID0gSlNPTi5zdHJpbmdpZnkoewogICAgcmVxdWlyZW1lbnRQcm90b2NvbFZlcnNpb246IDEsCiAgICBzdGF0dXM6ICJSRUFEWV9GT1JfRFJBRlQiLAogICAgcGF5bG9hZDogeyBkcmFmdDogeyBnb2FsOiAidmFsaWQgZ29hbCIsIHVuZXhwZWN0ZWQ6IHRydWUgfSB9LAogIH0pOwogIGNvbnN0IHRydW5jYXRlZCA9IGludmFsaWRTZW1hbnRpYy5zbGljZSgwLCAtMSk7CiAgY29uc3QgcmVwYWlyUmVzcG9uc2UgPSBjcmVhdGVEZXRlcm1pbmlzdGljUmVxdWlyZW1lbnRSZXBhaXJDYW5kaWRhdGUodHJ1bmNhdGVkKTsKICBhc3NlcnQub2socmVwYWlyUmVzcG9uc2UpOwogIGFzc2VydC50aHJvd3MoKCkgPT4gcGFyc2VSZXF1aXJlbWVudFNlbWFudGljUmVzcG9uc2UocmVwYWlyUmVzcG9uc2UhKSk7CiAgY29uc3QgcmVzdWx0ID0gdHJ5UGFyc2VSZXF1aXJlbWVudFJlc3BvbnNlKHRydW5jYXRlZCwgY29udGV4dCwgeyByZXBhaXJCdWRnZXQ6IDEsIHJlcGFpclJlc3BvbnNlOiByZXBhaXJSZXNwb25zZSEgfSk7CiAgYXNzZXJ0LmVxdWFsKHJlc3VsdC5vaywgZmFsc2UpOwogIGlmICghcmVzdWx0Lm9rKSB7CiAgICBhc3NlcnQuZXF1YWwocmVzdWx0LnNvdXJjZSwgInJlcGFpciIpOwogICAgYXNzZXJ0LmVxdWFsKHJlc3VsdC5yZXBhaXJBdHRlbXB0cywgMSk7CiAgICBhc3NlcnQuZXF1YWwocmVzdWx0LmVycm9yLmNvZGUsICJSRVBBSVJfRkFJTEVEIik7CiAgfQp9KTsK"
+          provider_add_b64 = "dGVzdCgiQVVULVIwIHJlcGFpcnMgb25lIG1pc3NpbmcgZmluYWwgUmVxdWlyZW1lbnQgcm9vdCBicmFjZSB3aXRob3V0IGFub3RoZXIgcHJvdmlkZXIgZGlzcGF0Y2giLCBhc3luYyAoKSA9PiB7CiAgY29uc3QgdmFsdWUgPSBhd2FpdCBmaXh0dXJlKCk7CiAgY29uc3QgcHJvdmlkZXIgPSBuZXcgRmFrZVByb3ZpZGVyKCk7CiAgcHJvdmlkZXIucmVzcG9uc2UgPSBwcm92aWRlci5yZXNwb25zZS5zbGljZSgwLCAtMSk7CiAgdHJ5IHsKICAgIGNvbnN0IHNlcnZpY2UgPSBuZXcgUmVxdWlyZW1lbnRBdXRvbWF0aW9uU2VydmljZSh7IHN0b3JlOiB2YWx1ZS5zdG9yZSwgcHJvdmlkZXIsIGlucHV0UmVmczogbmV3IElucHV0UmVmUmVnaXN0cnkoKSB9KTsKICAgIGNvbnN0IHNlc3Npb24gPSBhd2FpdCBzZXJ2aWNlLnN0YXJ0QWxpZ25tZW50KHsgcHJvamVjdElkOiAiYXV0LXIwLWF1dG9tYXRpb24iLCBnb2FsOiAiQWNjZXB0IG9uZSBkZXRlcm1pbmlzdGljIHByb3ZpZGVyIHRydW5jYXRpb24uIiwgd2ViZ3B0UHJvamVjdElkOiAid29ya3RzIiwgcHJvdmlkZXJUYXJnZXRSZWY6IFRFU1RfVEFSR0VULCBxdWVzdGlvbnM6IFtdIH0pOwogICAgY29uc3QgcmVzdWx0ID0gYXdhaXQgc2VydmljZS5yZXF1ZXN0RHJhZnQoeyBzZXNzaW9uSWQ6IHNlc3Npb24uYWxpZ25tZW50U2Vzc2lvbklkLCBwcm92aWRlclRhcmdldFJlZjogVEVTVF9UQVJHRVQgfSk7CiAgICBhc3NlcnQuZXF1YWwocmVzdWx0LnN0YXR1cywgIkRSQUZUX1JFQURZIik7CiAgICBhc3NlcnQuZXF1YWwocHJvdmlkZXIuc3VibWl0dGVkLmxlbmd0aCwgMSk7CiAgICBjb25zdCBzbmFwc2hvdCA9IGF3YWl0IHZhbHVlLnN0b3JlLnNuYXBzaG90KCk7CiAgICBhc3NlcnQuZXF1YWwoc25hcHNob3QuYWN0aW9uQXR0ZW1wdHMubGVuZ3RoLCAxLCAibG9jYWwgcmVwYWlyIG11c3Qgbm90IGNyZWF0ZSBhbm90aGVyIHByb3ZpZGVyIGF0dGVtcHQiKTsKICB9IGZpbmFsbHkgewogICAgYXdhaXQgY2xvc2VGaXh0dXJlKHZhbHVlKTsKICB9Cn0pOwoKdGVzdCgiQVVULVIwIGFwcGxpZXMgdGhlIHNhbWUgYm91bmRlZCBsb2NhbCByZXBhaXIgd2hlbiByZWNvbmNpbGluZyBhIGNvbXBsZXRlZCBSZXF1aXJlbWVudCB0dXJuIiwgYXN5bmMgKCkgPT4gewogIGNvbnN0IHZhbHVlID0gYXdhaXQgZml4dHVyZSgpOwogIGNvbnN0IHByb3ZpZGVyID0gbmV3IEZha2VQcm92aWRlcigpOwogIHByb3ZpZGVyLnN0YXRlID0gIlJVTk5JTkciOwogIHByb3ZpZGVyLnJlc3BvbnNlID0gcHJvdmlkZXIucmVzcG9uc2Uuc2xpY2UoMCwgLTEpOwogIHRyeSB7CiAgICBjb25zdCBzZXJ2aWNlID0gbmV3IFJlcXVpcmVtZW50QXV0b21hdGlvblNlcnZpY2UoeyBzdG9yZTogdmFsdWUuc3RvcmUsIHByb3ZpZGVyLCBpbnB1dFJlZnM6IG5ldyBJbnB1dFJlZlJlZ2lzdHJ5KCkgfSk7CiAgICBjb25zdCBzZXNzaW9uID0gYXdhaXQgc2VydmljZS5zdGFydEFsaWdubWVudCh7IHByb2plY3RJZDogImF1dC1yMC1hdXRvbWF0aW9uIiwgZ29hbDogIlJlY29uY2lsZSBvbmUgZGV0ZXJtaW5pc3RpYyBwcm92aWRlciB0cnVuY2F0aW9uLiIsIHdlYmdwdFByb2plY3RJZDogIndvcmt0cyIsIHByb3ZpZGVyVGFyZ2V0UmVmOiBURVNUX1RBUkdFVCwgcXVlc3Rpb25zOiBbXSB9KTsKICAgIGF3YWl0IGFzc2VydC5yZWplY3RzKHNlcnZpY2UucmVxdWVzdERyYWZ0KHsgc2Vzc2lvbklkOiBzZXNzaW9uLmFsaWdubWVudFNlc3Npb25JZCwgcHJvdmlkZXJUYXJnZXRSZWY6IFRFU1RfVEFSR0VUIH0pLCAoZXJyb3I6IHVua25vd24pID0+IGVycm9yIGluc3RhbmNlb2YgUmVxdWlyZW1lbnRTZXJ2aWNlRXJyb3IgJiYgZXJyb3IuY29kZSA9PT0gIlJFQ09WRVJZX1JFUVVJUkVEIik7CiAgICBwcm92aWRlci5zdGF0ZSA9ICJDT01QTEVURUQiOwogICAgY29uc3QgcmVzdWx0ID0gYXdhaXQgc2VydmljZS5yZWNvbmNpbGVQcm92aWRlclJlcXVlc3QoeyBzZXNzaW9uSWQ6IHNlc3Npb24uYWxpZ25tZW50U2Vzc2lvbklkIH0pOwogICAgYXNzZXJ0LmVxdWFsKHJlc3VsdC5zdGF0dXMsICJEUkFGVF9SRUFEWSIpOwogICAgYXNzZXJ0LmVxdWFsKHByb3ZpZGVyLnN1Ym1pdHRlZC5sZW5ndGgsIDEsICJyZWNvbmNpbGUgbXVzdCByZWFkIHRoZSBhY2NlcHRlZCB0dXJuIHJhdGhlciB0aGFuIHJlc2VuZCBpdCIpOwogICAgY29uc3Qgc25hcHNob3QgPSBhd2FpdCB2YWx1ZS5zdG9yZS5zbmFwc2hvdCgpOwogICAgYXNzZXJ0LmVxdWFsKHNuYXBzaG90LmFjdGlvbkF0dGVtcHRzLmxlbmd0aCwgMSwgImxvY2FsIHJlcGFpciBkdXJpbmcgcmVjb25jaWxlIG11c3Qgbm90IGNyZWF0ZSBhbm90aGVyIHByb3ZpZGVyIGF0dGVtcHQiKTsKICB9IGZpbmFsbHkgewogICAgYXdhaXQgY2xvc2VGaXh0dXJlKHZhbHVlKTsKICB9Cn0pOwoK"
+          Path("src/automation/requirement-response-repair.ts").write_text(decode(helper_b64), encoding="utf-8")
+          Path("tests/requirement-deterministic-repair.test.ts").write_text(decode(test_b64), encoding="utf-8")
 
-/**
- * Produces one local repair candidate for the narrow truncation observed from
- * a completed Requirement provider turn: every nested JSON structure and
- * string is already closed, but the root object is missing its final `}`.
- *
- * This helper never performs I/O, never changes semantic content, and rejects
- * every other malformed shape. The candidate must still pass the existing
- * Requirement parser, schema, and semantic validation before it can be used.
- */
-export function createDeterministicRequirementRepairCandidate(rawResponse: string): string | null {
-  const trimmed = rawResponse.trim();
-  if (!trimmed.startsWith("{") || Buffer.byteLength(trimmed, "utf8") >= MAX_REQUIREMENT_JSON_BYTES) return null;
-
-  const stack: Array<"{" | "["> = [];
-  let inString = false;
-  let escaped = false;
-
-  for (let index = 0; index < trimmed.length; index += 1) {
-    const character = trimmed[index]!;
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === '"') inString = false;
-      continue;
-    }
-
-    if (character === '"') {
-      inString = true;
-      continue;
-    }
-    if (character === "{" || character === "[") {
-      stack.push(character);
-      continue;
-    }
-    if (character !== "}" && character !== "]") continue;
-
-    const expected = character === "}" ? "{" : "[";
-    if (stack.length === 0 || stack[stack.length - 1] !== expected) return null;
-    stack.pop();
-    if (stack.length === 0 && index !== trimmed.length - 1) return null;
-  }
-
-  if (inString || stack.length !== 1 || stack[0] !== "{") return null;
-
-  const candidate = `${trimmed}}`;
-  if (Buffer.byteLength(candidate, "utf8") > MAX_REQUIREMENT_JSON_BYTES) return null;
-  try {
-    const parsed = JSON.parse(candidate) as unknown;
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  } catch {
-    return null;
-  }
-  return candidate;
-}
-''', encoding="utf-8")
-
-          replace_once(
-              "src/automation/requirement-service.ts",
-              'import type { AutomationProviderPort, ProviderTargetRef } from "./adapters.ts";\n',
-              'import type { AutomationProviderPort, ProviderTargetRef } from "./adapters.ts";\nimport { createDeterministicRequirementRepairCandidate } from "./requirement-response-repair.ts";\n',
-          )
-          replace_once(
-              "src/automation/requirement-service.ts",
-              'export interface RequirementQuestionInput {\n',
-              '''function parseProviderRequirementResponse(rawResponse: string, context: RequirementEnvelopeContext): RequirementEnvelope {\n  const repairResponse = createDeterministicRequirementRepairCandidate(rawResponse);\n  return parseRequirementResponse(rawResponse, context, repairResponse === null\n    ? { repairBudget: 0 }\n    : { repairBudget: 1, repairResponse });\n}\n\nexport interface RequirementQuestionInput {\n''',
-          )
-          replace_once(
-              "src/automation/requirement-service.ts",
-              'parseRequirementResponse(dispatch.response, responseContext, { repairBudget: 0 })',
-              'parseProviderRequirementResponse(dispatch.response, responseContext)',
-          )
-          replace_once(
-              "src/automation/requirement-service.ts",
-              'parseRequirementResponse(result.response, responseContext, { repairBudget: 0 })',
-              'parseProviderRequirementResponse(result.response, responseContext)',
-          )
-
-          Path("tests/requirement-deterministic-repair.test.ts").write_text(r'''import assert from "node:assert/strict";
-import test from "node:test";
-import { createDeterministicRequirementRepairCandidate } from "../src/automation/requirement-response-repair.ts";
-import {
-  parseRequirementSemanticResponse,
-  tryParseRequirementResponse,
-  type RequirementEnvelopeContext,
-} from "../src/automation/requirement-webgpt-contract.ts";
-
-const context: RequirementEnvelopeContext = {
-  projectId: "project-repair-test",
-  requestId: "request-repair-test",
-  idempotencyKey: "idempotency-repair-test",
-  semanticSha256: "1".repeat(64),
-  role: "REQUIREMENT",
-};
-
-const valid = JSON.stringify({
-  requirementProtocolVersion: 1,
-  status: "READY_FOR_DRAFT",
-  payload: {
-    draft: {
-      goal: "创建一个可以直接运行的经典贪吃蛇小游戏。",
-      constraints: ["不依赖外部服务。"],
-      acceptanceCriteria: ["方向键可以控制蛇移动。"],
-      nonGoals: ["不实现复杂视觉效果、音效或其他扩展玩法。"],
-    },
-  },
-});
-
-test("repairs only a completed Requirement JSON object missing its final root brace", () => {
-  const truncated = valid.slice(0, -1);
-  const repairResponse = createDeterministicRequirementRepairCandidate(truncated);
-  assert.equal(repairResponse, valid);
-  const result = tryParseRequirementResponse(truncated, context, { repairBudget: 1, repairResponse: repairResponse! });
-  assert.equal(result.ok, true);
-  if (result.ok) {
-    assert.equal(result.source, "repair");
-    assert.equal(result.repairAttempts, 1);
-    assert.equal(result.envelope.status, "READY_FOR_DRAFT");
-  }
-});
-
-test("deterministic Requirement repair stays fail-closed for every wider malformed shape", () => {
-  const cases = [
-    valid,
-    valid.slice(0, -2),
-    `${valid.slice(0, -1)} trailing`,
-    `prefix ${valid.slice(0, -1)}`,
-    `\`\`\`json\n${valid.slice(0, -1)}\n\`\`\``,
-    '{"requirementProtocolVersion":1,"status":"READY_FOR_DRAFT","payload":{"draft":{"goal":"unterminated}}',
-    '{"requirementProtocolVersion":1,"status":"READY_FOR_DRAFT","payload":{"draft":{"goal":"x"}],',
-    '{"requirementProtocolVersion":1,"status":"READY_FOR_DRAFT","payload":{"draft":{"goal":"x"}},',
-  ];
-  for (const malformed of cases) assert.equal(createDeterministicRequirementRepairCandidate(malformed), null, malformed);
-});
-
-test("a locally repaired candidate still must pass the unchanged Requirement schema and semantics", () => {
-  const invalidSemantic = JSON.stringify({
-    requirementProtocolVersion: 1,
-    status: "READY_FOR_DRAFT",
-    payload: { draft: { goal: "valid goal", unexpected: true } },
-  });
-  const truncated = invalidSemantic.slice(0, -1);
-  const repairResponse = createDeterministicRequirementRepairCandidate(truncated);
-  assert.ok(repairResponse);
-  assert.throws(() => parseRequirementSemanticResponse(repairResponse!));
-  const result = tryParseRequirementResponse(truncated, context, { repairBudget: 1, repairResponse: repairResponse! });
-  assert.equal(result.ok, false);
-  if (!result.ok) {
-    assert.equal(result.source, "repair");
-    assert.equal(result.repairAttempts, 1);
-    assert.equal(result.error.code, "REPAIR_FAILED");
-  }
-});
-''', encoding="utf-8")
+          replace_once("src/automation/requirement-service.ts", 'import type { AutomationProviderPort, ProviderTargetRef } from "./adapters.ts";\n', 'import type { AutomationProviderPort, ProviderTargetRef } from "./adapters.ts";\nimport { createDeterministicRequirementRepairCandidate } from "./requirement-response-repair.ts";\n')
+          replace_once("src/automation/requirement-service.ts", 'export interface RequirementQuestionInput {\n', 'function parseProviderRequirementResponse(rawResponse: string, context: RequirementEnvelopeContext): RequirementEnvelope {\n  const repairResponse = createDeterministicRequirementRepairCandidate(rawResponse);\n  return parseRequirementResponse(rawResponse, context, repairResponse === null\n    ? { repairBudget: 0 }\n    : { repairBudget: 1, repairResponse });\n}\n\nexport interface RequirementQuestionInput {\n')
+          replace_once("src/automation/requirement-service.ts", 'parseRequirementResponse(dispatch.response, responseContext, { repairBudget: 0 })', 'parseProviderRequirementResponse(dispatch.response, responseContext)')
+          replace_once("src/automation/requirement-service.ts", 'parseRequirementResponse(result.response, responseContext, { repairBudget: 0 })', 'parseProviderRequirementResponse(result.response, responseContext)')
 
           provider_marker = 'test("AUT-R0 persists the round ActionAttempt before the provider side effect", async () => {\n'
-          provider_tests = r'''test("AUT-R0 repairs one missing final Requirement root brace without another provider dispatch", async () => {
-  const value = await fixture();
-  const provider = new FakeProvider();
-  provider.response = provider.response.slice(0, -1);
-  try {
-    const service = new RequirementAutomationService({ store: value.store, provider, inputRefs: new InputRefRegistry() });
-    const session = await service.startAlignment({ projectId: "aut-r0-automation", goal: "Accept one deterministic provider truncation.", webgptProjectId: "workts", providerTargetRef: TEST_TARGET, questions: [] });
-    const result = await service.requestDraft({ sessionId: session.alignmentSessionId, providerTargetRef: TEST_TARGET });
-    assert.equal(result.status, "DRAFT_READY");
-    assert.equal(provider.submitted.length, 1);
-    const snapshot = await value.store.snapshot();
-    assert.equal(snapshot.actionAttempts.length, 1, "local repair must not create another provider attempt");
-  } finally {
-    await closeFixture(value);
-  }
-});
-
-test("AUT-R0 applies the same bounded local repair when reconciling a completed Requirement turn", async () => {
-  const value = await fixture();
-  const provider = new FakeProvider();
-  provider.state = "RUNNING";
-  provider.response = provider.response.slice(0, -1);
-  try {
-    const service = new RequirementAutomationService({ store: value.store, provider, inputRefs: new InputRefRegistry() });
-    const session = await service.startAlignment({ projectId: "aut-r0-automation", goal: "Reconcile one deterministic provider truncation.", webgptProjectId: "workts", providerTargetRef: TEST_TARGET, questions: [] });
-    await assert.rejects(service.requestDraft({ sessionId: session.alignmentSessionId, providerTargetRef: TEST_TARGET }), (error: unknown) => error instanceof RequirementServiceError && error.code === "RECOVERY_REQUIRED");
-    provider.state = "COMPLETED";
-    const result = await service.reconcileProviderRequest({ sessionId: session.alignmentSessionId });
-    assert.equal(result.status, "DRAFT_READY");
-    assert.equal(provider.submitted.length, 1, "reconcile must read the accepted turn rather than resend it");
-    const snapshot = await value.store.snapshot();
-    assert.equal(snapshot.actionAttempts.length, 1, "local repair during reconcile must not create another provider attempt");
-  } finally {
-    await closeFixture(value);
-  }
-});
-
-'''
-          replace_once("tests/aut-r0-requirement-provider.test.ts", provider_marker, provider_tests + provider_marker)
+          replace_once("tests/aut-r0-requirement-provider.test.ts", provider_marker, decode(provider_add_b64) + provider_marker)
 
           progress_path = Path("src/renderer/planner-operation-progress.ts")
           progress = progress_path.read_text(encoding="utf-8")
@@ -284,13 +105,13 @@ test("AUT-R0 applies the same bounded local repair when reconciling a completed 
               if old not in progress:
                   raise SystemExit(f"progress translation target missing: {old}")
               progress = progress.replace(old, new)
-          old_action = '''    const spec = action ? config.specs[action] : undefined;\n    if (!spec) return;\n\n    // Existing action handlers synchronously enter their busy state before the\n'''
-          new_action = '''    const spec = action ? config.specs[action] : undefined;\n    if (!spec) return;\n    dialog.dataset.operationProgressAction = action ?? "";\n\n    // Existing action handlers synchronously enter their busy state before the\n'''
+          old_action = decode("ICAgIGNvbnN0IHNwZWMgPSBhY3Rpb24gPyBjb25maWcuc3BlY3NbYWN0aW9uXSA6IHVuZGVmaW5lZDsKICAgIGlmICghc3BlYykgcmV0dXJuOwoKICAgIC8vIEV4aXN0aW5nIGFjdGlvbiBoYW5kbGVycyBzeW5jaHJvbm91c2x5IGVudGVyIHRoZWlyIGJ1c3kgc3RhdGUgYmVmb3JlIHRoZQo=")
+          new_action = decode("ICAgIGNvbnN0IHNwZWMgPSBhY3Rpb24gPyBjb25maWcuc3BlY3NbYWN0aW9uXSA6IHVuZGVmaW5lZDsKICAgIGlmICghc3BlYykgcmV0dXJuOwogICAgZGlhbG9nLmRhdGFzZXQub3BlcmF0aW9uUHJvZ3Jlc3NBY3Rpb24gPSBhY3Rpb24gPz8gIiI7CgogICAgLy8gRXhpc3RpbmcgYWN0aW9uIGhhbmRsZXJzIHN5bmNocm9ub3VzbHkgZW50ZXIgdGhlaXIgYnVzeSBzdGF0ZSBiZWZvcmUgdGhlCg==")
           if progress.count(old_action) != 1:
               raise SystemExit("progress action tracking target mismatch")
           progress = progress.replace(old_action, new_action)
-          old_guidance = '''    if (status.classList.contains("is-error") && /TIMEOUT|RECOVERY|UNKNOWN|APP_SERVER_TIMEOUT/i.test(message) && !message.includes("勿再次提交")) {\n      status.textContent = `${message}；请求结果可能不确定，请先使用 Reconcile Planner / Planner Status，勿再次提交。`;\n    }\n'''
-          new_guidance = '''    if (status.classList.contains("is-error") && /TIMEOUT|RECOVERY|UNKNOWN|APP_SERVER_TIMEOUT/i.test(message) && !message.includes("勿再次提交")) {\n      const action = dialog.dataset.operationProgressAction ?? "";\n      const requirementOutcome = action.startsWith("requirement-") || action === "questions-answer" || /Requirement/i.test(message);\n      const recoveryAction = requirementOutcome\n        ? "请先使用“对账需求状态”读取已接受请求的权威结果"\n        : "请先使用“对账规划器状态”或“读取规划器状态”";\n      status.textContent = `${message}；请求结果可能不确定，${recoveryAction}，勿再次提交。`;\n    }\n'''
+          old_guidance = decode("ICAgIGlmIChzdGF0dXMuY2xhc3NMaXN0LmNvbnRhaW5zKCJpcy1lcnJvciIpICYmIC9USU1FT1VUfFJFQ09WRVJZfFVOS05PV058QVBQX1NFUlZFUl9USU1FT1VUL2kudGVzdChtZXNzYWdlKSAmJiAhbWVzc2FnZS5pbmNsdWRlcygi5Yu/5YaN5qyh5o+Q5LqkIikpIHsKICAgICAgc3RhdHVzLnRleHRDb250ZW50ID0gYCR7bWVzc2FnZX3vvJvor7fmsYLnu5Pmnpzlj6/og73kuI3noa7lrprvvIzor7flhYjkvb/nlKggUmVjb25jaWxlIFBsYW5uZXIgLyBQbGFubmVyIFN0YXR1c++8jOWLv+WGjeasoeaPkOS6pOOAgmA7CiAgICB9Cg==")
+          new_guidance = decode("ICAgIGlmIChzdGF0dXMuY2xhc3NMaXN0LmNvbnRhaW5zKCJpcy1lcnJvciIpICYmIC9USU1FT1VUfFJFQ09WRVJZfFVOS05PV058QVBQX1NFUlZFUl9USU1FT1VUL2kudGVzdChtZXNzYWdlKSAmJiAhbWVzc2FnZS5pbmNsdWRlcygi5Yu/5YaN5qyh5o+Q5LqkIikpIHsKICAgICAgY29uc3QgYWN0aW9uID0gZGlhbG9nLmRhdGFzZXQub3BlcmF0aW9uUHJvZ3Jlc3NBY3Rpb24gPz8gIiI7CiAgICAgIGNvbnN0IHJlcXVpcmVtZW50T3V0Y29tZSA9IGFjdGlvbi5zdGFydHNXaXRoKCJyZXF1aXJlbWVudC0iKSB8fCBhY3Rpb24gPT09ICJxdWVzdGlvbnMtYW5zd2VyIiB8fCAvUmVxdWlyZW1lbnQvaS50ZXN0KG1lc3NhZ2UpOwogICAgICBjb25zdCByZWNvdmVyeUFjdGlvbiA9IHJlcXVpcmVtZW50T3V0Y29tZQogICAgICAgID8gIuivt+WFiOS9v+eUqOKAnOWvuei0pumcgOaxgueKtuaAgeKAneivu+WPluW3suaOpeWPl+ivt+axgueahOadg+Wogee7k+aenCIKICAgICAgICA6ICLor7flhYjkvb/nlKjigJzlr7notKbop4TliJLlmajnirbmgIHigJ3miJbigJzor7vlj5bop4TliJLlmajnirbmgIHigJ0iOwogICAgICBzdGF0dXMudGV4dENvbnRlbnQgPSBgJHttZXNzYWdlfe+8m+ivt+axgue7k+aenOWPr+iDveS4jeehruWumu+8jCR7cmVjb3ZlcnlBY3Rpb25977yM5Yu/5YaN5qyh5o+Q5Lqk44CCYDsKICAgIH0K")
           if progress.count(old_guidance) != 1:
               raise SystemExit("recovery guidance target mismatch")
           progress_path.write_text(progress.replace(old_guidance, new_guidance), encoding="utf-8")
@@ -315,10 +136,10 @@ test("AUT-R0 applies the same bounded local repair when reconciling a completed 
               if old not in test_text:
                   raise SystemExit(f"progress test target missing: {old}")
               test_text = test_text.replace(old, new)
-          guidance_test = '''\ntest("uncertain Requirement outcomes use Requirement recovery controls instead of Planner controls", () => {\n  assert.match(progress, /operationProgressAction/);\n  assert.match(progress, /对账需求状态/);\n  assert.match(progress, /读取已接受请求的权威结果/);\n  assert.match(progress, /对账规划器状态/);\n  assert.doesNotMatch(progress, /Reconcile Planner \\/ Planner Status/);\n});\n'''
           anchor = '\ntest("shared operation progress loads only after both Automation workspaces", () => {'
           if test_text.count(anchor) != 1:
               raise SystemExit("progress guidance test anchor mismatch")
+          guidance_test = decode("CnRlc3QoInVuY2VydGFpbiBSZXF1aXJlbWVudCBvdXRjb21lcyB1c2UgUmVxdWlyZW1lbnQgcmVjb3ZlcnkgY29udHJvbHMgaW5zdGVhZCBvZiBQbGFubmVyIGNvbnRyb2xzIiwgKCkgPT4gewogIGFzc2VydC5tYXRjaChwcm9ncmVzcywgL29wZXJhdGlvblByb2dyZXNzQWN0aW9uLyk7CiAgYXNzZXJ0Lm1hdGNoKHByb2dyZXNzLCAv5a+56LSm6ZyA5rGC54q25oCBLyk7CiAgYXNzZXJ0Lm1hdGNoKHByb2dyZXNzLCAv6K+75Y+W5bey5o6l5Y+X6K+35rGC55qE5p2D5aiB57uT5p6cLyk7CiAgYXNzZXJ0Lm1hdGNoKHByb2dyZXNzLCAv5a+56LSm6KeE5YiS5Zmo54q25oCBLyk7CiAgYXNzZXJ0LmRvZXNOb3RNYXRjaChwcm9ncmVzcywgL1JlY29uY2lsZSBQbGFubmVyIFwvIFBsYW5uZXIgU3RhdHVzLyk7Cn0pOwo=")
           test_path.write_text(test_text.replace(anchor, guidance_test + anchor), encoding="utf-8")
       - name: Install dependencies
         run: npm ci
