@@ -71,7 +71,7 @@ test("renderer does not duplicate the Requirement or Planner lifecycle state mac
 });
 
 test("Requirement / Planner UI loads after governance UI extensions", () => {
-  assert.match(uiProjection, /import\("\.\/automation-governance-inspector\.ts"\)/);
-  assert.match(uiProjection, /import\("\.\/automation-governance-actions\.ts"\)/);
-  assert.match(uiProjection, /import\("\.\/automation-requirement-planner\.ts"\)/);
+  assert.match(uiProjection, /import\("\.\/automation-governance-inspector\.js"\)/);
+  assert.match(uiProjection, /import\("\.\/automation-governance-actions\.js"\)/);
+  assert.match(uiProjection, /import\("\.\/automation-requirement-planner\.js"\)/);
 });
