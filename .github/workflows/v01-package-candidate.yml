@@ -51,7 +51,8 @@ jobs:
             'dist/package/resources/app/dist/renderer/automation-governance-actions.js',
             'dist/package/resources/app/dist/renderer/automation-requirement-planner.js',
             'dist/package/resources/app/dist/renderer/planner-operation-progress.js',
-            'dist/package/resources/app/dist/renderer/automation-v01-guidance.js'
+            'dist/package/resources/app/dist/renderer/automation-v01-guidance.js',
+            'dist/package/resources/app/dist/renderer/automation-ui-zh.js'
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Missing packaged artifact: $path" }
@@ -64,7 +65,8 @@ jobs:
             './automation-governance-actions.js',
             './automation-requirement-planner.js',
             './planner-operation-progress.js',
-            './automation-v01-guidance.js'
+            './automation-v01-guidance.js',
+            './automation-ui-zh.js'
           )
           foreach ($specifier in $requiredImports) {
             if (-not $projection.Contains($specifier)) {
@@ -76,7 +78,8 @@ jobs:
             './automation-governance-actions.ts',
             './automation-requirement-planner.ts',
             './planner-operation-progress.ts',
-            './automation-v01-guidance.ts'
+            './automation-v01-guidance.ts',
+            './automation-ui-zh.ts'
           )
           foreach ($specifier in $forbiddenImports) {
             if ($projection.Contains($specifier)) {
