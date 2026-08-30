@@ -7,9 +7,13 @@ const root = resolve(import.meta.dirname, "..");
 const guidance = readFileSync(resolve(root, "src/renderer/automation-v01-guidance.ts"), "utf8");
 const uiProjection = readFileSync(resolve(root, "src/renderer/ui-projection.ts"), "utf8");
 
-test("v0.1 Automation guidance is presentation-only and loads after workflow controls", () => {
-  assert.match(uiProjection, /import\("\.\/automation-requirement-planner\.ts"\)/);
-  assert.match(uiProjection, /import\("\.\/automation-v01-guidance\.ts"\)/);
+test("v0.1 Automation guidance is presentation-only and loads packaged workflow controls", () => {
+  assert.match(uiProjection, /import\("\.\/automation-governance-inspector\.js"\)/);
+  assert.match(uiProjection, /import\("\.\/automation-governance-actions\.js"\)/);
+  assert.match(uiProjection, /import\("\.\/automation-requirement-planner\.js"\)/);
+  assert.match(uiProjection, /import\("\.\/automation-v01-guidance\.js"\)/);
+  assert.doesNotMatch(uiProjection, /import\("\.\/automation-[^"]+\.ts"\)/);
+
   assert.match(guidance, /Automation Workflow/);
   assert.match(guidance, /1 · Requirement \/ Plan/);
   assert.match(guidance, /2 · Execute \/ Review \/ Complete/);
