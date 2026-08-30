@@ -46,10 +46,13 @@ jobs:
             'dist/package/Codex Workbench CLI Runtime.exe',
             'dist/package/resources/app/package.json',
             'dist/package/resources/app/dist/main/main.js',
+            'dist/package/resources/app/dist/main/native-provider-runtime-adapter.js',
             'dist/package/resources/app/dist/automation/requirement-response-repair.js',
             'dist/package/resources/app/dist/automation/requirement-service.js',
             'dist/package/resources/app/dist/automation/requirement-projection-service.js',
+            'dist/package/resources/app/dist/automation/planner-provider-integration.js',
             'dist/package/resources/app/dist/automation/planner-provider-prompt.js',
+            'dist/package/resources/app/dist/codex/automation/native-provider-port.js',
             'dist/package/resources/app/dist/renderer/ui-projection.js',
             'dist/package/resources/app/dist/renderer/automation-governance-inspector.js',
             'dist/package/resources/app/dist/renderer/automation-governance-actions.js',
@@ -82,6 +85,39 @@ jobs:
           }
           if (-not $plannerProjection.Contains('plannerRequirementVersionId')) {
             throw 'Packaged Requirement projection is missing active RequirementVersion Planner binding.'
+          }
+
+          $plannerIntegrationPath = 'dist/package/resources/app/dist/automation/planner-provider-integration.js'
+          $plannerIntegration = Get-Content $plannerIntegrationPath -Raw
+          if (-not $plannerIntegration.Contains('resolveRequestByCorrelation')) {
+            throw 'Packaged Planner integration is missing read-only request identity recovery.'
+          }
+          if (-not $plannerIntegration.Contains('REQUEST_RECOVERY_LOOKUP_FAILED')) {
+            throw 'Packaged Planner integration is missing bounded request recovery failure classification.'
+          }
+          if (-not $plannerIntegration.Contains('latestAttemptForIntent')) {
+            throw 'Packaged Planner integration is missing latest-attempt recovery selection.'
+          }
+
+          $nativeProviderPath = 'dist/package/resources/app/dist/codex/automation/native-provider-port.js'
+          $nativeProvider = Get-Content $nativeProviderPath -Raw
+          if (-not $nativeProvider.Contains('resolveTurnByPromptSha256')) {
+            throw 'Packaged Native provider is missing read-only existing-Turn recovery.'
+          }
+          if (-not $nativeProvider.Contains('automation-input-v1:')) {
+            throw 'Packaged Native provider is missing exact Automation input identity decoding.'
+          }
+
+          $nativeRuntimeAdapterPath = 'dist/package/resources/app/dist/main/native-provider-runtime-adapter.js'
+          $nativeRuntimeAdapter = Get-Content $nativeRuntimeAdapterPath -Raw
+          if (-not $nativeRuntimeAdapter.Contains('resolveTurnByPromptSha256')) {
+            throw 'Packaged Native runtime adapter is missing prompt-hash Turn recovery.'
+          }
+          if (-not $nativeRuntimeAdapter.Contains('excludeTurnIds')) {
+            throw 'Packaged Native runtime adapter is missing prior-attempt exclusion handling.'
+          }
+          if (-not $nativeRuntimeAdapter.Contains('userMessage')) {
+            throw 'Packaged Native runtime adapter is missing exact user prompt matching.'
           }
 
           $plannerPromptPath = 'dist/package/resources/app/dist/automation/planner-provider-prompt.js'
@@ -160,6 +196,7 @@ jobs:
             'packagedRequirementResponseRepair=PASS',
             'packagedPlannerVerificationContract=PASS',
             'packagedPlannerRestartRecovery=PASS',
+            'packagedPlannerRequestIdentityRecovery=PASS',
             'packagedAutomationUiContract=PASS',
             'note=Candidate packaging artifact only; current real Source and packaged E2E gates remain separately required.'
           ) | Set-Content 'dist/package/CANDIDATE_PROVENANCE.txt' -Encoding utf8
