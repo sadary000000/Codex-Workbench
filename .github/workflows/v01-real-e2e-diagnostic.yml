@@ -65,6 +65,8 @@ jobs:
             Write-Host 'OPENAI_API_KEY_PRESENT=true'
           }
           codex login status
+          Write-Host "CODEX_LOGIN_STATUS_EXIT=$LASTEXITCODE"
+          exit 0
 
       - name: Run source Real E2E
         run: npm run test:real:v0.1
@@ -76,6 +78,7 @@ jobs:
           name: v01-real-e2e-diagnostics-${{ github.sha }}
           path: |
             .workbench-e2e/**
+            dist/e2e/**
             dist/**/*.log
           if-no-files-found: ignore
           retention-days: 7
