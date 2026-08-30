@@ -139,39 +139,39 @@ export class AutomationRequirementProjectionService {
       if (session.currentRoundId) {
         round = document.requirementAlignmentRounds.find((item) => item.alignmentRoundId === session.currentRoundId) ?? null;
         if (!round || round.alignmentSessionId !== session.alignmentSessionId) {
-issues.push(`CURRENT_REQUIREMENT_ROUND_INVALID:${session.currentRoundId}`);
-round = null;
+          issues.push(`CURRENT_REQUIREMENT_ROUND_INVALID:${session.currentRoundId}`);
+          round = null;
         }
       }
       const questions: AutomationRequirementQuestionView[] = [];
       const assumptions: AutomationRequirementAssumptionView[] = [];
       if (round) {
         for (const questionId of round.questionIds) {
-const question = document.requirementQuestions.find((item) => item.questionId === questionId);
-if (!question || question.alignmentRoundId !== round.alignmentRoundId) issues.push(`REQUIREMENT_QUESTION_INVALID:${questionId}`);
-else questions.push(questionView(question));
+          const question = document.requirementQuestions.find((item) => item.questionId === questionId);
+          if (!question || question.alignmentRoundId !== round.alignmentRoundId) issues.push(`REQUIREMENT_QUESTION_INVALID:${questionId}`);
+          else questions.push(questionView(question));
         }
         for (const assumptionId of round.assumptionIds) {
-const assumption = document.requirementAssumptions.find((item) => item.assumptionId === assumptionId);
-if (!assumption || assumption.alignmentSessionId !== session.alignmentSessionId) issues.push(`REQUIREMENT_ASSUMPTION_INVALID:${assumptionId}`);
-else assumptions.push(assumptionView(assumption));
+          const assumption = document.requirementAssumptions.find((item) => item.assumptionId === assumptionId);
+          if (!assumption || assumption.alignmentSessionId !== session.alignmentSessionId) issues.push(`REQUIREMENT_ASSUMPTION_INVALID:${assumptionId}`);
+          else assumptions.push(assumptionView(assumption));
         }
       }
       alignment = {
         session: {
-alignmentSessionId: session.alignmentSessionId,
-status: session.status,
-goal: session.goal ?? null,
-currentRoundId: session.currentRoundId,
-latestDraftVersionId: session.latestDraftVersionId ?? null,
-updatedAt: session.updatedAt,
+          alignmentSessionId: session.alignmentSessionId,
+          status: session.status,
+          goal: session.goal ?? null,
+          currentRoundId: session.currentRoundId,
+          latestDraftVersionId: session.latestDraftVersionId ?? null,
+          updatedAt: session.updatedAt,
         },
         round: round ? {
-alignmentRoundId: round.alignmentRoundId,
-roundNumber: round.roundNumber,
-status: round.status,
-questions,
-assumptions,
+          alignmentRoundId: round.alignmentRoundId,
+          roundNumber: round.roundNumber,
+          status: round.status,
+          questions,
+          assumptions,
         } : null,
       };
     }
@@ -185,19 +185,41 @@ assumptions,
       } else {
         const parsed = parseRequirementContent(version.canonicalPayload, version.requirementVersionId, issues);
         if (parsed) {
-requirement = {
-  requirementVersionId: version.requirementVersionId,
-  version: version.version,
-  status: version.status,
-  payloadSha256: version.payloadSha256,
-  createdAt: version.createdAt,
-  confirmedAt: version.confirmedAt,
-  sourceAlignmentSessionId: parsed.sourceAlignmentSessionId,
-  content: parsed.content,
-};
+          requirement = {
+            requirementVersionId: version.requirementVersionId,
+            version: version.version,
+            status: version.status,
+            payloadSha256: version.payloadSha256,
+            createdAt: version.createdAt,
+            confirmedAt: version.confirmedAt,
+            sourceAlignmentSessionId: parsed.sourceAlignmentSessionId,
+            content: parsed.content,
+          };
         }
       }
     }
+
+    const activeRequirementVersionId = project.activeRequirementVersionId;
+    const plannerIntent = activeRequirementVersionId
+      ? document.actionIntents
+        .filter((item) => item.projectId === projectId && item.actionType === "PLANNER_REQUEST" && item.plannerRequirementVersionId === activeRequirementVersionId)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.intentId.localeCompare(left.intentId))[0] ?? null
+      : null;
+    const plannerAttempt = plannerIntent
+      ? document.actionAttempts
+        .filter((item) => item.intentId === plannerIntent.intentId)
+        .sort((left, right) => right.dispatchNumber - left.dispatchNumber || (right.createdAt ?? "").localeCompare(left.createdAt ?? "") || right.actionAttemptId.localeCompare(left.actionAttemptId))[0] ?? null
+      : null;
+    const plannerRecovery: AutomationRequirementProjectView["plannerRecovery"] = plannerIntent ? {
+      actionIntentId: plannerIntent.intentId,
+      actionAttemptId: plannerAttempt?.actionAttemptId ?? null,
+      intentState: plannerIntent.state,
+      attemptState: plannerAttempt?.state ?? null,
+      recoveryState: plannerAttempt?.recoveryState ?? null,
+      plannerState: plannerIntent.plannerState ?? null,
+      promotedPlanVersionId: plannerIntent.promotedPlanVersionId ?? null,
+      dispatchNumber: plannerAttempt?.dispatchNumber ?? null,
+    } : null;
 
     return {
       project: {
@@ -209,6 +231,7 @@ requirement = {
       },
       alignment,
       requirement,
+      plannerRecovery,
       integrity: { status: issues.length === 0 ? "OK" : "DEGRADED", issues },
     };
   }
