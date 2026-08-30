@@ -146,6 +146,7 @@ test("v0.1 Planner creates an ephemeral production InputRef and shares Native ta
   const requirement = {
     requirementVersionId: "requirement-v01",
     projectId: "project-v01-new-work",
+    status: "CONFIRMED",
     payloadSha256: "a".repeat(64),
     canonicalPayload: requirementPayload,
   };
