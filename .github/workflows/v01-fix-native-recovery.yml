@@ -1,0 +1,56 @@
+name: v0.1 Native Recovery Fix
+
+on:
+  push:
+    branches:
+      - release/v0.1-integration
+    paths:
+      - .github/workflows/v01-fix-native-recovery.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: release/v0.1-integration
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Apply narrow recovery persistence fix
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('src/codex/native-thread-runtime.ts')
+          text = path.read_text(encoding='utf-8')
+          old = '      if (acceptanceTimedOut || recoveryRequired) void persistFailure();\n      else await persistFailure();'
+          new = '      if (acceptanceTimedOut) void persistFailure();\n      else await persistFailure();'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one target block, found {text.count(old)}')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Native runtime regression
+        run: node --experimental-strip-types --test tests/native-thread-runtime.test.ts tests/v01-native-turn-acceptance-deadline.test.ts
+      - name: Full tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/codex/native-thread-runtime.ts
+          git diff --cached --check
+          git commit -m 'Fix: preserve Native transport recovery persistence'
+          git push origin HEAD:release/v0.1-integration
