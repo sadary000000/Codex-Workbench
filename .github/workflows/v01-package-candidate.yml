@@ -48,12 +48,14 @@ jobs:
             'dist/package/resources/app/dist/main/main.js',
             'dist/package/resources/app/dist/automation/requirement-response-repair.js',
             'dist/package/resources/app/dist/automation/requirement-service.js',
+            'dist/package/resources/app/dist/automation/requirement-projection-service.js',
             'dist/package/resources/app/dist/automation/planner-provider-prompt.js',
             'dist/package/resources/app/dist/renderer/ui-projection.js',
             'dist/package/resources/app/dist/renderer/automation-governance-inspector.js',
             'dist/package/resources/app/dist/renderer/automation-governance-actions.js',
             'dist/package/resources/app/dist/renderer/automation-requirement-planner.js',
             'dist/package/resources/app/dist/renderer/planner-operation-progress.js',
+            'dist/package/resources/app/dist/renderer/planner-restart-recovery.js',
             'dist/package/resources/app/dist/renderer/automation-v01-guidance.js',
             'dist/package/resources/app/dist/renderer/automation-ui-zh.js'
           )
@@ -68,6 +70,18 @@ jobs:
           }
           if ($requirementService.Contains('./requirement-response-repair.ts')) {
             throw 'Packaged Requirement service still references source-only response repair module.'
+          }
+
+          $plannerProjectionPath = 'dist/package/resources/app/dist/automation/requirement-projection-service.js'
+          $plannerProjection = Get-Content $plannerProjectionPath -Raw
+          if (-not $plannerProjection.Contains('plannerRecovery')) {
+            throw 'Packaged Requirement projection is missing Planner restart recovery projection.'
+          }
+          if (-not $plannerProjection.Contains('PLANNER_REQUEST')) {
+            throw 'Packaged Requirement projection is missing persisted Planner ActionIntent binding.'
+          }
+          if (-not $plannerProjection.Contains('plannerRequirementVersionId')) {
+            throw 'Packaged Requirement projection is missing active RequirementVersion Planner binding.'
           }
 
           $plannerPromptPath = 'dist/package/resources/app/dist/automation/planner-provider-prompt.js'
@@ -100,6 +114,7 @@ jobs:
             './automation-governance-actions.js',
             './automation-requirement-planner.js',
             './planner-operation-progress.js',
+            './planner-restart-recovery.js',
             './automation-v01-guidance.js',
             './automation-ui-zh.js'
           )
@@ -113,6 +128,7 @@ jobs:
             './automation-governance-actions.ts',
             './automation-requirement-planner.ts',
             './planner-operation-progress.ts',
+            './planner-restart-recovery.ts',
             './automation-v01-guidance.ts',
             './automation-ui-zh.ts'
           )
@@ -120,6 +136,18 @@ jobs:
             if ($projection.Contains($specifier)) {
               throw "Packaged UI projection still references source-only module: $specifier"
             }
+          }
+
+          $restartRecoveryPath = 'dist/package/resources/app/dist/renderer/planner-restart-recovery.js'
+          $restartRecovery = Get-Content $restartRecoveryPath -Raw
+          if (-not $restartRecovery.Contains('plannerRecovery')) {
+            throw 'Packaged Planner restart recovery UI is missing bounded recovery projection handling.'
+          }
+          if (-not $restartRecovery.Contains('retryAutomationPlan')) {
+            throw 'Packaged Planner restart recovery UI is missing exact-intent retry handling.'
+          }
+          if ($restartRecovery.Contains('createAutomationPlan')) {
+            throw 'Packaged Planner restart recovery UI must not create a new Planner intent.'
           }
 
           $guiSha = (Get-FileHash 'dist/package/Codex Workbench V1.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -131,6 +159,7 @@ jobs:
             "cliSha256=$cliSha",
             'packagedRequirementResponseRepair=PASS',
             'packagedPlannerVerificationContract=PASS',
+            'packagedPlannerRestartRecovery=PASS',
             'packagedAutomationUiContract=PASS',
             'note=Candidate packaging artifact only; current real Source and packaged E2E gates remain separately required.'
           ) | Set-Content 'dist/package/CANDIDATE_PROVENANCE.txt' -Encoding utf8
