@@ -1,0 +1,341 @@
+name: v0.1 Requirement Response Repair
+
+on:
+  push:
+    branches:
+      - release/v0.1-integration
+    paths:
+      - .github/workflows/v01-fix-requirement-response.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: release/v0.1-integration
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Apply bounded Requirement response repair
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one target block, found {count}")
+              target.write_text(text.replace(old, new), encoding="utf-8")
+
+          Path("src/automation/requirement-response-repair.ts").write_text(r'''import { MAX_REQUIREMENT_JSON_BYTES } from "./requirement-webgpt-contract.ts";
+
+/**
+ * Produces one local repair candidate for the narrow truncation observed from
+ * a completed Requirement provider turn: every nested JSON structure and
+ * string is already closed, but the root object is missing its final `}`.
+ *
+ * This helper never performs I/O, never changes semantic content, and rejects
+ * every other malformed shape. The candidate must still pass the existing
+ * Requirement parser, schema, and semantic validation before it can be used.
+ */
+export function createDeterministicRequirementRepairCandidate(rawResponse: string): string | null {
+  const trimmed = rawResponse.trim();
+  if (!trimmed.startsWith("{") || Buffer.byteLength(trimmed, "utf8") >= MAX_REQUIREMENT_JSON_BYTES) return null;
+
+  const stack: Array<"{" | "["> = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const character = trimmed[index]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "{" || character === "[") {
+      stack.push(character);
+      continue;
+    }
+    if (character !== "}" && character !== "]") continue;
+
+    const expected = character === "}" ? "{" : "[";
+    if (stack.length === 0 || stack[stack.length - 1] !== expected) return null;
+    stack.pop();
+    if (stack.length === 0 && index !== trimmed.length - 1) return null;
+  }
+
+  if (inString || stack.length !== 1 || stack[0] !== "{") return null;
+
+  const candidate = `${trimmed}}`;
+  if (Buffer.byteLength(candidate, "utf8") > MAX_REQUIREMENT_JSON_BYTES) return null;
+  try {
+    const parsed = JSON.parse(candidate) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  } catch {
+    return null;
+  }
+  return candidate;
+}
+''', encoding="utf-8")
+
+          replace_once(
+              "src/automation/requirement-service.ts",
+              'import type { AutomationProviderPort, ProviderTargetRef } from "./adapters.ts";\n',
+              'import type { AutomationProviderPort, ProviderTargetRef } from "./adapters.ts";\nimport { createDeterministicRequirementRepairCandidate } from "./requirement-response-repair.ts";\n',
+          )
+          replace_once(
+              "src/automation/requirement-service.ts",
+              'export interface RequirementQuestionInput {\n',
+              '''function parseProviderRequirementResponse(rawResponse: string, context: RequirementEnvelopeContext): RequirementEnvelope {\n  const repairResponse = createDeterministicRequirementRepairCandidate(rawResponse);\n  return parseRequirementResponse(rawResponse, context, repairResponse === null\n    ? { repairBudget: 0 }\n    : { repairBudget: 1, repairResponse });\n}\n\nexport interface RequirementQuestionInput {\n''',
+          )
+          replace_once(
+              "src/automation/requirement-service.ts",
+              'parseRequirementResponse(dispatch.response, responseContext, { repairBudget: 0 })',
+              'parseProviderRequirementResponse(dispatch.response, responseContext)',
+          )
+          replace_once(
+              "src/automation/requirement-service.ts",
+              'parseRequirementResponse(result.response, responseContext, { repairBudget: 0 })',
+              'parseProviderRequirementResponse(result.response, responseContext)',
+          )
+
+          Path("tests/requirement-deterministic-repair.test.ts").write_text(r'''import assert from "node:assert/strict";
+import test from "node:test";
+import { createDeterministicRequirementRepairCandidate } from "../src/automation/requirement-response-repair.ts";
+import {
+  parseRequirementSemanticResponse,
+  tryParseRequirementResponse,
+  type RequirementEnvelopeContext,
+} from "../src/automation/requirement-webgpt-contract.ts";
+
+const context: RequirementEnvelopeContext = {
+  projectId: "project-repair-test",
+  requestId: "request-repair-test",
+  idempotencyKey: "idempotency-repair-test",
+  semanticSha256: "1".repeat(64),
+  role: "REQUIREMENT",
+};
+
+const valid = JSON.stringify({
+  requirementProtocolVersion: 1,
+  status: "READY_FOR_DRAFT",
+  payload: {
+    draft: {
+      goal: "创建一个可以直接运行的经典贪吃蛇小游戏。",
+      constraints: ["不依赖外部服务。"],
+      acceptanceCriteria: ["方向键可以控制蛇移动。"],
+      nonGoals: ["不实现复杂视觉效果、音效或其他扩展玩法。"],
+    },
+  },
+});
+
+test("repairs only a completed Requirement JSON object missing its final root brace", () => {
+  const truncated = valid.slice(0, -1);
+  const repairResponse = createDeterministicRequirementRepairCandidate(truncated);
+  assert.equal(repairResponse, valid);
+  const result = tryParseRequirementResponse(truncated, context, { repairBudget: 1, repairResponse: repairResponse! });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.source, "repair");
+    assert.equal(result.repairAttempts, 1);
+    assert.equal(result.envelope.status, "READY_FOR_DRAFT");
+  }
+});
+
+test("deterministic Requirement repair stays fail-closed for every wider malformed shape", () => {
+  const cases = [
+    valid,
+    valid.slice(0, -2),
+    `${valid.slice(0, -1)} trailing`,
+    `prefix ${valid.slice(0, -1)}`,
+    `\`\`\`json\n${valid.slice(0, -1)}\n\`\`\``,
+    '{"requirementProtocolVersion":1,"status":"READY_FOR_DRAFT","payload":{"draft":{"goal":"unterminated}}',
+    '{"requirementProtocolVersion":1,"status":"READY_FOR_DRAFT","payload":{"draft":{"goal":"x"}],',
+    '{"requirementProtocolVersion":1,"status":"READY_FOR_DRAFT","payload":{"draft":{"goal":"x"}},',
+  ];
+  for (const malformed of cases) assert.equal(createDeterministicRequirementRepairCandidate(malformed), null, malformed);
+});
+
+test("a locally repaired candidate still must pass the unchanged Requirement schema and semantics", () => {
+  const invalidSemantic = JSON.stringify({
+    requirementProtocolVersion: 1,
+    status: "READY_FOR_DRAFT",
+    payload: { draft: { goal: "valid goal", unexpected: true } },
+  });
+  const truncated = invalidSemantic.slice(0, -1);
+  const repairResponse = createDeterministicRequirementRepairCandidate(truncated);
+  assert.ok(repairResponse);
+  assert.throws(() => parseRequirementSemanticResponse(repairResponse!));
+  const result = tryParseRequirementResponse(truncated, context, { repairBudget: 1, repairResponse: repairResponse! });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.source, "repair");
+    assert.equal(result.repairAttempts, 1);
+    assert.equal(result.error.code, "REPAIR_FAILED");
+  }
+});
+''', encoding="utf-8")
+
+          provider_marker = 'test("AUT-R0 persists the round ActionAttempt before the provider side effect", async () => {\n'
+          provider_tests = r'''test("AUT-R0 repairs one missing final Requirement root brace without another provider dispatch", async () => {
+  const value = await fixture();
+  const provider = new FakeProvider();
+  provider.response = provider.response.slice(0, -1);
+  try {
+    const service = new RequirementAutomationService({ store: value.store, provider, inputRefs: new InputRefRegistry() });
+    const session = await service.startAlignment({ projectId: "aut-r0-automation", goal: "Accept one deterministic provider truncation.", webgptProjectId: "workts", providerTargetRef: TEST_TARGET, questions: [] });
+    const result = await service.requestDraft({ sessionId: session.alignmentSessionId, providerTargetRef: TEST_TARGET });
+    assert.equal(result.status, "DRAFT_READY");
+    assert.equal(provider.submitted.length, 1);
+    const snapshot = await value.store.snapshot();
+    assert.equal(snapshot.actionAttempts.length, 1, "local repair must not create another provider attempt");
+  } finally {
+    await closeFixture(value);
+  }
+});
+
+test("AUT-R0 applies the same bounded local repair when reconciling a completed Requirement turn", async () => {
+  const value = await fixture();
+  const provider = new FakeProvider();
+  provider.state = "RUNNING";
+  provider.response = provider.response.slice(0, -1);
+  try {
+    const service = new RequirementAutomationService({ store: value.store, provider, inputRefs: new InputRefRegistry() });
+    const session = await service.startAlignment({ projectId: "aut-r0-automation", goal: "Reconcile one deterministic provider truncation.", webgptProjectId: "workts", providerTargetRef: TEST_TARGET, questions: [] });
+    await assert.rejects(service.requestDraft({ sessionId: session.alignmentSessionId, providerTargetRef: TEST_TARGET }), (error: unknown) => error instanceof RequirementServiceError && error.code === "RECOVERY_REQUIRED");
+    provider.state = "COMPLETED";
+    const result = await service.reconcileProviderRequest({ sessionId: session.alignmentSessionId });
+    assert.equal(result.status, "DRAFT_READY");
+    assert.equal(provider.submitted.length, 1, "reconcile must read the accepted turn rather than resend it");
+    const snapshot = await value.store.snapshot();
+    assert.equal(snapshot.actionAttempts.length, 1, "local repair during reconcile must not create another provider attempt");
+  } finally {
+    await closeFixture(value);
+  }
+});
+
+'''
+          replace_once("tests/aut-r0-requirement-provider.test.ts", provider_marker, provider_tests + provider_marker)
+
+          progress_path = Path("src/renderer/planner-operation-progress.ts")
+          progress = progress_path.read_text(encoding="utf-8")
+          translations = {
+              'label: "刷新 Runtime Target"': 'label: "刷新运行目标"',
+              'initialPhase: "正在读取 Runtime Truth"': 'initialPhase: "正在读取运行时状态"',
+              'label: "提交 Requirement answers"': 'label: "提交需求问题答案"',
+              'initialPhase: "正在提交 Requirement answers"': 'initialPhase: "正在提交需求问题答案"',
+              'waitingPhase: "等待 workflow truth 返回"': 'waitingPhase: "等待工作流状态返回"',
+              'label: "Start Requirement"': 'label: "开始需求澄清"',
+              'initialPhase: "正在核对 exact Native target"': 'initialPhase: "正在核对精确的 Native 目标"',
+              'waitingPhase: "等待 Requirement session 返回"': 'waitingPhase: "等待需求会话返回"',
+              'label: "Request Requirement Draft"': 'label: "生成需求草案"',
+              'initialPhase: "正在提交 provider continuation"': 'initialPhase: "正在提交提供方续接请求"',
+              'waitingPhase: "等待 Requirement provider 返回"': 'waitingPhase: "等待需求提供方返回"',
+              'label: "Reconcile Requirement"': 'label: "对账需求状态"',
+              'initialPhase: "正在读取 Requirement provider / recovery truth"': 'initialPhase: "正在读取需求提供方 / 恢复状态"',
+              'label: "Confirm Requirement"': 'label: "确认需求"',
+              'initialPhase: "正在写入 exact Requirement truth"': 'initialPhase: "正在写入精确需求状态"',
+              'label: "Create Plan"': 'label: "创建计划"',
+              'waitingPhase: "等待 Planner 接受/返回"': 'waitingPhase: "等待规划器接受/返回"',
+              'label: "Reconcile Planner"': 'label: "对账规划器状态"',
+              'initialPhase: "正在读取 Planner / recovery truth"': 'initialPhase: "正在读取规划器 / 恢复状态"',
+              'label: "Retry Planner"': 'label: "重试规划"',
+              'initialPhase: "正在重试 exact Planner intent"': 'initialPhase: "正在重试精确规划意图"',
+              'label: "Read Planner Status"': 'label: "读取规划器状态"',
+              'initialPhase: "正在读取 Planner status"': 'initialPhase: "正在读取规划器状态"',
+              'label: "Read Planner Result"': 'label: "读取规划结果"',
+              'initialPhase: "正在读取 Planner result"': 'initialPhase: "正在读取规划结果"',
+              'label: "Execute Step"': 'label: "执行步骤"',
+              'initialPhase: "正在核对 exact Native executor target"': 'initialPhase: "正在核对精确的 Native 执行目标"',
+              'waitingPhase: "等待 Executor 接受/返回"': 'waitingPhase: "等待执行器接受/返回"',
+              'label: "Reconcile Step"': 'label: "对账执行步骤"',
+              'initialPhase: "正在读取 ExecutionAttempt / recovery truth"': 'initialPhase: "正在读取执行尝试 / 恢复状态"',
+              'label: "Verify Step"': 'label: "验证步骤"',
+              'initialPhase: "等待 verifier 返回验证结果"': 'initialPhase: "等待验证器返回验证结果"',
+              'label: "Review APPROVE"': 'label: "审查通过"',
+              'label: "Review REJECT"': 'label: "审查拒绝"',
+              'initialPhase: "正在写入 immutable review evidence"': 'initialPhase: "正在写入不可变审查证据"',
+              'label: "Stage Gate PASS"': 'label: "阶段门禁通过"',
+              'label: "Stage Gate REJECT"': 'label: "阶段门禁拒绝"',
+              'initialPhase: "正在写入 Stage Gate decision"': 'initialPhase: "正在写入阶段门禁决策"',
+              'label: "Advance Stage"': 'label: "推进阶段"',
+              'initialPhase: "正在重新读取并推进 stage truth"': 'initialPhase: "正在重新读取并推进阶段状态"',
+              'label: "Complete Project"': 'label: "完成项目"',
+              'initialPhase: "正在校验 final governance truth"': 'initialPhase: "正在校验最终治理状态"',
+          }
+          for old, new in translations.items():
+              if old not in progress:
+                  raise SystemExit(f"progress translation target missing: {old}")
+              progress = progress.replace(old, new)
+          old_action = '''    const spec = action ? config.specs[action] : undefined;\n    if (!spec) return;\n\n    // Existing action handlers synchronously enter their busy state before the\n'''
+          new_action = '''    const spec = action ? config.specs[action] : undefined;\n    if (!spec) return;\n    dialog.dataset.operationProgressAction = action ?? "";\n\n    // Existing action handlers synchronously enter their busy state before the\n'''
+          if progress.count(old_action) != 1:
+              raise SystemExit("progress action tracking target mismatch")
+          progress = progress.replace(old_action, new_action)
+          old_guidance = '''    if (status.classList.contains("is-error") && /TIMEOUT|RECOVERY|UNKNOWN|APP_SERVER_TIMEOUT/i.test(message) && !message.includes("勿再次提交")) {\n      status.textContent = `${message}；请求结果可能不确定，请先使用 Reconcile Planner / Planner Status，勿再次提交。`;\n    }\n'''
+          new_guidance = '''    if (status.classList.contains("is-error") && /TIMEOUT|RECOVERY|UNKNOWN|APP_SERVER_TIMEOUT/i.test(message) && !message.includes("勿再次提交")) {\n      const action = dialog.dataset.operationProgressAction ?? "";\n      const requirementOutcome = action.startsWith("requirement-") || action === "questions-answer" || /Requirement/i.test(message);\n      const recoveryAction = requirementOutcome\n        ? "请先使用“对账需求状态”读取已接受请求的权威结果"\n        : "请先使用“对账规划器状态”或“读取规划器状态”";\n      status.textContent = `${message}；请求结果可能不确定，${recoveryAction}，勿再次提交。`;\n    }\n'''
+          if progress.count(old_guidance) != 1:
+              raise SystemExit("recovery guidance target mismatch")
+          progress_path.write_text(progress.replace(old_guidance, new_guidance), encoding="utf-8")
+
+          test_path = Path("tests/v01-planner-progress-ui.test.ts")
+          test_text = test_path.read_text(encoding="utf-8")
+          test_replacements = {
+              '/正在核对 exact Native target/': '/正在核对精确的 Native 目标/',
+              '/等待 Planner 接受\\/返回/': '/等待规划器接受\\/返回/',
+              '/等待 Requirement provider 返回/': '/等待需求提供方返回/',
+              '/正在读取 Requirement provider \\/ recovery truth/': '/正在读取需求提供方 \\/ 恢复状态/',
+              '/正在核对 exact Native executor target/': '/正在核对精确的 Native 执行目标/',
+              '/等待 Executor 接受\\/返回/': '/等待执行器接受\\/返回/',
+              '/正在读取 ExecutionAttempt \\/ recovery truth/': '/正在读取执行尝试 \\/ 恢复状态/',
+              '/等待 verifier 返回验证结果/': '/等待验证器返回验证结果/',
+              '/正在写入 immutable review evidence/': '/正在写入不可变审查证据/',
+              '/正在写入 Stage Gate decision/': '/正在写入阶段门禁决策/',
+              '/正在校验 final governance truth/': '/正在校验最终治理状态/',
+              '/Reconcile Planner \\/ Planner Status/': '/对账规划器状态/',
+          }
+          for old, new in test_replacements.items():
+              if old not in test_text:
+                  raise SystemExit(f"progress test target missing: {old}")
+              test_text = test_text.replace(old, new)
+          guidance_test = '''\ntest("uncertain Requirement outcomes use Requirement recovery controls instead of Planner controls", () => {\n  assert.match(progress, /operationProgressAction/);\n  assert.match(progress, /对账需求状态/);\n  assert.match(progress, /读取已接受请求的权威结果/);\n  assert.match(progress, /对账规划器状态/);\n  assert.doesNotMatch(progress, /Reconcile Planner \\/ Planner Status/);\n});\n'''
+          anchor = '\ntest("shared operation progress loads only after both Automation workspaces", () => {'
+          if test_text.count(anchor) != 1:
+              raise SystemExit("progress guidance test anchor mismatch")
+          test_path.write_text(test_text.replace(anchor, guidance_test + anchor), encoding="utf-8")
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Focused Requirement and UI regressions
+        run: node --experimental-strip-types --test tests/requirement-deterministic-repair.test.ts tests/aut-r0-requirement-provider.test.ts tests/v01-planner-progress-ui.test.ts
+      - name: Full tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/automation/requirement-response-repair.ts src/automation/requirement-service.ts src/renderer/planner-operation-progress.ts tests/requirement-deterministic-repair.test.ts tests/aut-r0-requirement-provider.test.ts tests/v01-planner-progress-ui.test.ts
+          git diff --cached --check
+          git commit -m 'Fix: recover bounded Requirement response truncation'
+          git push origin HEAD:release/v0.1-integration
