@@ -67,6 +67,7 @@ test("Requirement review projection exposes bounded questions and structured dra
     assert.equal(view.requirement?.payloadSha256, draft.payloadSha256);
     assert.deepEqual(view.requirement?.content.functionalRequirements, ["Execute governed work"]);
     assert.equal(view.requirement?.content.environmentConstraints[0], "staging");
+    assert.equal(view.plannerRecovery, null);
     const serialized = JSON.stringify(view);
     assert.equal(serialized.includes("canonicalPayload"), false);
     assert.equal(serialized.includes("contentRef"), false);
@@ -74,6 +75,91 @@ test("Requirement review projection exposes bounded questions and structured dra
     assert.equal(/prompt|transcript|provider.?body/i.test(serialized), false);
   } finally {
     await store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Planner recovery identity survives store reopen and remains bound to the active RequirementVersion", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-workbench-planner-restart-"));
+  const databasePath = join(root, "automation.db");
+  let store: AutomationStore | null = new AutomationStore(databasePath);
+  try {
+    await store.createAutomationProject({ projectId: "planner-restart-project", name: "Planner restart" });
+    const canonicalPayload = canonicalize({
+      schemaVersion: 1,
+      goal: "Recover a failed Planner action after restart",
+      scope: ["Planner recovery controls"],
+      outOfScope: ["Automatic resend"],
+      functionalRequirements: ["Reuse the persisted Planner action identity"],
+      technicalConstraints: ["Keep provider recovery fail-closed"],
+      environmentConstraints: ["Windows packaged app"],
+      acceptanceCriteria: ["Restart preserves Planner retry and reconcile identity"],
+      riskConstraints: ["Do not create a duplicate Planner intent"],
+      externalDependencies: [],
+      assumptions: [],
+      humanApprovalPoints: ["Requirement confirmation"],
+      knownDeferredGates: [],
+      createdFromAlignmentSessionId: "planner-restart-session",
+    }, "requirement");
+    const requirement = await store.createRequirementVersion({
+      requirementVersionId: "planner-restart-requirement-v1",
+      projectId: "planner-restart-project",
+      version: 1,
+      status: "CONFIRMED",
+      confirmedAt: new Date().toISOString(),
+      origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "planner-restart-test" },
+      canonicalPayload,
+    });
+    const intent = await store.createActionIntent({
+      intentId: "planner-restart-intent",
+      projectId: "planner-restart-project",
+      actionType: "PLANNER_REQUEST",
+      targetRef: "native-thread:restart",
+      sideEffectClass: "PURE",
+      executionOptions: {
+        requirementVersionId: requirement.requirementVersionId,
+        requirementPayloadSha256: requirement.payloadSha256,
+        plannerOperation: "PLAN_REQUIREMENT",
+      },
+      plannerRequestCanonical: "planner-restart-request",
+      logicalPlannerRequestId: "planner-restart-logical-request",
+      plannerRequirementVersionId: requirement.requirementVersionId,
+      plannerRequirementPayloadSha256: requirement.payloadSha256,
+      plannerOperation: "PLAN_REQUIREMENT",
+      plannerMaxProviderAttempts: 2,
+    });
+    await store.transaction((tx) => {
+      const current = tx.require("actionIntents", intent.intentId);
+      tx.replace("actionIntents", { ...current, state: "DISPATCH_ELIGIBLE" });
+    });
+    const attempt = await store.createActionAttempt({ actionAttemptId: "planner-restart-attempt-1", intentId: intent.intentId });
+    await store.createActionReceipt({ actionAttemptId: attempt.actionAttemptId, status: "SUCCEEDED" });
+    await store.markPlannerAttemptInvalidOutput(attempt.actionAttemptId);
+
+    await store.close();
+    store = null;
+
+    const reopened = new AutomationStore(databasePath);
+    try {
+      const view = await new AutomationRequirementProjectionService({ store: reopened }).inspect("planner-restart-project");
+      assert.equal(view.project.activeRequirementVersionId, requirement.requirementVersionId);
+      assert.deepEqual(view.plannerRecovery, {
+        actionIntentId: intent.intentId,
+        actionAttemptId: attempt.actionAttemptId,
+        intentState: "FAILED",
+        attemptState: "COMPLETED",
+        recoveryState: "COMPLETED",
+        plannerState: "ACTIVE",
+        promotedPlanVersionId: null,
+        dispatchNumber: 1,
+      });
+      const serialized = JSON.stringify(view.plannerRecovery);
+      assert.equal(/prompt|transcript|provider.?body|canonical/i.test(serialized), false);
+    } finally {
+      await reopened.close();
+    }
+  } finally {
+    if (store) await store.close();
     await rm(root, { recursive: true, force: true });
   }
 });
