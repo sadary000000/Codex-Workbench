@@ -69,6 +69,10 @@ function normalizeNewWorkProviderTarget(provider: AutomationProviderId, provider
   return createNativeThreadTargetRef(normalized);
 }
 
+function plannerInputCanBeReleased(status: string): boolean {
+  return status === "PLAN_READY" || status === "PROVIDER_FAILED";
+}
+
 async function ensureProjectPolicyForNewRequirement(store: AutomationStore, projectId: string): Promise<void> {
   const project = await store.get("automationProjects", projectId);
   if (!project) return;
@@ -204,6 +208,24 @@ export class AutomationExecutionFacade {
   async createPlan(input: PlannerCreateInput, providerId?: AutomationProviderId | null) {
     const provider = normalizeProviderId(providerId) ?? this.services.providers.defaultProviderId;
     const providerTargetRef = normalizeNewWorkProviderTarget(provider, input.providerTargetRef);
+    const project = await this.store.get("automationProjects", input.projectId);
+    const requirementVersionId = input.requirementVersionId ?? project?.activeRequirementVersionId ?? null;
+    const requirement = requirementVersionId
+      ? await this.store.get("requirementVersions", requirementVersionId)
+      : null;
+    if (!project
+      || !requirement
+      || requirement.projectId !== project.projectId
+      || project.activeRequirementVersionId !== requirement.requirementVersionId
+      || !["CONFIRMED", "ACTIVE"].includes(requirement.status)) {
+      // Preserve the Planner integration's authoritative domain errors without
+      // advancing the Project lifecycle for work that never became eligible.
+      return this.services.planner(provider).createPlanFromRequirement({
+        ...input,
+        providerTargetRef,
+      });
+    }
+
     await this.beginProjectPlanning(input.projectId);
     if (input.inputRefs && input.inputRefs.length > 0) {
       const result = await this.services.planner(provider).createPlanFromRequirement({
@@ -214,20 +236,6 @@ export class AutomationExecutionFacade {
       return result;
     }
 
-    const project = await this.store.get("automationProjects", input.projectId);
-    const requirementVersionId = input.requirementVersionId ?? project?.activeRequirementVersionId ?? null;
-    const requirement = requirementVersionId
-      ? await this.store.get("requirementVersions", requirementVersionId)
-      : null;
-    if (!project || !requirement || requirement.projectId !== project.projectId) {
-      // Preserve the Planner integration's authoritative domain errors.
-      const result = await this.services.planner(provider).createPlanFromRequirement({
-        ...input,
-        providerTargetRef,
-      });
-      await this.markProjectPlanReady(input.projectId, result.status);
-      return result;
-    }
     const currentPlanVersion = project.activePlanVersionId
       ? await this.store.get("planVersions", project.activePlanVersionId)
       : null;
@@ -242,22 +250,33 @@ export class AutomationExecutionFacade {
     });
     const ownerRef = `planner-input:${project.projectId}:${requirement.requirementVersionId}`;
     const registration = this.services.inputRefs.register({ kind: "OTHER", payload: prompt, ownerRef });
+    let result: Awaited<ReturnType<PlannerProviderIntegrationService["createPlanFromRequirement"]>>;
     try {
-      const result = await this.services.planner(provider).createPlanFromRequirement({
+      result = await this.services.planner(provider).createPlanFromRequirement({
         ...input,
         providerTargetRef,
         inputRefs: [registration.inputRef],
       });
-      await this.markProjectPlanReady(input.projectId, result.status);
-      return result;
-    } finally {
+    } catch (error) {
+      this.services.inputRefs.release(registration.inputRef, ownerRef);
+      throw error;
+    }
+    await this.markProjectPlanReady(input.projectId, result.status);
+    if (plannerInputCanBeReleased(result.status)) {
       this.services.inputRefs.release(registration.inputRef, ownerRef);
     }
+    return result;
   }
 
   async reconcilePlan(input: PlannerReconcileInput, providerId?: AutomationProviderId | null) {
     const provider = await this.providerForPlannerAttempt(input.actionAttemptId, providerId);
-    return this.services.planner(provider).reconcilePlannerRequest(input);
+    const result = await this.services.planner(provider).reconcilePlannerRequest(input);
+    await this.beginProjectPlanning(input.projectId);
+    await this.markProjectPlanReady(input.projectId, result.status);
+    if (plannerInputCanBeReleased(result.status) && result.actionIntentId) {
+      await this.releasePlannerInputForIntent(result.actionIntentId);
+    }
+    return result;
   }
 
   async retryPlan(input: PlannerRetryInput, providerId?: AutomationProviderId | null) {
@@ -270,7 +289,11 @@ export class AutomationExecutionFacade {
     }
     const provider = await this.providerForPlannerIntent(logicalId, providerId);
     const result = await this.services.planner(provider).retryPlannerRequest(input);
+    await this.beginProjectPlanning(input.projectId);
     await this.markProjectPlanReady(input.projectId, result.status);
+    if (plannerInputCanBeReleased(result.status)) {
+      await this.releasePlannerInputForIntent(logicalId);
+    }
     return result;
   }
 
@@ -460,5 +483,10 @@ export class AutomationExecutionFacade {
       actorRef: "automation-execution-facade",
       boundedPayload: { activePlanVersionId: project.activePlanVersionId },
     });
+  }
+
+  private async releasePlannerInputForIntent(actionIntentId: string): Promise<void> {
+    const intent = await this.store.get("actionIntents", actionIntentId);
+    if (intent?.payloadRef) this.services.inputRefs.release(intent.payloadRef);
   }
 }
