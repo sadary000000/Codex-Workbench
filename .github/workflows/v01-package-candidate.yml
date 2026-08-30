@@ -1,0 +1,60 @@
+name: v0.1 Windows Trial Candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - release/v0.1-integration
+    paths:
+      - .github/workflows/v01-package-candidate.yml
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact product snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: 64a2d810244b9e8c9b3871c576c772b517922df0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build Windows package
+        run: npm run package:win
+      - name: Verify trial package layout and record provenance
+        shell: pwsh
+        run: |
+          $required = @(
+            'dist/package/Codex Workbench V1.exe',
+            'dist/package/Codex Workbench CLI.exe',
+            'dist/package/Codex Workbench CLI Runtime.exe',
+            'dist/package/resources/app/package.json',
+            'dist/package/resources/app/dist/main/main.js'
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing packaged artifact: $path" }
+          }
+          $guiSha = (Get-FileHash 'dist/package/Codex Workbench V1.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $cliSha = (Get-FileHash 'dist/package/Codex Workbench CLI.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            'Codex Workbench v0.1 Windows trial candidate',
+            'productSnapshot=64a2d810244b9e8c9b3871c576c772b517922df0',
+            "guiSha256=$guiSha",
+            "cliSha256=$cliSha",
+            'note=Candidate packaging artifact only; current real Source and packaged E2E gates remain separately required.'
+          ) | Set-Content 'dist/package/CANDIDATE_PROVENANCE.txt' -Encoding utf8
+          Get-Content 'dist/package/CANDIDATE_PROVENANCE.txt'
+      - name: Upload Windows trial candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-workbench-v0.1-windows-64a2d810
+          path: dist/package
+          if-no-files-found: error
+          retention-days: 14
