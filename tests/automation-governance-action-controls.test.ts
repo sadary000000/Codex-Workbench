@@ -8,8 +8,8 @@ const actions = readFileSync(resolve(root, "src/renderer/automation-governance-a
 const uiProjection = readFileSync(resolve(root, "src/renderer/ui-projection.ts"), "utf8");
 
 test("governance actions load after the read-only inspector", () => {
-  assert.match(uiProjection, /import\("\.\/automation-governance-inspector\.ts"\)/);
-  assert.match(uiProjection, /\.then\(\(\) => import\("\.\/automation-governance-actions\.ts"\)\)/);
+  assert.match(uiProjection, /import\("\.\/automation-governance-inspector\.js"\)/);
+  assert.match(uiProjection, /\.then\(\(\) => import\("\.\/automation-governance-actions\.js"\)\)/);
 });
 
 test("governance actions use only existing narrow command bridges", () => {
