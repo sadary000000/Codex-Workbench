@@ -19,7 +19,7 @@ jobs:
       - name: Checkout exact product snapshot
         uses: actions/checkout@v4
         with:
-          ref: 7fb69a92c27510349609710122ee499c2cb4ac58
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -50,6 +50,7 @@ jobs:
             'dist/package/resources/app/dist/renderer/automation-governance-inspector.js',
             'dist/package/resources/app/dist/renderer/automation-governance-actions.js',
             'dist/package/resources/app/dist/renderer/automation-requirement-planner.js',
+            'dist/package/resources/app/dist/renderer/planner-operation-progress.js',
             'dist/package/resources/app/dist/renderer/automation-v01-guidance.js'
           )
           foreach ($path in $required) {
@@ -62,6 +63,7 @@ jobs:
             './automation-governance-inspector.js',
             './automation-governance-actions.js',
             './automation-requirement-planner.js',
+            './planner-operation-progress.js',
             './automation-v01-guidance.js'
           )
           foreach ($specifier in $requiredImports) {
@@ -73,6 +75,7 @@ jobs:
             './automation-governance-inspector.ts',
             './automation-governance-actions.ts',
             './automation-requirement-planner.ts',
+            './planner-operation-progress.ts',
             './automation-v01-guidance.ts'
           )
           foreach ($specifier in $forbiddenImports) {
@@ -85,7 +88,7 @@ jobs:
           $cliSha = (Get-FileHash 'dist/package/Codex Workbench CLI.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           @(
             'Codex Workbench v0.1 Windows trial candidate',
-            'productSnapshot=7fb69a92c27510349609710122ee499c2cb4ac58',
+            "productSnapshot=$env:GITHUB_SHA",
             "guiSha256=$guiSha",
             "cliSha256=$cliSha",
             'packagedAutomationUiContract=PASS',
@@ -95,7 +98,7 @@ jobs:
       - name: Upload Windows trial candidate
         uses: actions/upload-artifact@v4
         with:
-          name: codex-workbench-v0.1-windows-7fb69a92
+          name: codex-workbench-v0.1-windows-${{ github.sha }}
           path: dist/package
           if-no-files-found: error
           retention-days: 14
