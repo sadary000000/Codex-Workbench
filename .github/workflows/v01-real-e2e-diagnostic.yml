@@ -1,0 +1,81 @@
+name: v0.1 Windows Real E2E Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - release/v0.1-integration
+    paths:
+      - .github/workflows/v01-real-e2e-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  real-e2e:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Checkout exact product snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Workbench dependencies
+        run: npm ci
+
+      - name: Install frozen Codex CLI
+        shell: pwsh
+        run: |
+          npm install --global @openai/codex@0.147.0
+          codex --version
+          $prefix = (npm prefix --global).Trim()
+          $vendor = Join-Path $prefix 'node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe'
+          if (-not (Test-Path $vendor)) { throw "Frozen Codex vendor binary not found: $vendor" }
+          $sha = (Get-FileHash $vendor -Algorithm SHA256).Hash.ToUpperInvariant()
+          Write-Host "codexVendor=$vendor"
+          Write-Host "codexSha256=$sha"
+          if ($sha -ne '935A1911ED2556E4FFCEC995F4886AC2AC425863BA26FED264DF62E30272AD9D') {
+            throw "Codex binary SHA does not match frozen Workbench protocol contract."
+          }
+
+      - name: Prepare Electron Windows runtime
+        shell: pwsh
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '0'
+        run: |
+          node node_modules/electron/install.js
+          if (-not (Test-Path 'node_modules/electron/dist')) {
+            throw 'Electron Windows runtime was not installed.'
+          }
+
+      - name: Record Codex authentication availability
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) {
+            Write-Host 'OPENAI_API_KEY_PRESENT=false'
+          } else {
+            Write-Host 'OPENAI_API_KEY_PRESENT=true'
+          }
+          codex login status
+
+      - name: Run source Real E2E
+        run: npm run test:real:v0.1
+
+      - name: Upload Real E2E diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v01-real-e2e-diagnostics-${{ github.sha }}
+          path: |
+            .workbench-e2e/**
+            dist/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7
