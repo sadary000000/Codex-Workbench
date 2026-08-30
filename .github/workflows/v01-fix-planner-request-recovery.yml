@@ -1,0 +1,441 @@
+name: v0.1 Planner Request Identity Recovery Repair
+
+on:
+  push:
+    branches:
+      - release/v0.1-integration
+    paths:
+      - .github/workflows/v01-fix-planner-request-recovery.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: release/v0.1-integration
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Apply bounded Planner request recovery repair
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one target block, found {count}")
+              target.write_text(text.replace(old, new), encoding="utf-8")
+
+          replace_once(
+              "src/automation/adapters.ts",
+              '''export interface AutomationProviderPort {
+          ''',
+              '''export interface ProviderRequestRecoveryInput {
+            readonly idempotencyRef: string;
+            readonly correlation: ProviderCorrelation;
+            /** Opaque input identity used only for read-only recovery matching. */
+            readonly inputRef?: string | null;
+            /** Already-bound provider requests for prior attempts that must not be selected again. */
+            readonly excludeProviderRequestRefs?: readonly ProviderRequestRef[];
+          }
+
+          export interface ProviderRequestRecoveryResolution {
+            readonly providerRequestRef: ProviderRequestRef;
+            /** Provider-owned execution semantic recovered together with the request identity. */
+            readonly semanticRef: string | null;
+          }
+
+          export interface AutomationProviderPort {
+          ''',
+          )
+          replace_once(
+              "src/automation/adapters.ts",
+              '''  /** Read-only crash recovery lookup; it may only resolve an existing request by idempotency. */
+            resolveRequestByCorrelation?(input: { idempotencyRef: string; correlation: ProviderCorrelation }): Promise<ProviderRequestRef | null>;
+          ''',
+              '''  /** Read-only crash recovery lookup; it may only resolve an already-existing request. */
+            resolveRequestByCorrelation?(input: ProviderRequestRecoveryInput): Promise<ProviderRequestRecoveryResolution | null>;
+          ''',
+          )
+
+          replace_once(
+              "src/codex/automation/native-provider-port.ts",
+              '''  type ProviderRequestAccepted,
+            type ProviderRequestState,
+          ''',
+              '''  type ProviderRequestAccepted,
+            type ProviderRequestRecoveryInput,
+            type ProviderRequestRecoveryResolution,
+            type ProviderRequestState,
+          ''',
+          )
+          replace_once(
+              "src/codex/automation/native-provider-port.ts",
+              '''const TARGET_PREFIX = "native-thread-v1:";
+          const RESULT_PREFIX = "native-turn-result-v1:";
+          ''',
+              '''const TARGET_PREFIX = "native-thread-v1:";
+          const RESULT_PREFIX = "native-turn-result-v1:";
+          const INPUT_REF_PREFIX = "automation-input-v1:";
+          const SHA256_HEX = /^[a-f0-9]{64}$/i;
+          ''',
+          )
+          replace_once(
+              "src/codex/automation/native-provider-port.ts",
+              '''  hasThread(nativeThreadId: string): Promise<boolean>;
+            startTurn(input: { nativeThreadId: string; prompt: string }): Promise<{ nativeTurnId: string }>;
+          ''',
+              '''  hasThread(nativeThreadId: string): Promise<boolean>;
+            /** Read-only identity recovery; it must never start or resume a Turn. */
+            resolveTurnByPromptSha256?(input: { nativeThreadId: string; promptSha256: string; excludeTurnIds: readonly string[] }): Promise<string | null>;
+            startTurn(input: { nativeThreadId: string; prompt: string }): Promise<{ nativeTurnId: string }>;
+          ''',
+          )
+          replace_once(
+              "src/codex/automation/native-provider-port.ts",
+              '''function ensureCorrelation(correlation: ProviderCorrelation): void {
+          ''',
+              '''function parseAutomationInputRef(value: string | null | undefined): string | null {
+            if (!value?.startsWith(INPUT_REF_PREFIX)) return null;
+            const digest = value.slice(INPUT_REF_PREFIX.length);
+            return SHA256_HEX.test(digest) ? digest.toLowerCase() : null;
+          }
+
+          function ensureCorrelation(correlation: ProviderCorrelation): void {
+          ''',
+          )
+          replace_once(
+              "src/codex/automation/native-provider-port.ts",
+              '''  async submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted> {
+          ''',
+              '''  async resolveRequestByCorrelation(input: ProviderRequestRecoveryInput): Promise<ProviderRequestRecoveryResolution | null> {
+            ensureCorrelation(input.correlation);
+            if (!input.idempotencyRef || input.idempotencyRef !== input.correlation.idempotencyRef) throw new Error("PROVIDER_CORRELATION_REQUIRED");
+            if (!this.runtime.resolveTurnByPromptSha256) return null;
+            const providerScopeRef = input.correlation.providerScopeRef;
+            if (!providerScopeRef) return null;
+            const nativeThreadId = parseNativeThreadTargetRef(providerScopeRef);
+            const promptSha256 = parseAutomationInputRef(input.inputRef);
+            if (!promptSha256 || !(await this.runtime.hasThread(nativeThreadId))) return null;
+            const nativeTurnId = await this.runtime.resolveTurnByPromptSha256({
+              nativeThreadId,
+              promptSha256,
+              excludeTurnIds: input.excludeProviderRequestRefs ?? [],
+            });
+            if (!nativeTurnId) return null;
+            return { providerRequestRef: nativeTurnId, semanticRef: promptSha256 };
+          }
+
+            async submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted> {
+          ''',
+          )
+
+          replace_once(
+              "src/main/native-provider-runtime-adapter.ts",
+              '''  async runtimeCapability(): Promise<ProviderRuntimeCapability> {
+          ''',
+              '''  async resolveTurnByPromptSha256(input: { nativeThreadId: string; promptSha256: string; excludeTurnIds: readonly string[] }): Promise<string | null> {
+            const nativeThreadId = boundedId(input.nativeThreadId, "NATIVE_THREAD_ID");
+            const promptSha256 = input.promptSha256.trim().toLowerCase();
+            if (!/^[a-f0-9]{64}$/.test(promptSha256)) throw new Error("NATIVE_PROMPT_SHA256_INVALID");
+            const runtime = this.registry.get(nativeThreadId);
+            if (!runtime) return null;
+            const excluded = new Set(input.excludeTurnIds.map((turnId) => boundedId(turnId, "NATIVE_TURN_ID")));
+            const read = await runtime.readThread();
+            if (read.nativeThreadId !== nativeThreadId) throw new Error("NATIVE_TURN_THREAD_MISMATCH");
+            const matches = read.turns
+              .filter((turn) => turn.id !== null && !excluded.has(turn.id))
+              .filter((turn) => turn.items.some((item) => item.type === "userMessage" && typeof item.text === "string" && hash(item.text) === promptSha256))
+              .map((turn) => turn.id!)
+              .filter((turnId, index, values) => values.indexOf(turnId) === index);
+            if (matches.length !== 1) return null;
+            const nativeTurnId = boundedId(matches[0]!, "NATIVE_TURN_ID");
+            const existing = this.turns.get(nativeTurnId);
+            this.turns.set(nativeTurnId, { nativeThreadId, completion: existing?.completion ?? null, completed: existing?.completed ?? null });
+            return nativeTurnId;
+          }
+
+            async runtimeCapability(): Promise<ProviderRuntimeCapability> {
+          ''',
+          )
+
+          replace_once(
+              "src/automation/planner-provider-integration.ts",
+              '''function promotedPlan(snapshot: Awaited<ReturnType<AutomationStore["snapshot"]>>, intentId: string): PlanVersion | null {
+            const event = [...snapshot.auditEvents].reverse().find((item) => item.eventType === "PLANNER_PLAN_PROMOTED" && (item.correlationId === intentId || item.boundedPayload.actionIntentId === intentId));
+            if (!event) return null;
+            return snapshot.planVersions.find((item) => item.planVersionId === event.entityId) ?? null;
+          }
+          ''',
+              '''function promotedPlan(snapshot: Awaited<ReturnType<AutomationStore["snapshot"]>>, intentId: string): PlanVersion | null {
+            const event = [...snapshot.auditEvents].reverse().find((item) => item.eventType === "PLANNER_PLAN_PROMOTED" && (item.correlationId === intentId || item.boundedPayload.actionIntentId === intentId));
+            if (!event) return null;
+            return snapshot.planVersions.find((item) => item.planVersionId === event.entityId) ?? null;
+          }
+
+          function latestAttemptForIntent(snapshot: Awaited<ReturnType<AutomationStore["snapshot"]>>, intentId: string): ActionAttempt | null {
+            return snapshot.actionAttempts
+              .filter((item) => item.intentId === intentId)
+              .sort((left, right) => left.dispatchNumber - right.dispatchNumber)
+              .at(-1) ?? null;
+          }
+          ''',
+          )
+          replace_once(
+              "src/automation/planner-provider-integration.ts",
+              '''      const existingAttempt = snapshot.actionAttempts.find((item) => item.intentId === existingIntent.intentId) ?? null;
+          ''',
+              '''      const existingAttempt = latestAttemptForIntent(snapshot, existingIntent.intentId);
+          ''',
+          )
+          replace_once(
+              "src/automation/planner-provider-integration.ts",
+              '''    const request = requestFromIntent(intent);
+            const requestExternal = providerRefFor(snapshot, attempt, this.provider.provider);
+            if (!requestExternal) return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, request, errorCode: "REQUEST_CORRELATION_MISSING", errorMessage: "The existing Planner request reference is unavailable; no replacement request is allowed." });
+            if (snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId)?.status === "FAILED") return emptyResult({ status: "PROVIDER_FAILED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, providerRequestRef: requestExternal.opaqueId, providerRequestExternalRef: requestExternal.externalRefId, receiptId: snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId)?.receiptId ?? null, request, errorCode: "PROVIDER_FAILED", errorMessage: "The existing Planner provider attempt is terminally failed." });
+            const providerSemanticRef = attempt.providerSemanticSha256 ?? null;
+            const requestCorrelation = correlation(intent, attempt, request, providerSemanticRef);
+          ''',
+              '''    const request = requestFromIntent(intent);
+            let reconciledAttempt = attempt;
+            let requestExternal = providerRefFor(snapshot, attempt, this.provider.provider);
+            if (!requestExternal && this.provider.resolveRequestByCorrelation && intent.idempotencyRef) {
+              const excludeProviderRequestRefs = snapshot.actionAttempts
+                .filter((candidate) => candidate.intentId === intent.intentId && candidate.actionAttemptId !== attempt.actionAttemptId)
+                .map((candidate) => providerRefFor(snapshot, candidate, this.provider.provider)?.opaqueId ?? null)
+                .filter((value): value is string => value !== null);
+              let recovered: Awaited<ReturnType<NonNullable<AutomationProviderPort["resolveRequestByCorrelation"]>>>;
+              try {
+                recovered = await this.provider.resolveRequestByCorrelation({
+                  idempotencyRef: intent.idempotencyRef,
+                  correlation: correlation(intent, attempt, request),
+                  inputRef: request.inputRefs[0] ?? null,
+                  excludeProviderRequestRefs,
+                });
+              } catch (error) {
+                return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, request, errorCode: "REQUEST_RECOVERY_LOOKUP_FAILED", errorMessage: errorMessage(error) });
+              }
+              if (recovered) {
+                try {
+                  const persisted = await this.store.persistActionAttemptProviderRequest({
+                    projectId: project.projectId,
+                    actionAttemptId: attempt.actionAttemptId,
+                    provider: this.provider.provider,
+                    providerRequestRef: recovered.providerRequestRef,
+                    providerSemanticSha256: recovered.semanticRef,
+                  });
+                  requestExternal = { externalRefId: persisted.externalRef.externalRefId, opaqueId: persisted.externalRef.opaqueId };
+                  reconciledAttempt = persisted.attempt;
+                } catch (error) {
+                  return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, providerRequestRef: recovered.providerRequestRef, request, errorCode: "REQUEST_RECOVERY_PERSIST_FAILED", errorMessage: errorMessage(error) });
+                }
+              }
+            }
+            if (!requestExternal) return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, request, errorCode: "REQUEST_CORRELATION_MISSING", errorMessage: "The existing Planner request reference is unavailable; no replacement request is allowed." });
+            if (snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId)?.status === "FAILED") return emptyResult({ status: "PROVIDER_FAILED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, providerRequestRef: requestExternal.opaqueId, providerRequestExternalRef: requestExternal.externalRefId, receiptId: snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId)?.receiptId ?? null, request, errorCode: "PROVIDER_FAILED", errorMessage: "The existing Planner provider attempt is terminally failed." });
+            const providerSemanticRef = reconciledAttempt.providerSemanticSha256 ?? null;
+            const requestCorrelation = correlation(intent, reconciledAttempt, request, providerSemanticRef);
+          ''',
+          )
+          replace_once(
+              "src/automation/planner-provider-integration.ts",
+              '''    return this.finishObservation({ projectId: project.projectId, intent, attempt, request, providerRequestRef: requestExternal.opaqueId, requestExternal, observation, providerSemanticRef, reconcile: true });
+          ''',
+              '''    return this.finishObservation({ projectId: project.projectId, intent, attempt: reconciledAttempt, request, providerRequestRef: requestExternal.opaqueId, requestExternal, observation, providerSemanticRef, reconcile: true });
+          ''',
+          )
+          replace_once(
+              "src/automation/planner-provider-integration.ts",
+              '''    const attempt = snapshot.actionAttempts.find((item) => item.intentId === intent.intentId) ?? null;
+            const receipt = attempt ? snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId) ?? null : null;
+            const plan = promotedPlan(snapshot, intent.intentId);
+          ''',
+              '''    const attempt = latestAttemptForIntent(snapshot, intent.intentId);
+            const receipt = attempt ? snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId) ?? null : null;
+            const plan = promotedPlan(snapshot, intent.intentId);
+          ''',
+          )
+          replace_once(
+              "src/automation/planner-provider-integration.ts",
+              '''    const attempt = snapshot.actionAttempts.find((item) => item.intentId === intent.intentId) ?? null;
+            const receipt = attempt ? snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId) ?? null : null;
+            return { actionIntentId: intent.intentId, actionAttemptId: attempt?.actionAttemptId ?? null, receipt: receipt ? clone(receipt) : null, planVersion: clone(promotedPlan(snapshot, intent.intentId)) };
+          ''',
+              '''    const attempt = latestAttemptForIntent(snapshot, intent.intentId);
+            const receipt = attempt ? snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId) ?? null : null;
+            return { actionIntentId: intent.intentId, actionAttemptId: attempt?.actionAttemptId ?? null, receipt: receipt ? clone(receipt) : null, planVersion: clone(promotedPlan(snapshot, intent.intentId)) };
+          ''',
+          )
+
+          replace_once(
+              "tests/stage-k1-c-planner-provider.test.ts",
+              '''  providerResultHash: string | null = null;
+          ''',
+              '''  providerResultHash: string | null = null;
+            resolvedRequestRef: string | null = null;
+            resolveCount = 0;
+            lastRecoveryInputRef: string | null = null;
+            lastExcludedProviderRequestRefs: readonly string[] = [];
+          ''',
+          )
+          replace_once(
+              "tests/stage-k1-c-planner-provider.test.ts",
+              '''  async submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted> {
+          ''',
+              '''  async resolveRequestByCorrelation(input: { idempotencyRef: string; correlation: ProviderCorrelation; inputRef?: string | null; excludeProviderRequestRefs?: readonly string[] }): Promise<{ providerRequestRef: string; semanticRef: string | null } | null> {
+            this.resolveCount += 1;
+            this.lastRecoveryInputRef = input.inputRef ?? null;
+            this.lastExcludedProviderRequestRefs = [...(input.excludeProviderRequestRefs ?? [])];
+            return this.resolvedRequestRef ? { providerRequestRef: this.resolvedRequestRef, semanticRef: "provider-semantic-1" } : null;
+          }
+
+            async submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted> {
+          ''',
+          )
+          marker = '''test("K1-C rejects a RequirementVersion from another project", async () => {'''
+          recovery_test = '''test("K1-C recovers a missing accepted provider request identity without resubmission", async () => {
+            const value = await fixture();
+            const provider = new FakePlannerProvider();
+            provider.submitError = new Error("APP_SERVER_TIMEOUT");
+            const inputRef = "automation-input-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            try {
+              const service = createPlannerProviderIntegrationService({ store: value.store, provider });
+              const first = await service.createPlanFromRequirement({ projectId: PROJECT_ID, providerTargetRef: TARGET, inputRefs: [inputRef] });
+              assert.equal(first.status, "RECOVERY_REQUIRED");
+              assert.equal(provider.submitted.length, 1);
+              assert.equal((await value.store.snapshot()).actionAttempts[0]?.providerRequestRef, null, "submit timeout may lose the provider request identity before local persistence");
+
+              provider.resolvedRequestRef = "planner-request-1";
+              provider.submitError = null;
+              const recovered = await service.reconcilePlannerRequest({ projectId: PROJECT_ID, actionAttemptId: first.actionAttemptId! });
+              assert.equal(recovered.status, "PLAN_READY");
+              assert.equal(provider.submitted.length, 1, "read-only identity recovery must never resubmit the Planner request");
+              assert.equal(provider.resolveCount, 1);
+              assert.equal(provider.lastRecoveryInputRef, inputRef);
+              assert.deepEqual(provider.lastExcludedProviderRequestRefs, []);
+              assert.equal(provider.reconcileCount, 1);
+              const snapshot = await value.store.snapshot();
+              assert.equal(snapshot.planVersions.length, 1);
+              assert.equal(snapshot.automationProjects[0]?.activePlanVersionId, recovered.planVersion?.planVersionId);
+              assert.ok(snapshot.actionAttempts[0]?.providerRequestRef, "recovered provider request identity must be persisted before reconciliation");
+            } finally {
+              await dispose(value);
+            }
+          });
+
+          '''
+          replace_once("tests/stage-k1-c-planner-provider.test.ts", marker, recovery_test + marker)
+
+          retry_anchor = '''    assert.equal(snapshot.automationProjects[0]?.activePlanVersionId, second.planVersion?.planVersionId);
+
+              const replay = await service.retryPlannerRequest({ projectId: PROJECT_ID, actionIntentId: first.actionIntentId! });
+          '''
+          retry_replacement = '''    assert.equal(snapshot.automationProjects[0]?.activePlanVersionId, second.planVersion?.planVersionId);
+              const latestStatus = await service.plannerStatus({ projectId: PROJECT_ID, actionIntentId: first.actionIntentId! });
+              const latestResult = await service.plannerResult({ projectId: PROJECT_ID, actionIntentId: first.actionIntentId! });
+              assert.equal(latestStatus.actionAttemptId, second.actionAttemptId, "Planner status must report the latest retry attempt");
+              assert.equal(latestResult.actionAttemptId, second.actionAttemptId, "Planner result must report the latest retry attempt");
+
+              const replay = await service.retryPlannerRequest({ projectId: PROJECT_ID, actionIntentId: first.actionIntentId! });
+          '''
+          replace_once("tests/stage-k1-c-planner-provider.test.ts", retry_anchor, retry_replacement)
+
+          replace_once(
+              "tests/arch-r2-native-provider.test.ts",
+              '''test("ARCH-R2 Native submit timeout produces no fabricated acceptance and no internal retry", async () => {
+          ''',
+              '''test("ARCH-R2 Native recovery resolves an existing Turn by opaque input identity without dispatch", async () => {
+            const nativeRuntime = createRuntime();
+            const promptSha256 = "a".repeat(64);
+            nativeRuntime.resolveTurnByPromptSha256 = async (input) => {
+              assert.equal(input.nativeThreadId, "thread-r2");
+              assert.equal(input.promptSha256, promptSha256);
+              assert.deepEqual(input.excludeTurnIds, ["turn-old"]);
+              return "turn-r2";
+            };
+            const port = provider(nativeRuntime);
+            const recovered = await port.resolveRequestByCorrelation!({
+              idempotencyRef: correlation.idempotencyRef!,
+              correlation,
+              inputRef: `automation-input-v1:${promptSha256}`,
+              excludeProviderRequestRefs: ["turn-old"],
+            });
+            assert.deepEqual(recovered, { providerRequestRef: "turn-r2", semanticRef: promptSha256 });
+            assert.equal(nativeRuntime.starts, 0, "identity recovery must not call turn/start");
+          });
+
+          test("ARCH-R2 Native submit timeout produces no fabricated acceptance and no internal retry", async () => {
+          ''',
+          )
+
+          replace_once(
+              "tests/arch-r2-shared-native-runtime.test.ts",
+              '''import assert from "node:assert/strict";
+          ''',
+              '''import assert from "node:assert/strict";
+          import { createHash } from "node:crypto";
+          ''',
+          )
+          shared_test = '''
+          test("ARCH-R2 shared Native recovery selects exactly one unbound Turn with the exact prompt hash", async () => {
+            const h = harness();
+            const prompt = "planner prompt";
+            const promptSha256 = createHash("sha256").update(prompt, "utf8").digest("hex");
+            const userItem = (id: string) => ({ id: `item-${id}`, type: "userMessage", status: null, kind: "known" as const, text: prompt, input: null, output: null, error: null, raw: {} });
+            h.setRead({
+              nativeThreadId: "thread-r2-shared",
+              status: "ready",
+              title: null,
+              cwd: "/workspace",
+              error: null,
+              turns: [
+                { id: "turn-old", status: "completed", error: null, items: [userItem("old")], itemCount: 1, raw: {} },
+                { id: "turn-recovered", status: "completed", error: null, items: [userItem("recovered")], itemCount: 1, raw: {} },
+              ],
+              raw: {},
+            });
+            const adapter = new SharedNativeProviderRuntimeAdapter({ registry: h.registry, runtimeId: "workbench-process-r2" });
+
+            assert.equal(await adapter.resolveTurnByPromptSha256({ nativeThreadId: "thread-r2-shared", promptSha256, excludeTurnIds: ["turn-old"] }), "turn-recovered");
+            assert.equal(await adapter.resolveTurnByPromptSha256({ nativeThreadId: "thread-r2-shared", promptSha256, excludeTurnIds: [] }), null, "ambiguous same-prompt history must fail closed");
+            assert.equal(h.counters.starts, 0, "read-only recovery must never start a Native Turn");
+          });
+          '''
+          with Path("tests/arch-r2-shared-native-runtime.test.ts").open("a", encoding="utf-8") as handle:
+              handle.write(shared_test)
+
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Focused Planner recovery regression
+        run: node --experimental-strip-types --test tests/stage-k1-c-planner-provider.test.ts tests/arch-r2-native-provider.test.ts tests/arch-r2-shared-native-runtime.test.ts
+      - name: Full tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit verified repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/automation/adapters.ts src/automation/planner-provider-integration.ts src/codex/automation/native-provider-port.ts src/main/native-provider-runtime-adapter.ts tests/stage-k1-c-planner-provider.test.ts tests/arch-r2-native-provider.test.ts tests/arch-r2-shared-native-runtime.test.ts
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "Fix: recover missing Planner Native request identity"
+          git push origin HEAD:release/v0.1-integration
