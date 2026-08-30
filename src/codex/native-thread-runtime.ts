@@ -646,7 +646,7 @@ export class NativeThreadRuntime {
           lastError: details,
         });
       };
-      if (acceptanceTimedOut || recoveryRequired) void persistFailure();
+      if (acceptanceTimedOut) void persistFailure();
       else await persistFailure();
       throw normalized;
     } finally {
