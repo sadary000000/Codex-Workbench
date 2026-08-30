@@ -131,6 +131,27 @@ export class SharedNativeProviderRuntimeAdapter implements NativeProviderRuntime
     return this.registry.get(boundedId(nativeThreadId, "NATIVE_THREAD_ID")) !== null;
   }
 
+  async resolveTurnByPromptSha256(input: { nativeThreadId: string; promptSha256: string; excludeTurnIds: readonly string[] }): Promise<string | null> {
+  const nativeThreadId = boundedId(input.nativeThreadId, "NATIVE_THREAD_ID");
+  const promptSha256 = input.promptSha256.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(promptSha256)) throw new Error("NATIVE_PROMPT_SHA256_INVALID");
+  const runtime = this.registry.get(nativeThreadId);
+  if (!runtime) return null;
+  const excluded = new Set(input.excludeTurnIds.map((turnId) => boundedId(turnId, "NATIVE_TURN_ID")));
+  const read = await runtime.readThread();
+  if (read.nativeThreadId !== nativeThreadId) throw new Error("NATIVE_TURN_THREAD_MISMATCH");
+  const matches = read.turns
+    .filter((turn) => turn.id !== null && !excluded.has(turn.id))
+    .filter((turn) => turn.items.some((item) => item.type === "userMessage" && typeof item.text === "string" && hash(item.text) === promptSha256))
+    .map((turn) => turn.id!)
+    .filter((turnId, index, values) => values.indexOf(turnId) === index);
+  if (matches.length !== 1) return null;
+  const nativeTurnId = boundedId(matches[0]!, "NATIVE_TURN_ID");
+  const existing = this.turns.get(nativeTurnId);
+  this.turns.set(nativeTurnId, { nativeThreadId, completion: existing?.completion ?? null, completed: existing?.completed ?? null });
+  return nativeTurnId;
+}
+
   async runtimeCapability(): Promise<ProviderRuntimeCapability> {
     const attached = this.registry.list();
     const available = attached.some(({ runtime }) => !["FAILED", "DISCONNECTED", "RECOVERY_REQUIRED", "CLOSED"].includes(runtime.state));

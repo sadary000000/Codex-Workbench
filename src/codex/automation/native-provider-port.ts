@@ -19,6 +19,8 @@ import {
 
 const TARGET_PREFIX = "native-thread-v1:";
 const RESULT_PREFIX = "native-turn-result-v1:";
+const INPUT_REF_PREFIX = "automation-input-v1:";
+const SHA256_HEX = /^[a-f0-9]{64}$/i;
 
 export type NativeProviderTurnState = "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED" | "UNKNOWN";
 
@@ -37,6 +39,8 @@ export interface NativeProviderTurnView {
  */
 export interface NativeProviderRuntimePort {
   hasThread(nativeThreadId: string): Promise<boolean>;
+  /** Read-only identity recovery; it must never start or resume a Turn. */
+  resolveTurnByPromptSha256?(input: { nativeThreadId: string; promptSha256: string; excludeTurnIds: readonly string[] }): Promise<string | null>;
   startTurn(input: { nativeThreadId: string; prompt: string }): Promise<{ nativeTurnId: string }>;
   readTurn(nativeTurnId: string): Promise<NativeProviderTurnView>;
   reconcileTurn(nativeTurnId: string): Promise<NativeProviderTurnView>;
@@ -68,6 +72,12 @@ function parseNativeThreadTargetRef(value: ProviderTargetRef): string {
   }
   if (!decoded || decoded.length > 512 || /[\r\n]/.test(decoded)) throw new Error("NATIVE_TARGET_REF_INVALID");
   return decoded;
+}
+
+function parseAutomationInputRef(value: string | null | undefined): string | null {
+  if (!value?.startsWith(INPUT_REF_PREFIX)) return null;
+  const digest = value.slice(INPUT_REF_PREFIX.length);
+  return SHA256_HEX.test(digest) ? digest.toLowerCase() : null;
 }
 
 function ensureCorrelation(correlation: ProviderCorrelation): void {
@@ -191,6 +201,22 @@ export class NativeAutomationProviderPort implements AutomationProviderPort {
     if (capability.status === "WAITING") return [{ provider: "NATIVE", code: "BUSY" }];
     return [{ provider: "NATIVE", code: "TARGET_UNREACHABLE" }];
   }
+
+  async resolveRequestByCorrelation(input: { idempotencyRef: string; correlation: ProviderCorrelation; inputRef?: string | null; excludeProviderRequestRefs?: readonly string[] }): Promise<string | null> {
+  ensureCorrelation(input.correlation);
+  if (!input.idempotencyRef || input.idempotencyRef !== input.correlation.idempotencyRef) throw new Error("PROVIDER_CORRELATION_REQUIRED");
+  if (!this.runtime.resolveTurnByPromptSha256) return null;
+  const providerScopeRef = input.correlation.providerScopeRef;
+  if (!providerScopeRef) return null;
+  const nativeThreadId = parseNativeThreadTargetRef(providerScopeRef);
+  const promptSha256 = parseAutomationInputRef(input.inputRef);
+  if (!promptSha256 || !(await this.runtime.hasThread(nativeThreadId))) return null;
+  return this.runtime.resolveTurnByPromptSha256({
+    nativeThreadId,
+    promptSha256,
+    excludeTurnIds: input.excludeProviderRequestRefs ?? [],
+  });
+}
 
   async submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted> {
     if (input.provider !== "NATIVE") throw new Error("PROVIDER_ID_MISMATCH");

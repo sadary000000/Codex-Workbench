@@ -165,8 +165,8 @@ export interface AutomationProviderPort {
   submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted>;
   observe(input: { providerRequestRef: ProviderRequestRef; correlation?: ProviderCorrelation }): Promise<ProviderObservation>;
   reconcile(input: { providerRequestRef: ProviderRequestRef; correlation: ProviderCorrelation }): Promise<ProviderObservation>;
-  /** Read-only crash recovery lookup; it may only resolve an existing request by idempotency. */
-  resolveRequestByCorrelation?(input: { idempotencyRef: string; correlation: ProviderCorrelation }): Promise<ProviderRequestRef | null>;
+  /** Read-only crash recovery lookup; it may only resolve an already-existing request. */
+  resolveRequestByCorrelation?(input: { idempotencyRef: string; correlation: ProviderCorrelation; inputRef?: string | null; excludeProviderRequestRefs?: readonly ProviderRequestRef[] }): Promise<ProviderRequestRef | null>;
   /** Optional provider-owned result read; it never exposes provider internals. */
   readResult?(input: { providerRequestRef: ProviderRequestRef }): Promise<ProviderResult>;
   /** Optional bounded wait used by a synchronous domain operation. */

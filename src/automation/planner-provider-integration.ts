@@ -349,6 +349,19 @@ function promotedPlan(snapshot: Awaited<ReturnType<AutomationStore["snapshot"]>>
   return snapshot.planVersions.find((item) => item.planVersionId === event.entityId) ?? null;
 }
 
+function latestAttemptForIntent(snapshot: Awaited<ReturnType<AutomationStore["snapshot"]>>, intentId: string): ActionAttempt | null {
+  return snapshot.actionAttempts
+    .filter((item) => item.intentId === intentId)
+    .sort((left, right) => left.dispatchNumber - right.dispatchNumber)
+    .at(-1) ?? null;
+}
+
+function automationInputSha256(inputRef: string | null | undefined): string | null {
+  if (!inputRef) return null;
+  const match = /^automation-input-v1:([a-f0-9]{64})$/i.exec(inputRef);
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
 function operationFrom(value: unknown): PlannerProviderOperation {
   if (value === "PLAN_REQUIREMENT" || value === "DETAIL_STAGE") return value;
   throw new PlannerProviderIntegrationError("PLANNER_ACTION_MISMATCH", "Persisted Planner operation is missing or unsupported.");
@@ -436,7 +449,7 @@ export class PlannerProviderIntegrationService {
     const idempotencyRef = plannerRequestIdempotencyRef(request, input.idempotencyRef);
     const existingIntent = snapshot.actionIntents.find((item) => item.projectId === project.projectId && item.idempotencyRef === idempotencyRef);
     if (existingIntent) {
-      const existingAttempt = snapshot.actionAttempts.find((item) => item.intentId === existingIntent.intentId) ?? null;
+      const existingAttempt = latestAttemptForIntent(snapshot, existingIntent.intentId);
       const existingPlan = promotedPlan(snapshot, existingIntent.intentId);
       if (existingPlan) return emptyResult({ status: "PLAN_READY", actionIntentId: existingIntent.intentId, actionAttemptId: existingAttempt?.actionAttemptId ?? null, planVersion: clone(existingPlan), request });
       if (existingIntent.state === "FAILED" && existingAttempt?.plannerResultClassification === "INVALID_OUTPUT_RETRYABLE") {
@@ -591,18 +604,51 @@ export class PlannerProviderIntegrationService {
     const existingPlan = promotedPlan(snapshot, intent.intentId);
     if (existingPlan) return emptyResult({ status: "PLAN_READY", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, providerRequestRef: this.providerRequestOpaque(snapshot, attempt), providerRequestExternalRef: attempt.providerRequestRef, planVersion: clone(existingPlan) });
     const request = requestFromIntent(intent);
-    const requestExternal = providerRefFor(snapshot, attempt, this.provider.provider);
-    if (!requestExternal) return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, request, errorCode: "REQUEST_CORRELATION_MISSING", errorMessage: "The existing Planner request reference is unavailable; no replacement request is allowed." });
+    let reconciledAttempt = attempt;
+    let requestExternal = providerRefFor(snapshot, attempt, this.provider.provider);
+    if (!requestExternal && this.provider.resolveRequestByCorrelation && intent.idempotencyRef) {
+    const excludeProviderRequestRefs = snapshot.actionAttempts
+      .filter((candidate) => candidate.intentId === intent.intentId && candidate.actionAttemptId !== attempt.actionAttemptId)
+      .map((candidate) => providerRefFor(snapshot, candidate, this.provider.provider)?.opaqueId ?? null)
+      .filter((value): value is string => value !== null);
+    let recoveredProviderRequestRef: string | null;
+    try {
+      recoveredProviderRequestRef = await this.provider.resolveRequestByCorrelation({
+        idempotencyRef: intent.idempotencyRef,
+        correlation: correlation(intent, attempt, request),
+        inputRef: request.inputRefs[0] ?? null,
+        excludeProviderRequestRefs,
+      });
+    } catch (error) {
+      return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, request, errorCode: "REQUEST_RECOVERY_LOOKUP_FAILED", errorMessage: errorMessage(error) });
+    }
+    if (recoveredProviderRequestRef) {
+      try {
+        const persisted = await this.store.persistActionAttemptProviderRequest({
+          projectId: project.projectId,
+          actionAttemptId: attempt.actionAttemptId,
+          provider: this.provider.provider,
+          providerRequestRef: recoveredProviderRequestRef,
+          providerSemanticSha256: automationInputSha256(request.inputRefs[0] ?? null),
+        });
+        requestExternal = { externalRefId: persisted.externalRef.externalRefId, opaqueId: persisted.externalRef.opaqueId };
+        reconciledAttempt = persisted.attempt;
+      } catch (error) {
+        return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, providerRequestRef: recoveredProviderRequestRef, request, errorCode: "REQUEST_RECOVERY_PERSIST_FAILED", errorMessage: errorMessage(error) });
+      }
+    }
+  }
+  if (!requestExternal) return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, request, errorCode: "REQUEST_CORRELATION_MISSING", errorMessage: "The existing Planner request reference is unavailable; no replacement request is allowed." });
     if (snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId)?.status === "FAILED") return emptyResult({ status: "PROVIDER_FAILED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, providerRequestRef: requestExternal.opaqueId, providerRequestExternalRef: requestExternal.externalRefId, receiptId: snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId)?.receiptId ?? null, request, errorCode: "PROVIDER_FAILED", errorMessage: "The existing Planner provider attempt is terminally failed." });
-    const providerSemanticRef = attempt.providerSemanticSha256 ?? null;
-    const requestCorrelation = correlation(intent, attempt, request, providerSemanticRef);
+    const providerSemanticRef = reconciledAttempt.providerSemanticSha256 ?? null;
+    const requestCorrelation = correlation(intent, reconciledAttempt, request, providerSemanticRef);
     let observation: ProviderObservation;
     try {
       observation = await this.provider.reconcile({ providerRequestRef: requestExternal.opaqueId, correlation: requestCorrelation });
     } catch (error) {
       return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: attempt.actionAttemptId, providerRequestRef: requestExternal.opaqueId, providerRequestExternalRef: requestExternal.externalRefId, request, errorCode: "RECONCILE_FAILED", errorMessage: errorMessage(error) });
     }
-    return this.finishObservation({ projectId: project.projectId, intent, attempt, request, providerRequestRef: requestExternal.opaqueId, requestExternal, observation, providerSemanticRef, reconcile: true });
+    return this.finishObservation({ projectId: project.projectId, intent, attempt: reconciledAttempt, request, providerRequestRef: requestExternal.opaqueId, requestExternal, observation, providerSemanticRef, reconcile: true });
   }
 
   /** Pure status query; it never calls the provider or mutates persistence. */
@@ -610,7 +656,7 @@ export class PlannerProviderIntegrationService {
     const snapshot = await this.store.snapshot();
     const intent = snapshot.actionIntents.find((item) => item.projectId === input.projectId && item.intentId === input.actionIntentId);
     if (!intent) throw new PlannerProviderIntegrationError("PLANNER_ACTION_NOT_FOUND", "Planner ActionIntent was not found.");
-    const attempt = snapshot.actionAttempts.find((item) => item.intentId === intent.intentId) ?? null;
+    const attempt = latestAttemptForIntent(snapshot, intent.intentId);
     const receipt = attempt ? snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId) ?? null : null;
     const plan = promotedPlan(snapshot, intent.intentId);
     return { actionIntentId: intent.intentId, actionAttemptId: attempt?.actionAttemptId ?? null, state: intent.state, attemptState: attempt?.state ?? null, recoveryState: attempt?.recoveryState ?? null, receiptStatus: receipt?.status ?? null, planVersionId: plan?.planVersionId ?? null };
@@ -621,7 +667,7 @@ export class PlannerProviderIntegrationService {
     const snapshot = await this.store.snapshot();
     const intent = snapshot.actionIntents.find((item) => item.projectId === input.projectId && item.intentId === input.actionIntentId);
     if (!intent) throw new PlannerProviderIntegrationError("PLANNER_ACTION_NOT_FOUND", "Planner ActionIntent was not found.");
-    const attempt = snapshot.actionAttempts.find((item) => item.intentId === intent.intentId) ?? null;
+    const attempt = latestAttemptForIntent(snapshot, intent.intentId);
     const receipt = attempt ? snapshot.actionReceipts.find((item) => item.actionAttemptId === attempt.actionAttemptId) ?? null : null;
     return { actionIntentId: intent.intentId, actionAttemptId: attempt?.actionAttemptId ?? null, receipt: receipt ? clone(receipt) : null, planVersion: clone(promotedPlan(snapshot, intent.intentId)) };
   }

@@ -97,6 +97,10 @@ class FakePlannerProvider implements AutomationProviderPort {
   submitError: Error | null = null;
   observationResultHash: string | null = null;
   providerResultHash: string | null = null;
+  resolvedRequestRef: string | null = null;
+  resolveCount = 0;
+  lastRecoveryInputRef: string | null = null;
+  lastExcludedProviderRequestRefs: readonly string[] = [];
 
   async resolveTarget(input: { workflowRole: string | null; providerTargetRef: string }): Promise<ProviderTargetResolution> {
     return { provider: this.provider, workflowRole: input.workflowRole, providerTargetRef: input.providerTargetRef, status: "AVAILABLE", capability: "AVAILABLE" };
@@ -105,6 +109,13 @@ class FakePlannerProvider implements AutomationProviderPort {
   async capabilities(): Promise<readonly ProviderCapabilityFact[]> {
     return [{ provider: this.provider, code: "AVAILABLE" }];
   }
+
+  async resolveRequestByCorrelation(input: { idempotencyRef: string; correlation: ProviderCorrelation; inputRef?: string | null; excludeProviderRequestRefs?: readonly string[] }): Promise<string | null> {
+  this.resolveCount += 1;
+  this.lastRecoveryInputRef = input.inputRef ?? null;
+  this.lastExcludedProviderRequestRefs = [...(input.excludeProviderRequestRefs ?? [])];
+  return this.resolvedRequestRef;
+}
 
   async submit(input: ProviderSubmitInput): Promise<ProviderRequestAccepted> {
     this.submitted.push(input);
@@ -315,13 +326,14 @@ test("K1-C promotion cannot be invoked by a non-Planner ActionIntent", async () 
   }
 });
 
-test("K1-C ambiguous submit failure is UNKNOWN and replay/reconcile never resubmits", async () => {
+test("K1-C ambiguous submit failure recovers an existing provider request without resubmission", async () => {
   const value = await fixture();
   const provider = new FakePlannerProvider();
+  const inputRef = "automation-input-v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   provider.submitError = new Error("transport timeout after possible acceptance");
   try {
     const service = createPlannerProviderIntegrationService({ store: value.store, provider });
-    const first = await service.createPlanFromRequirement({ projectId: PROJECT_ID, providerTargetRef: TARGET, planningConstraints: ["no resend"] });
+    const first = await service.createPlanFromRequirement({ projectId: PROJECT_ID, providerTargetRef: TARGET, planningConstraints: ["no resend"], inputRefs: [inputRef] });
     assert.equal(first.status, "RECOVERY_REQUIRED");
     assert.equal(first.errorCode, "SUBMIT_OUTCOME_UNKNOWN");
     assert.equal(provider.submitted.length, 1);
@@ -331,16 +343,24 @@ test("K1-C ambiguous submit failure is UNKNOWN and replay/reconcile never resubm
     assert.equal(snapshot.actionReceipts[0]?.reconcileState, "RECOVERY_REQUIRED");
     assert.equal(snapshot.planVersions.length, 0);
 
-    const replay = await service.createPlanFromRequirement({ projectId: PROJECT_ID, providerTargetRef: TARGET, planningConstraints: ["no resend"] });
+    const replay = await service.createPlanFromRequirement({ projectId: PROJECT_ID, providerTargetRef: TARGET, planningConstraints: ["no resend"], inputRefs: [inputRef] });
     assert.equal(replay.status, "RECOVERY_REQUIRED");
     assert.equal(replay.errorCode, "NO_BLIND_RESEND");
     assert.equal(provider.submitted.length, 1);
 
-    const reconcile = await service.reconcilePlannerRequest({ projectId: PROJECT_ID, actionAttemptId: first.actionAttemptId! });
-    assert.equal(reconcile.status, "RECOVERY_REQUIRED");
-    assert.equal(reconcile.errorCode, "REQUEST_CORRELATION_MISSING");
-    assert.equal(provider.reconcileCount, 0, "without an accepted opaque request ref, reconcile must not guess or call the provider");
-    assert.equal(provider.submitted.length, 1);
+    provider.resolvedRequestRef = "planner-request-1";
+  provider.submitError = null;
+  const reconcile = await service.reconcilePlannerRequest({ projectId: PROJECT_ID, actionAttemptId: first.actionAttemptId! });
+  assert.equal(reconcile.status, "PLAN_READY");
+  assert.equal(provider.resolveCount, 1);
+  assert.equal(provider.lastRecoveryInputRef, inputRef);
+  assert.deepEqual(provider.lastExcludedProviderRequestRefs, []);
+  assert.equal(provider.reconcileCount, 1);
+  assert.equal(provider.submitted.length, 1, "read-only recovery must never resubmit the Planner request");
+  const recoveredSnapshot = await value.store.snapshot();
+  assert.equal(recoveredSnapshot.planVersions.length, 1);
+  assert.equal(recoveredSnapshot.automationProjects[0]?.activePlanVersionId, reconcile.planVersion?.planVersionId);
+  assert.ok(recoveredSnapshot.actionAttempts[0]?.providerRequestRef, "recovered provider request identity must be persisted before promotion");
   } finally {
     await dispose(value);
   }
@@ -469,6 +489,10 @@ test("PRE-R2 retries a terminally observed invalid Planner payload once and prom
     assert.equal(snapshot.actionReceipts.length, 2);
     assert.equal(snapshot.planVersions.length, 1);
     assert.equal(snapshot.automationProjects[0]?.activePlanVersionId, second.planVersion?.planVersionId);
+    const latestStatus = await service.plannerStatus({ projectId: PROJECT_ID, actionIntentId: first.actionIntentId! });
+    const latestResult = await service.plannerResult({ projectId: PROJECT_ID, actionIntentId: first.actionIntentId! });
+    assert.equal(latestStatus.actionAttemptId, second.actionAttemptId, "Planner status must report the latest retry attempt");
+    assert.equal(latestResult.actionAttemptId, second.actionAttemptId, "Planner result must report the latest retry attempt");
 
     const replay = await service.retryPlannerRequest({ projectId: PROJECT_ID, actionIntentId: first.actionIntentId! });
     assert.equal(replay.status, "PLAN_READY");

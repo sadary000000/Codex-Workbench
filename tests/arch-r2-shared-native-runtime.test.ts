@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { SharedNativeProviderRuntimeAdapter, type NativeRuntimeRegistryPort } from "../src/main/native-provider-runtime-adapter.ts";
 import type { ThreadReadView, TurnResult } from "../src/shared/runtime-types.ts";
@@ -95,4 +96,29 @@ test("ARCH-R2 Native runtime capability reports shared runtime availability with
   assert.deepEqual(capability.supportedOperations, ["PROMPT", "RETRY", "VERIFY"]);
   assert.equal(capability.allowDataEgress, false);
   assert.equal(capability.allowSideEffects, false);
+});
+
+
+test("ARCH-R2 shared Native recovery selects exactly one unbound Turn with the exact prompt hash", async () => {
+  const h = harness();
+  const prompt = "planner prompt";
+  const promptSha256 = createHash("sha256").update(prompt, "utf8").digest("hex");
+  const view: ThreadReadView = {
+    nativeThreadId: "thread-r2-shared",
+    status: "ready",
+    title: null,
+    cwd: "/workspace",
+    error: null,
+    turns: [
+      { id: "turn-old", status: "completed", error: null, items: [{ id: "item-old", type: "userMessage", status: null, kind: "known", text: prompt, input: null, output: null, error: null, raw: {} }], itemCount: 1, raw: {} },
+      { id: "turn-recovered", status: "completed", error: null, items: [{ id: "item-recovered", type: "userMessage", status: null, kind: "known", text: prompt, input: null, output: null, error: null, raw: {} }], itemCount: 1, raw: {} },
+    ],
+    raw: {},
+  };
+  h.setRead(view);
+  const adapter = new SharedNativeProviderRuntimeAdapter({ registry: h.registry, runtimeId: "workbench-process-r2" });
+
+  assert.equal(await adapter.resolveTurnByPromptSha256({ nativeThreadId: "thread-r2-shared", promptSha256, excludeTurnIds: ["turn-old"] }), "turn-recovered");
+  assert.equal(await adapter.resolveTurnByPromptSha256({ nativeThreadId: "thread-r2-shared", promptSha256, excludeTurnIds: [] }), null, "ambiguous same-prompt history must fail closed");
+  assert.equal(h.counters.starts, 0, "read-only recovery must never start a Native Turn");
 });

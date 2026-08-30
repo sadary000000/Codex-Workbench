@@ -178,6 +178,26 @@ test("ARCH-R2 Native observe and reconcile never call startTurn again", async ()
   assert.equal(await port.readResult!({ providerRequestRef: "turn-r2" }).then((value) => value.response), '{"ok":true}');
 });
 
+test("ARCH-R2 Native recovery resolves an existing Turn by opaque input identity without dispatch", async () => {
+  const nativeRuntime = createRuntime();
+  const promptSha256 = "a".repeat(64);
+  nativeRuntime.resolveTurnByPromptSha256 = async (input) => {
+    assert.equal(input.nativeThreadId, "thread-r2");
+    assert.equal(input.promptSha256, promptSha256);
+    assert.deepEqual(input.excludeTurnIds, ["turn-old"]);
+    return "turn-r2";
+  };
+  const port = provider(nativeRuntime);
+  const recovered = await port.resolveRequestByCorrelation!({
+    idempotencyRef: correlation.idempotencyRef!,
+    correlation,
+    inputRef: `automation-input-v1:${promptSha256}`,
+    excludeProviderRequestRefs: ["turn-old"],
+  });
+  assert.equal(recovered, "turn-r2");
+  assert.equal(nativeRuntime.starts, 0, "identity recovery must not call turn/start");
+});
+
 test("ARCH-R2 Native submit timeout produces no fabricated acceptance and no internal retry", async () => {
   const nativeRuntime = createRuntime({ throwOnStart: true });
   const port = provider(nativeRuntime);
