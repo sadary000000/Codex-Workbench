@@ -23,8 +23,13 @@ test("official CLI front door isolates the Electron process tree from parent pip
   assert.match(source, /--user-data-dir=/);
 });
 
-test("package contract emits GUI, CLI front door, and same-package CLI runtime", () => {
+test("package contract emits GUI, CLI front door, same-package CLI runtime, and packaged app payload", () => {
   const packageScript = readFileSync(join(root, "scripts", "package-win.mjs"), "utf8");
+  assert.match(packageScript, /const appRoot = join\(packageRoot, "resources", "app"\);/);
+  assert.match(packageScript, /await mkdir\(appRoot, \{ recursive: true \}\);/);
+  assert.match(packageScript, /join\(appRoot, "dist", directory\)/);
+  assert.match(packageScript, /main: "dist\/main\/main\.js"/);
+  assert.match(packageScript, /default_app\.asar/);
   assert.match(packageScript, /Codex Workbench V1\.exe/);
   assert.match(packageScript, /Codex Workbench CLI\.exe/);
   assert.match(packageScript, /Codex Workbench CLI Runtime\.exe/);
