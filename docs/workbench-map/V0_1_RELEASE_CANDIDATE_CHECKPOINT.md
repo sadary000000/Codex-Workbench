@@ -1,261 +1,216 @@
 # Codex Workbench v0.1 Release Candidate Checkpoint
 
 Checkpoint date: **2026-08-30**
-Status: **REAL SOURCE + PACKAGED E2E PASS — FINAL REGRESSION / PR REVIEW**
+Status: **DETERMINISTIC CLOSURE PASS — CURRENT PRODUCT SNAPSHOT AWAITS REAL SOURCE + PACKAGED E2E RE-RUN**
 
-Git refs, PR metadata, and repository contents are authoritative. This checkpoint advances the durable resume route from the original PR #49 scope-freeze handoff to the current integrated release candidate. The frozen v0.1 scope itself is unchanged.
+Git refs, PR metadata, and repository contents are authoritative. This checkpoint preserves the frozen v0.1 scope and records the exact current product snapshot separately from later test/control-plane/documentation commits.
 
 ## 1. Repository truth
 
 - Repository: `sadary000000/Codex-Workbench`
-- Default/stable branch: `codex/workbench-v1`
-- Current release candidate: PR #50, `release/v0.1-integration`
-- PR #50 base: `workbench/next`
-- PR #50 base SHA at this checkpoint: `ab4423930f8cc633aee0edb21a1172bf59754991`
-- PR #50 exact implementation head tested by both real E2E gates: `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a`
-- PR #50 state: Draft / open / unmerged / mergeable
-- Product-line origin remains PR #48, `feature/automation-project-create-associate`, exact historical endpoint `68faf1ce38c1bd39aadcad3ed3d6382fd3d8a599`
-- Scope-freeze origin remains PR #49, `docs/v0.1-mvp-scope-freeze`
+- Current release candidate: Draft PR #50, branch `release/v0.1-integration`, base `workbench/next`
+- Current exact product implementation snapshot: `64a2d810244b9e8c9b3871c576c772b517922df0`
+- Frozen product test branch: `test/v0.1-release-candidate-snapshot`
+- The snapshot branch currently points exactly to `64a2d810244b9e8c9b3871c576c772b517922df0`.
+- The release branch is allowed to be ahead of that snapshot with test/control-plane/checkpoint-only commits. Before treating any later release-branch head as the same product snapshot, compare it against `64a2d810...` and confirm there is no production/runtime delta.
+- Scope-freeze origin remains PR #49 `docs/v0.1-mvp-scope-freeze`.
 - No merge, branch deletion, force-push, PR close, or ready-for-review transition is authorized by this checkpoint.
 
-## 2. Frozen v0.1 scope remains authoritative
+## 2. Frozen v0.1 scope
 
 Read `docs/V0.1-MVP-SCOPE-FREEZE.md` before changing product scope.
 
-v0.1 still requires only:
+v0.1 requires only:
 
-1. normal Codex-native conversation/coding behavior;
+1. normal Codex-native conversation/coding;
 2. Product Project management and restart persistence;
 3. usable basic Conversation Map / Project Map;
-4. one understandable Automation path from goal -> Requirement -> Plan -> Execute -> Reconcile if needed -> Verify -> Review/Gate -> Advance -> Complete;
-5. a real runnable Windows package and packaged end-to-end validation.
+4. an understandable Automation path: `goal -> Requirement -> Plan -> Execute -> Reconcile if needed -> Verify -> Review/Gate -> Advance -> Complete`;
+5. a runnable Windows package and packaged end-to-end validation.
 
-Manual user clicks between Automation governance stages remain acceptable.
+Manual clicks between Automation governance stages remain acceptable.
 
-Deferred beyond v0.1 remain fully autonomous continuous execution, Attention Center, user-facing Requirement Change/automatic Replan UX, standalone Workflow Map, parallel scheduling, generalized hardware/deployment/GUI adapters, expanded multi-provider UI, cloud/team features, enterprise permissions, advanced backup UI, updater productization, and other large systems not required by the frozen acceptance path.
+Deferred remain fully autonomous continuous execution, Attention Center, user-facing Requirement Change/automatic Replan UX, standalone Workflow Map, parallel scheduling, generalized hardware/deployment/GUI adapters, expanded multi-provider UI, cloud/team, enterprise permissions, advanced backup UI, updater productization, and other systems not required by the frozen acceptance path.
 
-Scope-control rule: if a proposed change is not required to make the frozen acceptance path complete, understandable, reliable, or packageable, defer it.
+Scope rule: if a proposed change is not needed to make the frozen acceptance path complete, understandable, reliable, or packageable, defer it.
 
-## 3. Architecture invariants remain frozen
+## 3. Frozen architecture invariants
 
 - Native Thread/Turn/Item is Codex Runtime Truth.
-- Workbench does not own a second Native transcript.
-- Workbench does not implement a second Native context manager, sandbox, tool executor, or subagent runtime.
-- Ordinary Native execution reuses Codex-native runtime/harness behavior.
-- Product Project and AutomationProject remain distinct identities with explicit association.
-- unlink association != delete AutomationProject.
-- RequirementVersion / PlanVersion and governance state remain Workbench workflow truth.
-- Map remains projection/governance increment, not Runtime Truth.
-- unknown external-provider side effect -> reconcile exact request identity; never blind resend.
-- optional Workbench features must not contaminate ordinary Native Codex context unless explicitly activated.
+- Workbench does not own a second Native transcript/context manager/sandbox/tool executor/subagent runtime.
+- Ordinary Native execution reuses Codex-native runtime behavior.
+- Product Project and AutomationProject are distinct identities with explicit association.
+- RequirementVersion / PlanVersion and governance remain Workbench workflow truth.
+- Map is projection/governance, not Runtime Truth.
+- Unknown external-provider side effect requires reconciliation of the exact request identity; never blind resend.
+- Optional Workbench features must not contaminate ordinary Native Codex context unless explicitly activated.
 
-## 4. Integration stage — complete
+## 4. Integrated release path already closed deterministically
 
-PR #50 was created as the coherent v0.1 candidate instead of merging or rewriting the historical stacked PRs.
+The release candidate already contains and has deterministic regression coverage for:
 
-The integration-only delta after PR #49 synchronized stable repository-test bootstrap/control files into the candidate without changing product runtime behavior. Initial candidate commit:
+- coherent PR #50 integration;
+- minimal Automation Workflow UI cleanup;
+- real Electron/CDP v0.1 E2E harness;
+- Native target canonicalization (`native-thread-v1:*`);
+- conservative first-Requirement PolicyVersion bootstrap;
+- Requirement and Planner provider-binding ownership fixes;
+- provider-neutral Requirement carrier decoding only at the executable provider boundary;
+- explicit Conversation Map and Project Map enable/usability assertions in Real E2E;
+- Windows Codex resolution that survives E2E-isolated `APPDATA` while retaining strict binary SHA provenance;
+- Planner production prompt/InputRef composition;
+- AutomationProject lifecycle projection through planning/ready/running;
+- Planner reconcile projection to `READY` after `PLAN_READY`;
+- Planner ephemeral InputRef retention across non-terminal recovery/retry and release after terminal outcome;
+- validation of the exact active `CONFIRMED` Requirement before project lifecycle advances to planning.
 
-- `59294a785f111517bb5af488b8896697679d0fc3`
-- message: `Release: synchronize stable test bootstrap into v0.1 candidate`
+The focused Planner recovery regression is `tests/v01-planner-facade-recovery.test.ts`.
 
-CI run `33263782548`, job `99130093172`, passed checkout exact ref, `npm ci`, Typecheck, full repository tests, and Build.
+## 5. Current exact product snapshot and deterministic evidence
 
-Integration is therefore closed unless Real E2E exposes a concrete integration defect.
+Exact product snapshot:
 
-## 5. Minimal UI cleanup — complete
+- `64a2d810244b9e8c9b3871c576c772b517922df0`
+- commit message: `Test: complete confirmed Requirement planner fixture`
+- snapshot branch: `test/v0.1-release-candidate-snapshot`
 
-Static acceptance-path review found one concrete understandability defect: the shared Automation launcher still described itself as a read-only `Governance Inspector` even though Requirement/Planner and mutating Governance Actions had subsequently been attached to the same surface.
+Deterministic CI for that exact snapshot:
 
-The candidate now uses presentation-only v0.1 workflow guidance:
+- workflow run: `33289482948`
+- job: `99198461570`
+- `npm ci`: PASS
+- Typecheck: PASS
+- full repository tests: PASS
+- Build: PASS
 
-- launcher title: `Automation Workflow`
-- `状态 / 证据`
-- `1 · Requirement / Plan`
-- `2 · Execute / Review / Complete`
-- bounded flow guidance: Requirement/Plan -> Execute -> Reconcile if needed -> Verify -> Review -> Gate -> Advance -> Complete
+A later compare from `64a2d810...` to release head `5c16c6d1ea4065f5beb7ec1e7bd57932050eb1f9` showed only these files changed:
 
-The cleanup does not add a renderer lifecycle state machine, does not change backend action legality, and does not change Native runtime/provider semantics.
+- `docs/testing/ACTIVE_TEST.json`
+- `docs/testing/DEFERRED_TESTS.json`
+- `tests/codex-test-bootstrap-contract.test.ts`
+- `tests/official-cli-contract.test.ts`
 
-Candidate head after this cleanup was `eddb0964d20c1cf3e3ae0c2c5bc565e54326b788`. CI run `33263890236`, job `99130374937`, passed dependency install, Typecheck, full repository tests, and Build.
+No production/runtime file changed in that range.
 
-## 6. Real E2E harness — ready
+## 6. Independent Codex test control plane
 
-The repository has one current frozen-v0.1 E2E harness:
+The active blocking exact-head validation is now bound to the stable product snapshot rather than the moving release branch:
 
-- `scripts/v01-real-e2e.mjs`
-- focused contract: `tests/v01-real-e2e-harness.test.ts`
-- source command: `npm run test:real:v0.1`
-- packaged command: `npm run test:real:v0.1:package`
+- active test id: `v01-release-candidate-exact-head-validation-v1`
+- profile: `repository-exact-head-validation`
+- branch: `test/v0.1-release-candidate-snapshot`
+- exact commit: `64a2d810244b9e8c9b3871c576c772b517922df0`
+- result scope: exact tested commit
 
-The harness deliberately does **not** reuse historical AUT-2/AUT-3/K1-D stage-gate environment hooks as the product path. It launches the real Electron application, connects to the real renderer through Chromium DevTools Protocol, and invokes the existing `window.codexWorkbenchV1` preload API. This preserves the renderer-owned USER confirmation boundary instead of exposing Requirement confirmation through the generic Automation Control Plane.
+Control-plane commit:
 
-The source and packaged modes drive the same acceptance sequence:
+- `37bb16a1953bb9d5dc15b7e5409eb16d4943f17e`
+- CI run `33289580204`
+- job `99198727063`
+- dependency install / Typecheck / full tests / Build: PASS
 
-1. launch Workbench with isolated app data;
-2. create a real temporary local Git repository and Product Project;
-3. create a Native Thread;
-4. run a normal read-only Codex Turn against the fixture `package.json`;
-5. explicitly enable Conversation Map and Project Map and require each result to be `available=true`, `enabled=true`, with a non-null persisted map projection;
-6. create and associate an AutomationProject;
-7. start Requirement alignment on the exact Native Thread;
-8. answer any returned Requirement questions through the USER renderer API;
-9. confirm the exact RequirementVersion + payload SHA-256;
-10. run Planner on the exact Native Thread;
-11. execute the current PURE/read-only Step, reconcile if required;
-12. run deterministic HASH_MATCH verification;
-13. approve Step Review;
-14. PASS Stage Gate and advance until plan completion-ready;
-15. complete the AutomationProject;
-16. close and relaunch Workbench;
-17. confirm Product Project, Native Thread binding/resume, Automation association, completed workflow state, and Project Map governance references survive restart.
+`docs/testing/DEFERRED_TESTS.json` is synchronized with the PR #46/#47 Native A/B protocol v1.2 debt:
 
-The current Native Automation execution slice is intentionally PURE/read-only. The E2E fixture therefore uses a read-only package inspection Step and the already-implemented HASH_MATCH verifier path. Frozen expected final Step marker:
+- resolved Case 1 is warmup-only and must not be rerun as a formal trial;
+- unresolved formal debt remains `AB-READ-002-package-contract` and `AB-READ-003-source-contract`;
+- external `usageLimitExceeded` / workspace-capacity exhaustion is pause/checkpoint, not a semantic failure;
+- historical published evidence remains immutable.
 
-- result: `V01_AUTOMATION_E2E_OK`
-- SHA-256: `c24dfa0cb5e7111c0237b6a7df34feb3a8ebff68cd1c8aa4060d189fe9fd1474`
+The repository exact-head Codex runbook is a deterministic correctness/architecture gate. It is not a substitute for the real authenticated Codex Source E2E or Windows packaged E2E gates below.
 
-The harness is test infrastructure only. It does not add product runtime capability.
+## 7. Windows package static contract
 
-## 7. Pre-Real-E2E acceptance blockers closed on PR #50
-
-Static production-path review before the first real-model run found and closed the following concrete defects. These are bug fixes inside the frozen acceptance path, not new v0.1 product scope.
-
-### 7.1 Native target canonicalization
-
-Renderer-facing Automation actions naturally supply the raw Native Thread runtime id, while the Native provider contract accepts the versioned `native-thread-v1:<encoded-id>` target.
-
-`AutomationExecutionFacade` now canonicalizes raw Native Thread ids at the main-process new-work boundary for Requirement, Planner, and Step execution. Already-versioned Native targets are idempotent and non-Native provider targets are unchanged.
-
-This keeps Runtime Truth in the renderer/native runtime while provider encoding remains a composition concern.
-
-### 7.2 Conservative policy bootstrap for a fresh AutomationProject
-
-A newly-created AutomationProject intentionally begins without a PolicyVersion, but executable Requirement dispatch requires a pinned policy.
-
-Before the first new Requirement session is persisted, `AutomationExecutionFacade` now creates one project PolicyVersion from the existing product hard constraints only when the project has no policy truth. Existing policy is never replaced, contradictory partial policy state fails closed, and the default remains `allowDataEgress=false` / `allowSideEffects=false`.
-
-The policy model still permits ordinary bounded `PROMPT` operations; the disabled flags deny their corresponding `DATA_EGRESS` / `SIDE_EFFECT` operations rather than incorrectly blocking the v0.1 PURE/read-only Native path.
-
-### 7.3 Provider ownership migration for Requirement and Planner
-
-`PersistedProviderBindingPort` is the durable owner of `ActionAttempt.executorRef` for executable provider work. Legacy Requirement and Planner code still pre-filled that field with service-local labels (`automation.requirement-provider` / `automation.planner-provider`), which conflicted with the versioned provider-binding guard before any external side effect.
-
-Requirement initial dispatch plus Planner initial dispatch and explicit retry no longer preclaim that ownership. The strict provider-binding guard remains unchanged. Production-composed regressions exercise the real binding decorator rather than separate mocks.
-
-Step execution was inspected and did not have the same legacy ownership conflict.
-
-### 7.4 Frozen workflow carrier does not leak into the Native provider
-
-Provider-aware Requirement persistence intentionally encodes provider-neutral scope/target identities into versioned `automation-workflow-provider-ref-v1:*` envelopes stored in the frozen v4 ExternalRef carrier slots.
-
-The frozen Requirement state machine subsequently reuses those carrier values in Action ledger/recovery truth. Passing them directly to the Native provider would violate the Native provider-owned target contract.
-
-`ProviderAwareRequirementAutomationService` now wraps its executable provider with a compatibility boundary that:
-
-- keeps the workflow carrier intact above the provider boundary;
-- decodes `SCOPE` / `TARGET` only when crossing into the executable provider;
-- supplies the real `native-thread-v1:*` target/scope to Native execution;
-- restores the workflow carrier on accepted observations so upper Action/recovery identity checks remain exact;
-- preserves legacy non-neutral v4 refs unchanged;
-- preserves optional provider recovery/read/wait/cancel capabilities rather than inventing a second runtime path.
-
-The provider binding guard and recovery rules were not weakened.
-
-Candidate head `2e02ecebb52c3dcc29c9111c5d9dfd1eb1a738cd` passed CI run `33280925188`, job `99175840727`: `npm ci`, Typecheck, all 659 repository tests, and Build.
-
-### 7.5 Map acceptance is now usability, not API existence
-
-A fresh Conversation Map can legitimately report `available=true` while `enabled=false` and `map=null`. The first E2E harness only read Map status, which could therefore pass without proving a usable Map.
-
-The harness now invokes the real renderer/preload `enableMap` and `enableProjectMap` paths and requires both Maps to be available, enabled, and backed by non-null projections. The focused harness contract requires those production calls and assertions.
-
-Exact pre-checkpoint candidate head `7ebba91723ad00c966e179420400f6b47cd3a978` passed CI run `33281010714`, job `99176064512`: `npm ci`, Typecheck, all 659 repository tests, and Build.
-
-At this checkpoint there is no known deterministic acceptance-path blocker remaining. This does **not** claim a real-model E2E PASS.
-
-## 8. Native runtime / safety compatibility check
-
-The shared Native Automation provider continues to reuse the already-attached Workbench Native runtime. It does not create/resume/fork a second runtime trunk.
-
-For Automation turns the shared adapter uses the existing `startTurnAccepted` with:
-
-- `approvalPolicy: "never"`
-- read-only sandbox policy
-
-The Native runtime capability used by v0.1 supports `PROMPT`, `RETRY`, and `VERIFY`, with data egress and side effects disabled. This is compatible with the frozen PURE/read-only fixture and the current policy bootstrap.
-
-## 9. Windows package state
-
-The existing package entry remains:
+Packaging remains:
 
 - `npm run package:win`
+- packaged acceptance: `npm run test:real:v0.1:package`
 
-It builds the application and creates the Windows package under `dist/package`, including `Codex Workbench V1.exe` and the official Workbench CLI executable. Packaging requires a real Windows environment with `csc.exe` available.
+`scripts/package-win.mjs` assembles:
 
-The packaged acceptance command is:
+- `dist/package/Codex Workbench V1.exe`
+- `dist/package/resources/app` with compiled runtime payload and minimal package manifest;
+- `dist/package/Codex Workbench CLI Runtime.exe`;
+- `dist/package/Codex Workbench CLI.exe` compiled with Windows `csc.exe`;
+- removal of Electron `resources/default_app.asar`.
 
-- `npm run test:real:v0.1:package`
+`tests/official-cli-contract.test.ts` now deterministically locks the GUI executable, CLI wrapper/runtime separation, official CLI routing to the GUI host, and `resources/app` assembly contract. No packaging runtime behavior was changed for this test closure.
 
-This first runs the existing Windows packaging path, then runs the same v0.1 E2E harness against `dist/package/Codex Workbench V1.exe`.
+Package-contract test commit:
 
-The real Windows packaged acceptance gate passed on exact implementation commit `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a`:
+- `5c16c6d1ea4065f5beb7ec1e7bd57932050eb1f9`
+- CI run `33289669604`
+- job `99198967921`
+- dependency install / Typecheck / full tests / Build: PASS
 
-- command: `npm run test:real:v0.1:package`
-- package build: `PACKAGE PASS`
-- E2E result: `PASS_REAL`
-- tracked sanitized evidence: `docs/V0_1_REAL_PACKAGE_E2E_EVIDENCE.json`
-- local raw evidence: `dist/e2e/v01-package-e2e.json` (gitignored; not publication truth)
+## 8. Historical Real E2E evidence and current gate validity
 
-The source gate immediately preceding it also passed on the same implementation commit:
+Tracked historical evidence exists and is valid for exact implementation commit `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a` only:
 
-- command: `npm run test:real:v0.1`
-- E2E result: `PASS_REAL`
-- tracked sanitized evidence: `docs/V0_1_REAL_SOURCE_E2E_EVIDENCE.json`
-- the subsequent package build replaced `dist/`; the source result was extracted before replacement and its tracked evidence records that retention fact explicitly.
+- `docs/V0_1_REAL_SOURCE_E2E_EVIDENCE.json`: `PASS_REAL`
+- `docs/V0_1_REAL_PACKAGE_E2E_EVIDENCE.json`: `PACKAGE PASS` + `PASS_REAL`
 
-Both runs completed the frozen nine-phase path through restart/persistence, including usable Conversation/Project Maps, confirmed Requirement, validated/promoted Plan, PURE Step execution and verification, Review/Gate/Advance/Complete, then persisted Product Project, Native Thread binding, Automation association, completed lifecycle, and governance references after relaunch.
+Those runs completed the frozen acceptance path through restart/persistence on a real authenticated Codex/Windows host.
 
-## 10. Current release-route status
+However, after `0c6871f...`, `src/main/automation-execution-facade.ts` changed in the actual Planner/Automation lifecycle acceptance path. A compare from `0c6871f...` to the current release line shows that this Facade file is the only production/runtime file changed after the historical Real E2E, while the remaining changes are evidence/control-plane/checkpoint/tests.
 
-- Integration: **deterministic gate PASS**
-- Minimal UI Cleanup: **deterministic gate PASS**
-- Acceptance-path static blocker cleanup: **deterministic gate PASS**
-- Real Source E2E: **PASS_REAL on `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a`**
-- Windows Packaged E2E: **PACKAGE PASS + PASS_REAL on `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a`**
-- Bug Fix: **closed for concrete blockers found by Real E2E; focused regressions added**
-- Final Regression: **PASS — Typecheck, focused 30/30, full repository 664/664, and Build**
-- v0.1 release: pending
+Therefore the historical `PASS_REAL` evidence MUST NOT be presented as satisfying the current `64a2d810...` product snapshot. It remains useful historical evidence that the package/harness/runtime path worked before the Facade hardening.
 
-Do not reopen historical K1-K8 implementation sequencing. Historical AUT/K1 real gates remain evidence/history, not the current release route.
+## 9. Current release-route status
 
-## 11. Test-debt policy
+- Integration: **PASS**
+- Minimal UI cleanup: **PASS**
+- Native/provider/policy/map/Windows resolver blocker cleanup: **PASS**
+- Planner Facade/lifecycle recovery hardening: **PASS deterministic**
+- Exact product snapshot frozen: **PASS** (`64a2d810...`)
+- Independent Codex control plane rebound: **PASS deterministic**
+- Windows package static contract: **PASS deterministic**
+- Historical Source Real E2E on `0c6871f...`: **PASS_REAL, historical only**
+- Historical Windows packaged E2E on `0c6871f...`: **PASS_REAL, historical only**
+- Current Source Real E2E on `64a2d810...`: **RE-RUN REQUIRED**
+- Current Windows packaged E2E on `64a2d810...`: **RE-RUN REQUIRED after Source pass**
+- Concrete bugfixes: **only if those gates expose an acceptance defect**
+- Final regression: **after final real-gate result / any concrete fix**
+- User trial handoff: **after current packaged E2E pass and final regression**
 
-The incremental test-debt policy remains unchanged:
+## 10. Real E2E commands and evidence
 
-- published historical evidence is immutable / append-only;
-- already-passed formal model cases are retired from future formal trial queues;
-- unresolved Native A/B debt remains on PR #46/#47;
-- cheap deterministic repository/static gates remain;
-- new fixes get focused deterministic regression coverage;
-- do not rerun expensive already-passed real-model A/B trials merely because the UI or candidate head changed.
+On a real host with a working/authenticated Codex runtime, check out or detach exactly at `64a2d810244b9e8c9b3871c576c772b517922df0` and run:
 
-PR #46/#47 need to be re-read only when release-candidate test debt becomes relevant. Do not modify `AB-READ-003-source-contract` merely because the historical v1.1 run never reached it.
+```bash
+npm run test:real:v0.1
+```
 
-## 12. Immediate resume sequence
+Expected local evidence:
 
-When a new conversation resumes this project:
+- `dist/e2e/v01-real-e2e.json`
+- result `PASS_REAL`
 
-1. Read `docs/workbench-map/CURRENT_CHECKPOINT.md`, this checkpoint, and `docs/V0.1-MVP-SCOPE-FREEZE.md` from PR #50's current head.
-2. Re-read GitHub metadata/head for PR #50. Git refs are authoritative if the branch moved after this checkpoint.
-3. Re-read PR #48/#49 only when historical product/scope ancestry is needed; they are no longer the current product endpoint.
-4. Treat PR #50 / `release/v0.1-integration` as the current v0.1 release candidate unless newer repository ancestry proves otherwise.
-5. Keep the v0.1 Scope Freeze hard. Do not add deferred Automation systems.
-6. Do not repeat the already-closed deterministic blocker audit above unless new repository evidence or Real E2E contradicts it.
-7. Do not repeat the source or packaged real-model E2E gates unless a later code change affects their tested path or repository truth invalidates the evidence binding.
-8. Final regression following the E2E gates passed: Typecheck, focused tests 30/30, all repository tests 664/664, and Build.
-9. Verify PR #50 CI and review the tracked evidence against exact tested implementation commit `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a`.
-10. Keep `dist/e2e/*.json` local and gitignored; use the tracked sanitized evidence files as durable publication truth.
-11. Do not merge, delete branches, force-push, close PRs, or mark Draft PRs ready without explicit user approval.
-12. Do not restart already-passed expensive formal model trials.
+Then on real Windows:
 
-If repository truth contradicts this checkpoint, repository truth wins and this checkpoint should be deliberately advanced again as part of the next durable handoff.
+```bash
+npm run test:real:v0.1:package
+```
+
+Expected local evidence:
+
+- `dist/e2e/v01-package-e2e.json`
+- package `PACKAGE PASS`
+- result `PASS_REAL`
+
+If either fails, fix only the concrete frozen-acceptance defect, add a focused deterministic regression, rerun deterministic CI and the affected Real E2E, then create/rebind a new exact product snapshot if production code changed.
+
+This ChatGPT execution environment does not provide a real authenticated Windows Codex desktop host, so it cannot truthfully manufacture those two current `PASS_REAL` results.
+
+## 11. Immediate resume sequence
+
+1. Read `docs/workbench-map/CURRENT_CHECKPOINT.md`, this file, and `docs/V0.1-MVP-SCOPE-FREEZE.md` from PR #50.
+2. Verify PR #50 state/head and the snapshot ref `test/v0.1-release-candidate-snapshot`.
+3. Treat `64a2d810244b9e8c9b3871c576c772b517922df0` as the exact current product implementation unless a later compare proves a production/runtime delta.
+4. Do not reopen historical K1-K8 implementation sequencing.
+5. Do not repeat already-passed formal Native A/B Case 1.
+6. Immediate external release gate: run `npm run test:real:v0.1` on exact snapshot `64a2d810...` with a real authenticated Codex runtime.
+7. If Source passes, run `npm run test:real:v0.1:package` on exact snapshot `64a2d810...` on Windows.
+8. If a real gate fails, make only concrete acceptance-path fixes and add focused regression coverage; no speculative scope expansion.
+9. After both current Real E2E gates pass, run final deterministic regression and update this checkpoint/evidence to the exact tested product snapshot.
+10. Keep unresolved A/B v1.2 debt on its frozen execution target unless release-candidate validation explicitly resumes it.
+11. Do not merge PRs, delete branches, force-push, close PRs, or mark Draft PRs ready without explicit user approval.
