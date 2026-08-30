@@ -38,6 +38,22 @@ export interface AutomationRequirementContentView {
   knownDeferredGates: string[];
 }
 
+/**
+ * Bounded restart-recovery identity for the latest Planner action bound to the
+ * active RequirementVersion. No raw prompt, provider body, or Plan content is
+ * exposed through this projection.
+ */
+export interface AutomationPlannerRecoveryView {
+  actionIntentId: string;
+  actionAttemptId: string | null;
+  intentState: string;
+  attemptState: string | null;
+  recoveryState: string | null;
+  plannerState: "ACTIVE" | "PROMOTED" | "FAILED" | null;
+  promotedPlanVersionId: string | null;
+  dispatchNumber: number | null;
+}
+
 export interface AutomationRequirementProjectView {
   project: {
     projectId: string;
@@ -73,6 +89,7 @@ export interface AutomationRequirementProjectView {
     sourceAlignmentSessionId: string;
     content: AutomationRequirementContentView;
   };
+  plannerRecovery: AutomationPlannerRecoveryView | null;
   integrity: {
     status: "OK" | "DEGRADED";
     issues: string[];
