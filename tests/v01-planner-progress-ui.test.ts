@@ -9,8 +9,8 @@ const uiProjection = readFileSync(resolve(root, "src/renderer/ui-projection.ts")
 
 test("Planner Create Plan shows bounded truthful progress without inventing percentage completion", () => {
   assert.match(progress, /planner-create/);
-  assert.match(progress, /正在核对 exact Native target/);
-  assert.match(progress, /等待 Planner 接受\/返回/);
+  assert.match(progress, /正在核对精确的 Native 目标/);
+  assert.match(progress, /等待规划器接受\/返回/);
   assert.match(progress, /已等待/);
   assert.match(progress, /响应较慢；请勿重复提交/);
   assert.match(progress, /setInterval\(renderProgress, 1_000\)/);
@@ -37,15 +37,15 @@ test("Requirement and governance actions share the same elapsed-time working-sta
   ]) {
     assert.ok(progress.includes(`\"${action}\"`), `missing progress mapping for ${action}`);
   }
-  assert.match(progress, /等待 Requirement provider 返回/);
-  assert.match(progress, /正在读取 Requirement provider \/ recovery truth/);
-  assert.match(progress, /正在核对 exact Native executor target/);
-  assert.match(progress, /等待 Executor 接受\/返回/);
-  assert.match(progress, /正在读取 ExecutionAttempt \/ recovery truth/);
-  assert.match(progress, /等待 verifier 返回验证结果/);
-  assert.match(progress, /正在写入 immutable review evidence/);
-  assert.match(progress, /正在写入 Stage Gate decision/);
-  assert.match(progress, /正在校验 final governance truth/);
+  assert.match(progress, /等待需求提供方返回/);
+  assert.match(progress, /正在读取需求提供方 \/ 恢复状态/);
+  assert.match(progress, /正在核对精确的 Native 执行目标/);
+  assert.match(progress, /等待执行器接受\/返回/);
+  assert.match(progress, /正在读取执行尝试 \/ 恢复状态/);
+  assert.match(progress, /等待验证器返回验证结果/);
+  assert.match(progress, /正在写入不可变审查证据/);
+  assert.match(progress, /正在写入阶段门禁决策/);
+  assert.match(progress, /正在校验最终治理状态/);
   assert.match(progress, /响应较慢；请勿重复操作/);
 });
 
@@ -56,8 +56,16 @@ test("cancelled confirmations and validation failures do not start fake operatio
 
 test("uncertain Planner outcomes direct the user to reconcile instead of resubmitting", () => {
   assert.match(progress, /TIMEOUT\|RECOVERY\|UNKNOWN\|APP_SERVER_TIMEOUT/);
-  assert.match(progress, /Reconcile Planner \/ Planner Status/);
+  assert.match(progress, /对账规划器状态/);
   assert.match(progress, /勿再次提交/);
+});
+
+test("uncertain Requirement outcomes use Requirement recovery controls instead of Planner controls", () => {
+  assert.match(progress, /operationProgressAction/);
+  assert.match(progress, /对账需求状态/);
+  assert.match(progress, /读取已接受请求的权威结果/);
+  assert.match(progress, /对账规划器状态/);
+  assert.doesNotMatch(progress, /Reconcile Planner \/ Planner Status/);
 });
 
 test("shared operation progress loads only after both Automation workspaces", () => {

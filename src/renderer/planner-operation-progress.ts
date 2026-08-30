@@ -20,103 +20,103 @@ interface DialogProgressConfig {
 
 const PLANNER_OPERATION_SPECS: Readonly<Record<string, OperationProgressSpec>> = Object.freeze({
   "target-refresh": {
-    label: "刷新 Runtime Target",
-    initialPhase: "正在读取 Runtime Truth",
+    label: "刷新运行目标",
+    initialPhase: "正在读取运行时状态",
   },
   "questions-answer": {
-    label: "提交 Requirement answers",
-    initialPhase: "正在提交 Requirement answers",
-    waitingPhase: "等待 workflow truth 返回",
+    label: "提交需求问题答案",
+    initialPhase: "正在提交需求问题答案",
+    waitingPhase: "等待工作流状态返回",
     waitingAfterMs: 2_000,
   },
   "requirement-start": {
-    label: "Start Requirement",
-    initialPhase: "正在核对 exact Native target",
-    waitingPhase: "等待 Requirement session 返回",
+    label: "开始需求澄清",
+    initialPhase: "正在核对精确的 Native 目标",
+    waitingPhase: "等待需求会话返回",
     waitingAfterMs: 2_000,
   },
   "requirement-draft": {
-    label: "Request Requirement Draft",
-    initialPhase: "正在提交 provider continuation",
-    waitingPhase: "等待 Requirement provider 返回",
+    label: "生成需求草案",
+    initialPhase: "正在提交提供方续接请求",
+    waitingPhase: "等待需求提供方返回",
     waitingAfterMs: 2_000,
     slowHint: "响应较慢；请勿重复提交",
   },
   "requirement-reconcile": {
-    label: "Reconcile Requirement",
-    initialPhase: "正在读取 Requirement provider / recovery truth",
+    label: "对账需求状态",
+    initialPhase: "正在读取需求提供方 / 恢复状态",
   },
   "requirement-confirm": {
-    label: "Confirm Requirement",
-    initialPhase: "正在写入 exact Requirement truth",
+    label: "确认需求",
+    initialPhase: "正在写入精确需求状态",
   },
   "planner-create": {
-    label: "Create Plan",
-    initialPhase: "正在核对 exact Native target",
-    waitingPhase: "等待 Planner 接受/返回",
+    label: "创建计划",
+    initialPhase: "正在核对精确的 Native 目标",
+    waitingPhase: "等待规划器接受/返回",
     waitingAfterMs: 2_000,
     slowHint: "响应较慢；请勿重复提交",
   },
   "planner-reconcile": {
-    label: "Reconcile Planner",
-    initialPhase: "正在读取 Planner / recovery truth",
+    label: "对账规划器状态",
+    initialPhase: "正在读取规划器 / 恢复状态",
   },
   "planner-retry": {
-    label: "Retry Planner",
-    initialPhase: "正在重试 exact Planner intent",
-    waitingPhase: "等待 Planner 接受/返回",
+    label: "重试规划",
+    initialPhase: "正在重试精确规划意图",
+    waitingPhase: "等待规划器接受/返回",
     waitingAfterMs: 2_000,
     slowHint: "响应较慢；请勿重复提交",
   },
   "planner-status": {
-    label: "Read Planner Status",
-    initialPhase: "正在读取 Planner status",
+    label: "读取规划器状态",
+    initialPhase: "正在读取规划器状态",
   },
   "planner-result": {
-    label: "Read Planner Result",
-    initialPhase: "正在读取 Planner result",
+    label: "读取规划结果",
+    initialPhase: "正在读取规划结果",
   },
 });
 
 const GOVERNANCE_OPERATION_SPECS: Readonly<Record<string, OperationProgressSpec>> = Object.freeze({
   "step-execute": {
-    label: "Execute Step",
-    initialPhase: "正在核对 exact Native executor target",
-    waitingPhase: "等待 Executor 接受/返回",
+    label: "执行步骤",
+    initialPhase: "正在核对精确的 Native 执行目标",
+    waitingPhase: "等待执行器接受/返回",
     waitingAfterMs: 2_000,
     slowHint: "响应较慢；请勿重复提交",
   },
   "step-reconcile": {
-    label: "Reconcile Step",
-    initialPhase: "正在读取 ExecutionAttempt / recovery truth",
+    label: "对账执行步骤",
+    initialPhase: "正在读取执行尝试 / 恢复状态",
   },
   "step-verify": {
-    label: "Verify Step",
-    initialPhase: "等待 verifier 返回验证结果",
+    label: "验证步骤",
+    initialPhase: "等待验证器返回验证结果",
   },
   "step-review-approve": {
-    label: "Review APPROVE",
-    initialPhase: "正在写入 immutable review evidence",
+    label: "审查通过",
+    initialPhase: "正在写入不可变审查证据",
   },
   "step-review-reject": {
-    label: "Review REJECT",
-    initialPhase: "正在写入 immutable review evidence",
+    label: "审查拒绝",
+    initialPhase: "正在写入不可变审查证据",
   },
   "stage-gate-pass": {
-    label: "Stage Gate PASS",
-    initialPhase: "正在写入 Stage Gate decision",
+    label: "阶段门禁通过",
+    initialPhase: "正在写入阶段门禁决策",
   },
   "stage-gate-reject": {
-    label: "Stage Gate REJECT",
-    initialPhase: "正在写入 Stage Gate decision",
+    label: "阶段门禁拒绝",
+    initialPhase: "正在写入阶段门禁决策",
   },
   "stage-advance": {
-    label: "Advance Stage",
-    initialPhase: "正在重新读取并推进 stage truth",
+    label: "推进阶段",
+    initialPhase: "正在重新读取并推进阶段状态",
   },
   "project-complete": {
-    label: "Complete Project",
-    initialPhase: "正在校验 final governance truth",
+    label: "完成项目",
+    initialPhase: "正在校验最终治理状态",
   },
 });
 
@@ -188,6 +188,7 @@ function installDialogOperationProgress(config: DialogProgressConfig): void {
     const action = target.getAttribute(config.actionAttribute);
     const spec = action ? config.specs[action] : undefined;
     if (!spec) return;
+    dialog.dataset.operationProgressAction = action ?? "";
 
     // Existing action handlers synchronously enter their busy state before the
     // first provider/IPC await. A cancelled confirmation or validation failure
@@ -222,7 +223,12 @@ function installPlannerRecoveryGuidance(): void {
   const applyGuidance = (): void => {
     const message = status.textContent ?? "";
     if (status.classList.contains("is-error") && /TIMEOUT|RECOVERY|UNKNOWN|APP_SERVER_TIMEOUT/i.test(message) && !message.includes("勿再次提交")) {
-      status.textContent = `${message}；请求结果可能不确定，请先使用 Reconcile Planner / Planner Status，勿再次提交。`;
+      const action = dialog.dataset.operationProgressAction ?? "";
+      const requirementOutcome = action.startsWith("requirement-") || action === "questions-answer" || /Requirement/i.test(message);
+      const recoveryAction = requirementOutcome
+        ? "请先使用“对账需求状态”读取已接受请求的权威结果"
+        : "请先使用“对账规划器状态”或“读取规划器状态”";
+      status.textContent = `${message}；请求结果可能不确定，${recoveryAction}，勿再次提交。`;
     }
   };
 

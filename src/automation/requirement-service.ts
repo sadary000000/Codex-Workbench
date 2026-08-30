@@ -16,6 +16,7 @@ import {
   validateRequirementRequest,
 } from "./requirement-webgpt-contract.ts";
 import type { AutomationProviderPort, ProviderTargetRef } from "./adapters.ts";
+import { createDeterministicRequirementRepairCandidate } from "./requirement-response-repair.ts";
 import { InputRefRegistry } from "./input-ref.ts";
 import { RequirementProviderDispatch, RequirementProviderDispatchError, type RequirementProviderDispatchResult } from "./requirement-provider-dispatch.ts";
 import { RequirementEgressPolicy, type ContextItem } from "./requirement-egress-policy.ts";
@@ -83,6 +84,13 @@ export class RequirementServiceError extends Error {
     this.code = code;
     this.details = details;
   }
+}
+
+function parseProviderRequirementResponse(rawResponse: string, context: RequirementEnvelopeContext): RequirementEnvelope {
+  const repairResponse = createDeterministicRequirementRepairCandidate(rawResponse);
+  return parseRequirementResponse(rawResponse, context, repairResponse === null
+    ? { repairBudget: 0 }
+    : { repairBudget: 1, repairResponse });
 }
 
 export interface RequirementQuestionInput {
@@ -691,7 +699,7 @@ export class RequirementAutomationService {
       });
       if (dispatch.state !== "COMPLETED" || dispatch.response === null) throw new RequirementServiceError("RECOVERY_REQUIRED", "Requirement provider accepted the request but its result is not safely available; reconcile before retrying.");
       try {
-        envelope = parseRequirementResponse(dispatch.response, responseContext, { repairBudget: 0 });
+        envelope = parseProviderRequirementResponse(dispatch.response, responseContext);
       } catch (error) {
         if (!input.repairEnvelope) throw new RequirementServiceError("MALFORMED_REQUIREMENT_RESPONSE", error instanceof Error ? error.message : "The WebGPT requirement response was invalid.");
         try {
@@ -766,7 +774,7 @@ export class RequirementAutomationService {
     };
     let envelope: RequirementEnvelope;
     try {
-      envelope = parseRequirementResponse(result.response, responseContext, { repairBudget: 0 });
+      envelope = parseProviderRequirementResponse(result.response, responseContext);
     } catch (error) {
       throw new RequirementServiceError("MALFORMED_REQUIREMENT_RESPONSE", error instanceof Error ? error.message : "The reconciled Requirement response was invalid.");
     }

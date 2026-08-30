@@ -141,6 +141,43 @@ test("AUT-R0 Requirement uses opaque InputRef and the provider Action ledger", a
   }
 });
 
+test("AUT-R0 repairs one missing final Requirement root brace without another provider dispatch", async () => {
+  const value = await fixture();
+  const provider = new FakeProvider();
+  provider.response = provider.response.slice(0, -1);
+  try {
+    const service = new RequirementAutomationService({ store: value.store, provider, inputRefs: new InputRefRegistry() });
+    const session = await service.startAlignment({ projectId: "aut-r0-automation", goal: "Accept one deterministic provider truncation.", webgptProjectId: "workts", providerTargetRef: TEST_TARGET, questions: [] });
+    const result = await service.requestDraft({ sessionId: session.alignmentSessionId, providerTargetRef: TEST_TARGET });
+    assert.equal(result.status, "DRAFT_READY");
+    assert.equal(provider.submitted.length, 1);
+    const snapshot = await value.store.snapshot();
+    assert.equal(snapshot.actionAttempts.length, 1, "local repair must not create another provider attempt");
+  } finally {
+    await closeFixture(value);
+  }
+});
+
+test("AUT-R0 applies the same bounded local repair when reconciling a completed Requirement turn", async () => {
+  const value = await fixture();
+  const provider = new FakeProvider();
+  provider.state = "RUNNING";
+  provider.response = provider.response.slice(0, -1);
+  try {
+    const service = new RequirementAutomationService({ store: value.store, provider, inputRefs: new InputRefRegistry() });
+    const session = await service.startAlignment({ projectId: "aut-r0-automation", goal: "Reconcile one deterministic provider truncation.", webgptProjectId: "workts", providerTargetRef: TEST_TARGET, questions: [] });
+    await assert.rejects(service.requestDraft({ sessionId: session.alignmentSessionId, providerTargetRef: TEST_TARGET }), (error: unknown) => error instanceof RequirementServiceError && error.code === "RECOVERY_REQUIRED");
+    provider.state = "COMPLETED";
+    const result = await service.reconcileProviderRequest({ sessionId: session.alignmentSessionId });
+    assert.equal(result.status, "DRAFT_READY");
+    assert.equal(provider.submitted.length, 1, "reconcile must read the accepted turn rather than resend it");
+    const snapshot = await value.store.snapshot();
+    assert.equal(snapshot.actionAttempts.length, 1, "local repair during reconcile must not create another provider attempt");
+  } finally {
+    await closeFixture(value);
+  }
+});
+
 test("AUT-R0 persists the round ActionAttempt before the provider side effect", async () => {
   const value = await fixture();
   const provider = new FakeProvider();
