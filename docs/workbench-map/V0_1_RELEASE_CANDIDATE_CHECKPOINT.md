@@ -1,7 +1,7 @@
 # Codex Workbench v0.1 Release Candidate Checkpoint
 
 Checkpoint date: **2026-08-30**
-Status: **ACTIVE RESUME INDEX — REAL SOURCE E2E IS THE NEXT GATE**
+Status: **REAL SOURCE + PACKAGED E2E PASS — FINAL REGRESSION / PR REVIEW**
 
 Git refs, PR metadata, and repository contents are authoritative. This checkpoint advances the durable resume route from the original PR #49 scope-freeze handoff to the current integrated release candidate. The frozen v0.1 scope itself is unchanged.
 
@@ -12,7 +12,7 @@ Git refs, PR metadata, and repository contents are authoritative. This checkpoin
 - Current release candidate: PR #50, `release/v0.1-integration`
 - PR #50 base: `workbench/next`
 - PR #50 base SHA at this checkpoint: `ab4423930f8cc633aee0edb21a1172bf59754991`
-- PR #50 exact candidate head **before this checkpoint update**: `7ebba91723ad00c966e179420400f6b47cd3a978`
+- PR #50 exact implementation head tested by both real E2E gates: `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a`
 - PR #50 state: Draft / open / unmerged / mergeable
 - Product-line origin remains PR #48, `feature/automation-project-create-associate`, exact historical endpoint `68faf1ce38c1bd39aadcad3ed3d6382fd3d8a599`
 - Scope-freeze origin remains PR #49, `docs/v0.1-mvp-scope-freeze`
@@ -198,17 +198,32 @@ The packaged acceptance command is:
 
 This first runs the existing Windows packaging path, then runs the same v0.1 E2E harness against `dist/package/Codex Workbench V1.exe`.
 
-No packaged-E2E PASS is claimed yet.
+The real Windows packaged acceptance gate passed on exact implementation commit `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a`:
+
+- command: `npm run test:real:v0.1:package`
+- package build: `PACKAGE PASS`
+- E2E result: `PASS_REAL`
+- tracked sanitized evidence: `docs/V0_1_REAL_PACKAGE_E2E_EVIDENCE.json`
+- local raw evidence: `dist/e2e/v01-package-e2e.json` (gitignored; not publication truth)
+
+The source gate immediately preceding it also passed on the same implementation commit:
+
+- command: `npm run test:real:v0.1`
+- E2E result: `PASS_REAL`
+- tracked sanitized evidence: `docs/V0_1_REAL_SOURCE_E2E_EVIDENCE.json`
+- the subsequent package build replaced `dist/`; the source result was extracted before replacement and its tracked evidence records that retention fact explicitly.
+
+Both runs completed the frozen nine-phase path through restart/persistence, including usable Conversation/Project Maps, confirmed Requirement, validated/promoted Plan, PURE Step execution and verification, Review/Gate/Advance/Complete, then persisted Product Project, Native Thread binding, Automation association, completed lifecycle, and governance references after relaunch.
 
 ## 10. Current release-route status
 
 - Integration: **deterministic gate PASS**
 - Minimal UI Cleanup: **deterministic gate PASS**
 - Acceptance-path static blocker cleanup: **deterministic gate PASS**
-- Real Source E2E: **harness ready; actual real-model execution pending**
-- Windows Packaged E2E: **command ready; execution pending after Source Real E2E**
-- Bug Fix: only for concrete defects found by Real/packaged E2E
-- Final Regression: pending
+- Real Source E2E: **PASS_REAL on `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a`**
+- Windows Packaged E2E: **PACKAGE PASS + PASS_REAL on `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a`**
+- Bug Fix: **closed for concrete blockers found by Real E2E; focused regressions added**
+- Final Regression: **PASS — Typecheck, focused 30/30, full repository 664/664, and Build**
 - v0.1 release: pending
 
 Do not reopen historical K1-K8 implementation sequencing. Historical AUT/K1 real gates remain evidence/history, not the current release route.
@@ -236,10 +251,10 @@ When a new conversation resumes this project:
 4. Treat PR #50 / `release/v0.1-integration` as the current v0.1 release candidate unless newer repository ancestry proves otherwise.
 5. Keep the v0.1 Scope Freeze hard. Do not add deferred Automation systems.
 6. Do not repeat the already-closed deterministic blocker audit above unless new repository evidence or Real E2E contradicts it.
-7. The immediate product task is **Real Source E2E**: run `npm run test:real:v0.1` on a real development host with working Codex runtime/authentication and capture `dist/e2e/v01-real-e2e.json`.
-8. If Real Source E2E fails, fix only the concrete acceptance-path defect found, add/update focused deterministic regression coverage, rerun repository gates, and rerun the affected E2E path.
-9. After Source Real E2E passes, run `npm run test:real:v0.1:package` on real Windows and capture `dist/e2e/v01-package-e2e.json`.
-10. Only after packaged E2E passes, proceed to final regression: Typecheck, focused tests, full repository tests, Build, Windows package, restart/persistence confirmation, and retained release-candidate test debt as explicitly required.
+7. Do not repeat the source or packaged real-model E2E gates unless a later code change affects their tested path or repository truth invalidates the evidence binding.
+8. Final regression following the E2E gates passed: Typecheck, focused tests 30/30, all repository tests 664/664, and Build.
+9. Verify PR #50 CI and review the tracked evidence against exact tested implementation commit `0c6871f83d8d3a92ec2a369d40df025e1aaecc8a`.
+10. Keep `dist/e2e/*.json` local and gitignored; use the tracked sanitized evidence files as durable publication truth.
 11. Do not merge, delete branches, force-push, close PRs, or mark Draft PRs ready without explicit user approval.
 12. Do not restart already-passed expensive formal model trials.
 

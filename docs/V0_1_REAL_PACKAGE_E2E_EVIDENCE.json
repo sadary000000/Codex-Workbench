@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "gate": "v0.1-real-package-e2e",
+  "command": "npm run test:real:v0.1:package",
+  "mode": "package",
+  "result": "PASS_REAL",
+  "exactTestedCommit": "0c6871f83d8d3a92ec2a369d40df025e1aaecc8a",
+  "startedAt": "2026-08-30T02:44:00.760Z",
+  "completedAt": "2026-08-30T02:46:01.611Z",
+  "packageBuild": {
+    "result": "PACKAGE PASS",
+    "workbenchExecutableProduced": true,
+    "cliExecutableProduced": true
+  },
+  "phases": [
+    { "phase": "launch", "state": "IDLE" },
+    { "phase": "normal-codex", "passed": true },
+    { "phase": "maps", "conversationMapUsable": true, "projectMapUsable": true },
+    { "phase": "requirement", "status": "CONFIRMED" },
+    { "phase": "planner", "stages": 1, "steps": 1 },
+    { "phase": "automation-step", "execution": "VERIFYING", "verification": "REVIEWING" },
+    { "phase": "stage-advance", "status": "PLAN_COMPLETE_READY" },
+    { "phase": "complete", "status": "COMPLETED" },
+    {
+      "phase": "restart-persistence",
+      "productProjectRecovered": true,
+      "nativeThreadRecovered": true,
+      "automationAssociationRecovered": true,
+      "automationLifecycle": "COMPLETED",
+      "governanceReferences": 2
+    }
+  ],
+  "fixture": {
+    "expectedPackageName": "workbench-e2e-fixture",
+    "expectedVersion": "0.0.1",
+    "marker": "V01_AUTOMATION_E2E_OK",
+    "markerSha256": "c24dfa0cb5e7111c0237b6a7df34feb3a8ebff68cd1c8aa4060d189fe9fd1474"
+  },
+  "rawArtifact": {
+    "path": "dist/e2e/v01-package-e2e.json",
+    "tracked": false,
+    "retention": "Local-only raw evidence; the tracked file is the sanitized release record."
+  },
+  "sanitization": {
+    "localPathsIncluded": false,
+    "rawPromptsIncluded": false,
+    "rawResponsesIncluded": false,
+    "secretsIncluded": false
+  },
+  "error": null
+}
