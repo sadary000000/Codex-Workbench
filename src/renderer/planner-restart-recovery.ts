@@ -238,8 +238,7 @@ function installPlannerRestartRecovery(): void {
     const projectId = select.value.trim();
     if (card && projectId && card.dataset[CHECKED_PROJECT_ATTRIBUTE] !== projectId) scheduleRefresh();
   });
-  observer.observe(dialog, { childList: true, subtree: true });
-  observer.observe(dialog, { attributes: true, attributeFilter: ["open"] });
+  observer.observe(dialog, { childList: true, subtree: true, attributes: true, attributeFilter: ["open"] });
   select.addEventListener("change", () => scheduleRefresh(true));
   scheduleRefresh();
 }
