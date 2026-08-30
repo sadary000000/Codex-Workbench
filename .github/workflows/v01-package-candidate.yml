@@ -48,6 +48,7 @@ jobs:
             'dist/package/resources/app/dist/main/main.js',
             'dist/package/resources/app/dist/automation/requirement-response-repair.js',
             'dist/package/resources/app/dist/automation/requirement-service.js',
+            'dist/package/resources/app/dist/automation/planner-provider-prompt.js',
             'dist/package/resources/app/dist/renderer/ui-projection.js',
             'dist/package/resources/app/dist/renderer/automation-governance-inspector.js',
             'dist/package/resources/app/dist/renderer/automation-governance-actions.js',
@@ -67,6 +68,29 @@ jobs:
           }
           if ($requirementService.Contains('./requirement-response-repair.ts')) {
             throw 'Packaged Requirement service still references source-only response repair module.'
+          }
+
+          $plannerPromptPath = 'dist/package/resources/app/dist/automation/planner-provider-prompt.js'
+          $plannerPrompt = Get-Content $plannerPromptPath -Raw
+          $verificationClasses = @(
+            'BUILD',
+            'TEST',
+            'GIT_DIFF',
+            'GIT_STATUS',
+            'FILE_EXISTS',
+            'HASH_MATCH',
+            'JSON_SCHEMA',
+            'CLI_SMOKE',
+            'HARDWARE_SMOKE',
+            'CUSTOM_APPROVED'
+          )
+          foreach ($verificationClass in $verificationClasses) {
+            if (-not $plannerPrompt.Contains($verificationClass)) {
+              throw "Packaged Planner prompt is missing verificationClass: $verificationClass"
+            }
+          }
+          if (-not $plannerPrompt.Contains('Never invent, translate, or emit any other verificationClass value.')) {
+            throw 'Packaged Planner prompt is missing strict verificationClass guidance.'
           }
 
           $projectionPath = 'dist/package/resources/app/dist/renderer/ui-projection.js'
@@ -106,6 +130,7 @@ jobs:
             "guiSha256=$guiSha",
             "cliSha256=$cliSha",
             'packagedRequirementResponseRepair=PASS',
+            'packagedPlannerVerificationContract=PASS',
             'packagedAutomationUiContract=PASS',
             'note=Candidate packaging artifact only; current real Source and packaged E2E gates remain separately required.'
           ) | Set-Content 'dist/package/CANDIDATE_PROVENANCE.txt' -Encoding utf8
