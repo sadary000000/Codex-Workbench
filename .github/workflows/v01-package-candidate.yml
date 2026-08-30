@@ -19,7 +19,7 @@ jobs:
       - name: Checkout exact product snapshot
         uses: actions/checkout@v4
         with:
-          ref: 64a2d810244b9e8c9b3871c576c772b517922df0
+          ref: 7fb69a92c27510349609710122ee499c2cb4ac58
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -45,25 +45,57 @@ jobs:
             'dist/package/Codex Workbench CLI.exe',
             'dist/package/Codex Workbench CLI Runtime.exe',
             'dist/package/resources/app/package.json',
-            'dist/package/resources/app/dist/main/main.js'
+            'dist/package/resources/app/dist/main/main.js',
+            'dist/package/resources/app/dist/renderer/ui-projection.js',
+            'dist/package/resources/app/dist/renderer/automation-governance-inspector.js',
+            'dist/package/resources/app/dist/renderer/automation-governance-actions.js',
+            'dist/package/resources/app/dist/renderer/automation-requirement-planner.js',
+            'dist/package/resources/app/dist/renderer/automation-v01-guidance.js'
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Missing packaged artifact: $path" }
           }
+
+          $projectionPath = 'dist/package/resources/app/dist/renderer/ui-projection.js'
+          $projection = Get-Content $projectionPath -Raw
+          $requiredImports = @(
+            './automation-governance-inspector.js',
+            './automation-governance-actions.js',
+            './automation-requirement-planner.js',
+            './automation-v01-guidance.js'
+          )
+          foreach ($specifier in $requiredImports) {
+            if (-not $projection.Contains($specifier)) {
+              throw "Packaged UI projection is missing dynamic import: $specifier"
+            }
+          }
+          $forbiddenImports = @(
+            './automation-governance-inspector.ts',
+            './automation-governance-actions.ts',
+            './automation-requirement-planner.ts',
+            './automation-v01-guidance.ts'
+          )
+          foreach ($specifier in $forbiddenImports) {
+            if ($projection.Contains($specifier)) {
+              throw "Packaged UI projection still references source-only module: $specifier"
+            }
+          }
+
           $guiSha = (Get-FileHash 'dist/package/Codex Workbench V1.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           $cliSha = (Get-FileHash 'dist/package/Codex Workbench CLI.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           @(
             'Codex Workbench v0.1 Windows trial candidate',
-            'productSnapshot=64a2d810244b9e8c9b3871c576c772b517922df0',
+            'productSnapshot=7fb69a92c27510349609710122ee499c2cb4ac58',
             "guiSha256=$guiSha",
             "cliSha256=$cliSha",
+            'packagedAutomationUiContract=PASS',
             'note=Candidate packaging artifact only; current real Source and packaged E2E gates remain separately required.'
           ) | Set-Content 'dist/package/CANDIDATE_PROVENANCE.txt' -Encoding utf8
           Get-Content 'dist/package/CANDIDATE_PROVENANCE.txt'
       - name: Upload Windows trial candidate
         uses: actions/upload-artifact@v4
         with:
-          name: codex-workbench-v0.1-windows-64a2d810
+          name: codex-workbench-v0.1-windows-7fb69a92
           path: dist/package
           if-no-files-found: error
           retention-days: 14
