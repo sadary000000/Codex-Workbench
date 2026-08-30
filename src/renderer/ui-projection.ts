@@ -80,5 +80,6 @@ if (typeof document !== "undefined" && typeof window !== "undefined") {
   void import("./automation-governance-inspector.js")
     .then(() => import("./automation-governance-actions.js"))
     .then(() => import("./automation-requirement-planner.js"))
+    .then(() => import("./planner-operation-progress.js"))
     .then(() => import("./automation-v01-guidance.js"));
 }

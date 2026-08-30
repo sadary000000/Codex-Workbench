@@ -30,6 +30,7 @@ import type {
 } from "../shared/runtime-types.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+const TURN_ACCEPTANCE_TIMEOUT_MS = 15_000;
 const MAX_PROMPT_LENGTH = 32_768;
 const MAX_EVENT_STRING = 2_048;
 
@@ -142,6 +143,40 @@ function transportRecovery(error: unknown): boolean {
     || code === "APP_SERVER_PROCESS_EXIT"
     || code === "APP_SERVER_CONNECTION_LOST"
     || code === "APP_SERVER_CLIENT_CLOSED";
+}
+
+function turnAcceptanceTimeout(phase: string): Error & { code: string } {
+  const error = new Error(`Native Turn acceptance timed out during ${phase}.`) as Error & { code: string };
+  error.code = "TURN_ACCEPTANCE_TIMEOUT";
+  return error;
+}
+
+function withinTurnAcceptanceDeadline<T>(
+  deadlineMs: number,
+  phase: string,
+  operation: (remainingMs: number) => Promise<T>,
+): Promise<T> {
+  const remainingMs = Math.max(0, deadlineMs - Date.now());
+  if (remainingMs <= 0) return Promise.reject(turnAcceptanceTimeout(phase));
+  let pending: Promise<T>;
+  try {
+    pending = operation(remainingMs);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(turnAcceptanceTimeout(phase)), remainingMs);
+    pending.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function isUnmaterializedThreadLifecycleError(error: unknown): boolean {
@@ -410,7 +445,7 @@ export class NativeThreadRuntime {
           nativeThreadId,
           cwd: this.cwd,
           createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         });
         await this.persistProjection({ lastKnownState: "ready", lastError: null });
         this.stateValue = "READY";
@@ -532,11 +567,17 @@ export class NativeThreadRuntime {
     this.turnStartInFlight = true;
     const localRunId = randomUUID();
     const nativeThreadId = this.nativeThreadIdValue;
+    const acceptanceDeadlineMs = Date.now() + Math.min(this.timeoutMs, TURN_ACCEPTANCE_TIMEOUT_MS);
     let turnId: string | null = null;
+    let dispatchStarted = false;
     try {
       this.newThreadReadFallbackAllowedValue = false;
       if (this.persistence) {
-        await this.persistence.beginPrompt({ localRunId, nativeThreadId, prompt: text });
+        await withinTurnAcceptanceDeadline(
+          acceptanceDeadlineMs,
+          "persisting prompt intent",
+          () => this.persistence!.beginPrompt({ localRunId, nativeThreadId, prompt: text }),
+        );
       }
       this.stateValue = "TURN_RUNNING";
       const requestParams = {
@@ -555,7 +596,12 @@ export class NativeThreadRuntime {
         inputCapability: "text",
         attachments: "unsupported/deferred",
       });
-      const response = await this.client.request("turn/start", requestParams, this.timeoutMs);
+      dispatchStarted = true;
+      const response = await withinTurnAcceptanceDeadline(
+        acceptanceDeadlineMs,
+        "waiting for turn/start acknowledgement",
+        (remainingMs) => this.client!.request("turn/start", requestParams, remainingMs),
+      );
       const responseNativeThreadId = responseThreadId(response);
       if (responseNativeThreadId && responseNativeThreadId !== nativeThreadId) {
         throw this.fail("TURN_THREAD_MISMATCH", "turn/start returned a Turn for a different Native Thread.");
@@ -563,9 +609,6 @@ export class NativeThreadRuntime {
       turnId = idFrom(object(response)?.turn, "id");
       if (!turnId) throw this.fail("TURN_ID_MISSING", "turn/start did not return a Turn ID.");
       this.activeTurnValue = { localRunId, turnId };
-      if (this.persistence) {
-        await this.safeUpdatePrompt(localRunId, { status: "running", turnId });
-      }
       this.turnStartInFlight = false;
       const acceptance: TurnAcceptance = {
         accepted: true,
@@ -573,29 +616,38 @@ export class NativeThreadRuntime {
         nativeThreadId,
         turnId,
       };
-      return {
-        acceptance,
-        completion: this.completeTurn(localRunId, nativeThreadId, turnId),
-      };
+      const completion = (async (): Promise<TurnResult> => {
+        if (this.persistence) await this.safeUpdatePrompt(localRunId, { status: "running", turnId });
+        return this.completeTurn(localRunId, nativeThreadId, turnId!);
+      })();
+      return { acceptance, completion };
     } catch (error) {
       this.activeTurnValue = null;
       const normalized = asError(error);
       const details = errorInfo(normalized);
-      const recoveryRequired = transportRecovery(normalized) || this.stateValue === "DISCONNECTED" || this.closing;
+      const acceptanceTimedOut = normalized.code === "TURN_ACCEPTANCE_TIMEOUT";
+      const recoveryRequired = (acceptanceTimedOut && dispatchStarted)
+        || transportRecovery(normalized)
+        || this.stateValue === "DISCONNECTED"
+        || this.closing;
       const promptStatus: PromptRecoveryStatus = recoveryRequired ? "recovery_required" : "failed";
-      await this.safeUpdatePrompt(localRunId, { status: promptStatus, turnId, lastError: details });
       if (this.stateValue !== "DISCONNECTED" && this.stateValue !== "RECOVERY_REQUIRED") {
         this.stateValue = recoveryRequired ? "RECOVERY_REQUIRED" : "FAILED";
       }
       this.lastErrorValue = details;
       const failureState: RuntimeState = this.stateValue;
-      await this.safePersistProjection({
-        ...(isWriterConflictError(normalized)
-          ? {}
-          : { lastKnownState: failureState === "DISCONNECTED" ? "disconnected" : recoveryRequired ? "recovery_required" : "failed" }),
-        lastKnownTurnId: turnId,
-        lastError: details,
-      });
+      const persistFailure = async (): Promise<void> => {
+        await this.safeUpdatePrompt(localRunId, { status: promptStatus, turnId, lastError: details });
+        await this.safePersistProjection({
+          ...(isWriterConflictError(normalized)
+            ? {}
+            : { lastKnownState: failureState === "DISCONNECTED" ? "disconnected" : recoveryRequired ? "recovery_required" : "failed" }),
+          lastKnownTurnId: turnId,
+          lastError: details,
+        });
+      };
+      if (acceptanceTimedOut || recoveryRequired) void persistFailure();
+      else await persistFailure();
       throw normalized;
     } finally {
       this.turnStartInFlight = false;
