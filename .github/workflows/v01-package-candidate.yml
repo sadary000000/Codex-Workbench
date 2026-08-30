@@ -46,6 +46,8 @@ jobs:
             'dist/package/Codex Workbench CLI Runtime.exe',
             'dist/package/resources/app/package.json',
             'dist/package/resources/app/dist/main/main.js',
+            'dist/package/resources/app/dist/automation/requirement-response-repair.js',
+            'dist/package/resources/app/dist/automation/requirement-service.js',
             'dist/package/resources/app/dist/renderer/ui-projection.js',
             'dist/package/resources/app/dist/renderer/automation-governance-inspector.js',
             'dist/package/resources/app/dist/renderer/automation-governance-actions.js',
@@ -56,6 +58,15 @@ jobs:
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Missing packaged artifact: $path" }
+          }
+
+          $requirementServicePath = 'dist/package/resources/app/dist/automation/requirement-service.js'
+          $requirementService = Get-Content $requirementServicePath -Raw
+          if (-not $requirementService.Contains('./requirement-response-repair.js')) {
+            throw 'Packaged Requirement service is missing bounded response repair import.'
+          }
+          if ($requirementService.Contains('./requirement-response-repair.ts')) {
+            throw 'Packaged Requirement service still references source-only response repair module.'
           }
 
           $projectionPath = 'dist/package/resources/app/dist/renderer/ui-projection.js'
@@ -94,6 +105,7 @@ jobs:
             "productSnapshot=$env:GITHUB_SHA",
             "guiSha256=$guiSha",
             "cliSha256=$cliSha",
+            'packagedRequirementResponseRepair=PASS',
             'packagedAutomationUiContract=PASS',
             'note=Candidate packaging artifact only; current real Source and packaged E2E gates remain separately required.'
           ) | Set-Content 'dist/package/CANDIDATE_PROVENANCE.txt' -Encoding utf8
