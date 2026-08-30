@@ -33,4 +33,5 @@ export * from "./composition-root.ts";
 export * from "./planner-validator.ts";
 export * from "./planner-provider-contract.ts";
 export * from "./planner-provider-integration.ts";
+export * from "./planner-provider-prompt.ts";
 export * from "./stage-k1-d-reconcile-only.ts";

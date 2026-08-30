@@ -134,17 +134,32 @@ test("existing project PolicyVersion is preserved when Requirement work starts",
   }
 });
 
-test("v0.1 Planner and Step new-work entrypoints normalize the same raw Native Thread id", async () => {
+test("v0.1 Planner creates an ephemeral production InputRef and shares Native target normalization with Step", async () => {
   let plannerTarget = "";
+  let plannerInputRef = "";
+  let plannerPrompt = "";
   let stepTarget = "";
+  let projectLifecycle = "REQUIREMENTS_CONFIRMED";
+  const projectEvents: string[] = [];
+  const inputRefs = new InputRefRegistry();
+  const requirementPayload = JSON.stringify({ goal: "Read package.json without modifying files." });
+  const requirement = {
+    requirementVersionId: "requirement-v01",
+    projectId: "project-v01-new-work",
+    payloadSha256: "a".repeat(64),
+    canonicalPayload: requirementPayload,
+  };
   const services = {
     providers: { defaultProviderId: "NATIVE" },
+    inputRefs,
     planner: (providerId: AutomationProviderId) => {
       assert.equal(providerId, "NATIVE");
       return {
-        createPlanFromRequirement: async (input: { providerTargetRef: string }) => {
+        createPlanFromRequirement: async (input: { providerTargetRef: string; inputRefs?: readonly string[] }) => {
           plannerTarget = input.providerTargetRef;
-          return {};
+          plannerInputRef = input.inputRefs?.[0] ?? "";
+          plannerPrompt = await inputRefs.resolve(plannerInputRef);
+          return { status: "PLAN_READY" };
         },
       };
     },
@@ -158,7 +173,23 @@ test("v0.1 Planner and Step new-work entrypoints normalize the same raw Native T
       };
     },
   } as unknown as AutomationProviderServiceRouter;
-  const facade = new AutomationExecutionFacade({ store: {} as never, services });
+  const store = {
+    get: async (collection: string, id: string) => {
+      if (collection === "automationProjects" && id === "project-v01-new-work") {
+        return { projectId: id, lifecycle: projectLifecycle, activeRequirementVersionId: requirement.requirementVersionId, activePlanVersionId: null };
+      }
+      if (collection === "requirementVersions" && id === requirement.requirementVersionId) return requirement;
+      return null;
+    },
+    transitionProject: async (_projectId: string, event: string) => {
+      projectEvents.push(event);
+      if (event === "START_PLANNING") projectLifecycle = "PLANNING";
+      else if (event === "PLAN_READY") projectLifecycle = "READY";
+      else if (event === "START") projectLifecycle = "RUNNING";
+      return { projectId: "project-v01-new-work", lifecycle: projectLifecycle };
+    },
+  };
+  const facade = new AutomationExecutionFacade({ store: store as never, services });
 
   await facade.createPlan({
     projectId: "project-v01-new-work",
@@ -172,5 +203,12 @@ test("v0.1 Planner and Step new-work entrypoints normalize the same raw Native T
   });
 
   assert.equal(plannerTarget, "native-thread-v1:thread-v01-shared");
+  assert.match(plannerInputRef, /^automation-input-v1:[a-f0-9]{64}$/);
+  assert.match(plannerPrompt, /projectId=project-v01-new-work/);
+  assert.match(plannerPrompt, /requirementVersionId=requirement-v01/);
+  assert.match(plannerPrompt, /Read package\.json without modifying files\./);
+  assert.equal(inputRefs.has(plannerInputRef), false, "Planner raw prompt must leave the ephemeral registry after provider submit returns");
   assert.equal(stepTarget, "native-thread-v1:thread-v01-shared");
+  assert.deepEqual(projectEvents, ["START_PLANNING", "PLAN_READY", "START"]);
+  assert.equal(projectLifecycle, "RUNNING");
 });

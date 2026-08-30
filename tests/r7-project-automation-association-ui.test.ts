@@ -40,7 +40,8 @@ test("R7.4 main keeps Automation activation behind the lazy association reader",
   assert.equal(getter.includes("new ProjectAutomationAssociationService"), true);
 
   const listHandler = main.slice(main.indexOf("IPC.projectAutomationAssociationList"), main.indexOf("IPC.projectAutomationCandidateList"));
-  const unlinkHandler = main.slice(main.indexOf("IPC.projectAutomationUnlink"), main.indexOf("IPC.threadList"));
+  const unlinkHandler = main.slice(main.indexOf("IPC.projectAutomationUnlink"), main.indexOf("IPC.automationRequirementStart"));
   assert.equal(listHandler.includes("ensureAutomationPersistence"), false);
   assert.equal(unlinkHandler.includes("ensureAutomationPersistence"), false);
+  assert.equal(unlinkHandler.includes("getAutomationProviderHost"), false);
 });

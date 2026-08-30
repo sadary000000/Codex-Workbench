@@ -128,6 +128,10 @@ test("repairs one malformed completed response in the same Chat and preserves th
   assert.equal((events[0]?.original as { responseSha256: string }).responseSha256.length, 64);
   assert.equal("response" in events[0]!, false);
   assert.match(repairPrompt, /top-level keys must be exactly requirementProtocolVersion, status, and payload/);
+  assert.match(repairPrompt, /Omit an optional field instead of returning an empty string or empty array/);
+  assert.match(repairPrompt, /never return context:\"\", constraints:\[\], acceptanceCriteria:\[\], assumptions:\[\], or nonGoals:\[\]/);
+  assert.match(repairPrompt, /confidence, when present, must be exactly LOW, MEDIUM, or HIGH/);
+  assert.match(repairPrompt, /A minimal valid sufficient response has this shape/);
   assert.doesNotMatch(repairPrompt, /projectId=|requestId=|idempotencyKey=|semanticSha256=/);
 });
 

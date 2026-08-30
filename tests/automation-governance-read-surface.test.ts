@@ -22,6 +22,7 @@ test("Automation governance projection is readable through both narrow product s
   assert.match(main, /request\.command === "automation\.project\.inspect"/);
   assert.match(main, /getAutomationProviderHost\(\)\.governance\.inspect\(request\.projectId\)/);
   assert.match(main, /IPC\.automationProjectGovernance/);
+  assert.match(main, /IPC\.automationProjectGovernance[\s\S]*?await ensureAutomationPersistence\(\);[\s\S]*?getAutomationProviderHost\(\)\.governance\.inspect\(projectId\.trim\(\)\)/);
   assert.match(main, /getAutomationProviderHost\(\)\.governance\.inspect\(projectId\.trim\(\)\)/);
   assert.match(preload, /automationProjectGovernance: "automation:project:governance"/);
   assert.match(preload, /getAutomationGovernanceProject:/);

@@ -152,6 +152,10 @@ test("aligns a batch, resolves context, calls explicit REQUIREMENT WebGPT, and r
     assert.match(first.request?.prompt ?? "", /NEEDS_INPUT payload must be/);
     assert.match(first.request?.prompt ?? "", /resolutionMode must be exactly one of USER_REQUIRED, ASSUMPTION_ALLOWED, AVAILABLE_CONTEXT, or AUTO_INVESTIGATION/);
     assert.match(first.request?.prompt ?? "", /Do not use UI control labels such as SINGLE_SELECT/);
+    assert.match(first.request?.prompt ?? "", /Omit an optional field instead of returning an empty string or empty array/);
+    assert.match(first.request?.prompt ?? "", /never return context:\"\", constraints:\[\], acceptanceCriteria:\[\], assumptions:\[\], or nonGoals:\[\]/);
+    assert.match(first.request?.prompt ?? "", /confidence, when present, must be exactly LOW, MEDIUM, or HIGH/);
+    assert.match(first.request?.prompt ?? "", /A minimal valid sufficient response has this shape/);
     assert.doesNotMatch(first.request?.prompt ?? "", /Protocol identity to echo|Request semanticSha256 to echo/);
     assert.equal(first.request?.prompt.includes(first.request?.semanticSha256 ?? ""), false);
     assert.equal(webgpt.requests.length, 1);

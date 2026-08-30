@@ -2497,6 +2497,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.automationProjectGovernance, async (_event, projectId: unknown) => {
     try {
       if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256) throw codedError("PROJECT_INSPECT_INPUT_REQUIRED", "Automation governance read requires a bounded Project ID.");
+      await ensureAutomationPersistence();
       return ok(await getAutomationProviderHost().governance.inspect(projectId.trim()));
     } catch (error) {
       return fail(error);

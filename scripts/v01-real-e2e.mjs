@@ -246,10 +246,23 @@ function statusText(value) {
   return "";
 }
 
+function isTransientNativeReadError(error) {
+  const message = errorText(error).toLowerCase();
+  return message.includes("not materialized yet")
+    || (message.includes("rollout at ") && message.includes(" is empty"));
+}
+
 async function waitForNativeTurn(cdp, turnId, timeoutMs = 180_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const read = await invoke(cdp, "readThread", [], 30_000);
+    let read;
+    try {
+      read = await invoke(cdp, "readThread", [], 30_000);
+    } catch (error) {
+      if (!isTransientNativeReadError(error)) throw error;
+      await delay(250);
+      continue;
+    }
     const turn = read?.turns?.find((candidate) => candidate.id === turnId);
     if (turn) {
       const state = statusText(turn.status);
@@ -266,8 +279,35 @@ async function waitForNativeTurn(cdp, turnId, timeoutMs = 180_000) {
   throw new Error(`NATIVE_TURN_TIMEOUT:${turnId}`);
 }
 
+async function waitForComposerCapabilities(cdp, nativeThreadId, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      return await invoke(cdp, "getComposerCapabilities", [nativeThreadId]);
+    } catch (error) {
+      const message = errorText(error);
+      if (!message.includes("THREAD_TARGET_MISMATCH")) throw error;
+      lastError = error;
+      await invoke(cdp, "switchThread", [nativeThreadId]);
+      await delay(250);
+    }
+  }
+  throw new Error(`COMPOSER_CAPABILITIES_TIMEOUT:${errorText(lastError)}`);
+}
+
+async function requestOrReconcileRequirementDraft(cdp, sessionId) {
+  try {
+    return await invoke(cdp, "requestAutomationRequirementDraft", [sessionId]);
+  } catch (error) {
+    const message = errorText(error);
+    if (!message.includes("REQUESTAUTOMATIONREQUIREMENTDRAFT_FAILED:RECOVERY_REQUIRED:")) throw error;
+    return invoke(cdp, "reconcileAutomationRequirement", [sessionId, null]);
+  }
+}
+
 async function settleRequirement(cdp, automationProjectId, sessionId) {
-  let receipt = await invoke(cdp, "requestAutomationRequirementDraft", [sessionId]);
+  let receipt = await requestOrReconcileRequirementDraft(cdp, sessionId);
   for (let attempt = 0; attempt < 6; attempt += 1) {
     let view = await invoke(cdp, "getAutomationRequirementProject", [automationProjectId]);
     assert.equal(view.integrity.status, "OK", `Requirement projection degraded: ${view.integrity.issues.join(" | ")}`);
@@ -278,7 +318,7 @@ async function settleRequirement(cdp, automationProjectId, sessionId) {
         question.defaultRecommendation || question.options?.[0] || "Follow the explicit v0.1 E2E goal exactly; keep scope minimal, PURE, read-only, and deterministic.",
       ]));
       await invoke(cdp, "answerAutomationRequirementQuestions", [sessionId, view.alignment?.round?.alignmentRoundId ?? null, answers]);
-      receipt = await invoke(cdp, "requestAutomationRequirementDraft", [sessionId]);
+      receipt = await requestOrReconcileRequirementDraft(cdp, sessionId);
       continue;
     }
     if (view.requirement && receipt?.status === "DRAFT_READY") return view;
@@ -398,7 +438,7 @@ try {
   evidence.identities.productProjectId = productProject.projectId;
   evidence.identities.nativeThreadId = nativeThreadId;
 
-  const capabilities = await invoke(instance.cdp, "getComposerCapabilities", [nativeThreadId]);
+  const capabilities = await waitForComposerCapabilities(instance.cdp, nativeThreadId);
   const model = capabilities.defaultModel ?? capabilities.models?.[0]?.model ?? null;
   const modelCapability = capabilities.models?.find((candidate) => candidate.model === model) ?? capabilities.models?.[0] ?? null;
   const preferences = {

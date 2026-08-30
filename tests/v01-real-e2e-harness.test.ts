@@ -48,6 +48,28 @@ test("v0.1 real E2E harness is syntactically valid and drives production rendere
   assert.match(harness, /restart-persistence/);
 });
 
+test("v0.1 E2E retries only the known fresh-thread materialization read race", () => {
+  assert.match(harness, /function isTransientNativeReadError\(error\)/);
+  assert.match(harness, /message\.includes\("not materialized yet"\)/);
+  assert.match(harness, /message\.includes\("rollout at "\) && message\.includes\(" is empty"\)/);
+  assert.match(harness, /if \(!isTransientNativeReadError\(error\)\) throw error/);
+  assert.match(harness, /await delay\(250\);\s*continue;/);
+});
+
+test("v0.1 E2E reselects only the exact new thread during the Composer target race", () => {
+  assert.match(harness, /async function waitForComposerCapabilities\(cdp, nativeThreadId/);
+  assert.match(harness, /message\.includes\("THREAD_TARGET_MISMATCH"\)/);
+  assert.match(harness, /invoke\(cdp, "switchThread", \[nativeThreadId\]\)/);
+  assert.match(harness, /waitForComposerCapabilities\(instance\.cdp, nativeThreadId\)/);
+});
+
+test("v0.1 E2E reconciles an accepted Requirement request instead of resending it", () => {
+  assert.match(harness, /function requestOrReconcileRequirementDraft\(cdp, sessionId\)/);
+  assert.match(harness, /REQUESTAUTOMATIONREQUIREMENTDRAFT_FAILED:RECOVERY_REQUIRED:/);
+  assert.match(harness, /return invoke\(cdp, "reconcileAutomationRequirement", \[sessionId, null\]\)/);
+  assert.doesNotMatch(harness, /REQUESTAUTOMATIONREQUIREMENTDRAFT_FAILED:RECOVERY_REQUIRED:[\s\S]{0,300}requestAutomationRequirementDraft/);
+});
+
 test("v0.1 E2E does not use historical Automation stage gates as the product path", () => {
   assert.doesNotMatch(harness, /environment\.AUT2_REAL_WEBGPT_GATE\s*=\s*["']1["']/);
   assert.doesNotMatch(harness, /environment\.AUT3_REAL_PLANNER_GATE\s*=\s*["']1["']/);

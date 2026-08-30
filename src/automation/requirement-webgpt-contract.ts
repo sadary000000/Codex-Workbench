@@ -29,7 +29,11 @@ export const REQUIREMENT_MODEL_RESPONSE_INSTRUCTIONS = [
   "Allowed status values are NEEDS_INPUT, READY_FOR_DRAFT, and BLOCKED.",
   "Question resolutionMode must be exactly one of USER_REQUIRED, ASSUMPTION_ALLOWED, AVAILABLE_CONTEXT, or AUTO_INVESTIGATION. For a blocking fact that the user must answer, use USER_REQUIRED. Do not use UI control labels such as SINGLE_SELECT.",
   "NEEDS_INPUT payload must be {questions: [{category, question, whyNeeded, blocking, resolutionMode, options?, defaultRecommendation?, dependsOn?}], assumptions?: [{statement, rationale?, impact?, confidence?, blocking?}]} and questions must contain at least one item.",
+  "Assumption confidence, when present, must be exactly LOW, MEDIUM, or HIGH; never return a number, percentage, or any other label.",
   "READY_FOR_DRAFT payload must be {draft: {goal, context?, constraints?, acceptanceCriteria?, assumptions?, nonGoals?}}.",
+  "Every returned string and every string-list item must be non-empty after trimming. Omit an optional field instead of returning an empty string or empty array.",
+  "In particular, never return context:\"\", constraints:[], acceptanceCriteria:[], assumptions:[], or nonGoals:[]. If an optional READY_FOR_DRAFT field has no meaningful value, leave that key out of draft entirely.",
+  "A minimal valid sufficient response has this shape: {\"requirementProtocolVersion\":1,\"status\":\"READY_FOR_DRAFT\",\"payload\":{\"draft\":{\"goal\":\"A concrete non-empty goal\"}}}.",
   "BLOCKED payload must be {code, reason, retryable}.",
   "Do not output projectId, role, chatRef, requestId, idempotencyKey, semanticSha256, questionId, roundId, alignmentSessionId, requirementVersionId, auditEventId, or payloadSha256.",
 ].join("\n");
