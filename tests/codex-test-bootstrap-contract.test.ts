@@ -105,27 +105,28 @@ test("deferred test registry retains non-blocking work without granting current 
   }
 });
 
-test("Direct Codex vs Workbench Native deferred A/B is ready on one exact green harness target", () => {
+test("Direct Codex vs Workbench Native deferred A/B is ready on one exact protocol-v1.2 unresolved target", () => {
   const entry = deferredTests.tests.find((candidate: { testId?: string }) => candidate.testId === "direct-codex-vs-workbench-native-ab-v1");
   assert.ok(entry);
   assert.equal(entry.status, "ready");
   assert.equal(entry.blocksMainline, false);
   assert.equal(entry.requiredBefore, "release-candidate");
   assert.deepEqual(entry.executionTarget, {
-    branch: "feature/ab-native-parity-validation",
-    commit: "7420b7c6ce93201641c7e79e33e05392602ebf01",
-    pullRequest: 19,
-    productBaselineCommit: "af911e71ca3370c143d504e2923b122f827cac6c",
+    branch: "test/native-ab-unresolved-v1-2-clean",
+    commit: "95ac3c6358627dcbd7c8b486fae667d0c1e2d40f",
+    pullRequest: 46,
+    productBaselineCommit: "7c6603f9fd205dddc1ba62758000e0b85de36d00",
   });
   assert.equal(entry.protocol.source, "execution-target");
-  assert.equal(entry.protocol.version, "1.0.0");
+  assert.equal(entry.protocol.version, "1.2.0");
   for (const key of ["runbook", "agentPlan", "cases", "resultSchema", "runner"]) {
     assert.equal(typeof entry.protocol[key], "string", `deferred A/B protocol.${key} must be a repository path`);
     assert.equal(entry.protocol[key].length > 0, true);
   }
-  assert.equal(entry.knownHarnessEvidence.workflowRunId, 33235545775);
-  assert.equal(entry.knownHarnessEvidence.workflowJobId, 99055770565);
-  assert.equal(entry.knownHarnessEvidence.finalSelfCleanCommit, entry.executionTarget.commit);
+  assert.equal(entry.knownHarnessEvidence.workflowRunId, 33261530680);
+  assert.equal(entry.knownHarnessEvidence.workflowJobId, 99124204299);
+  assert.equal(entry.knownHarnessEvidence.finalSelfCleanCommit, "7dc08e4e59a37a5c08dc5e36f6ec2aef256f836d");
+  assert.match(entry.knownHarnessEvidence.note, /clean exact execution target 95ac3c6358627dcbd7c8b486fae667d0c1e2d40f/);
   assert.equal(entry.knownHarnessEvidence.conclusion, "success");
   assert.equal(entry.executionPolicy.timedTrialsMustNotShareContendedRuntimeResources, true);
   assert.equal(entry.executionPolicy.resultAppliesOnlyToExactExecutionTarget, true);
