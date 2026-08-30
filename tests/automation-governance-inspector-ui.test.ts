@@ -10,7 +10,7 @@ const uiProjection = readFileSync(resolve(root, "src/renderer/ui-projection.ts")
 test("renderer loads the governance inspector only in the browser", () => {
   assert.match(uiProjection, /typeof document !== "undefined"/);
   assert.match(uiProjection, /typeof window !== "undefined"/);
-  assert.match(uiProjection, /import\("\.\/automation-governance-inspector\.ts"\)/);
+  assert.match(uiProjection, /import\("\.\/automation-governance-inspector\.js"\)/);
 });
 
 test("governance inspector consumes only the bounded read projection", () => {
