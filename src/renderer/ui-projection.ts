@@ -74,9 +74,11 @@ export function userFacingErrorMessage(error: RuntimeErrorInfo): string {
 
 // renderer.ts is currently the single renderer entrypoint. Keep these UI-only
 // extensions browser-gated so projection helpers remain safe in Node tests.
+// Use emitted .js specifiers here: TypeScript preserves dynamic-import strings,
+// and the packaged renderer contains JavaScript modules rather than source .ts files.
 if (typeof document !== "undefined" && typeof window !== "undefined") {
-  void import("./automation-governance-inspector.ts")
-    .then(() => import("./automation-governance-actions.ts"))
-    .then(() => import("./automation-requirement-planner.ts"))
-    .then(() => import("./automation-v01-guidance.ts"));
+  void import("./automation-governance-inspector.js")
+    .then(() => import("./automation-governance-actions.js"))
+    .then(() => import("./automation-requirement-planner.js"))
+    .then(() => import("./automation-v01-guidance.js"));
 }
