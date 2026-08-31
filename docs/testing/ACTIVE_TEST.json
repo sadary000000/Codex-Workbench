@@ -14,7 +14,7 @@
   "targetPolicy": {
     "startFreshness": "branch-head-must-match",
     "completionFreshness": "branch-head-must-match-for-mainline-gate",
-    "resultScope": "exact-tested-product-tree"
+    "resultScope": "exact-tested-commit"
   },
   "controlPlanePolicy": {
     "freezeBootstrapCommit": true,
