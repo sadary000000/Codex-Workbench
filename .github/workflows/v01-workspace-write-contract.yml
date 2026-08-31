@@ -680,6 +680,23 @@ test("user-confirmed RECONCILABLE Step dispatches one workspace-write Native Tur
 });''',
           )
 
+          replace_once(
+              'tests/automation-native-executor-target-ui.test.ts',
+              'assert.match(actions, /api\\.executeAutomationStep\\(view\\.project\\.projectId, step\\.stepSpecId, selectedTarget\\)/);',
+              'assert.match(actions, /api\\.executeAutomationStep\\(view\\.project\\.projectId, step\\.stepSpecId, selectedTarget, workspaceWrite\\)/);',
+          )
+
+          replace_once(
+              'tests/v01-native-target-normalization.test.ts',
+              '''    assert.equal(policyView.allowDataEgress, false);
+    assert.equal(policyView.allowSideEffects, false);
+    assert.ok(policyView.allowedOperations.includes("PROMPT"));''',
+              '''    assert.equal(policyView.allowDataEgress, false);
+    assert.equal(policyView.allowSideEffects, true);
+    assert.ok(policyView.allowedOperations.includes("PROMPT"));
+    assert.ok(policyView.allowedOperations.includes("SIDE_EFFECT"));''',
+          )
+
           Path('tests/v01-workspace-write-contract.test.ts').write_text('''import assert from "node:assert/strict";
 import test from "node:test";
 import { v01NativeExecutionDisposition } from "../src/automation/v01-workspace-write-contract.ts";
