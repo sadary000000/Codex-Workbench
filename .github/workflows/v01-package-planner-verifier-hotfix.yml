@@ -1,0 +1,92 @@
+name: v0.1 Planner Verifier Hotfix Windows
+
+on:
+  push:
+    branches:
+      - release/v0.1-integration
+    paths:
+      - .github/workflows/v01-package-planner-verifier-hotfix.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PRODUCT_SNAPSHOT: 650168ba73aacf7226f86eeafcf73ea48eb4cc23
+    steps:
+      - name: Checkout exact Planner verifier hotfix snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCT_SNAPSHOT }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare Electron Windows runtime
+        shell: pwsh
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '0'
+        run: |
+          node node_modules/electron/install.js
+          if (-not (Test-Path 'node_modules/electron/dist')) {
+            throw 'Electron Windows runtime was not installed.'
+          }
+
+      - name: Typecheck exact snapshot
+        run: npm run typecheck
+
+      - name: Run Planner verifier hotfix tests
+        shell: pwsh
+        run: |
+          node --import tsx --test tests/v01-planner-verification-class-prompt.test.ts tests/v01-planner-verifier-list-repair.test.ts
+
+      - name: Build Windows package
+        run: npm run package:win
+
+      - name: Verify hotfix is packaged
+        shell: pwsh
+        run: |
+          $required = @(
+            'dist/package/Codex Workbench V1.exe',
+            'dist/package/resources/app/dist/automation/planner-provider-prompt.js',
+            'dist/package/resources/app/dist/automation/planner-result-repair-provider.js',
+            'dist/package/resources/app/dist/automation/provider-service-router.js'
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing packaged hotfix artifact: $path" }
+          }
+          $prompt = Get-Content 'dist/package/resources/app/dist/automation/planner-provider-prompt.js' -Raw
+          if (-not $prompt.Contains('verificationPlan MUST be a JSON array containing 1 to 32 non-empty strings')) {
+            throw 'Packaged Planner prompt is missing verifier-list shape constraint.'
+          }
+          $repair = Get-Content 'dist/package/resources/app/dist/automation/planner-result-repair-provider.js' -Raw
+          if (-not $repair.Contains('repairPlannerVerifierListShape')) {
+            throw 'Packaged Planner result repair boundary is missing.'
+          }
+          $router = Get-Content 'dist/package/resources/app/dist/automation/provider-service-router.js' -Raw
+          if (-not $router.Contains('createPlannerResultRepairProvider')) {
+            throw 'Packaged Planner service is not wired through the repair boundary.'
+          }
+          @{
+            productSnapshot = '${{ env.PRODUCT_SNAPSHOT }}'
+            packagedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+            purpose = 'planner-verifier-list-hotfix'
+          } | ConvertTo-Json | Set-Content -Path 'dist/package/HOTFIX-PROVENANCE.json' -Encoding utf8
+
+      - name: Upload fixed Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Codex-Workbench-v0.1-Windows-Planner-Verifier-Hotfix-${{ env.PRODUCT_SNAPSHOT }}
+          path: dist/package/**
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 14
