@@ -40,6 +40,18 @@ jobs:
           Path('/tmp/apply-v01-workspace-write.py').write_text('\n'.join(body) + '\n', encoding='utf-8')
       - name: Apply reviewed patch
         run: python /tmp/apply-v01-workspace-write.py
+      - name: Keep Native execution mode explicit in regression calls
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('tests/arch-r2-shared-native-runtime.test.ts')
+          text = path.read_text(encoding='utf-8')
+          old = 'adapter.startTurn({ nativeThreadId: "thread-r2-shared", prompt: "planner prompt" })'
+          count = text.count(old)
+          if count != 3:
+              raise SystemExit(f'expected 3 read-only startTurn calls, found {count}')
+          text = text.replace(old, 'adapter.startTurn({ nativeThreadId: "thread-r2-shared", prompt: "planner prompt", executionMode: "READ_ONLY" })')
+          path.write_text(text, encoding='utf-8')
       - name: Install dependencies
         run: npm ci
       - name: Typecheck
