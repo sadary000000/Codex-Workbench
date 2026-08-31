@@ -5,6 +5,11 @@ import type {
 
 const MAX_PLANNER_RESULT_CHARS = 128 * 1024;
 
+type ResolveTargetInput = Parameters<AutomationProviderPort["resolveTarget"]>[0];
+type SubmitInput = Parameters<AutomationProviderPort["submit"]>[0];
+type ObserveInput = Parameters<AutomationProviderPort["observe"]>[0];
+type ReconcileInput = Parameters<AutomationProviderPort["reconcile"]>[0];
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -69,11 +74,11 @@ function repairResult(result: ProviderResult): ProviderResult {
 export function createPlannerResultRepairProvider(provider: AutomationProviderPort): AutomationProviderPort {
   return Object.freeze({
     provider: provider.provider,
-    resolveTarget: (input) => provider.resolveTarget(input),
+    resolveTarget: (input: ResolveTargetInput) => provider.resolveTarget(input),
     capabilities: () => provider.capabilities(),
-    submit: (input) => provider.submit(input),
-    observe: (input) => provider.observe(input),
-    reconcile: (input) => provider.reconcile(input),
+    submit: (input: SubmitInput) => provider.submit(input),
+    observe: (input: ObserveInput) => provider.observe(input),
+    reconcile: (input: ReconcileInput) => provider.reconcile(input),
     ...(provider.resolveRequestByCorrelation
       ? { resolveRequestByCorrelation: (input: Parameters<NonNullable<AutomationProviderPort["resolveRequestByCorrelation"]>>[0]) => provider.resolveRequestByCorrelation!(input) }
       : {}),
