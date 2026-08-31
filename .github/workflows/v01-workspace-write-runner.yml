@@ -31,13 +31,10 @@ jobs:
           marker = '      - name: Apply reviewed workspace-write contract'
           start = lines.index(marker)
           run_line = next(index for index in range(start + 1, len(lines)) if lines[index] == '        run: |')
+          end = next(index for index in range(run_line + 1, len(lines)) if lines[index] == '      - name: Install dependencies')
           body = []
-          for line in lines[run_line + 1:]:
-              if line.startswith('      - name:'):
-                  break
-              if line and not line.startswith('          '):
-                  raise SystemExit(f'unexpected patch-script indentation: {line!r}')
-              body.append(line[10:] if line else '')
+          for line in lines[run_line + 1:end]:
+              body.append(line[10:] if line.startswith('          ') else line)
           if not body:
               raise SystemExit('reviewed patch script was empty')
           Path('/tmp/apply-v01-workspace-write.py').write_text('\n'.join(body) + '\n', encoding='utf-8')
