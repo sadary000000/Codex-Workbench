@@ -16,7 +16,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     env:
-      PRODUCT_SNAPSHOT: 9258dad688284ba0941dd6d0c38493117da86bb7
+      PRODUCT_SNAPSHOT: a2ad45a4a54aca3ca9d069afa2c5c412ac615471
     steps:
       - name: Checkout frozen workspace-write product snapshot
         uses: actions/checkout@v4
@@ -49,6 +49,7 @@ jobs:
             'dist/package/resources/app/package.json',
             'dist/package/resources/app/dist/main/main.js',
             'dist/package/resources/app/dist/main/native-provider-runtime-adapter.js',
+            'dist/package/resources/app/dist/main/automation-provider-host.js',
             'dist/package/resources/app/dist/automation/v01-workspace-write-contract.js',
             'dist/package/resources/app/dist/automation/requirement-response-repair.js',
             'dist/package/resources/app/dist/automation/requirement-service.js',
@@ -109,6 +110,34 @@ jobs:
           }
           if (-not $plannerIntegration.Contains('latestAttemptForIntent')) {
             throw 'Packaged Planner integration is missing latest-attempt recovery selection.'
+          }
+          if (-not $plannerIntegration.Contains('V01_MAX_PLANNER_PROVIDER_ATTEMPTS = 2')) {
+            throw 'Packaged Planner integration is missing the quota-safe two-attempt ceiling.'
+          }
+
+          $plannerHostPath = 'dist/package/resources/app/dist/main/automation-provider-host.js'
+          $plannerHost = Get-Content $plannerHostPath -Raw
+          if (-not $plannerHost.Contains('V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS = 120000')) {
+            throw 'Packaged Planner host is missing the 120 second interactive provider wait.'
+          }
+
+          if (-not $plannerProjection.Contains('attemptsRemaining')) {
+            throw 'Packaged Requirement projection is missing remaining model-call visibility.'
+          }
+          if (-not $plannerProjection.Contains('resultClassification')) {
+            throw 'Packaged Requirement projection is missing Planner result classification.'
+          }
+
+          $plannerRendererPath = 'dist/package/resources/app/dist/renderer/automation-requirement-planner.js'
+          $plannerRenderer = Get-Content $plannerRendererPath -Raw
+          if (-not $plannerRenderer.Contains('Retry 会新增一次模型调用')) {
+            throw 'Packaged Planner UI is missing the explicit retry quota warning.'
+          }
+          if (-not $plannerRenderer.Contains('不新增调用')) {
+            throw 'Packaged Planner UI is missing no-new-call action labels.'
+          }
+          if (-not $plannerRenderer.Contains('INVALID_OUTPUT_RETRYABLE')) {
+            throw 'Packaged Planner UI is missing conditional retry classification.'
           }
 
           $nativeProviderPath = 'dist/package/resources/app/dist/codex/automation/native-provider-port.js'
@@ -214,6 +243,7 @@ jobs:
             'packagedPlannerVerificationContract=PASS',
             'packagedPlannerRestartRecovery=PASS',
             'packagedPlannerRequestIdentityRecovery=PASS',
+            'packagedPlannerQuotaSafeRecovery=PASS',
             'packagedAutomationUiContract=PASS',
             'note=Candidate packaging artifact only; current real Source and packaged E2E gates remain separately required.'
           ) | Set-Content 'dist/package/CANDIDATE_PROVENANCE.txt' -Encoding utf8
