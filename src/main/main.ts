@@ -1551,6 +1551,13 @@ function getAutomationProviderHost(): AutomationProviderHost {
     inputRefs: automationInputRefs,
     nativeRuntimes: runtimes,
     nativeRuntimeId: workbenchInstanceId,
+    resolveNativeTurnPreferences: async (nativeThreadId) => {
+      const preferences = await getPersistence().getComposerPreferences(nativeThreadId);
+      return {
+        ...(preferences?.model ? { model: preferences.model } : {}),
+        ...(preferences?.effort ? { effort: preferences.effort } : {}),
+      };
+    },
     webgptProvider: getLazyWebGptProviderPort(),
   });
   return automationProviderHost;

@@ -54,8 +54,14 @@ interface PlannerResultReceipt {
   planVersionId: string | null;
 }
 
+interface AutomationComposerPreferences {
+  model: string | null;
+  effort: string | null;
+}
+
 interface AutomationRequirementPlannerApi {
   getState(): Promise<IpcEnvelope<RuntimeSnapshot>>;
+  getComposerPreferences(nativeThreadId: string): Promise<IpcEnvelope<AutomationComposerPreferences | null>>;
   getAutomationRequirementProject(projectId: string): Promise<IpcEnvelope<AutomationRequirementProjectView>>;
   startAutomationRequirement(projectId: string, goal: string, providerTargetRef: string): Promise<IpcEnvelope<RequirementStartReceipt>>;
   requestAutomationRequirementDraft(sessionId: string): Promise<IpcEnvelope<RequirementDraftReceipt>>;
@@ -206,6 +212,7 @@ function installRequirementPlannerWorkspace(): void {
   let currentProjectId = "";
   let currentView: AutomationRequirementProjectView | null = null;
   let runtimeSnapshot: RuntimeSnapshot | null = null;
+  let automationComposerPreferences: AutomationComposerPreferences | null = null;
   let selectedTargetRef: string | null = null;
   let lastPlanner: PlannerReceipt | PlannerStatusReceipt | PlannerResultReceipt | null = null;
   let busy = false;
@@ -247,6 +254,11 @@ function installRequirementPlannerWorkspace(): void {
   const readRuntime = async (): Promise<IpcEnvelope<RuntimeSnapshot>> => {
     const response = await api.getState();
     runtimeSnapshot = response.ok && response.result ? response.result : null;
+    automationComposerPreferences = null;
+    if (runtimeSnapshot?.nativeThreadId) {
+      const preferences = await api.getComposerPreferences(runtimeSnapshot.nativeThreadId);
+      automationComposerPreferences = preferences.ok ? preferences.result ?? null : null;
+    }
     return response;
   };
 
@@ -300,8 +312,14 @@ function installRequirementPlannerWorkspace(): void {
     runtime.append(node("span", "automation-rp-meta-label", "当前已附着 Native Thread"), node("code", "automation-rp-meta-value", runtimeSnapshot?.nativeThreadId ?? "—"), node("span", "automation-rp-meta-label", `state: ${runtimeSnapshot?.state ?? "UNAVAILABLE"}`));
     const selected = node("div", "automation-rp-meta-item");
     selected.append(node("span", "automation-rp-meta-label", "已显式选择 target"), node("code", "automation-rp-meta-value", selectedTargetRef ?? "—"), node("span", "automation-rp-meta-label", targetIsCurrent() ? "exact identity matches current Runtime Truth" : "Execute/start 前需要 exact identity match"));
-    grid.append(runtime, selected);
-    card.append(grid);
+    const model = node("div", "automation-rp-meta-item");
+    model.append(
+      node("span", "automation-rp-meta-label", "Automation 模型 · 跟随 Native Thread"),
+      node("code", "automation-rp-meta-value", automationComposerPreferences?.model ?? "App Server 默认模型"),
+      node("span", "automation-rp-meta-label", automationComposerPreferences?.effort ? `reasoning: ${automationComposerPreferences.effort}` : "reasoning: 跟随模型默认"),
+    );
+    grid.append(runtime, selected, model);
+    card.append(grid, node("span", "automation-rp-note", "请在主 Composer 的模型下拉框选择模型；Automation 会在每个新 Turn 使用该 Native Thread 已保存的模型与推理强度。"));
     const actions = node("div", "automation-rp-actions");
     const refresh = button("刷新 Runtime Target", "target-refresh");
     refresh.addEventListener("click", () => void runAndRefresh("刷新 Runtime Target", async () => {

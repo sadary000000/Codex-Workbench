@@ -5,7 +5,7 @@ import { AutomationGovernanceProjectionService } from "../automation/governance-
 import { AutomationRequirementProjectionService } from "../automation/requirement-projection-service.ts";
 import { AutomationExecutionFacade } from "./automation-execution-facade.ts";
 import { createAutomationProviderComposition, type AutomationProviderComposition } from "./automation-provider-composition.ts";
-import { SharedNativeProviderRuntimeAdapter, type NativeRuntimeRegistryPort } from "./native-provider-runtime-adapter.ts";
+import { SharedNativeProviderRuntimeAdapter, type NativeAutomationTurnPreferences, type NativeRuntimeRegistryPort } from "./native-provider-runtime-adapter.ts";
 
 export const V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS = 1_000;
 
@@ -33,11 +33,13 @@ export function createAutomationProviderHost(options: {
   readonly inputRefs: InputRefRegistry;
   readonly nativeRuntimes: NativeRuntimeRegistryPort;
   readonly nativeRuntimeId: string;
+  readonly resolveNativeTurnPreferences?: (nativeThreadId: string) => Promise<NativeAutomationTurnPreferences>;
   readonly webgptProvider?: AutomationProviderPort | null;
 }): AutomationProviderHost {
   const nativeRuntime = new SharedNativeProviderRuntimeAdapter({
     registry: options.nativeRuntimes,
     runtimeId: options.nativeRuntimeId,
+    resolveTurnPreferences: options.resolveNativeTurnPreferences,
   });
   const composition = createAutomationProviderComposition({
     store: options.store,

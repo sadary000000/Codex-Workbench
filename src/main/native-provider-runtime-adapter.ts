@@ -21,6 +21,8 @@ export interface NativeRuntimeRegistryPort {
   list(): Array<{ nativeThreadId: string; runtime: SharedNativeRuntime }>;
 }
 
+export type NativeAutomationTurnPreferences = Pick<NativeTurnOptions, "model" | "effort">;
+
 interface TurnOwner {
   readonly nativeThreadId: string;
   completion: Promise<TurnResult> | null;
@@ -120,11 +122,17 @@ function timeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 export class SharedNativeProviderRuntimeAdapter implements NativeProviderRuntimePort {
   private readonly registry: NativeRuntimeRegistryPort;
   private readonly runtimeId: string;
+  private readonly resolveTurnPreferences: ((nativeThreadId: string) => Promise<NativeAutomationTurnPreferences>) | null;
   private readonly turns = new Map<string, TurnOwner>();
 
-  constructor(options: { registry: NativeRuntimeRegistryPort; runtimeId: string }) {
+  constructor(options: {
+    registry: NativeRuntimeRegistryPort;
+    runtimeId: string;
+    resolveTurnPreferences?: (nativeThreadId: string) => Promise<NativeAutomationTurnPreferences>;
+  }) {
     this.registry = options.registry;
     this.runtimeId = boundedId(options.runtimeId, "NATIVE_RUNTIME_ID");
+    this.resolveTurnPreferences = options.resolveTurnPreferences ?? null;
   }
 
   async hasThread(nativeThreadId: string): Promise<boolean> {
@@ -173,7 +181,12 @@ export class SharedNativeProviderRuntimeAdapter implements NativeProviderRuntime
     const sandboxPolicy: NativeTurnOptions["sandboxPolicy"] = input.executionMode === "WORKSPACE_WRITE"
       ? { type: "workspaceWrite", networkAccess: false, writableRoots: [snapshot.cwd] }
       : { type: "readOnly", networkAccess: false };
-    const started = await runtime.startTurnAccepted(input.prompt, { approvalPolicy: "never", sandboxPolicy });
+    const preferences = await this.resolveTurnPreferences?.(nativeThreadId) ?? {};
+    const started = await runtime.startTurnAccepted(input.prompt, {
+      ...preferences,
+      approvalPolicy: "never",
+      sandboxPolicy,
+    });
     if (started.acceptance.nativeThreadId !== nativeThreadId) throw new Error("NATIVE_TURN_THREAD_MISMATCH");
     const nativeTurnId = boundedId(started.acceptance.turnId, "NATIVE_TURN_ID");
     const owner: TurnOwner = { nativeThreadId, completion: started.completion, completed: null };
