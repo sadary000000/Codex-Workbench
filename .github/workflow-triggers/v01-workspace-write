@@ -1,5 +1,7 @@
-trigger=2026-08-31T04:18:00Z
+trigger=2026-08-31T06:49:00Z
 base=20682e11290d350a4cf536e64f3eff369008c1d4
 contract=v0.1-native-workspace-write
 extractor=v2
 explicitNativeMode=v2
+fullSuiteContracts=v1
+contractCommit=dbfeabe2406d939226160210dfd2c252f9f40a17
