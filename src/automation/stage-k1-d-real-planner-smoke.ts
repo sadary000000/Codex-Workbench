@@ -142,8 +142,8 @@ interface RequestSummary {
   readonly idempotencyKey: string | null;
   readonly promptChars: number;
   readonly promptSha256: string;
-    readonly targetIdentitySha256: string | null;
-    readonly currentPageIdentitySha256: string | null;
+  readonly targetIdentitySha256: string | null;
+  readonly currentPageIdentitySha256: string | null;
   readonly lastKnownPageUrlSha256: string | null;
   readonly submittedAt: string | null;
   readonly completedAt: string | null;
@@ -266,14 +266,22 @@ export function buildPlannerPrompt(requirementPayload: string, projectId: string
   return [
     "You are the planning-only provider for STAGE-K1-D.",
     "Return exactly one JSON object. Do not use Markdown fences, prose, comments, or extra keys.",
-    "The object must satisfy the K1-B PlanCandidate contract and must use these exact identities:",
-    `planVersionId=${PLAN_VERSION_ID}`,
-    `projectId=${projectId}`,
-    `requirementVersionId=${requirementVersionId}`,
-    `requirementPayloadSha256=${requirementPayloadSha256}`,
+    "The object MUST satisfy the current K1-B PlanCandidate contract below. Any field not explicitly listed is forbidden.",
+    "Top-level keys exactly: planVersionId, projectId, requirementVersionId, requirementPayloadSha256, version, supersedes, currentStageId, stages, steps, ambiguity.",
+    `Use planVersionId=${PLAN_VERSION_ID}.`,
+    `Use projectId=${projectId}.`,
+    `Use requirementVersionId=${requirementVersionId}.`,
+    `Use requirementPayloadSha256=${requirementPayloadSha256}.`,
     "Use version=1, supersedes=null, currentStageId=stage-k1-d-current.",
-    "Use exactly one DETAILED stage with stageSpecId=stage-k1-d-current, stageKey=K1-D-PLANNING, ordinal=0, specVersion=1, supersedes=null, dependsOn=[], non-empty objective, acceptanceCriteria, assumptions=[], risks=[].",
-    "Use exactly one PLANNER_STEP under that stage with stepSpecId=step-k1-d-current, stepKey=K1-D-VALIDATE, ordinal=0, specVersion=1, supersedes=null, non-empty objective, inputs, expectedOutputs, acceptanceCriteria, assumptions=[], constraints=[], riskClass=LOW, sideEffectClass=RECONCILABLE.",
+    "stages MUST be an array with exactly one object.",
+    "The stage object keys exactly: stageSpecId, planVersionId, stageKey, name, objective, dependsOn, acceptanceCriteria, detailLevel, assumptions, risks, specVersion, ordinal, supersedes.",
+    `Use stageSpecId=${STAGE_SPEC_ID}, planVersionId=${PLAN_VERSION_ID}, stageKey=K1-D-PLANNING, detailLevel=DETAILED, specVersion=1, ordinal=0, supersedes=null, dependsOn=[], assumptions=[], risks=[].`,
+    "Stage name, objective, and acceptanceCriteria must be non-empty and machine-verifiable.",
+    "steps MUST be an array with exactly one object for the current detailed stage.",
+    "The step object keys exactly: stepSpecId, stageSpecId, stepKey, specVersion, kind, ordinal, objective, inputs, expectedOutputs, acceptanceCriteria, assumptions, constraints, riskClass, sideEffectClass, supersedes.",
+    `Use stepSpecId=${STEP_SPEC_ID}, stageSpecId=${STAGE_SPEC_ID}, stepKey=K1-D-VALIDATE, specVersion=1, kind=PLANNER_STEP, ordinal=0, assumptions=[], constraints=[], riskClass=LOW, sideEffectClass=RECONCILABLE, supersedes=null.`,
+    "Step objective, inputs, expectedOutputs, and acceptanceCriteria must be JSON arrays/strings of the exact types required by those keys; acceptanceCriteria must contain at least one non-empty machine-verifiable string.",
+    "Do NOT emit verificationPlan. verificationPlan is not part of the K1-B PlanCandidate contract and will be rejected as UNSUPPORTED_FIELD.",
     "Set ambiguity to {\"blockingQuestions\":[],\"missingRequirementFields\":[],\"assumptions\":[]}.",
     "The requirement below is a non-sensitive test fixture. Do not execute it; only return the candidate JSON.",
     requirementPayload,
