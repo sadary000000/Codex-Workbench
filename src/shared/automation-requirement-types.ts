@@ -52,6 +52,9 @@ export interface AutomationPlannerRecoveryView {
   plannerState: "ACTIVE" | "PROMOTED" | "FAILED" | null;
   promotedPlanVersionId: string | null;
   dispatchNumber: number | null;
+  attemptLimit: number;
+  attemptsRemaining: number;
+  resultClassification: string | null;
 }
 
 export interface AutomationRequirementProjectView {

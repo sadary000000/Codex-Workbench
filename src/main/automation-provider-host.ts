@@ -7,7 +7,7 @@ import { AutomationExecutionFacade } from "./automation-execution-facade.ts";
 import { createAutomationProviderComposition, type AutomationProviderComposition } from "./automation-provider-composition.ts";
 import { SharedNativeProviderRuntimeAdapter, type NativeAutomationTurnPreferences, type NativeRuntimeRegistryPort } from "./native-provider-runtime-adapter.ts";
 
-export const V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS = 1_000;
+export const V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS = 120_000;
 
 export interface AutomationProviderHost {
   readonly nativeRuntime: SharedNativeProviderRuntimeAdapter;
@@ -23,10 +23,10 @@ export interface AutomationProviderHost {
  * WebGPT workspace and mutates no workflow state. Runtime owners must already
  * exist and are passed in as narrow ports.
  *
- * Product-facing provider waits are capped so an accepted long-running model
- * request returns to Workbench quickly with its durable recovery identity.
- * The underlying provider/domain defaults remain unchanged outside this host,
- * and progress after the cap continues only through explicit reconcile paths.
+ * Product-facing provider waits use the provider's bounded 120 second terminal
+ * window so ordinary Planner work can finish without forcing manual recovery
+ * after one second. The renderer remains asynchronous and shows elapsed time;
+ * a genuinely non-terminal result still returns its durable recovery identity.
  */
 export function createAutomationProviderHost(options: {
   readonly store: AutomationStore;

@@ -48,13 +48,13 @@ function providerWithoutWait(): AutomationProviderPort {
   };
 }
 
-test("v0.1 product provider wait cap bounds a 120 second synchronous wait", async () => {
+test("v0.1 product provider wait cap preserves the bounded 120 second terminal window", async () => {
   const calls: number[] = [];
   const capped = capProviderSynchronousWait(providerWithWait(calls), V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS);
   const result = await capped.waitResult?.({ providerRequestRef: "turn-1", timeoutMs: 120_000 });
 
-  assert.equal(V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS, 1_000);
-  assert.deepEqual(calls, [1_000]);
+  assert.equal(V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS, 120_000);
+  assert.deepEqual(calls, [120_000]);
   assert.equal(result?.state, "RUNNING");
 });
 

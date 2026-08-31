@@ -502,8 +502,8 @@ function installRequirementPlannerWorkspace(): void {
     return wrapper;
   };
 
-  const plannerIntentId = (): string | null => lastPlanner?.actionIntentId ?? null;
-  const plannerAttemptId = (): string | null => lastPlanner?.actionAttemptId ?? null;
+  const plannerIntentId = (): string | null => lastPlanner?.actionIntentId ?? currentView?.plannerRecovery?.actionIntentId ?? null;
+  const plannerAttemptId = (): string | null => lastPlanner?.actionAttemptId ?? currentView?.plannerRecovery?.actionAttemptId ?? null;
 
   const renderPlanner = (view: AutomationRequirementProjectView): HTMLElement => {
     const card = node("section", "automation-rp-card");
@@ -513,43 +513,62 @@ function installRequirementPlannerWorkspace(): void {
     const meta = node("div", "automation-rp-meta-grid");
     appendValue(meta, "active RequirementVersion", view.project.activeRequirementVersionId);
     appendValue(meta, "active PlanVersion", view.project.activePlanVersionId);
+    appendValue(meta, "Planner 尝试", view.plannerRecovery?.dispatchNumber ?? 0);
+    appendValue(meta, "剩余新模型调用", view.plannerRecovery?.attemptsRemaining ?? view.plannerRecovery?.attemptLimit ?? 2);
+    appendValue(meta, "结果分类", view.plannerRecovery?.resultClassification);
     card.append(meta);
 
     const actions = node("div", "automation-rp-actions");
-    const create = button("Create Plan on selected Native Thread", "planner-create");
-    create.dataset.requiresActiveRequirement = "true";
-    create.addEventListener("click", () => {
-      const requirementVersionId = view.project.activeRequirementVersionId;
-      const target = selectedTargetRef;
-      if (!requirementVersionId) {
-        setStatus("需要先有 active confirmed RequirementVersion。", "error");
-        return;
-      }
-      if (!target) return;
-      if (!window.confirm(`用 active Requirement ${requirementVersionId} 在 exact Native Thread ${target} 上创建 Plan？`)) return;
-      void runAndRefresh("Create Plan", async () => {
-        const preflight = await exactTargetPreflight();
-        if (!preflight.ok) return { ok: false, error: preflight.error };
-        return api.createAutomationPlan(view.project.projectId, target, requirementVersionId);
-      }, (receipt) => { lastPlanner = receipt; });
-    });
-    actions.append(create);
+    if (!view.plannerRecovery?.actionIntentId) {
+      const create = button("Create Plan on selected Native Thread", "planner-create");
+      create.dataset.requiresActiveRequirement = "true";
+      create.addEventListener("click", () => {
+        const requirementVersionId = view.project.activeRequirementVersionId;
+        const target = selectedTargetRef;
+        if (!requirementVersionId) {
+          setStatus("需要先有 active confirmed RequirementVersion。", "error");
+          return;
+        }
+        if (!target) return;
+        if (!window.confirm(`用 active Requirement ${requirementVersionId} 在 exact Native Thread ${target} 上创建 Plan？\n\n这会发起一次新的模型调用。`)) return;
+        void runAndRefresh("Create Plan", async () => {
+          const preflight = await exactTargetPreflight();
+          if (!preflight.ok) return { ok: false, error: preflight.error };
+          return api.createAutomationPlan(view.project.projectId, target, requirementVersionId);
+        }, (receipt) => { lastPlanner = receipt; });
+      });
+      actions.append(create);
+    } else {
+      card.append(node("span", "automation-rp-note", "当前 Requirement 已有 Planner intent；Create 已锁定，避免重复提交。状态、结果与对账不会发起新的模型调用。"));
+    }
 
     const actionAttemptId = plannerAttemptId();
     if (actionAttemptId) {
-      const reconcile = button("Reconcile Planner", "planner-reconcile");
+      const reconcile = button("Reconcile Planner · 不新增调用", "planner-reconcile");
       reconcile.addEventListener("click", () => void runAndRefresh("Reconcile Planner", () => api.reconcileAutomationPlan(view.project.projectId, actionAttemptId), (receipt) => { lastPlanner = receipt; }));
       actions.append(reconcile);
     }
     const actionIntentId = plannerIntentId();
     if (actionIntentId) {
-      const retry = button("Retry exact Planner intent", "planner-retry");
-      retry.addEventListener("click", () => void runAndRefresh("Retry Planner", () => api.retryAutomationPlan(view.project.projectId, actionIntentId), (receipt) => { lastPlanner = receipt; }));
-      const plannerStatus = button("Planner Status", "planner-status");
+      const recovery = view.plannerRecovery;
+      const receiptInvalid = Boolean(lastPlanner && "status" in lastPlanner && lastPlanner.status === "INVALID_PROVIDER_RESULT");
+      const persistedInvalid = recovery?.plannerState === "FAILED"
+        && recovery.attemptState === "COMPLETED"
+        && recovery.resultClassification === "INVALID_OUTPUT_RETRYABLE";
+      const remaining = recovery?.attemptsRemaining ?? 0;
+      if ((receiptInvalid || persistedInvalid) && remaining > 0) {
+        const retry = button(`Retry Planner · 剩余 ${remaining} 次`, "planner-retry");
+        retry.addEventListener("click", () => {
+          if (!window.confirm(`Planner 返回了无效终态结果。\n\nRetry 会新增一次模型调用，当前剩余 ${remaining} 次。是否继续？`)) return;
+          void runAndRefresh("Retry Planner", () => api.retryAutomationPlan(view.project.projectId, actionIntentId), (receipt) => { lastPlanner = receipt; });
+        });
+        actions.append(retry);
+      }
+      const plannerStatus = button("Planner Status · 不新增调用", "planner-status");
       plannerStatus.addEventListener("click", () => void runAndRefresh("Read Planner Status", () => api.getAutomationPlannerStatus(view.project.projectId, actionIntentId), (receipt) => { lastPlanner = receipt; }));
-      const result = button("Planner Result", "planner-result");
+      const result = button("Planner Result · 不新增调用", "planner-result");
       result.addEventListener("click", () => void runAndRefresh("Read Planner Result", () => api.getAutomationPlannerResult(view.project.projectId, actionIntentId), (receipt) => { lastPlanner = receipt; }));
-      actions.append(retry, plannerStatus, result);
+      actions.append(plannerStatus, result);
     }
     card.append(actions);
     const receipt = renderPlannerReceipt();

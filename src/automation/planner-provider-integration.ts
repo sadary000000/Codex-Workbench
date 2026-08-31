@@ -27,7 +27,7 @@ import {
 
 const MAX_LIST_ITEMS = 64;
 const MAX_TEXT = 4_096;
-const MAX_PLANNER_PROVIDER_ATTEMPTS = 2;
+export const V01_V01_MAX_PLANNER_PROVIDER_ATTEMPTS = 2;
 const OPAQUE_INPUT_REF = /^automation-input-v1:[a-f0-9]{64}$/i;
 
 export type PlannerIntegrationStatus =
@@ -211,14 +211,19 @@ export class PlannerProviderResponseError extends Error {
 }
 
 /**
- * Parse only a bounded JSON object.  No free-text repair, wrapper guessing, or
- * semantic coercion occurs here; K1-B remains the semantic gate.
+ * Parse only a bounded JSON object. One exact Markdown JSON fence is removed
+ * deterministically because models commonly wrap otherwise-valid structured
+ * output. No free-text extraction, wrapper guessing, or semantic coercion is
+ * allowed; K1-B remains the semantic gate.
  */
 export function normalizePlannerProviderResponse(response: unknown): PlannerProviderResponseNormalization {
   if (typeof response !== "string" || response.length === 0 || response.length > 128 * 1024) throw new PlannerProviderResponseError("Provider Planner result must be a bounded JSON string.");
+  const trimmed = response.trim();
+  const fenced = /^\`\`\`(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n\`\`\`$/i.exec(trimmed);
+  const json = fenced?.[1]?.trim() ?? trimmed;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(response) as unknown;
+    parsed = JSON.parse(json) as unknown;
   } catch (error) {
     throw new PlannerProviderResponseError("Provider Planner result is not valid JSON.", error);
   }
@@ -558,7 +563,7 @@ export class PlannerProviderIntegrationService {
     if (intent.state === "UNCERTAIN" || intent.state === "RECOVERY_REQUIRED" || latest.state === "UNCERTAIN" || latest.state === "RECOVERY_REQUIRED" || latestReceipt?.status === "UNKNOWN") {
       return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: intent.intentId, actionAttemptId: latest.actionAttemptId, providerRequestRef: this.providerRequestOpaque(snapshot, latest), providerRequestExternalRef: latest.providerRequestRef ?? null, receiptId: latestReceipt?.receiptId ?? null, request, errorCode: "RECONCILE_BEFORE_RETRY", errorMessage: "The latest Planner provider outcome is uncertain; reconcile the existing attempt before any retry." });
     }
-    if (attempts.length >= MAX_PLANNER_PROVIDER_ATTEMPTS) {
+    if (attempts.length >= V01_MAX_PLANNER_PROVIDER_ATTEMPTS) {
       return emptyResult({ status: "INVALID_PROVIDER_RESULT", actionIntentId: intent.intentId, actionAttemptId: latest.actionAttemptId, receiptId: latestReceipt?.receiptId ?? null, request, errorCode: "RETRY_BUDGET_EXHAUSTED", errorMessage: "The bounded Planner provider-attempt budget is exhausted." });
     }
     if (intent.state !== "FAILED" || latest.state !== "COMPLETED" || latestReceipt?.status !== "SUCCEEDED" || latest.plannerResultClassification !== "INVALID_OUTPUT_RETRYABLE" || !["TERMINAL_CONFIRMED", "RESULT_OBSERVED"].includes(latestReceipt.outcomeCertainty)) {

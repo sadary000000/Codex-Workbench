@@ -6,6 +6,7 @@ import type {
   AutomationRequirementProjectView,
   AutomationRequirementQuestionView,
 } from "../shared/automation-requirement-types.ts";
+import { V01_MAX_PLANNER_PROVIDER_ATTEMPTS } from "./planner-provider-integration.ts";
 
 const MAX_ITEMS = 64;
 const MAX_TEXT = 4_096;
@@ -219,6 +220,9 @@ export class AutomationRequirementProjectionService {
       plannerState: plannerIntent.plannerState ?? null,
       promotedPlanVersionId: plannerIntent.promotedPlanVersionId ?? null,
       dispatchNumber: plannerAttempt?.dispatchNumber ?? null,
+      attemptLimit: V01_MAX_PLANNER_PROVIDER_ATTEMPTS,
+      attemptsRemaining: Math.max(0, V01_MAX_PLANNER_PROVIDER_ATTEMPTS - (plannerAttempt?.dispatchNumber ?? 0)),
+      resultClassification: plannerAttempt?.plannerResultClassification ?? null,
     } : null;
 
     return {
