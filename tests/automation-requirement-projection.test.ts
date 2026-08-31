@@ -152,6 +152,9 @@ test("Planner recovery identity survives store reopen and remains bound to the a
         plannerState: "ACTIVE",
         promotedPlanVersionId: null,
         dispatchNumber: 1,
+        attemptLimit: 2,
+        attemptsRemaining: 1,
+        resultClassification: "INVALID_OUTPUT_RETRYABLE",
       });
       const serialized = JSON.stringify(view.plannerRecovery);
       assert.equal(/prompt|transcript|provider.?body|canonical/i.test(serialized), false);
