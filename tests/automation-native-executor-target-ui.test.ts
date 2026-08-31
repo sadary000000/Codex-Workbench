@@ -29,7 +29,7 @@ test("fresh Execute rechecks exact Native identity immediately before dispatch",
   assert.match(actions, /const preflight = await readRuntimeTarget\(\)/);
   assert.match(actions, /preflight\.result\.nativeThreadId !== selectedTarget/);
   assert.match(actions, /NATIVE_EXECUTOR_TARGET_CHANGED/);
-  assert.match(actions, /api\.executeAutomationStep\(view\.project\.projectId, step\.stepSpecId, selectedTarget\)/);
+  assert.match(actions, /api\.executeAutomationStep\(view\.project\.projectId, step\.stepSpecId, selectedTarget, workspaceWrite\)/);
   assert.match(actions, /Execute Step \$\{step\.stepKey\} on exact Native Thread \$\{selectedTarget\}/);
 });
 

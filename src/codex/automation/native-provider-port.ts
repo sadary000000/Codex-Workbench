@@ -23,6 +23,7 @@ const INPUT_REF_PREFIX = "automation-input-v1:";
 const SHA256_HEX = /^[a-f0-9]{64}$/i;
 
 export type NativeProviderTurnState = "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED" | "UNKNOWN";
+export type NativeProviderExecutionMode = "READ_ONLY" | "WORKSPACE_WRITE";
 
 export interface NativeProviderTurnView {
   readonly nativeThreadId: string;
@@ -41,7 +42,7 @@ export interface NativeProviderRuntimePort {
   hasThread(nativeThreadId: string): Promise<boolean>;
   /** Read-only identity recovery; it must never start or resume a Turn. */
   resolveTurnByPromptSha256?(input: { nativeThreadId: string; promptSha256: string; excludeTurnIds: readonly string[] }): Promise<string | null>;
-  startTurn(input: { nativeThreadId: string; prompt: string }): Promise<{ nativeTurnId: string }>;
+  startTurn(input: { nativeThreadId: string; prompt: string; executionMode: NativeProviderExecutionMode }): Promise<{ nativeTurnId: string }>;
   readTurn(nativeTurnId: string): Promise<NativeProviderTurnView>;
   reconcileTurn(nativeTurnId: string): Promise<NativeProviderTurnView>;
   waitTurn?(nativeTurnId: string, timeoutMs: number): Promise<NativeProviderTurnView>;
@@ -53,7 +54,7 @@ export interface NativeAutomationProviderPortOptions {
   readonly runtime: NativeProviderRuntimePort;
   readonly resolveInputRef: (inputRef: string) => Promise<string>;
   readonly policyAuthority: ProviderPolicyAuthorityPort;
-  readonly validateActionAttempt?: (correlation: ProviderCorrelation) => Promise<void>;
+  readonly validateActionAttempt?: (correlation: ProviderCorrelation) => Promise<NativeProviderExecutionMode>;
 }
 
 export function createNativeThreadTargetRef(nativeThreadId: string): ProviderTargetRef {
@@ -169,7 +170,7 @@ export class NativeAutomationProviderPort implements AutomationProviderPort {
   private readonly runtime: NativeProviderRuntimePort;
   private readonly resolveInputRef: (inputRef: string) => Promise<string>;
   private readonly policyAuthority: ProviderPolicyAuthorityPort;
-  private readonly validateActionAttempt?: (correlation: ProviderCorrelation) => Promise<void>;
+  private readonly validateActionAttempt?: (correlation: ProviderCorrelation) => Promise<NativeProviderExecutionMode>;
 
   constructor(options: NativeAutomationProviderPortOptions) {
     this.runtime = options.runtime;
@@ -233,7 +234,7 @@ export class NativeAutomationProviderPort implements AutomationProviderPort {
     const authorization = await this.policyAuthority.authorize({ operation: "SUBMIT", correlation: input.correlation, runtimeCapability: liveCapability });
     assertProviderExecutionAuthorization({ operation: "SUBMIT", correlation: input.correlation, authorization });
     assertLiveCapabilityProof(authorization, liveCapability);
-    await this.validateActionAttempt?.(input.correlation);
+    const executionMode = await this.validateActionAttempt?.(input.correlation) ?? "READ_ONLY";
     const prompt = await this.resolveInputRef(input.inputRef);
     if (!prompt.trim()) throw new Error("PROVIDER_INPUT_REF_EMPTY");
     const semanticRef = createHash("sha256").update(prompt, "utf8").digest("hex");
@@ -242,7 +243,7 @@ export class NativeAutomationProviderPort implements AutomationProviderPort {
     // authoritative Native Turn ID. If it throws before that proof exists,
     // this port returns no acceptance and callers must fail closed rather than
     // inventing an identity or trying a second turn/start.
-    const accepted = await this.runtime.startTurn({ nativeThreadId, prompt });
+    const accepted = await this.runtime.startTurn({ nativeThreadId, prompt, executionMode });
     if (!accepted.nativeTurnId?.trim()) throw new Error("NATIVE_TURN_ID_MISSING");
     return {
       provider: "NATIVE",

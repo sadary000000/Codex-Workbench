@@ -36,11 +36,16 @@ function harness(): {
   const runtime = {
     nativeThreadId: "thread-r2-shared",
     state: "READY" as const,
-    snapshot: () => ({ activeTurnId: "turn-r2-shared" }),
-    startTurnAccepted: async (prompt: string, options?: { approvalPolicy?: "never" | "on-request"; sandboxPolicy?: { type: "readOnly" } }) => {
+    snapshot: () => ({ activeTurnId: "turn-r2-shared", cwd: "/workspace" }),
+    startTurnAccepted: async (prompt: string, options?: { approvalPolicy?: "never" | "on-request"; sandboxPolicy?: { type: "readOnly"; networkAccess?: boolean } | { type: "workspaceWrite"; networkAccess?: boolean; writableRoots?: string[] } }) => {
       counters.starts += 1;
-      assert.equal(prompt, "planner prompt");
-      assert.deepEqual(options, { approvalPolicy: "never", sandboxPolicy: { type: "readOnly" } });
+      if (prompt === "planner prompt") {
+        assert.deepEqual(options, { approvalPolicy: "never", sandboxPolicy: { type: "readOnly", networkAccess: false } });
+      } else if (prompt === "workspace prompt") {
+        assert.deepEqual(options, { approvalPolicy: "never", sandboxPolicy: { type: "workspaceWrite", networkAccess: false, writableRoots: ["/workspace"] } });
+      } else {
+        assert.fail(`unexpected prompt: ${prompt}`);
+      }
       return { acceptance: { turnId: "turn-r2-shared", nativeThreadId: "thread-r2-shared" }, completion: never };
     },
     readThread: async () => { counters.reads += 1; return current; },
@@ -68,17 +73,17 @@ test("ARCH-R2 shared Native adapter dispatches only on an already-attached runti
   assert.equal(await adapter.hasThread("thread-r2-shared"), true);
   assert.equal(await adapter.hasThread("missing-thread"), false);
 
-  const accepted = await adapter.startTurn({ nativeThreadId: "thread-r2-shared", prompt: "planner prompt" });
+  const accepted = await adapter.startTurn({ nativeThreadId: "thread-r2-shared", prompt: "planner prompt", executionMode: "READ_ONLY" });
   assert.equal(accepted.nativeTurnId, "turn-r2-shared");
   assert.equal(h.counters.starts, 1);
-  await assert.rejects(() => adapter.startTurn({ nativeThreadId: "missing-thread", prompt: "planner prompt" }), /NATIVE_TARGET_UNAVAILABLE/);
+  await assert.rejects(() => adapter.startTurn({ nativeThreadId: "missing-thread", prompt: "planner prompt", executionMode: "READ_ONLY" }), /NATIVE_TARGET_UNAVAILABLE/);
   assert.equal(h.counters.starts, 1, "missing target must fail closed instead of creating/resuming another runtime");
 });
 
 test("ARCH-R2 Native read/reconcile reuse the same Turn and reconcile only refreshes projection", async () => {
   const h = harness();
   const adapter = new SharedNativeProviderRuntimeAdapter({ registry: h.registry, runtimeId: "workbench-process-r2" });
-  await adapter.startTurn({ nativeThreadId: "thread-r2-shared", prompt: "planner prompt" });
+  await adapter.startTurn({ nativeThreadId: "thread-r2-shared", prompt: "planner prompt", executionMode: "READ_ONLY" });
 
   const observed = await adapter.readTurn("turn-r2-shared");
   assert.equal(observed.state, "RUNNING");
@@ -108,15 +113,22 @@ test("ARCH-R2 Native reconcile preserves a terminal Turn when projection refresh
   assert.equal(h.counters.starts, 0, "a terminal Turn found by reconcile must never cause a new turn/start");
 });
 
-test("ARCH-R2 Native runtime capability reports shared runtime availability without side-effect authority", async () => {
+test("ARCH-R2 Native adapter constrains workspace-write to the exact runtime cwd", async () => {
+  const h = harness();
+  const adapter = new SharedNativeProviderRuntimeAdapter({ registry: h.registry, runtimeId: "workbench-process-r2" });
+  await adapter.startTurn({ nativeThreadId: "thread-r2-shared", prompt: "workspace prompt", executionMode: "WORKSPACE_WRITE" });
+  assert.equal(h.counters.starts, 1);
+});
+
+test("ARCH-R2 Native runtime capability reports workspace-write capability without granting policy authority", async () => {
   const h = harness();
   const adapter = new SharedNativeProviderRuntimeAdapter({ registry: h.registry, runtimeId: "workbench-process-r2" });
   const capability = await adapter.runtimeCapability();
   assert.equal(capability.status, "READY");
   assert.equal(capability.runtimeId, "workbench-process-r2");
-  assert.deepEqual(capability.supportedOperations, ["PROMPT", "RETRY", "VERIFY"]);
+  assert.deepEqual(capability.supportedOperations, ["PROMPT", "RETRY", "SIDE_EFFECT", "VERIFY"]);
   assert.equal(capability.allowDataEgress, false);
-  assert.equal(capability.allowSideEffects, false);
+  assert.equal(capability.allowSideEffects, true);
 });
 
 

@@ -14,7 +14,7 @@ interface IpcEnvelope<T = unknown> {
 interface AutomationGovernanceActionApi {
   getState(): Promise<IpcEnvelope<RuntimeSnapshot>>;
   getAutomationGovernanceProject(projectId: string): Promise<IpcEnvelope<AutomationGovernanceProjectView>>;
-  executeAutomationStep(projectId: string, stepSpecId: string, providerTargetRef: string): Promise<IpcEnvelope>;
+  executeAutomationStep(projectId: string, stepSpecId: string, providerTargetRef: string, userConfirmedSideEffect?: boolean): Promise<IpcEnvelope>;
   reconcileAutomationStep(projectId: string, executionAttemptId: string): Promise<IpcEnvelope>;
   verifyAutomationStep(projectId: string, executionAttemptId: string): Promise<IpcEnvelope>;
   reviewAutomationStep(
@@ -279,7 +279,11 @@ function installAutomationGovernanceActions(): void {
       setStatus("请先显式选择一个当前已附着的 Native Thread 作为 Executor Target。", "error");
       return;
     }
-    if (!requireConfirmation(`Execute Step ${step.stepKey} on exact Native Thread ${selectedTarget}?`)) return;
+    const workspaceWrite = step.sideEffectClass === "RECONCILABLE";
+    const confirmation = workspaceWrite
+      ? `Execute Step ${step.stepKey} with workspace-write access limited to the current workspace on exact Native Thread ${selectedTarget}?`
+      : `Execute Step ${step.stepKey} on exact Native Thread ${selectedTarget}?`;
+    if (!requireConfirmation(confirmation)) return;
     void run("Execute Step", async () => {
       const preflight = await readRuntimeTarget();
       if (!preflight.ok || !preflight.result) return preflight;
@@ -292,7 +296,7 @@ function installAutomationGovernanceActions(): void {
           },
         };
       }
-      return api.executeAutomationStep(view.project.projectId, step.stepSpecId, selectedTarget);
+      return api.executeAutomationStep(view.project.projectId, step.stepSpecId, selectedTarget, workspaceWrite);
     });
   };
 

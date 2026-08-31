@@ -2,6 +2,7 @@ import type {
   ProviderAuthorizationOperation,
   ProviderExecutionAuthorization,
   ProviderPolicyAuthorityPort,
+  ProviderCorrelation,
   ProviderRuntimeCapability,
 } from "./adapters.ts";
 import {
@@ -18,6 +19,7 @@ import {
   type PolicyOperation,
 } from "./effective-policy.ts";
 import { AutomationStore } from "./store.ts";
+import { v01NativeExecutionDisposition } from "./v01-workspace-write-contract.ts";
 
 export class ProviderPolicyAuthorityError extends Error {
   readonly code: string;
@@ -97,12 +99,27 @@ export class ProviderPolicyAuthority implements ProviderPolicyAuthorityPort {
 
     const correlationId = input.correlation.idempotencyRef ?? input.correlation.actionAttemptId ?? input.correlation.actionIntentId;
     if (!correlationId) throw new ProviderPolicyAuthorityError("POLICY_CORRELATION_REQUIRED", "Provider policy evaluation requires a stable correlation id.");
+    const nativeExecutionMode = input.operation === "SUBMIT"
+      ? await this.nativeSubmitExecutionMode(input.correlation)
+      : "READ_ONLY";
     const operation = await this.policyOperation(input.operation, input.correlation.actionAttemptId);
     const capability = runtimeCapability(input.runtimeCapability);
     let decision: EffectivePolicyDecision;
     try {
       const policy = policyVersionViewFromRecord(record);
       const pin = pinPolicyVersion(policy, correlationId);
+      if (nativeExecutionMode === "WORKSPACE_WRITE") {
+        const sideEffectDecision = resolvePinnedEffectivePolicy({
+operation: "SIDE_EFFECT",
+correlationId,
+actionId: input.correlation.actionIntentId,
+hardConstraints: this.hardConstraints,
+policyVersion: policy,
+runtimeCapability: capability,
+pin,
+        });
+        if (sideEffectDecision.decision !== "ALLOW") throw decisionError(sideEffectDecision);
+      }
       decision = resolvePinnedEffectivePolicy({
         operation,
         correlationId,
@@ -193,6 +210,30 @@ export class ProviderPolicyAuthority implements ProviderPolicyAuthorityPort {
 
   snapshot(policyVersionId: string) {
     return this.budgets.get(policyVersionId)?.snapshot() ?? null;
+  }
+
+  private async nativeSubmitExecutionMode(correlation: ProviderCorrelation): Promise<"READ_ONLY" | "WORKSPACE_WRITE"> {
+    const actionAttemptId = correlation.actionAttemptId ?? "";
+    const actionIntentId = correlation.actionIntentId ?? "";
+    const attempt = actionAttemptId ? await this.store.get("actionAttempts", actionAttemptId) : null;
+    if (!attempt || attempt.intentId !== actionIntentId || attempt.policyVersionId !== correlation.policyVersionId) {
+      throw new ProviderPolicyAuthorityError("POLICY_ATTEMPT_INVALID", "Provider side-effect authorization references a mismatched ActionAttempt.", { actionAttemptId, actionIntentId });
+    }
+    const intent = await this.store.get("actionIntents", actionIntentId);
+    if (!intent
+      || intent.projectId !== correlation.projectId
+      || intent.policyVersionId !== correlation.policyVersionId
+      || intent.idempotencyRef !== correlation.idempotencyRef) {
+      throw new ProviderPolicyAuthorityError("POLICY_ATTEMPT_INVALID", "Provider side-effect authorization references a mismatched ActionIntent.", { actionAttemptId, actionIntentId });
+    }
+    const disposition = v01NativeExecutionDisposition(intent);
+    if (disposition === "APPROVAL_REQUIRED") {
+      throw new ProviderPolicyAuthorityError("POLICY_SIDE_EFFECT_APPROVAL_REQUIRED", "Workspace-write STEP_EXECUTION requires the exact persisted user confirmation.", { actionAttemptId, actionIntentId });
+    }
+    if (disposition === "UNSUPPORTED") {
+      throw new ProviderPolicyAuthorityError("POLICY_SIDE_EFFECT_UNSUPPORTED", "v0.1 Native execution supports only PURE or user-confirmed RECONCILABLE workspace Steps.", { actionAttemptId, actionIntentId });
+    }
+    return disposition;
   }
 
   private async policyOperation(operation: ProviderAuthorizationOperation, actionAttemptId: string | null): Promise<PolicyOperation> {

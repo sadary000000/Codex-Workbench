@@ -1,5 +1,5 @@
 import type { AutomationProviderId } from "../automation/adapters.ts";
-import { DEFAULT_HARD_CONSTRAINTS, POLICY_SCHEMA_VERSION, policyVersionPayload } from "../automation/effective-policy.ts";
+import { POLICY_SCHEMA_VERSION, V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS, policyVersionPayload } from "../automation/effective-policy.ts";
 import { persistedProviderIdForIntent } from "../automation/provider-binding-port.ts";
 import type { PlannerProviderIntegrationService } from "../automation/planner-provider-integration.ts";
 import { buildPlannerProviderPrompt } from "../automation/planner-provider-prompt.ts";
@@ -102,14 +102,14 @@ async function ensureProjectPolicyForNewRequirement(store: AutomationStore, proj
       preset: DEFAULT_PROJECT_POLICY_PRESET,
       payload: policyVersionPayload({
         schemaVersion: POLICY_SCHEMA_VERSION,
-        maxPromptDispatches: DEFAULT_HARD_CONSTRAINTS.maxPromptDispatches,
-        maxRepairDispatches: DEFAULT_HARD_CONSTRAINTS.maxRepairDispatches,
-        maxRetryDispatches: DEFAULT_HARD_CONSTRAINTS.maxRetryDispatches,
-        maxNewChatDispatches: DEFAULT_HARD_CONSTRAINTS.maxNewChatDispatches,
-        allowedOperations: DEFAULT_HARD_CONSTRAINTS.allowedOperations,
-        requireHumanGateFor: DEFAULT_HARD_CONSTRAINTS.requireHumanGateFor,
-        allowDataEgress: DEFAULT_HARD_CONSTRAINTS.allowDataEgress,
-        allowSideEffects: DEFAULT_HARD_CONSTRAINTS.allowSideEffects,
+        maxPromptDispatches: V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS.maxPromptDispatches,
+        maxRepairDispatches: V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS.maxRepairDispatches,
+        maxRetryDispatches: V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS.maxRetryDispatches,
+        maxNewChatDispatches: V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS.maxNewChatDispatches,
+        allowedOperations: V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS.allowedOperations,
+        requireHumanGateFor: V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS.requireHumanGateFor,
+        allowDataEgress: V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS.allowDataEgress,
+        allowSideEffects: V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS.allowSideEffects,
       }),
       supersedes: null,
     });
@@ -147,7 +147,8 @@ async function ensureProjectPolicyForNewRequirement(store: AutomationStore, proj
  * it becomes executable. Before the first Requirement session is persisted,
  * this facade installs one conservative typed PolicyVersion using the existing
  * product hard constraints. Existing policy truth is never replaced or
- * guessed, and data egress/side effects remain disabled.
+ * guessed. Data egress remains disabled; fresh v0.1 policy admits only the
+ * separately user-confirmed workspace-write execution contract.
  *
  * Deterministic Step verification, explicit user review, Stage gating,
  * Stage progression, and final Project completion projection are deliberately

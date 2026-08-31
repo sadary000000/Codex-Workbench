@@ -68,8 +68,9 @@ test("v0.1 first Requirement work bootstraps conservative project policy and can
     assert.equal(policy.preset, "v0.1-default-workflow");
     const policyView = policyVersionViewFromRecord(policy);
     assert.equal(policyView.allowDataEgress, false);
-    assert.equal(policyView.allowSideEffects, false);
+    assert.equal(policyView.allowSideEffects, true);
     assert.ok(policyView.allowedOperations.includes("PROMPT"));
+    assert.ok(policyView.allowedOperations.includes("SIDE_EFFECT"));
     assert.ok(policyView.allowedOperations.includes("VERIFY"));
   } finally {
     await f.store.close();

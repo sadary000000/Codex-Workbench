@@ -9,6 +9,7 @@ import type {
 import { InputRefRegistry } from "./input-ref.ts";
 import { providerReferenceOpaqueId } from "./provider-reference.ts";
 import { AutomationStore, AutomationStoreError } from "./store.ts";
+import { V01_SIDE_EFFECT_APPROVAL } from "./v01-workspace-write-contract.ts";
 import type {
   ActionAttempt,
   ActionIntent,
@@ -33,6 +34,8 @@ export interface ExecuteStepInput {
   readonly stepSpecId: string;
   readonly providerTargetRef: string;
   readonly timeoutMs?: number;
+  /** Required only for a fresh RECONCILABLE workspace-write Step. */
+  readonly userConfirmedSideEffect?: boolean;
 }
 
 export interface ReconcileStepInput {
@@ -64,6 +67,7 @@ export class StepExecutionError extends Error {
     | "STEP_EXECUTION_STEP_NOT_ACTIVE"
     | "STEP_EXECUTION_STAGE_NOT_ACTIVE"
     | "STEP_EXECUTION_NON_PURE_UNSUPPORTED"
+    | "STEP_EXECUTION_SIDE_EFFECT_APPROVAL_REQUIRED"
     | "STEP_EXECUTION_POLICY_REQUIRED"
     | "STEP_EXECUTION_TARGET_UNAVAILABLE"
     | "STEP_EXECUTION_NOT_READY"
@@ -140,9 +144,10 @@ function executionKey(projectId: string, stepSpecId: string, attemptNumber: numb
 }
 
 function executionPrompt(step: StepSpec): string {
+  const workspaceWrite = step.sideEffectClass === "RECONCILABLE";
   const payload = {
     protocol: STEP_EXECUTION_PROTOCOL,
-    mode: "PURE_READ_ONLY",
+    mode: workspaceWrite ? "WORKSPACE_WRITE" : "PURE_READ_ONLY",
     step: {
       stepKey: step.stepKey,
       specVersion: step.specVersion,
@@ -154,12 +159,20 @@ function executionPrompt(step: StepSpec): string {
       assumptions: step.assumptions ?? [],
       constraints: step.constraints ?? [],
     },
-    rules: [
-      "Use the existing attached Native Codex thread only.",
-      "This step is PURE and read-only: do not modify the workspace or external state.",
-      "Do not create, resume, or fork another runtime or thread.",
-      "Return a bounded final answer that identifies the produced output/evidence for later deterministic verification.",
-    ],
+    rules: workspaceWrite
+      ? [
+"Use the existing attached Native Codex thread only.",
+"This Step is authorized for workspace write only: modify files only inside the current Native Thread workspace as required by the Step.",
+"Do not modify external state and do not use network access.",
+"Do not create, resume, or fork another runtime or thread.",
+"Return a bounded final answer that identifies the produced output/evidence for later deterministic verification.",
+        ]
+      : [
+"Use the existing attached Native Codex thread only.",
+"This step is PURE and read-only: do not modify the workspace or external state.",
+"Do not create, resume, or fork another runtime or thread.",
+"Return a bounded final answer that identifies the produced output/evidence for later deterministic verification.",
+        ],
   };
   const prompt = JSON.stringify(payload);
   if (Buffer.byteLength(prompt, "utf8") > MAX_EXECUTION_PROMPT_BYTES) {
@@ -223,7 +236,7 @@ function resultFromDocument(document: AutomationDocument, attempt: ExecutionAtte
 }
 
 /**
- * Executes one PURE/read-only Step through the already-composed provider port.
+ * Executes one PURE/read-only or explicitly user-confirmed RECONCILABLE workspace Step through the already-composed provider port.
  *
  * This service owns workflow orchestration only. It never creates a Native
  * runtime, thread, sandbox, tool executor, or transcript store. The provider
@@ -249,6 +262,9 @@ export class NativeStepExecutionService {
       const existing = context.document.executionAttempts.find((item) => item.attemptId === context.runtime.currentAttemptId);
       if (!existing) throw new StepExecutionError("STEP_EXECUTION_CORRELATION_MISMATCH", "StepRuntime points to a missing ExecutionAttempt.");
       return resultFromDocument(context.document, existing);
+    }
+    if (context.step.sideEffectClass === "RECONCILABLE" && input.userConfirmedSideEffect !== true) {
+      throw new StepExecutionError("STEP_EXECUTION_SIDE_EFFECT_APPROVAL_REQUIRED", "A fresh workspace-write Step requires the user's explicit confirmation before any execution record or Native dispatch is created.");
     }
     if (!["NOT_STARTED", "READY"].includes(context.runtime.lifecycle)) {
       throw new StepExecutionError("STEP_EXECUTION_NOT_READY", `StepRuntime is not eligible for a fresh execution: ${context.runtime.lifecycle}.`);
@@ -285,10 +301,16 @@ export class NativeStepExecutionService {
         attemptId: executionAttempt.attemptId,
         actionType: STEP_EXECUTION_ACTION,
         targetRef: input.providerTargetRef,
-        sideEffectClass: "PURE",
+        sideEffectClass: context.step.sideEffectClass,
         payloadRef: registered.inputRef,
         payloadHash: registered.sha256,
-        executionOptions: { stepSpecVersion: context.step.specVersion, attemptNumber, readOnly: true },
+        executionOptions: {
+stepSpecVersion: context.step.specVersion,
+attemptNumber,
+readOnly: context.step.sideEffectClass === "PURE",
+workspaceWrite: context.step.sideEffectClass === "RECONCILABLE",
+sideEffectApproval: context.step.sideEffectClass === "RECONCILABLE" ? V01_SIDE_EFFECT_APPROVAL : "NOT_REQUIRED",
+        },
         idempotencyRef: `native-step-v1:${key}`,
         expectedOutcomeRef: `native-step-result-v1:${key}`,
         policyVersionId: context.policyVersionId,
@@ -418,8 +440,8 @@ export class NativeStepExecutionService {
     const step = document.stepSpecs.find((item) => item.stepSpecId === stepSpecId);
     if (!step) throw new StepExecutionError("STEP_EXECUTION_STEP_NOT_FOUND", `StepSpec was not found: ${stepSpecId}`);
     if (step.specStatus !== "ACTIVE") throw new StepExecutionError("STEP_EXECUTION_STEP_NOT_ACTIVE", "Only the exact ACTIVE StepSpec version may execute.");
-    if (step.sideEffectClass !== "PURE") {
-      throw new StepExecutionError("STEP_EXECUTION_NON_PURE_UNSUPPORTED", "Native Step execution is read-only in this slice; non-PURE StepSpecs require a separately reviewed capability/policy path.");
+    if (step.sideEffectClass !== "PURE" && step.sideEffectClass !== "RECONCILABLE") {
+      throw new StepExecutionError("STEP_EXECUTION_NON_PURE_UNSUPPORTED", "v0.1 Native Step execution supports only PURE or explicitly user-confirmed RECONCILABLE workspace Steps.");
     }
     const stage = document.stageSpecs.find((item) => item.stageSpecId === step.stageSpecId);
     if (!stage) throw new StepExecutionError("STEP_EXECUTION_CORRELATION_MISMATCH", "StepSpec points to a missing StageSpec.");

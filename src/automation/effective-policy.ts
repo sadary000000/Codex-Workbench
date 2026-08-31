@@ -215,6 +215,25 @@ export const DEFAULT_HARD_CONSTRAINTS: HardConstraints = createHardConstraints({
   allowSideEffects: false,
 });
 
+/**
+ * Reviewed v0.1 Native Automation product profile.
+ *
+ * Generic policy remains conservative. This production profile admits only
+ * the workspace side-effect capability; the exact user-confirmed STEP_EXECUTION
+ * gate is enforced from persisted ActionIntent truth by ProviderPolicyAuthority
+ * before SIDE_EFFECT evaluation. Network/data egress remains denied.
+ */
+export const V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS: HardConstraints = createHardConstraints({
+  maxPromptDispatches: DEFAULT_HARD_CONSTRAINTS.maxPromptDispatches,
+  maxRepairDispatches: DEFAULT_HARD_CONSTRAINTS.maxRepairDispatches,
+  maxRetryDispatches: DEFAULT_HARD_CONSTRAINTS.maxRetryDispatches,
+  maxNewChatDispatches: DEFAULT_HARD_CONSTRAINTS.maxNewChatDispatches,
+  allowedOperations: DEFAULT_HARD_CONSTRAINTS.allowedOperations,
+  requireHumanGateFor: [],
+  allowDataEgress: false,
+  allowSideEffects: true,
+});
+
 export function createHardConstraints(input: HardConstraintsInput): HardConstraints {
   const result: HardConstraints = {
     schemaVersion: positiveInteger(input.schemaVersion ?? POLICY_SCHEMA_VERSION, "hardConstraints.schemaVersion"),

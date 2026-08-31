@@ -32,6 +32,7 @@ class FakeNativeRuntime implements NativeProviderRuntimePort {
   waits = 0;
   state: NativeProviderTurnState;
   lastPrompt: string | null = null;
+  lastExecutionMode: "READ_ONLY" | "WORKSPACE_WRITE" | null = null;
 
   constructor(state: NativeProviderTurnState) {
     this.state = state;
@@ -46,19 +47,24 @@ class FakeNativeRuntime implements NativeProviderRuntimePort {
       capabilityVersion: "native-step-executor-test-v1",
       runtimeId: "shared-native-step-executor-test-runtime",
       status: "READY" as const,
-      supportedOperations: ["PROMPT", "RETRY", "VERIFY"] as const,
+      supportedOperations: ["PROMPT", "RETRY", "SIDE_EFFECT", "VERIFY"] as const,
       allowDataEgress: false,
-      allowSideEffects: false,
+      allowSideEffects: true,
     };
   }
 
-  async startTurn(input: { nativeThreadId: string; prompt: string }): Promise<{ nativeTurnId: string }> {
+  async startTurn(input: { nativeThreadId: string; prompt: string; executionMode: "READ_ONLY" | "WORKSPACE_WRITE" }): Promise<{ nativeTurnId: string }> {
     assert.equal(input.nativeThreadId, NATIVE_THREAD_ID);
     assert.match(input.prompt, /workbench-native-step-execution-v1/);
-    assert.match(input.prompt, /PURE_READ_ONLY/);
-    assert.match(input.prompt, /inspect the existing workspace without modifying it/);
+    if (input.executionMode === "WORKSPACE_WRITE") {
+      assert.match(input.prompt, /WORKSPACE_WRITE/);
+      assert.match(input.prompt, /modify files only inside the current Native Thread workspace/);
+    } else {
+      assert.match(input.prompt, /PURE_READ_ONLY/);
+    }
     this.starts += 1;
     this.lastPrompt = input.prompt;
+    this.lastExecutionMode = input.executionMode;
     return { nativeTurnId: NATIVE_TURN_ID };
   }
 
@@ -107,10 +113,10 @@ async function fixture(initialState: NativeProviderTurnState) {
       maxRepairDispatches: 1,
       maxRetryDispatches: 2,
       maxNewChatDispatches: 0,
-      allowedOperations: ["PROMPT", "RETRY", "VERIFY"],
+      allowedOperations: ["PROMPT", "RETRY", "SIDE_EFFECT", "VERIFY"],
       requireHumanGateFor: [],
       allowDataEgress: false,
-      allowSideEffects: false,
+      allowSideEffects: true,
     }),
     supersedes: null,
   });
@@ -223,7 +229,7 @@ test("PURE Step executes once through the existing Native provider and stops at 
   }
 });
 
-test("non-PURE Step fails closed before any Native dispatch or execution record", async () => {
+test("RECONCILABLE Step requires explicit user confirmation before any Native dispatch or execution record", async () => {
   const f = await fixture("COMPLETED");
   try {
     await assert.rejects(
@@ -232,7 +238,7 @@ test("non-PURE Step fails closed before any Native dispatch or execution record"
         stepSpecId: f.nonPureStep.stepSpecId,
         providerTargetRef: f.providerTargetRef,
       }),
-      (error: unknown) => error instanceof StepExecutionError && error.code === "STEP_EXECUTION_NON_PURE_UNSUPPORTED",
+      (error: unknown) => error instanceof StepExecutionError && error.code === "STEP_EXECUTION_SIDE_EFFECT_APPROVAL_REQUIRED",
     );
     assert.equal(f.runtime.starts, 0);
     const snapshot = await f.store.snapshot();
@@ -240,6 +246,31 @@ test("non-PURE Step fails closed before any Native dispatch or execution record"
     assert.equal(snapshot.actionIntents.some((item) => item.stepSpecId === f.nonPureStep.stepSpecId), false);
     const runtime = snapshot.stepRuntimes.find((item) => item.stepSpecId === f.nonPureStep.stepSpecId);
     assert.equal(runtime?.lifecycle, "NOT_STARTED");
+  } finally {
+    await cleanup(f);
+  }
+});
+
+test("user-confirmed RECONCILABLE Step dispatches one workspace-write Native Turn with durable approval", async () => {
+  const f = await fixture("COMPLETED");
+  try {
+    const result = await f.facade.executeStep({
+      projectId: f.project.projectId,
+      stepSpecId: f.nonPureStep.stepSpecId,
+      providerTargetRef: f.providerTargetRef,
+      timeoutMs: 100,
+      userConfirmedSideEffect: true,
+    });
+    assert.equal(result.status, "VERIFYING");
+    assert.equal(f.runtime.starts, 1);
+    assert.equal(f.runtime.lastExecutionMode, "WORKSPACE_WRITE");
+    const snapshot = await f.store.snapshot();
+    const intent = snapshot.actionIntents.find((item) => item.intentId === result.actionIntentId);
+    assert.equal(intent?.actionType, "STEP_EXECUTION");
+    assert.equal(intent?.sideEffectClass, "RECONCILABLE");
+    assert.equal(intent?.executionOptions.readOnly, false);
+    assert.equal(intent?.executionOptions.workspaceWrite, true);
+    assert.equal(intent?.executionOptions.sideEffectApproval, "USER_CONFIRMED");
   } finally {
     await cleanup(f);
   }

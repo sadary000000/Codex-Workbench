@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
-import type { RuntimeState, ThreadReadView, TurnResult } from "../shared/runtime-types.ts";
+import type { NativeTurnOptions, RuntimeState, ThreadReadView, TurnResult } from "../shared/runtime-types.ts";
 import type { ProviderRuntimeCapability } from "../automation/adapters.ts";
-import type { NativeProviderRuntimePort, NativeProviderTurnState, NativeProviderTurnView } from "../codex/automation/native-provider-port.ts";
+import type { NativeProviderExecutionMode, NativeProviderRuntimePort, NativeProviderTurnState, NativeProviderTurnView } from "../codex/automation/native-provider-port.ts";
 
 interface SharedNativeRuntime {
   readonly nativeThreadId: string | null;
   readonly state: RuntimeState;
-  snapshot(): { activeTurnId: string | null };
-  startTurnAccepted(prompt: string, options?: { approvalPolicy?: "never" | "on-request"; sandboxPolicy?: { type: "readOnly" } }): Promise<{
+  snapshot(): { activeTurnId: string | null; cwd: string };
+  startTurnAccepted(prompt: string, options?: NativeTurnOptions): Promise<{
     acceptance: { turnId: string; nativeThreadId: string };
     completion: Promise<TurnResult>;
   }>;
@@ -159,17 +159,21 @@ export class SharedNativeProviderRuntimeAdapter implements NativeProviderRuntime
       capabilityVersion: "native-shared-runtime-v1",
       runtimeId: this.runtimeId,
       status: available ? "READY" : "UNAVAILABLE",
-      supportedOperations: ["PROMPT", "RETRY", "VERIFY"],
+      supportedOperations: ["PROMPT", "RETRY", "SIDE_EFFECT", "VERIFY"],
       allowDataEgress: false,
-      allowSideEffects: false,
+      allowSideEffects: true,
     };
   }
 
-  async startTurn(input: { nativeThreadId: string; prompt: string }): Promise<{ nativeTurnId: string }> {
+  async startTurn(input: { nativeThreadId: string; prompt: string; executionMode: NativeProviderExecutionMode }): Promise<{ nativeTurnId: string }> {
     const nativeThreadId = boundedId(input.nativeThreadId, "NATIVE_THREAD_ID");
     const runtime = this.registry.get(nativeThreadId);
     if (!runtime) throw Object.assign(new Error("NATIVE_TARGET_UNAVAILABLE:TARGET_UNREACHABLE"), { code: "NATIVE_TARGET_UNAVAILABLE:TARGET_UNREACHABLE" });
-    const started = await runtime.startTurnAccepted(input.prompt, { approvalPolicy: "never", sandboxPolicy: { type: "readOnly" } });
+    const snapshot = runtime.snapshot();
+    const sandboxPolicy: NativeTurnOptions["sandboxPolicy"] = input.executionMode === "WORKSPACE_WRITE"
+      ? { type: "workspaceWrite", networkAccess: false, writableRoots: [snapshot.cwd] }
+      : { type: "readOnly", networkAccess: false };
+    const started = await runtime.startTurnAccepted(input.prompt, { approvalPolicy: "never", sandboxPolicy });
     if (started.acceptance.nativeThreadId !== nativeThreadId) throw new Error("NATIVE_TURN_THREAD_MISMATCH");
     const nativeTurnId = boundedId(started.acceptance.turnId, "NATIVE_TURN_ID");
     const owner: TurnOwner = { nativeThreadId, completion: started.completion, completed: null };

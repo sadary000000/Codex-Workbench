@@ -2441,11 +2441,12 @@ function registerIpc(): void {
       return fail(error);
     }
   });
-  ipcMain.handle(IPC.automationStepExecute, async (_event, projectId: unknown, stepSpecId: unknown, providerTargetRef: unknown) => {
+  ipcMain.handle(IPC.automationStepExecute, async (_event, projectId: unknown, stepSpecId: unknown, providerTargetRef: unknown, userConfirmedSideEffect: unknown) => {
     try {
       if (typeof projectId !== "string" || !projectId.trim() || projectId.length > 256 || typeof stepSpecId !== "string" || !stepSpecId.trim() || stepSpecId.length > 256) throw codedError("STEP_EXECUTION_INPUT_REQUIRED", "Automation Step execution requires bounded Project and Step IDs.");
       if (typeof providerTargetRef !== "string" || !providerTargetRef.trim() || providerTargetRef.length > 512 || /^https?:\/\//i.test(providerTargetRef.trim())) throw codedError("STEP_EXECUTION_INPUT_REQUIRED", "Automation Step execution requires a bounded opaque provider target reference.");
-      return ok(await getAutomationProviderHost().execution.executeStep({ projectId: projectId.trim(), stepSpecId: stepSpecId.trim(), providerTargetRef: providerTargetRef.trim() }));
+      if (userConfirmedSideEffect !== undefined && typeof userConfirmedSideEffect !== "boolean") throw codedError("STEP_EXECUTION_INPUT_REQUIRED", "Automation Step side-effect confirmation must be boolean when supplied.");
+      return ok(await getAutomationProviderHost().execution.executeStep({ projectId: projectId.trim(), stepSpecId: stepSpecId.trim(), providerTargetRef: providerTargetRef.trim(), userConfirmedSideEffect: userConfirmedSideEffect === true }));
     } catch (error) {
       return fail(error);
     }

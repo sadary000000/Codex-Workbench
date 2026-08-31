@@ -2,10 +2,12 @@ import type { AutomationProviderPort, ProviderCorrelation } from "../automation/
 import { PersistedProviderBindingPort } from "../automation/provider-binding-port.ts";
 import { InputRefRegistry } from "../automation/input-ref.ts";
 import { ProviderPolicyAuthority } from "../automation/provider-policy-authority.ts";
+import { V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS } from "../automation/effective-policy.ts";
+import { v01NativeExecutionDisposition } from "../automation/v01-workspace-write-contract.ts";
 import { AutomationProviderRegistry } from "../automation/provider-registry.ts";
 import { AutomationProviderServiceRouter } from "../automation/provider-service-router.ts";
 import { AutomationStore } from "../automation/store.ts";
-import { NativeAutomationProviderPort, type NativeProviderRuntimePort } from "../codex/automation/native-provider-port.ts";
+import { NativeAutomationProviderPort, type NativeProviderExecutionMode, type NativeProviderRuntimePort } from "../codex/automation/native-provider-port.ts";
 import { capProviderSynchronousWait } from "./provider-wait-cap.ts";
 
 export interface AutomationProviderComposition {
@@ -17,7 +19,7 @@ export interface AutomationProviderComposition {
   readonly webgptProvider: AutomationProviderPort | null;
 }
 
-async function validatePersistedAttempt(store: AutomationStore, correlation: ProviderCorrelation): Promise<void> {
+async function validatePersistedAttempt(store: AutomationStore, correlation: ProviderCorrelation): Promise<NativeProviderExecutionMode> {
   const attemptId = correlation.actionAttemptId ?? "";
   const attempt = await store.get("actionAttempts", attemptId);
   if (!attempt
@@ -29,6 +31,10 @@ async function validatePersistedAttempt(store: AutomationStore, correlation: Pro
   if (!intent || intent.projectId !== correlation.projectId || intent.idempotencyRef !== correlation.idempotencyRef) {
     throw new Error("PROVIDER_ACTION_INTENT_CORRELATION_INVALID");
   }
+  const disposition = v01NativeExecutionDisposition(intent);
+  if (disposition === "APPROVAL_REQUIRED") throw new Error("PROVIDER_SIDE_EFFECT_APPROVAL_REQUIRED");
+  if (disposition === "UNSUPPORTED") throw new Error("PROVIDER_SIDE_EFFECT_UNSUPPORTED");
+  return disposition;
 }
 
 /**
@@ -53,7 +59,7 @@ export function createAutomationProviderComposition(options: {
   readonly webgptProvider?: AutomationProviderPort | null;
   readonly synchronousWaitCapMs?: number;
 }): AutomationProviderComposition {
-  const nativePolicy = new ProviderPolicyAuthority(options.store);
+  const nativePolicy = new ProviderPolicyAuthority(options.store, V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS);
   const nativeRuntimeProvider = new NativeAutomationProviderPort({
     runtime: options.nativeRuntime,
     resolveInputRef: async (inputRef) => options.inputRefs.resolve(inputRef),
