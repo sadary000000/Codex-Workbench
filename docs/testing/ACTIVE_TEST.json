@@ -3,18 +3,18 @@
   "state": "active",
   "executionClass": "blocking",
   "blocksMainline": true,
-  "testId": "v01-release-candidate-exact-head-validation-v1",
+  "testId": "v01-release-candidate-exact-head-validation-v2",
   "profile": "repository-exact-head-validation",
   "repository": "sadary000000/Codex-Workbench",
   "target": {
     "branch": "test/v0.1-release-candidate-snapshot",
-    "commit": "64a2d810244b9e8c9b3871c576c772b517922df0",
+    "commit": "5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf",
     "pullRequest": 50
   },
   "targetPolicy": {
     "startFreshness": "branch-head-must-match",
     "completionFreshness": "branch-head-must-match-for-mainline-gate",
-    "resultScope": "exact-tested-commit"
+    "resultScope": "exact-tested-product-tree"
   },
   "controlPlanePolicy": {
     "freezeBootstrapCommit": true,
@@ -31,9 +31,10 @@
     "resultManifestSchema": "docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json"
   },
   "knownEvidence": {
-    "workflowRunId": 33289482948,
-    "workflowJobId": 99198461570,
-    "knownGreenCommit": "64a2d810244b9e8c9b3871c576c772b517922df0",
-    "note": "Historical deterministic CI evidence only. The independent Codex executor must rerun the frozen active protocol on the exact release-candidate snapshot and must not convert this prior green result into a PASS. Real-model Source E2E and Windows packaged E2E remain separate release gates."
+    "workflowRunId": 33365713285,
+    "workflowJobId": 99405819227,
+    "knownGreenCommit": "5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf",
+    "result": "PASS",
+    "note": "The workspace-write runner applied the reviewed patch to its parent, passed npm ci, Typecheck, focused regressions, all repository tests, and Build, then created this exact product/source-and-test tree as commit 5fdba268. Real Source and Windows packaged E2E remain separate blocking release gates."
   }
 }
