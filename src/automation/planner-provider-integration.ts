@@ -27,7 +27,7 @@ import {
 
 const MAX_LIST_ITEMS = 64;
 const MAX_TEXT = 4_096;
-export const V01_V01_MAX_PLANNER_PROVIDER_ATTEMPTS = 2;
+export const V01_MAX_PLANNER_PROVIDER_ATTEMPTS = 2;
 const OPAQUE_INPUT_REF = /^automation-input-v1:[a-f0-9]{64}$/i;
 
 export type PlannerIntegrationStatus =
