@@ -16,9 +16,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     env:
-      PRODUCT_SNAPSHOT: a2ad45a4a54aca3ca9d069afa2c5c412ac615471
+      PRODUCT_SNAPSHOT: 650168ba73aacf7226f86eeafcf73ea48eb4cc23
     steps:
-      - name: Checkout frozen workspace-write product snapshot
+      - name: Checkout exact Planner verifier hotfix product snapshot
         uses: actions/checkout@v4
         with:
           ref: ${{ env.PRODUCT_SNAPSHOT }}
@@ -56,6 +56,8 @@ jobs:
             'dist/package/resources/app/dist/automation/requirement-projection-service.js',
             'dist/package/resources/app/dist/automation/planner-provider-integration.js',
             'dist/package/resources/app/dist/automation/planner-provider-prompt.js',
+            'dist/package/resources/app/dist/automation/planner-result-repair-provider.js',
+            'dist/package/resources/app/dist/automation/provider-service-router.js',
             'dist/package/resources/app/dist/codex/automation/native-provider-port.js',
             'dist/package/resources/app/dist/renderer/ui-projection.js',
             'dist/package/resources/app/dist/renderer/automation-governance-inspector.js',
@@ -186,6 +188,23 @@ jobs:
           if (-not $plannerPrompt.Contains('Never invent, translate, or emit any other verificationClass value.')) {
             throw 'Packaged Planner prompt is missing strict verificationClass guidance.'
           }
+          if (-not $plannerPrompt.Contains('verificationPlan MUST be a JSON array containing 1 to 32 non-empty strings.')) {
+            throw 'Packaged Planner prompt is missing verifier list shape guidance.'
+          }
+
+          $plannerRepairPath = 'dist/package/resources/app/dist/automation/planner-result-repair-provider.js'
+          $plannerRepair = Get-Content $plannerRepairPath -Raw
+          if (-not $plannerRepair.Contains('repairPlannerVerifierListShape')) {
+            throw 'Packaged Planner result repair boundary is missing.'
+          }
+          if (-not $plannerRepair.Contains('verificationPlan')) {
+            throw 'Packaged Planner result repair boundary is missing verificationPlan repair.'
+          }
+          $providerRouterPath = 'dist/package/resources/app/dist/automation/provider-service-router.js'
+          $providerRouter = Get-Content $providerRouterPath -Raw
+          if (-not $providerRouter.Contains('createPlannerResultRepairProvider')) {
+            throw 'Packaged Planner service is not wired through the bounded result repair boundary.'
+          }
 
           $projectionPath = 'dist/package/resources/app/dist/renderer/ui-projection.js'
           $projection = Get-Content $projectionPath -Raw
@@ -241,11 +260,12 @@ jobs:
             'packagedWorkspaceWriteContract=PASS',
             'packagedRequirementResponseRepair=PASS',
             'packagedPlannerVerificationContract=PASS',
+            'packagedPlannerVerifierListRepair=PASS',
             'packagedPlannerRestartRecovery=PASS',
             'packagedPlannerRequestIdentityRecovery=PASS',
             'packagedPlannerQuotaSafeRecovery=PASS',
             'packagedAutomationUiContract=PASS',
-            'note=Candidate packaging artifact only; current real Source and packaged E2E gates remain separately required.'
+            'note=Planner verifier-list hotfix candidate; real Source and packaged E2E gates remain separately required.'
           ) | Set-Content 'dist/package/CANDIDATE_PROVENANCE.txt' -Encoding utf8
           Get-Content 'dist/package/CANDIDATE_PROVENANCE.txt'
       - name: Upload Windows trial candidate
