@@ -8,7 +8,7 @@
   "repository": "sadary000000/Codex-Workbench",
   "target": {
     "branch": "test/v0.1-release-candidate-snapshot",
-    "commit": "9258dad688284ba0941dd6d0c38493117da86bb7",
+    "commit": "a2ad45a4a54aca3ca9d069afa2c5c412ac615471",
     "pullRequest": 50
   },
   "targetPolicy": {
@@ -31,10 +31,10 @@
     "resultManifestSchema": "docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json"
   },
   "knownEvidence": {
-    "workflowRunId": 33396789299,
-    "workflowJobId": 99503093944,
-    "knownGreenCommit": "9258dad688284ba0941dd6d0c38493117da86bb7",
+    "workflowRunId": 33398289386,
+    "workflowJobId": 99508049727,
+    "knownGreenCommit": "a2ad45a4a54aca3ca9d069afa2c5c412ac615471",
     "result": "PASS",
-    "note": "Full CI passed npm ci, Typecheck, 702 repository tests, and Build on the exact Thread-selected Automation model snapshot. Real Source and Windows packaged E2E remain separate blocking release gates."
+    "note": "Full CI passed npm ci, Typecheck, 704 repository tests, and Build on the exact Planner reliability and Thread-selected Automation model snapshot. Windows candidate packaging run 33398616292 also passed quota-safe Planner artifact gates. Real Source and Windows packaged E2E remain separate blocking release gates."
   }
 }
