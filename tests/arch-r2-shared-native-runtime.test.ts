@@ -27,9 +27,11 @@ function harness(): {
   registry: NativeRuntimeRegistryPort;
   counters: { starts: number; reads: number; refreshes: number; interrupts: number };
   setRead: (view: ThreadReadView) => void;
+  setRefreshFailure: (error: Error | null) => void;
 } {
   const counters = { starts: 0, reads: 0, refreshes: 0, interrupts: 0 };
   let current = readView("running");
+  let refreshFailure: Error | null = null;
   const never = new Promise<TurnResult>(() => undefined);
   const runtime = {
     nativeThreadId: "thread-r2-shared",
@@ -42,12 +44,17 @@ function harness(): {
       return { acceptance: { turnId: "turn-r2-shared", nativeThreadId: "thread-r2-shared" }, completion: never };
     },
     readThread: async () => { counters.reads += 1; return current; },
-    refreshProjectionFromRead: async (read?: ThreadReadView) => { counters.refreshes += 1; return read ?? current; },
+    refreshProjectionFromRead: async (read?: ThreadReadView) => {
+      counters.refreshes += 1;
+      if (refreshFailure) throw refreshFailure;
+      return read ?? current;
+    },
     interruptTurn: async () => { counters.interrupts += 1; return { ok: true as const, turnId: "turn-r2-shared" }; },
   };
   return {
     counters,
     setRead: (view) => { current = view; },
+    setRefreshFailure: (error) => { refreshFailure = error; },
     registry: {
       get: (nativeThreadId) => nativeThreadId === "thread-r2-shared" ? runtime : null,
       list: () => [{ nativeThreadId: "thread-r2-shared", runtime }],
@@ -85,6 +92,20 @@ test("ARCH-R2 Native read/reconcile reuse the same Turn and reconcile only refre
   assert.match(reconciled.resultHash ?? "", /^[a-f0-9]{64}$/);
   assert.equal(h.counters.starts, 1, "reconcile must never redispatch turn/start");
   assert.equal(h.counters.refreshes, 1, "explicit reconcile may refresh only the local projection");
+});
+
+test("ARCH-R2 Native reconcile preserves a terminal Turn when projection refresh fails", async () => {
+  const h = harness();
+  h.setRead(readView("completed", "terminal plan"));
+  h.setRefreshFailure(new Error("projection refresh failed"));
+  const adapter = new SharedNativeProviderRuntimeAdapter({ registry: h.registry, runtimeId: "workbench-process-r2" });
+
+  const reconciled = await adapter.reconcileTurn("turn-r2-shared");
+  assert.equal(reconciled.state, "COMPLETED");
+  assert.equal(reconciled.response, "terminal plan");
+  assert.match(reconciled.resultHash ?? "", /^[a-f0-9]{64}$/);
+  assert.equal(h.counters.refreshes, 1, "reconcile still attempts the local projection refresh once");
+  assert.equal(h.counters.starts, 0, "a terminal Turn found by reconcile must never cause a new turn/start");
 });
 
 test("ARCH-R2 Native runtime capability reports shared runtime availability without side-effect authority", async () => {

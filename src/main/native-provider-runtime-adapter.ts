@@ -231,7 +231,16 @@ export class SharedNativeProviderRuntimeAdapter implements NativeProviderRuntime
         const view = fromRead(read, turnId);
         if (!view) continue;
         this.turns.set(turnId, { nativeThreadId: candidate.nativeThreadId, completion: owner?.completion ?? null, completed: owner?.completed ?? null });
-        if (reconcile) await candidate.runtime.refreshProjectionFromRead(read);
+        if (reconcile) {
+          try {
+            await candidate.runtime.refreshProjectionFromRead(read);
+          } catch (error) {
+            if (view.state === "COMPLETED" || view.state === "FAILED" || view.state === "INTERRUPTED") {
+              return { runtime: candidate.runtime, view };
+            }
+            throw error;
+          }
+        }
         return { runtime: candidate.runtime, view };
       } catch {
         // A query failure on one attached runtime is not evidence that another
