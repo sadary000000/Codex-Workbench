@@ -1,0 +1,50 @@
+name: Package Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/workbench-v1
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'tools/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/package-windows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  package-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Build Windows portable package
+        run: npm run package:win
+
+      - name: Upload Windows portable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Codex-Workbench-Windows-${{ github.sha }}
+          path: dist/package/**
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 14
