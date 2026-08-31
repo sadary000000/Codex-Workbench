@@ -1,6 +1,7 @@
 import type { AutomationProviderId, AutomationProviderPort } from "./adapters.ts";
 import { InputRefRegistry } from "./input-ref.ts";
 import { createPlannerProviderIntegrationService, type PlannerProviderIntegrationService } from "./planner-provider-integration.ts";
+import { createPlannerResultRepairProvider } from "./planner-result-repair-provider.ts";
 import { ProviderAwareRequirementAutomationService } from "./provider-aware-requirement-service.ts";
 import { AutomationProviderRegistry } from "./provider-registry.ts";
 import { NativeStepExecutionService } from "./step-execution-service.ts";
@@ -46,6 +47,7 @@ export class AutomationProviderServiceRouter {
     const id = provider.provider;
     const existing = this.serviceSets.get(id);
     if (existing) return existing;
+    const plannerProvider = createPlannerResultRepairProvider(provider);
     const created: AutomationProviderServices = Object.freeze({
       providerId: id,
       provider,
@@ -56,7 +58,7 @@ export class AutomationProviderServiceRouter {
       }),
       planner: createPlannerProviderIntegrationService({
         store: this.store,
-        provider,
+        provider: plannerProvider,
       }),
       stepExecution: new NativeStepExecutionService({
         store: this.store,
