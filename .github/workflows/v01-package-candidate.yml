@@ -15,11 +15,13 @@ jobs:
   package:
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      PRODUCT_SNAPSHOT: 5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf
     steps:
       - name: Checkout frozen workspace-write product snapshot
         uses: actions/checkout@v4
         with:
-          ref: 5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf
+          ref: ${{ env.PRODUCT_SNAPSHOT }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -200,7 +202,7 @@ jobs:
           $cliSha = (Get-FileHash 'dist/package/Codex Workbench CLI.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           @(
             'Codex Workbench v0.1 Windows trial candidate',
-            "productSnapshot=$env:GITHUB_SHA",
+            "productSnapshot=$env:PRODUCT_SNAPSHOT",
             "guiSha256=$guiSha",
             "cliSha256=$cliSha",
             'packagedWorkspaceWriteContract=PASS',
@@ -215,7 +217,7 @@ jobs:
       - name: Upload Windows trial candidate
         uses: actions/upload-artifact@v4
         with:
-          name: codex-workbench-v0.1-windows-${{ github.sha }}
+          name: codex-workbench-v0.1-windows-${{ env.PRODUCT_SNAPSHOT }}
           path: dist/package
           if-no-files-found: error
           retention-days: 14
