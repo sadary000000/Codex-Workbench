@@ -3,12 +3,12 @@
   "state": "active",
   "executionClass": "blocking",
   "blocksMainline": true,
-  "testId": "v01-release-candidate-exact-head-validation-v2",
+  "testId": "v01-release-candidate-exact-head-validation-v3",
   "profile": "repository-exact-head-validation",
   "repository": "sadary000000/Codex-Workbench",
   "target": {
     "branch": "test/v0.1-release-candidate-snapshot",
-    "commit": "5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf",
+    "commit": "9258dad688284ba0941dd6d0c38493117da86bb7",
     "pullRequest": 50
   },
   "targetPolicy": {
@@ -31,10 +31,10 @@
     "resultManifestSchema": "docs/testing/TEST_RESULT_MANIFEST_SCHEMA.json"
   },
   "knownEvidence": {
-    "workflowRunId": 33365713285,
-    "workflowJobId": 99405819227,
-    "knownGreenCommit": "5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf",
+    "workflowRunId": 33396789299,
+    "workflowJobId": 99503093944,
+    "knownGreenCommit": "9258dad688284ba0941dd6d0c38493117da86bb7",
     "result": "PASS",
-    "note": "The workspace-write runner applied the reviewed patch to its parent, passed npm ci, Typecheck, focused regressions, all repository tests, and Build, then created this exact product/source-and-test tree as commit 5fdba268. Real Source and Windows packaged E2E remain separate blocking release gates."
+    "note": "Full CI passed npm ci, Typecheck, 702 repository tests, and Build on the exact Thread-selected Automation model snapshot. Real Source and Windows packaged E2E remain separate blocking release gates."
   }
 }
