@@ -18,10 +18,10 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-      - name: Checkout exact product snapshot
+      - name: Checkout frozen workspace-write product snapshot
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: 5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf
 
       - uses: actions/setup-node@v4
         with:
