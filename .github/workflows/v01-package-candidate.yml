@@ -117,7 +117,7 @@ jobs:
 
           $plannerHostPath = 'dist/package/resources/app/dist/main/automation-provider-host.js'
           $plannerHost = Get-Content $plannerHostPath -Raw
-          if (-not $plannerHost.Contains('V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS = 120000')) {
+          if (($plannerHost -notmatch 'V01_INTERACTIVE_PROVIDER_WAIT_CAP_MS\s*=\s*120_?000')) {
             throw 'Packaged Planner host is missing the 120 second interactive provider wait.'
           }
 
