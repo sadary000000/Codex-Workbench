@@ -16,10 +16,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout exact product snapshot
+      - name: Checkout frozen workspace-write product snapshot
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: 5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -47,6 +47,7 @@ jobs:
             'dist/package/resources/app/package.json',
             'dist/package/resources/app/dist/main/main.js',
             'dist/package/resources/app/dist/main/native-provider-runtime-adapter.js',
+            'dist/package/resources/app/dist/automation/v01-workspace-write-contract.js',
             'dist/package/resources/app/dist/automation/requirement-response-repair.js',
             'dist/package/resources/app/dist/automation/requirement-service.js',
             'dist/package/resources/app/dist/automation/requirement-projection-service.js',
@@ -64,6 +65,15 @@ jobs:
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Missing packaged artifact: $path" }
+          }
+
+          $workspaceWriteContractPath = 'dist/package/resources/app/dist/automation/v01-workspace-write-contract.js'
+          $workspaceWriteContract = Get-Content $workspaceWriteContractPath -Raw
+          if (-not $workspaceWriteContract.Contains('USER_CONFIRMED')) {
+            throw 'Packaged workspace-write contract is missing durable user confirmation authority.'
+          }
+          if (-not $workspaceWriteContract.Contains('WORKSPACE_WRITE')) {
+            throw 'Packaged workspace-write contract is missing bounded workspace-write disposition.'
           }
 
           $requirementServicePath = 'dist/package/resources/app/dist/automation/requirement-service.js'
@@ -193,6 +203,7 @@ jobs:
             "productSnapshot=$env:GITHUB_SHA",
             "guiSha256=$guiSha",
             "cliSha256=$cliSha",
+            'packagedWorkspaceWriteContract=PASS',
             'packagedRequirementResponseRepair=PASS',
             'packagedPlannerVerificationContract=PASS',
             'packagedPlannerRestartRecovery=PASS',
