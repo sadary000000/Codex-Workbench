@@ -1,0 +1,721 @@
+name: v0.1 Native Workspace Write Contract
+
+on:
+  push:
+    branches:
+      - release/v0.1-integration
+    paths:
+      - .github/workflows/v01-workspace-write-contract.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: release/v0.1-integration
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Apply reviewed workspace-write contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one replacement target, found {count}')
+              p.write_text(text.replace(old, new), encoding='utf-8')
+
+          Path('src/automation/v01-workspace-write-contract.ts').write_text('''import type { ActionIntent } from "./types.ts";
+
+export const V01_WORKSPACE_WRITE_ACTION_TYPE = "STEP_EXECUTION" as const;
+export const V01_WORKSPACE_WRITE_SIDE_EFFECT_CLASS = "RECONCILABLE" as const;
+export const V01_SIDE_EFFECT_APPROVAL = "USER_CONFIRMED" as const;
+
+export type V01NativeExecutionDisposition =
+  | "READ_ONLY"
+  | "WORKSPACE_WRITE"
+  | "APPROVAL_REQUIRED"
+  | "UNSUPPORTED";
+
+/**
+ * v0.1's only writable Native Automation contract.
+ *
+ * Planner/Requirement provider requests may themselves be RECONCILABLE, so
+ * sideEffectClass alone is never authority to write. Only a STEP_EXECUTION
+ * intent may request workspace-write, and only when the exact persisted intent
+ * carries the renderer user's explicit confirmation. Everything else remains
+ * read-only or fails closed.
+ */
+export function v01NativeExecutionDisposition(
+  intent: Pick<ActionIntent, "actionType" | "sideEffectClass" | "executionOptions">,
+): V01NativeExecutionDisposition {
+  if (intent.actionType !== V01_WORKSPACE_WRITE_ACTION_TYPE) return "READ_ONLY";
+  if (intent.sideEffectClass === "PURE") return "READ_ONLY";
+  if (intent.sideEffectClass !== V01_WORKSPACE_WRITE_SIDE_EFFECT_CLASS) return "UNSUPPORTED";
+  if (intent.executionOptions.workspaceWrite !== true || intent.executionOptions.sideEffectApproval !== V01_SIDE_EFFECT_APPROVAL) {
+    return "APPROVAL_REQUIRED";
+  }
+  return "WORKSPACE_WRITE";
+}
+''', encoding='utf-8')
+
+          replace_once(
+              'src/automation/effective-policy.ts',
+              '''export const DEFAULT_HARD_CONSTRAINTS: HardConstraints = createHardConstraints({
+  maxPromptDispatches: 12,
+  maxRepairDispatches: 3,
+  maxRetryDispatches: 3,
+  maxNewChatDispatches: 3,
+  allowedOperations: ["PROMPT", "REPAIR", "RETRY", "NEW_CHAT", "HUMAN_GATE", "SIDE_EFFECT", "VERIFY"],
+  requireHumanGateFor: ["SIDE_EFFECT"],
+  allowDataEgress: false,
+  allowSideEffects: false,
+});''',
+              '''export const DEFAULT_HARD_CONSTRAINTS: HardConstraints = createHardConstraints({
+  maxPromptDispatches: 12,
+  maxRepairDispatches: 3,
+  maxRetryDispatches: 3,
+  maxNewChatDispatches: 3,
+  allowedOperations: ["PROMPT", "REPAIR", "RETRY", "NEW_CHAT", "HUMAN_GATE", "SIDE_EFFECT", "VERIFY"],
+  requireHumanGateFor: ["SIDE_EFFECT"],
+  allowDataEgress: false,
+  allowSideEffects: false,
+});
+
+/**
+ * Reviewed v0.1 Native Automation product profile.
+ *
+ * Generic policy remains conservative. This production profile admits only
+ * the workspace side-effect capability; the exact user-confirmed STEP_EXECUTION
+ * gate is enforced from persisted ActionIntent truth by ProviderPolicyAuthority
+ * before SIDE_EFFECT evaluation. Network/data egress remains denied.
+ */
+export const V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS: HardConstraints = createHardConstraints({
+  maxPromptDispatches: DEFAULT_HARD_CONSTRAINTS.maxPromptDispatches,
+  maxRepairDispatches: DEFAULT_HARD_CONSTRAINTS.maxRepairDispatches,
+  maxRetryDispatches: DEFAULT_HARD_CONSTRAINTS.maxRetryDispatches,
+  maxNewChatDispatches: DEFAULT_HARD_CONSTRAINTS.maxNewChatDispatches,
+  allowedOperations: DEFAULT_HARD_CONSTRAINTS.allowedOperations,
+  requireHumanGateFor: [],
+  allowDataEgress: false,
+  allowSideEffects: true,
+});''',
+          )
+
+          replace_once(
+              'src/main/automation-execution-facade.ts',
+              'import { DEFAULT_HARD_CONSTRAINTS, POLICY_SCHEMA_VERSION, policyVersionPayload } from "../automation/effective-policy.ts";',
+              'import { POLICY_SCHEMA_VERSION, V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS, policyVersionPayload } from "../automation/effective-policy.ts";',
+          )
+          p = Path('src/main/automation-execution-facade.ts')
+          text = p.read_text(encoding='utf-8')
+          if text.count('DEFAULT_HARD_CONSTRAINTS.') != 8:
+              raise SystemExit(f'automation-execution-facade.ts: unexpected DEFAULT_HARD_CONSTRAINTS use count {text.count("DEFAULT_HARD_CONSTRAINTS.")}')
+          text = text.replace('DEFAULT_HARD_CONSTRAINTS.', 'V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS.')
+          text = text.replace('Existing policy truth is never replaced or\n * guessed, and data egress/side effects remain disabled.', 'Existing policy truth is never replaced or\n * guessed. Data egress remains disabled; fresh v0.1 policy admits only the\n * separately user-confirmed workspace-write execution contract.')
+          p.write_text(text, encoding='utf-8')
+
+          replace_once(
+              'src/main/automation-provider-composition.ts',
+              'import { ProviderPolicyAuthority } from "../automation/provider-policy-authority.ts";',
+              'import { ProviderPolicyAuthority } from "../automation/provider-policy-authority.ts";\nimport { V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS } from "../automation/effective-policy.ts";\nimport { v01NativeExecutionDisposition } from "../automation/v01-workspace-write-contract.ts";',
+          )
+          replace_once(
+              'src/main/automation-provider-composition.ts',
+              'import { NativeAutomationProviderPort, type NativeProviderRuntimePort } from "../codex/automation/native-provider-port.ts";',
+              'import { NativeAutomationProviderPort, type NativeProviderExecutionMode, type NativeProviderRuntimePort } from "../codex/automation/native-provider-port.ts";',
+          )
+          replace_once(
+              'src/main/automation-provider-composition.ts',
+              'async function validatePersistedAttempt(store: AutomationStore, correlation: ProviderCorrelation): Promise<void> {',
+              'async function validatePersistedAttempt(store: AutomationStore, correlation: ProviderCorrelation): Promise<NativeProviderExecutionMode> {',
+          )
+          replace_once(
+              'src/main/automation-provider-composition.ts',
+              '''  if (!intent || intent.projectId !== correlation.projectId || intent.idempotencyRef !== correlation.idempotencyRef) {
+    throw new Error("PROVIDER_ACTION_INTENT_CORRELATION_INVALID");
+  }
+}''',
+              '''  if (!intent || intent.projectId !== correlation.projectId || intent.idempotencyRef !== correlation.idempotencyRef) {
+    throw new Error("PROVIDER_ACTION_INTENT_CORRELATION_INVALID");
+  }
+  const disposition = v01NativeExecutionDisposition(intent);
+  if (disposition === "APPROVAL_REQUIRED") throw new Error("PROVIDER_SIDE_EFFECT_APPROVAL_REQUIRED");
+  if (disposition === "UNSUPPORTED") throw new Error("PROVIDER_SIDE_EFFECT_UNSUPPORTED");
+  return disposition;
+}''',
+          )
+          replace_once(
+              'src/main/automation-provider-composition.ts',
+              'const nativePolicy = new ProviderPolicyAuthority(options.store);',
+              'const nativePolicy = new ProviderPolicyAuthority(options.store, V01_NATIVE_AUTOMATION_HARD_CONSTRAINTS);',
+          )
+
+          replace_once(
+              'src/automation/provider-policy-authority.ts',
+              '  ProviderExecutionAuthorization,\n  ProviderPolicyAuthorityPort,',
+              '  ProviderExecutionAuthorization,\n  ProviderPolicyAuthorityPort,\n  ProviderCorrelation,',
+          )
+          replace_once(
+              'src/automation/provider-policy-authority.ts',
+              'import { AutomationStore } from "./store.ts";',
+              'import { AutomationStore } from "./store.ts";\nimport { v01NativeExecutionDisposition } from "./v01-workspace-write-contract.ts";',
+          )
+          replace_once(
+              'src/automation/provider-policy-authority.ts',
+              '''    const correlationId = input.correlation.idempotencyRef ?? input.correlation.actionAttemptId ?? input.correlation.actionIntentId;
+    if (!correlationId) throw new ProviderPolicyAuthorityError("POLICY_CORRELATION_REQUIRED", "Provider policy evaluation requires a stable correlation id.");
+    const operation = await this.policyOperation(input.operation, input.correlation.actionAttemptId);''',
+              '''    const correlationId = input.correlation.idempotencyRef ?? input.correlation.actionAttemptId ?? input.correlation.actionIntentId;
+    if (!correlationId) throw new ProviderPolicyAuthorityError("POLICY_CORRELATION_REQUIRED", "Provider policy evaluation requires a stable correlation id.");
+    const nativeExecutionMode = input.operation === "SUBMIT"
+      ? await this.nativeSubmitExecutionMode(input.correlation)
+      : "READ_ONLY";
+    const operation = await this.policyOperation(input.operation, input.correlation.actionAttemptId);''',
+          )
+          replace_once(
+              'src/automation/provider-policy-authority.ts',
+              '''      const policy = policyVersionViewFromRecord(record);
+      const pin = pinPolicyVersion(policy, correlationId);
+      decision = resolvePinnedEffectivePolicy({
+        operation,''',
+              '''      const policy = policyVersionViewFromRecord(record);
+      const pin = pinPolicyVersion(policy, correlationId);
+      if (nativeExecutionMode === "WORKSPACE_WRITE") {
+        const sideEffectDecision = resolvePinnedEffectivePolicy({
+          operation: "SIDE_EFFECT",
+          correlationId,
+          actionId: input.correlation.actionIntentId,
+          hardConstraints: this.hardConstraints,
+          policyVersion: policy,
+          runtimeCapability: capability,
+          pin,
+        });
+        if (sideEffectDecision.decision !== "ALLOW") throw decisionError(sideEffectDecision);
+      }
+      decision = resolvePinnedEffectivePolicy({
+        operation,''',
+          )
+          replace_once(
+              'src/automation/provider-policy-authority.ts',
+              '''  snapshot(policyVersionId: string) {
+    return this.budgets.get(policyVersionId)?.snapshot() ?? null;
+  }
+
+  private async policyOperation''',
+              '''  snapshot(policyVersionId: string) {
+    return this.budgets.get(policyVersionId)?.snapshot() ?? null;
+  }
+
+  private async nativeSubmitExecutionMode(correlation: ProviderCorrelation): Promise<"READ_ONLY" | "WORKSPACE_WRITE"> {
+    const actionAttemptId = correlation.actionAttemptId ?? "";
+    const actionIntentId = correlation.actionIntentId ?? "";
+    const attempt = actionAttemptId ? await this.store.get("actionAttempts", actionAttemptId) : null;
+    if (!attempt || attempt.intentId !== actionIntentId || attempt.policyVersionId !== correlation.policyVersionId) {
+      throw new ProviderPolicyAuthorityError("POLICY_ATTEMPT_INVALID", "Provider side-effect authorization references a mismatched ActionAttempt.", { actionAttemptId, actionIntentId });
+    }
+    const intent = await this.store.get("actionIntents", actionIntentId);
+    if (!intent
+      || intent.projectId !== correlation.projectId
+      || intent.policyVersionId !== correlation.policyVersionId
+      || intent.idempotencyRef !== correlation.idempotencyRef) {
+      throw new ProviderPolicyAuthorityError("POLICY_ATTEMPT_INVALID", "Provider side-effect authorization references a mismatched ActionIntent.", { actionAttemptId, actionIntentId });
+    }
+    const disposition = v01NativeExecutionDisposition(intent);
+    if (disposition === "APPROVAL_REQUIRED") {
+      throw new ProviderPolicyAuthorityError("POLICY_SIDE_EFFECT_APPROVAL_REQUIRED", "Workspace-write STEP_EXECUTION requires the exact persisted user confirmation.", { actionAttemptId, actionIntentId });
+    }
+    if (disposition === "UNSUPPORTED") {
+      throw new ProviderPolicyAuthorityError("POLICY_SIDE_EFFECT_UNSUPPORTED", "v0.1 Native execution supports only PURE or user-confirmed RECONCILABLE workspace Steps.", { actionAttemptId, actionIntentId });
+    }
+    return disposition;
+  }
+
+  private async policyOperation''',
+          )
+
+          replace_once(
+              'src/codex/automation/native-provider-port.ts',
+              'export type NativeProviderTurnState = "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED" | "UNKNOWN";',
+              'export type NativeProviderTurnState = "RUNNING" | "COMPLETED" | "FAILED" | "INTERRUPTED" | "UNKNOWN";\nexport type NativeProviderExecutionMode = "READ_ONLY" | "WORKSPACE_WRITE";',
+          )
+          replace_once(
+              'src/codex/automation/native-provider-port.ts',
+              '  startTurn(input: { nativeThreadId: string; prompt: string }): Promise<{ nativeTurnId: string }>;',
+              '  startTurn(input: { nativeThreadId: string; prompt: string; executionMode: NativeProviderExecutionMode }): Promise<{ nativeTurnId: string }>;',
+          )
+          replace_once(
+              'src/codex/automation/native-provider-port.ts',
+              '  readonly validateActionAttempt?: (correlation: ProviderCorrelation) => Promise<void>;',
+              '  readonly validateActionAttempt?: (correlation: ProviderCorrelation) => Promise<NativeProviderExecutionMode>;',
+          )
+          replace_once(
+              'src/codex/automation/native-provider-port.ts',
+              '  private readonly validateActionAttempt?: (correlation: ProviderCorrelation) => Promise<void>;',
+              '  private readonly validateActionAttempt?: (correlation: ProviderCorrelation) => Promise<NativeProviderExecutionMode>;',
+          )
+          replace_once(
+              'src/codex/automation/native-provider-port.ts',
+              '''    assertProviderExecutionAuthorization({ operation: "SUBMIT", correlation: input.correlation, authorization });
+    assertLiveCapabilityProof(authorization, liveCapability);
+    await this.validateActionAttempt?.(input.correlation);
+    const prompt = await this.resolveInputRef(input.inputRef);''',
+              '''    assertProviderExecutionAuthorization({ operation: "SUBMIT", correlation: input.correlation, authorization });
+    assertLiveCapabilityProof(authorization, liveCapability);
+    const executionMode = await this.validateActionAttempt?.(input.correlation) ?? "READ_ONLY";
+    const prompt = await this.resolveInputRef(input.inputRef);''',
+          )
+          replace_once(
+              'src/codex/automation/native-provider-port.ts',
+              'const accepted = await this.runtime.startTurn({ nativeThreadId, prompt });',
+              'const accepted = await this.runtime.startTurn({ nativeThreadId, prompt, executionMode });',
+          )
+
+          replace_once(
+              'src/main/native-provider-runtime-adapter.ts',
+              'import type { RuntimeState, ThreadReadView, TurnResult } from "../shared/runtime-types.ts";',
+              'import type { NativeTurnOptions, RuntimeState, ThreadReadView, TurnResult } from "../shared/runtime-types.ts";',
+          )
+          replace_once(
+              'src/main/native-provider-runtime-adapter.ts',
+              'import type { NativeProviderRuntimePort, NativeProviderTurnState, NativeProviderTurnView } from "../codex/automation/native-provider-port.ts";',
+              'import type { NativeProviderExecutionMode, NativeProviderRuntimePort, NativeProviderTurnState, NativeProviderTurnView } from "../codex/automation/native-provider-port.ts";',
+          )
+          replace_once(
+              'src/main/native-provider-runtime-adapter.ts',
+              '''  snapshot(): { activeTurnId: string | null };
+  startTurnAccepted(prompt: string, options?: { approvalPolicy?: "never" | "on-request"; sandboxPolicy?: { type: "readOnly" } }): Promise<{''',
+              '''  snapshot(): { activeTurnId: string | null; cwd: string };
+  startTurnAccepted(prompt: string, options?: NativeTurnOptions): Promise<{''',
+          )
+          replace_once(
+              'src/main/native-provider-runtime-adapter.ts',
+              '''      supportedOperations: ["PROMPT", "RETRY", "VERIFY"],
+      allowDataEgress: false,
+      allowSideEffects: false,''',
+              '''      supportedOperations: ["PROMPT", "RETRY", "SIDE_EFFECT", "VERIFY"],
+      allowDataEgress: false,
+      allowSideEffects: true,''',
+          )
+          replace_once(
+              'src/main/native-provider-runtime-adapter.ts',
+              '''  async startTurn(input: { nativeThreadId: string; prompt: string }): Promise<{ nativeTurnId: string }> {
+    const nativeThreadId = boundedId(input.nativeThreadId, "NATIVE_THREAD_ID");
+    const runtime = this.registry.get(nativeThreadId);
+    if (!runtime) throw Object.assign(new Error("NATIVE_TARGET_UNAVAILABLE:TARGET_UNREACHABLE"), { code: "NATIVE_TARGET_UNAVAILABLE:TARGET_UNREACHABLE" });
+    const started = await runtime.startTurnAccepted(input.prompt, { approvalPolicy: "never", sandboxPolicy: { type: "readOnly" } });''',
+              '''  async startTurn(input: { nativeThreadId: string; prompt: string; executionMode: NativeProviderExecutionMode }): Promise<{ nativeTurnId: string }> {
+    const nativeThreadId = boundedId(input.nativeThreadId, "NATIVE_THREAD_ID");
+    const runtime = this.registry.get(nativeThreadId);
+    if (!runtime) throw Object.assign(new Error("NATIVE_TARGET_UNAVAILABLE:TARGET_UNREACHABLE"), { code: "NATIVE_TARGET_UNAVAILABLE:TARGET_UNREACHABLE" });
+    const snapshot = runtime.snapshot();
+    const sandboxPolicy: NativeTurnOptions["sandboxPolicy"] = input.executionMode === "WORKSPACE_WRITE"
+      ? { type: "workspaceWrite", networkAccess: false, writableRoots: [snapshot.cwd] }
+      : { type: "readOnly", networkAccess: false };
+    const started = await runtime.startTurnAccepted(input.prompt, { approvalPolicy: "never", sandboxPolicy });''',
+          )
+
+          replace_once(
+              'src/automation/step-execution-service.ts',
+              'import type {\n  ActionAttempt,',
+              'import { V01_SIDE_EFFECT_APPROVAL } from "./v01-workspace-write-contract.ts";\nimport type {\n  ActionAttempt,',
+          )
+          replace_once(
+              'src/automation/step-execution-service.ts',
+              '''export interface ExecuteStepInput {
+  readonly projectId: string;
+  readonly stepSpecId: string;
+  readonly providerTargetRef: string;
+  readonly timeoutMs?: number;
+}''',
+              '''export interface ExecuteStepInput {
+  readonly projectId: string;
+  readonly stepSpecId: string;
+  readonly providerTargetRef: string;
+  readonly timeoutMs?: number;
+  /** Required only for a fresh RECONCILABLE workspace-write Step. */
+  readonly userConfirmedSideEffect?: boolean;
+}''',
+          )
+          replace_once(
+              'src/automation/step-execution-service.ts',
+              '    | "STEP_EXECUTION_NON_PURE_UNSUPPORTED"\n    | "STEP_EXECUTION_POLICY_REQUIRED"',
+              '    | "STEP_EXECUTION_NON_PURE_UNSUPPORTED"\n    | "STEP_EXECUTION_SIDE_EFFECT_APPROVAL_REQUIRED"\n    | "STEP_EXECUTION_POLICY_REQUIRED"',
+          )
+          replace_once(
+              'src/automation/step-execution-service.ts',
+              '''function executionPrompt(step: StepSpec): string {
+  const payload = {
+    protocol: STEP_EXECUTION_PROTOCOL,
+    mode: "PURE_READ_ONLY",
+    step: {
+      stepKey: step.stepKey,
+      specVersion: step.specVersion,
+      kind: step.kind,
+      objective: step.objective ?? step.goal,
+      inputs: step.inputs ?? [],
+      expectedOutputs: step.expectedOutputs ?? [],
+      acceptanceCriteria: step.acceptanceCriteria ?? [],
+      assumptions: step.assumptions ?? [],
+      constraints: step.constraints ?? [],
+    },
+    rules: [
+      "Use the existing attached Native Codex thread only.",
+      "This step is PURE and read-only: do not modify the workspace or external state.",
+      "Do not create, resume, or fork another runtime or thread.",
+      "Return a bounded final answer that identifies the produced output/evidence for later deterministic verification.",
+    ],
+  };''',
+              '''function executionPrompt(step: StepSpec): string {
+  const workspaceWrite = step.sideEffectClass === "RECONCILABLE";
+  const payload = {
+    protocol: STEP_EXECUTION_PROTOCOL,
+    mode: workspaceWrite ? "WORKSPACE_WRITE" : "PURE_READ_ONLY",
+    step: {
+      stepKey: step.stepKey,
+      specVersion: step.specVersion,
+      kind: step.kind,
+      objective: step.objective ?? step.goal,
+      inputs: step.inputs ?? [],
+      expectedOutputs: step.expectedOutputs ?? [],
+      acceptanceCriteria: step.acceptanceCriteria ?? [],
+      assumptions: step.assumptions ?? [],
+      constraints: step.constraints ?? [],
+    },
+    rules: workspaceWrite
+      ? [
+          "Use the existing attached Native Codex thread only.",
+          "This Step is authorized for workspace write only: modify files only inside the current Native Thread workspace as required by the Step.",
+          "Do not modify external state and do not use network access.",
+          "Do not create, resume, or fork another runtime or thread.",
+          "Return a bounded final answer that identifies the produced output/evidence for later deterministic verification.",
+        ]
+      : [
+          "Use the existing attached Native Codex thread only.",
+          "This step is PURE and read-only: do not modify the workspace or external state.",
+          "Do not create, resume, or fork another runtime or thread.",
+          "Return a bounded final answer that identifies the produced output/evidence for later deterministic verification.",
+        ],
+  };''',
+          )
+          replace_once(
+              'src/automation/step-execution-service.ts',
+              '''    if (context.runtime.currentAttemptId) {
+      const existing = context.document.executionAttempts.find((item) => item.attemptId === context.runtime.currentAttemptId);
+      if (!existing) throw new StepExecutionError("STEP_EXECUTION_CORRELATION_MISMATCH", "StepRuntime points to a missing ExecutionAttempt.");
+      return resultFromDocument(context.document, existing);
+    }
+    if (!["NOT_STARTED", "READY"].includes(context.runtime.lifecycle)) {''',
+              '''    if (context.runtime.currentAttemptId) {
+      const existing = context.document.executionAttempts.find((item) => item.attemptId === context.runtime.currentAttemptId);
+      if (!existing) throw new StepExecutionError("STEP_EXECUTION_CORRELATION_MISMATCH", "StepRuntime points to a missing ExecutionAttempt.");
+      return resultFromDocument(context.document, existing);
+    }
+    if (context.step.sideEffectClass === "RECONCILABLE" && input.userConfirmedSideEffect !== true) {
+      throw new StepExecutionError("STEP_EXECUTION_SIDE_EFFECT_APPROVAL_REQUIRED", "A fresh workspace-write Step requires the user's explicit confirmation before any execution record or Native dispatch is created.");
+    }
+    if (!["NOT_STARTED", "READY"].includes(context.runtime.lifecycle)) {''',
+          )
+          replace_once(
+              'src/automation/step-execution-service.ts',
+              '''        sideEffectClass: "PURE",
+        payloadRef: registered.inputRef,
+        payloadHash: registered.sha256,
+        executionOptions: { stepSpecVersion: context.step.specVersion, attemptNumber, readOnly: true },''',
+              '''        sideEffectClass: context.step.sideEffectClass,
+        payloadRef: registered.inputRef,
+        payloadHash: registered.sha256,
+        executionOptions: {
+          stepSpecVersion: context.step.specVersion,
+          attemptNumber,
+          readOnly: context.step.sideEffectClass === "PURE",
+          workspaceWrite: context.step.sideEffectClass === "RECONCILABLE",
+          sideEffectApproval: context.step.sideEffectClass === "RECONCILABLE" ? V01_SIDE_EFFECT_APPROVAL : "NOT_REQUIRED",
+        },''',
+          )
+          replace_once(
+              'src/automation/step-execution-service.ts',
+              '''    if (step.sideEffectClass !== "PURE") {
+      throw new StepExecutionError("STEP_EXECUTION_NON_PURE_UNSUPPORTED", "Native Step execution is read-only in this slice; non-PURE StepSpecs require a separately reviewed capability/policy path.");
+    }''',
+              '''    if (step.sideEffectClass !== "PURE" && step.sideEffectClass !== "RECONCILABLE") {
+      throw new StepExecutionError("STEP_EXECUTION_NON_PURE_UNSUPPORTED", "v0.1 Native Step execution supports only PURE or explicitly user-confirmed RECONCILABLE workspace Steps.");
+    }''',
+          )
+          p = Path('src/automation/step-execution-service.ts')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace(' * Executes one PURE/read-only Step through the already-composed provider port.', ' * Executes one PURE/read-only or explicitly user-confirmed RECONCILABLE workspace Step through the already-composed provider port.')
+          p.write_text(text, encoding='utf-8')
+
+          replace_once(
+              'src/renderer/automation-governance-actions.ts',
+              '  executeAutomationStep(projectId: string, stepSpecId: string, providerTargetRef: string): Promise<IpcEnvelope>;',
+              '  executeAutomationStep(projectId: string, stepSpecId: string, providerTargetRef: string, userConfirmedSideEffect?: boolean): Promise<IpcEnvelope>;',
+          )
+          replace_once(
+              'src/renderer/automation-governance-actions.ts',
+              '''    if (!requireConfirmation(`Execute Step ${step.stepKey} on exact Native Thread ${selectedTarget}?`)) return;
+    void run("Execute Step", async () => {''',
+              '''    const workspaceWrite = step.sideEffectClass === "RECONCILABLE";
+    const confirmation = workspaceWrite
+      ? `Execute Step ${step.stepKey} with workspace-write access limited to the current workspace on exact Native Thread ${selectedTarget}?`
+      : `Execute Step ${step.stepKey} on exact Native Thread ${selectedTarget}?`;
+    if (!requireConfirmation(confirmation)) return;
+    void run("Execute Step", async () => {''',
+          )
+          replace_once(
+              'src/renderer/automation-governance-actions.ts',
+              '      return api.executeAutomationStep(view.project.projectId, step.stepSpecId, selectedTarget);',
+              '      return api.executeAutomationStep(view.project.projectId, step.stepSpecId, selectedTarget, workspaceWrite);',
+          )
+
+          replace_once(
+              'src/preload/preload.cts',
+              '  executeAutomationStep: (projectId: string, stepSpecId: string, providerTargetRef: string) => ipcRenderer.invoke(channels.automationStepExecute, String(projectId ?? "").slice(0, 256), String(stepSpecId ?? "").slice(0, 256), String(providerTargetRef ?? "").slice(0, 512)),',
+              '  executeAutomationStep: (projectId: string, stepSpecId: string, providerTargetRef: string, userConfirmedSideEffect = false) => ipcRenderer.invoke(channels.automationStepExecute, String(projectId ?? "").slice(0, 256), String(stepSpecId ?? "").slice(0, 256), String(providerTargetRef ?? "").slice(0, 512), userConfirmedSideEffect === true),',
+          )
+
+          replace_once(
+              'src/main/main.ts',
+              'ipcMain.handle(IPC.automationStepExecute, async (_event, projectId: unknown, stepSpecId: unknown, providerTargetRef: unknown) => {',
+              'ipcMain.handle(IPC.automationStepExecute, async (_event, projectId: unknown, stepSpecId: unknown, providerTargetRef: unknown, userConfirmedSideEffect: unknown) => {',
+          )
+          replace_once(
+              'src/main/main.ts',
+              '      if (typeof providerTargetRef !== "string" || !providerTargetRef.trim() || providerTargetRef.length > 512 || /^https?:\\/\\//i.test(providerTargetRef.trim())) throw codedError("STEP_EXECUTION_INPUT_REQUIRED", "Automation Step execution requires a bounded opaque provider target reference.");',
+              '      if (typeof providerTargetRef !== "string" || !providerTargetRef.trim() || providerTargetRef.length > 512 || /^https?:\\/\\//i.test(providerTargetRef.trim())) throw codedError("STEP_EXECUTION_INPUT_REQUIRED", "Automation Step execution requires a bounded opaque provider target reference.");\n      if (userConfirmedSideEffect !== undefined && typeof userConfirmedSideEffect !== "boolean") throw codedError("STEP_EXECUTION_INPUT_REQUIRED", "Automation Step side-effect confirmation must be boolean when supplied.");',
+          )
+          replace_once(
+              'src/main/main.ts',
+              '      return ok(await getAutomationProviderHost().execution.executeStep({ projectId: projectId.trim(), stepSpecId: stepSpecId.trim(), providerTargetRef: providerTargetRef.trim() }));',
+              '      return ok(await getAutomationProviderHost().execution.executeStep({ projectId: projectId.trim(), stepSpecId: stepSpecId.trim(), providerTargetRef: providerTargetRef.trim(), userConfirmedSideEffect: userConfirmedSideEffect === true }));',
+          )
+
+          replace_once(
+              'src/automation/planner-provider-prompt.ts',
+              '    "Use riskClass LOW, MEDIUM, or HIGH and sideEffectClass PURE, IDEMPOTENT, RECONCILABLE, or NON_REPEATABLE. A read-only inspection step must be PURE.",',
+              '    "Use riskClass LOW, MEDIUM, or HIGH and sideEffectClass PURE, IDEMPOTENT, RECONCILABLE, or NON_REPEATABLE. A read-only inspection step must be PURE.",\n    "For a v0.1 step that creates, edits, or deletes files inside the current workspace, use sideEffectClass RECONCILABLE. Do not use IDEMPOTENT or NON_REPEATABLE for v0.1 workspace-file execution.",',
+          )
+
+          replace_once(
+              'tests/arch-r2-shared-native-runtime.test.ts',
+              '    snapshot: () => ({ activeTurnId: "turn-r2-shared" }),',
+              '    snapshot: () => ({ activeTurnId: "turn-r2-shared", cwd: "/workspace" }),',
+          )
+          replace_once(
+              'tests/arch-r2-shared-native-runtime.test.ts',
+              '''    startTurnAccepted: async (prompt: string, options?: { approvalPolicy?: "never" | "on-request"; sandboxPolicy?: { type: "readOnly" } }) => {
+      counters.starts += 1;
+      assert.equal(prompt, "planner prompt");
+      assert.deepEqual(options, { approvalPolicy: "never", sandboxPolicy: { type: "readOnly" } });
+      return { acceptance: { turnId: "turn-r2-shared", nativeThreadId: "thread-r2-shared" }, completion: never };
+    },''',
+              '''    startTurnAccepted: async (prompt: string, options?: { approvalPolicy?: "never" | "on-request"; sandboxPolicy?: { type: "readOnly"; networkAccess?: boolean } | { type: "workspaceWrite"; networkAccess?: boolean; writableRoots?: string[] } }) => {
+      counters.starts += 1;
+      if (prompt === "planner prompt") {
+        assert.deepEqual(options, { approvalPolicy: "never", sandboxPolicy: { type: "readOnly", networkAccess: false } });
+      } else if (prompt === "workspace prompt") {
+        assert.deepEqual(options, { approvalPolicy: "never", sandboxPolicy: { type: "workspaceWrite", networkAccess: false, writableRoots: ["/workspace"] } });
+      } else {
+        assert.fail(`unexpected prompt: ${prompt}`);
+      }
+      return { acceptance: { turnId: "turn-r2-shared", nativeThreadId: "thread-r2-shared" }, completion: never };
+    },''',
+          )
+          replace_once(
+              'tests/arch-r2-shared-native-runtime.test.ts',
+              '''test("ARCH-R2 Native runtime capability reports shared runtime availability without side-effect authority", async () => {
+  const h = harness();''',
+              '''test("ARCH-R2 Native adapter constrains workspace-write to the exact runtime cwd", async () => {
+  const h = harness();
+  const adapter = new SharedNativeProviderRuntimeAdapter({ registry: h.registry, runtimeId: "workbench-process-r2" });
+  await adapter.startTurn({ nativeThreadId: "thread-r2-shared", prompt: "workspace prompt", executionMode: "WORKSPACE_WRITE" });
+  assert.equal(h.counters.starts, 1);
+});
+
+test("ARCH-R2 Native runtime capability reports workspace-write capability without granting policy authority", async () => {
+  const h = harness();''',
+          )
+          replace_once(
+              'tests/arch-r2-shared-native-runtime.test.ts',
+              '''  assert.deepEqual(capability.supportedOperations, ["PROMPT", "RETRY", "VERIFY"]);
+  assert.equal(capability.allowDataEgress, false);
+  assert.equal(capability.allowSideEffects, false);''',
+              '''  assert.deepEqual(capability.supportedOperations, ["PROMPT", "RETRY", "SIDE_EFFECT", "VERIFY"]);
+  assert.equal(capability.allowDataEgress, false);
+  assert.equal(capability.allowSideEffects, true);''',
+          )
+
+          replace_once(
+              'tests/automation-native-step-executor.test.ts',
+              '  lastPrompt: string | null = null;',
+              '  lastPrompt: string | null = null;\n  lastExecutionMode: "READ_ONLY" | "WORKSPACE_WRITE" | null = null;',
+          )
+          replace_once(
+              'tests/automation-native-step-executor.test.ts',
+              '''      supportedOperations: ["PROMPT", "RETRY", "VERIFY"] as const,
+      allowDataEgress: false,
+      allowSideEffects: false,''',
+              '''      supportedOperations: ["PROMPT", "RETRY", "SIDE_EFFECT", "VERIFY"] as const,
+      allowDataEgress: false,
+      allowSideEffects: true,''',
+          )
+          replace_once(
+              'tests/automation-native-step-executor.test.ts',
+              '''  async startTurn(input: { nativeThreadId: string; prompt: string }): Promise<{ nativeTurnId: string }> {
+    assert.equal(input.nativeThreadId, NATIVE_THREAD_ID);
+    assert.match(input.prompt, /workbench-native-step-execution-v1/);
+    assert.match(input.prompt, /PURE_READ_ONLY/);
+    assert.match(input.prompt, /inspect the existing workspace without modifying it/);
+    this.starts += 1;
+    this.lastPrompt = input.prompt;
+    return { nativeTurnId: NATIVE_TURN_ID };
+  }''',
+              '''  async startTurn(input: { nativeThreadId: string; prompt: string; executionMode: "READ_ONLY" | "WORKSPACE_WRITE" }): Promise<{ nativeTurnId: string }> {
+    assert.equal(input.nativeThreadId, NATIVE_THREAD_ID);
+    assert.match(input.prompt, /workbench-native-step-execution-v1/);
+    if (input.executionMode === "WORKSPACE_WRITE") {
+      assert.match(input.prompt, /WORKSPACE_WRITE/);
+      assert.match(input.prompt, /modify files only inside the current Native Thread workspace/);
+    } else {
+      assert.match(input.prompt, /PURE_READ_ONLY/);
+    }
+    this.starts += 1;
+    this.lastPrompt = input.prompt;
+    this.lastExecutionMode = input.executionMode;
+    return { nativeTurnId: NATIVE_TURN_ID };
+  }''',
+          )
+          replace_once(
+              'tests/automation-native-step-executor.test.ts',
+              '''      allowedOperations: ["PROMPT", "RETRY", "VERIFY"],
+      requireHumanGateFor: [],
+      allowDataEgress: false,
+      allowSideEffects: false,''',
+              '''      allowedOperations: ["PROMPT", "RETRY", "SIDE_EFFECT", "VERIFY"],
+      requireHumanGateFor: [],
+      allowDataEgress: false,
+      allowSideEffects: true,''',
+          )
+          replace_once(
+              'tests/automation-native-step-executor.test.ts',
+              '''test("non-PURE Step fails closed before any Native dispatch or execution record", async () => {
+  const f = await fixture("COMPLETED");
+  try {
+    await assert.rejects(
+      () => f.facade.executeStep({
+        projectId: f.project.projectId,
+        stepSpecId: f.nonPureStep.stepSpecId,
+        providerTargetRef: f.providerTargetRef,
+      }),
+      (error: unknown) => error instanceof StepExecutionError && error.code === "STEP_EXECUTION_NON_PURE_UNSUPPORTED",
+    );
+    assert.equal(f.runtime.starts, 0);
+    const snapshot = await f.store.snapshot();
+    assert.equal(snapshot.executionAttempts.some((item) => item.stepSpecId === f.nonPureStep.stepSpecId), false);
+    assert.equal(snapshot.actionIntents.some((item) => item.stepSpecId === f.nonPureStep.stepSpecId), false);
+    const runtime = snapshot.stepRuntimes.find((item) => item.stepSpecId === f.nonPureStep.stepSpecId);
+    assert.equal(runtime?.lifecycle, "NOT_STARTED");
+  } finally {
+    await cleanup(f);
+  }
+});''',
+              '''test("RECONCILABLE Step requires explicit user confirmation before any Native dispatch or execution record", async () => {
+  const f = await fixture("COMPLETED");
+  try {
+    await assert.rejects(
+      () => f.facade.executeStep({
+        projectId: f.project.projectId,
+        stepSpecId: f.nonPureStep.stepSpecId,
+        providerTargetRef: f.providerTargetRef,
+      }),
+      (error: unknown) => error instanceof StepExecutionError && error.code === "STEP_EXECUTION_SIDE_EFFECT_APPROVAL_REQUIRED",
+    );
+    assert.equal(f.runtime.starts, 0);
+    const snapshot = await f.store.snapshot();
+    assert.equal(snapshot.executionAttempts.some((item) => item.stepSpecId === f.nonPureStep.stepSpecId), false);
+    assert.equal(snapshot.actionIntents.some((item) => item.stepSpecId === f.nonPureStep.stepSpecId), false);
+    const runtime = snapshot.stepRuntimes.find((item) => item.stepSpecId === f.nonPureStep.stepSpecId);
+    assert.equal(runtime?.lifecycle, "NOT_STARTED");
+  } finally {
+    await cleanup(f);
+  }
+});
+
+test("user-confirmed RECONCILABLE Step dispatches one workspace-write Native Turn with durable approval", async () => {
+  const f = await fixture("COMPLETED");
+  try {
+    const result = await f.facade.executeStep({
+      projectId: f.project.projectId,
+      stepSpecId: f.nonPureStep.stepSpecId,
+      providerTargetRef: f.providerTargetRef,
+      timeoutMs: 100,
+      userConfirmedSideEffect: true,
+    });
+    assert.equal(result.status, "VERIFYING");
+    assert.equal(f.runtime.starts, 1);
+    assert.equal(f.runtime.lastExecutionMode, "WORKSPACE_WRITE");
+    const snapshot = await f.store.snapshot();
+    const intent = snapshot.actionIntents.find((item) => item.intentId === result.actionIntentId);
+    assert.equal(intent?.actionType, "STEP_EXECUTION");
+    assert.equal(intent?.sideEffectClass, "RECONCILABLE");
+    assert.equal(intent?.executionOptions.readOnly, false);
+    assert.equal(intent?.executionOptions.workspaceWrite, true);
+    assert.equal(intent?.executionOptions.sideEffectApproval, "USER_CONFIRMED");
+  } finally {
+    await cleanup(f);
+  }
+});''',
+          )
+
+          Path('tests/v01-workspace-write-contract.test.ts').write_text('''import assert from "node:assert/strict";
+import test from "node:test";
+import { v01NativeExecutionDisposition } from "../src/automation/v01-workspace-write-contract.ts";
+
+function intent(actionType: string, sideEffectClass: "PURE" | "IDEMPOTENT" | "RECONCILABLE" | "NON_REPEATABLE", executionOptions: Record<string, string | number | boolean | null> = {}) {
+  return { actionType, sideEffectClass, executionOptions };
+}
+
+test("v0.1 workspace-write classification never upgrades Planner RECONCILABLE requests", () => {
+  assert.equal(v01NativeExecutionDisposition(intent("PLANNER_REQUEST", "RECONCILABLE")), "READ_ONLY");
+});
+
+test("v0.1 workspace-write classification requires exact persisted user confirmation", () => {
+  assert.equal(v01NativeExecutionDisposition(intent("STEP_EXECUTION", "PURE")), "READ_ONLY");
+  assert.equal(v01NativeExecutionDisposition(intent("STEP_EXECUTION", "RECONCILABLE", { workspaceWrite: true })), "APPROVAL_REQUIRED");
+  assert.equal(v01NativeExecutionDisposition(intent("STEP_EXECUTION", "RECONCILABLE", { workspaceWrite: true, sideEffectApproval: "USER_CONFIRMED" })), "WORKSPACE_WRITE");
+  assert.equal(v01NativeExecutionDisposition(intent("STEP_EXECUTION", "IDEMPOTENT", { workspaceWrite: true, sideEffectApproval: "USER_CONFIRMED" })), "UNSUPPORTED");
+  assert.equal(v01NativeExecutionDisposition(intent("STEP_EXECUTION", "NON_REPEATABLE", { workspaceWrite: true, sideEffectApproval: "USER_CONFIRMED" })), "UNSUPPORTED");
+});
+''', encoding='utf-8')
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Workspace-write focused regression
+        run: node --experimental-strip-types --test tests/v01-workspace-write-contract.test.ts tests/arch-r2-shared-native-runtime.test.ts tests/automation-native-step-executor.test.ts
+      - name: Full tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit verified contract
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '4189822+github-actions[bot]@users.noreply.github.com'
+          git add src tests
+          git diff --cached --check
+          git commit -m 'Feature: authorize bounded Native workspace writes'
+          git push origin HEAD:release/v0.1-integration
