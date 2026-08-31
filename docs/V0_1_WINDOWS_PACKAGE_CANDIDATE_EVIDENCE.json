@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "gate": "v0.1-windows-package-static-candidate",
+  "result": "PASS",
+  "exactPackagedProductCommit": "5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf",
+  "workflowRunId": 33367825291,
+  "workflowJobId": 99412083132,
+  "artifact": {
+    "id": 9748921908,
+    "name": "codex-workbench-v0.1-windows-5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf",
+    "sizeBytes": 247399264
+  },
+  "checks": {
+    "packageBuild": "PASS",
+    "layoutContract": "PASS",
+    "workspaceWriteModulePresent": true,
+    "durableUserConfirmationMarkerPresent": true,
+    "workspaceWriteDispositionMarkerPresent": true
+  },
+  "limitation": "This is a Windows package build and static contract result. It is not a packaged real E2E PASS."
+}

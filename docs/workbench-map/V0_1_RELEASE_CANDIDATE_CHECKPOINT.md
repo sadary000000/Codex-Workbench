@@ -68,11 +68,35 @@ The ordinary pull-request workflow for the bot-created commit produced `action_r
 - User-confirmed bounded workspace-write: **PASS deterministic**
 - Exact product snapshot frozen: **PASS**
 - Full deterministic gate: **PASS**
-- Current Source Real E2E: **REQUIRED**
-- Current Windows packaged Real E2E: **REQUIRED after Source pass**
+- Current Source Real E2E: **ENVIRONMENT_BLOCKED** (run `33367529964`; runner had no Codex credentials)
+- Windows package build/static contract: **PASS** (run `33367825291`; exact-snapshot artifact produced)
+- Current Windows packaged Real E2E: **REQUIRED after authenticated Source pass**
 - Concrete bug fixes: **only if a real gate exposes a defect**
 - Final regression: **required after both real gates and any fixes**
 - User trial handoff and v0.1 publication: **pending**
+
+## 6. Latest external gate attempts
+
+Source Real E2E attempt:
+
+- exact product snapshot: `5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf`
+- workflow run: `33367529964`
+- job: `99411188941`
+- result: `ENVIRONMENT_BLOCKED`
+- `OPENAI_API_KEY_PRESENT=false`
+- `codex login status`: `Not logged in`
+- harness result: `FAIL` at the first Native Turn with `NATIVE_TURN_TERMINAL_FAILURE:failed`
+- classification: no product defect established; rerun requires a valid authenticated Codex runtime
+
+Windows static package candidate:
+
+- workflow run: `33367825291`
+- job: `99412083132`
+- result: PASS
+- exact product snapshot packaged: `5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf`
+- artifact: `codex-workbench-v0.1-windows-5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf`
+- workspace-write packaged module and durable user-confirmation markers: PASS
+- this is a package build/static-contract result, not packaged `PASS_REAL`
 
 ## 6. Required real gates
 
@@ -109,7 +133,7 @@ Required evidence:
 
 The acceptance path must cover Product Project, Native conversation/read, Maps, AutomationProject association, Requirement confirmation, Planner, PURE and user-confirmed workspace-write execution as applicable, reconciliation, verification, review/gate, completion, and close/reopen persistence.
 
-## 7. Failure and snapshot policy
+## 8. Failure and snapshot policy
 
 If a real gate fails:
 
@@ -120,7 +144,7 @@ If a real gate fails:
 5. rerun the affected real gates on that new snapshot;
 6. never reuse evidence from an older implementation commit.
 
-## 8. Final regression and publication
+## 9. Final regression and publication
 
 After both current real gates pass:
 

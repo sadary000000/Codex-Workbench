@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "gate": "v0.1-real-source-e2e",
+  "result": "ENVIRONMENT_BLOCKED",
+  "exactTestedCommit": "5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf",
+  "workflowRunId": 33367529964,
+  "workflowJobId": 99411188941,
+  "artifactId": 9748826817,
+  "observed": {
+    "openAiApiKeyPresent": false,
+    "codexLoginStatus": "Not logged in",
+    "build": "PASS",
+    "harnessResult": "FAIL",
+    "phase": "first-native-turn",
+    "error": "NATIVE_TURN_TERMINAL_FAILURE:failed"
+  },
+  "classification": "No product defect established. The GitHub-hosted Windows runner had no authenticated Codex credentials.",
+  "requiredAction": "Configure a valid OPENAI_API_KEY repository Actions secret or run the exact snapshot on an authenticated real Codex host, then rerun Source Real E2E."
+}
