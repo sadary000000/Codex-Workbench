@@ -1,3 +1,4 @@
-trigger=2026-08-31T04:05:00Z
+trigger=2026-08-31T04:10:00Z
 base=20682e11290d350a4cf536e64f3eff369008c1d4
 contract=v0.1-native-workspace-write
+extractor=v2
