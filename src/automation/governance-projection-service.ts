@@ -1,6 +1,7 @@
 import { AutomationStore } from "./store.ts";
 import type { AutomationDocument, Evidence, PlanVersion, StageSpec, StepSpec } from "./types.ts";
 import type {
+  AutomationGovernanceActionEligibility,
   AutomationGovernanceEvidenceView,
   AutomationGovernanceProjectView,
   AutomationGovernanceStageView,
@@ -10,6 +11,10 @@ import type {
 const VERIFIER_PROTOCOL = "workbench-step-verifier-v1";
 const REVIEW_PROTOCOL = "workbench-step-review-v1";
 const GATE_PROTOCOL = "workbench-stage-gate-v1";
+
+function eligibility(allowed: boolean, reason: string): AutomationGovernanceActionEligibility {
+  return { allowed, reason: allowed ? "" : reason };
+}
 
 function metaString(evidence: Evidence, key: string): string | null {
   const value = evidence.metadata[key];
@@ -147,6 +152,52 @@ function position(document: AutomationDocument, projectId: string, plan: PlanVer
   return { source: "NONE" as const, checkpointId: null, currentStageSpecId: null, createdAt: null };
 }
 
+function stepActions(input: {
+  readonly isCurrentStage: boolean;
+  readonly runtime: AutomationGovernanceStepView["runtime"];
+  readonly attempt: AutomationGovernanceStepView["attempt"];
+  readonly verification: AutomationGovernanceEvidenceView | null;
+  readonly review: AutomationGovernanceEvidenceView | null;
+}): AutomationGovernanceStepView["actions"] {
+  const execute = input.isCurrentStage && !input.attempt;
+  const reconcile = Boolean(input.attempt && input.runtime?.lifecycle === "EXECUTING");
+  const verify = Boolean(
+    input.attempt
+    && input.runtime?.lifecycle === "VERIFYING"
+    && input.attempt.lifecycle === "COMPLETED"
+    && input.attempt.terminalResult === "COMPLETED"
+    && !input.verification,
+  );
+  const review = Boolean(
+    input.runtime?.lifecycle === "REVIEWING"
+    && input.verification?.state === "PASS"
+    && !input.review,
+  );
+  return {
+    execute: eligibility(execute, "Only a not-yet-executed Step in the current Stage can start."),
+    reconcile: eligibility(reconcile, "Reconcile is available only while the current Step execution is still executing or recoverable."),
+    verify: eligibility(verify, "Verify requires one terminal-successful ExecutionAttempt in VERIFYING with no verification Evidence yet."),
+    review: eligibility(review, "Review requires PASS verification Evidence in REVIEWING and no immutable review decision yet."),
+  };
+}
+
+function stageActions(input: {
+  readonly isCurrent: boolean;
+  readonly gate: AutomationGovernanceEvidenceView | null;
+  readonly steps: readonly AutomationGovernanceStepView[];
+}): AutomationGovernanceStageView["actions"] {
+  const allStepsApproved = input.steps.length > 0 && input.steps.every((step) =>
+    step.review?.state === "APPROVE"
+    && step.runtime?.lifecycle === "TERMINAL"
+    && step.runtime.terminalResult === "COMPLETED");
+  const gate = input.isCurrent && !input.gate && allStepsApproved;
+  const advance = input.isCurrent && input.gate?.state === "PASS";
+  return {
+    gate: eligibility(gate, "Stage Gate requires the current Stage, all Steps terminal-approved, and no immutable Stage gate decision yet."),
+    advance: eligibility(advance, "Advance requires the current Stage to have exact PASS Stage Gate Evidence."),
+  };
+}
+
 /** Provider/runtime-neutral read projection over Automation workflow truth only. */
 export class AutomationGovernanceProjectionService {
   readonly store: AutomationStore;
@@ -170,13 +221,14 @@ export class AutomationGovernanceProjectionService {
         policyVersionId: project.policyVersionId,
       },
     };
+    const unavailableComplete = { complete: eligibility(false, "Project completion requires an active Plan and completed final Stage progression.") };
     if (!project.activePlanVersionId) {
-      return { ...base, plan: null, runtimePosition: null, stages: [], integrity: { status: "OK", issues: [] } };
+      return { ...base, plan: null, runtimePosition: null, stages: [], actions: unavailableComplete, integrity: { status: "OK", issues: [] } };
     }
     const plan = document.planVersions.find((item) => item.planVersionId === project.activePlanVersionId) ?? null;
     if (!plan || plan.projectId !== projectId || plan.status !== "ACTIVE") {
       issues.push(`ACTIVE_PLAN_INVALID:${project.activePlanVersionId}`);
-      return { ...base, plan: null, runtimePosition: null, stages: [], integrity: { status: "DEGRADED", issues } };
+      return { ...base, plan: null, runtimePosition: null, stages: [], actions: unavailableComplete, integrity: { status: "DEGRADED", issues } };
     }
     const planHash = plan.payloadSha256 ?? null;
     if (!planHash) issues.push(`ACTIVE_PLAN_PAYLOAD_SHA256_MISSING:${plan.planVersionId}`);
@@ -188,6 +240,7 @@ export class AutomationGovernanceProjectionService {
     }
     const runtimePosition = position(document, projectId, plan, stages, issues);
     const stageViews: AutomationGovernanceStageView[] = stages.map((stage) => {
+      const isCurrent = runtimePosition.currentStageSpecId === stage.stageSpecId;
       const steps = document.stepSpecs
         .filter((item) => item.stageSpecId === stage.stageSpecId && item.specStatus === "ACTIVE")
         .sort((left, right) => (left.ordinal ?? Number.MAX_SAFE_INTEGER) - (right.ordinal ?? Number.MAX_SAFE_INTEGER) || left.stepSpecId.localeCompare(right.stepSpecId));
@@ -195,7 +248,7 @@ export class AutomationGovernanceProjectionService {
         const runtimes = document.stepRuntimes.filter((item) => item.stepSpecId === step.stepSpecId);
         if (runtimes.length > 1) issues.push(`MULTIPLE_STEP_RUNTIME:${step.stepSpecId}`);
         const runtime = runtimes.length === 1 ? runtimes[0]! : null;
-        let attempt = null;
+        let attempt: AutomationGovernanceStepView["attempt"] = null;
         if (runtime?.currentAttemptId) {
           const candidate = document.executionAttempts.find((item) => item.attemptId === runtime.currentAttemptId) ?? null;
           if (!candidate || candidate.projectId !== projectId || candidate.stageSpecId !== stage.stageSpecId || candidate.stepSpecId !== step.stepSpecId) {
@@ -214,6 +267,15 @@ export class AutomationGovernanceProjectionService {
         const evidenceInput = runtime?.currentAttemptId && planHash
           ? { projectId, plan, planHash, stage, step, attemptId: runtime.currentAttemptId }
           : null;
+        const verification = evidenceInput ? currentVerification(document, evidenceInput, issues) : null;
+        const review = evidenceInput ? currentReview(document, evidenceInput, issues) : null;
+        const runtimeView: AutomationGovernanceStepView["runtime"] = runtime ? {
+          stepRuntimeId: runtime.stepRuntimeId,
+          lifecycle: runtime.lifecycle,
+          terminalResult: runtime.terminalResult,
+          waitReason: runtime.waitReason,
+          currentAttemptId: runtime.currentAttemptId,
+        } : null;
         return {
           stepSpecId: step.stepSpecId,
           stepKey: step.stepKey,
@@ -221,18 +283,14 @@ export class AutomationGovernanceProjectionService {
           objective: step.objective ?? step.goal,
           riskClass: step.riskClass,
           sideEffectClass: step.sideEffectClass,
-          runtime: runtime ? {
-            stepRuntimeId: runtime.stepRuntimeId,
-            lifecycle: runtime.lifecycle,
-            terminalResult: runtime.terminalResult,
-            waitReason: runtime.waitReason,
-            currentAttemptId: runtime.currentAttemptId,
-          } : null,
+          runtime: runtimeView,
           attempt,
-          verification: evidenceInput ? currentVerification(document, evidenceInput, issues) : null,
-          review: evidenceInput ? currentReview(document, evidenceInput, issues) : null,
+          verification,
+          review,
+          actions: stepActions({ isCurrentStage: isCurrent, runtime: runtimeView, attempt, verification, review }),
         };
       });
+      const gate = planHash ? currentGate(document, projectId, plan, planHash, stage, issues) : null;
       return {
         stageSpecId: stage.stageSpecId,
         stageKey: stage.stageKey,
@@ -241,11 +299,14 @@ export class AutomationGovernanceProjectionService {
         ordinal: stage.ordinal,
         dependsOn: [...(stage.dependsOn ?? [])],
         detailLevel: stage.detailLevel ?? null,
-        isCurrent: runtimePosition.currentStageSpecId === stage.stageSpecId,
-        gate: planHash ? currentGate(document, projectId, plan, planHash, stage, issues) : null,
+        isCurrent,
+        gate,
         steps: stepViews,
+        actions: stageActions({ isCurrent, gate, steps: stepViews }),
       };
     });
+    const allStagesPassed = stageViews.length > 0 && stageViews.every((stage) => stage.gate?.state === "PASS");
+    const completeAllowed = allStagesPassed && runtimePosition.currentStageSpecId === null;
     return {
       ...base,
       plan: {
@@ -257,6 +318,9 @@ export class AutomationGovernanceProjectionService {
       },
       runtimePosition,
       stages: stageViews,
+      actions: {
+        complete: eligibility(completeAllowed, "Complete Project requires every Stage PASS plus final Stage progression to PLAN_COMPLETE_READY."),
+      },
       integrity: { status: issues.length === 0 ? "OK" : "DEGRADED", issues },
     };
   }
