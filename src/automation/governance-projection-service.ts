@@ -1,5 +1,6 @@
 import { AutomationStore } from "./store.ts";
 import type { AutomationDocument, Evidence, PlanVersion, StageSpec, StepSpec } from "./types.ts";
+import { v01StepSideEffectCapability } from "./v01-effective-capability.ts";
 import type {
   AutomationGovernanceActionEligibility,
   AutomationGovernanceEvidenceView,
@@ -39,11 +40,7 @@ function evidenceView(
   };
 }
 
-function exactlyOne(
-  values: Evidence[],
-  issue: string,
-  issues: string[],
-): Evidence | null {
+function exactlyOne(values: Evidence[], issue: string, issues: string[]): Evidence | null {
   if (values.length === 1) return values[0]!;
   if (values.length > 1) issues.push(issue);
   return null;
@@ -90,11 +87,7 @@ function currentReview(
     && (item.metadata.decision === "APPROVE" || item.metadata.decision === "REJECT")
   ), `MULTIPLE_CURRENT_STEP_REVIEW:${input.step.stepSpecId}`, issues);
   if (!evidence) return null;
-  return evidenceView(
-    evidence,
-    evidence.metadata.decision as "APPROVE" | "REJECT",
-    metaString(evidence, "reviewerRef"),
-  );
+  return evidenceView(evidence, evidence.metadata.decision as "APPROVE" | "REJECT", metaString(evidence, "reviewerRef"));
 }
 
 function currentGate(
@@ -120,11 +113,7 @@ function currentGate(
     && (item.metadata.decision === "PASS" || item.metadata.decision === "REJECT")
   ), `MULTIPLE_CURRENT_STAGE_GATE:${stage.stageSpecId}`, issues);
   if (!evidence) return null;
-  return evidenceView(
-    evidence,
-    evidence.metadata.decision as "PASS" | "REJECT",
-    metaString(evidence, "gatekeeperRef"),
-  );
+  return evidenceView(evidence, evidence.metadata.decision as "PASS" | "REJECT", metaString(evidence, "gatekeeperRef"));
 }
 
 function position(document: AutomationDocument, projectId: string, plan: PlanVersion, stages: StageSpec[], issues: string[]) {
@@ -135,12 +124,7 @@ function position(document: AutomationDocument, projectId: string, plan: PlanVer
     if (checkpoint.currentStageSpecId && !stages.some((stage) => stage.stageSpecId === checkpoint.currentStageSpecId)) {
       issues.push(`CHECKPOINT_STAGE_OUTSIDE_ACTIVE_PLAN:${checkpoint.currentStageSpecId}`);
     }
-    return {
-      source: "CHECKPOINT" as const,
-      checkpointId: checkpoint.checkpointId,
-      currentStageSpecId: checkpoint.currentStageSpecId,
-      createdAt: checkpoint.createdAt,
-    };
+    return { source: "CHECKPOINT" as const, checkpointId: checkpoint.checkpointId, currentStageSpecId: checkpoint.currentStageSpecId, createdAt: checkpoint.createdAt };
   }
   if (plan.currentStageId) {
     if (stages.some((stage) => stage.stageSpecId === plan.currentStageId)) {
@@ -152,15 +136,27 @@ function position(document: AutomationDocument, projectId: string, plan: PlanVer
   return { source: "NONE" as const, checkpointId: null, currentStageSpecId: null, createdAt: null };
 }
 
+function hasReconcileTruth(document: AutomationDocument, executionAttemptId: string): boolean {
+  const intent = document.actionIntents.find((item) => item.actionType === "STEP_EXECUTION" && item.attemptId === executionAttemptId) ?? null;
+  return Boolean(intent && document.actionAttempts.some((item) => item.intentId === intent.intentId));
+}
+
 function stepActions(input: {
   readonly isCurrentStage: boolean;
+  readonly hasPolicy: boolean;
+  readonly sideEffectClass: StepSpec["sideEffectClass"];
+  readonly hasReconcileTruth: boolean;
   readonly runtime: AutomationGovernanceStepView["runtime"];
   readonly attempt: AutomationGovernanceStepView["attempt"];
   readonly verification: AutomationGovernanceEvidenceView | null;
   readonly review: AutomationGovernanceEvidenceView | null;
 }): AutomationGovernanceStepView["actions"] {
-  const execute = input.isCurrentStage && !input.attempt;
-  const reconcile = Boolean(input.attempt && input.runtime?.lifecycle === "EXECUTING");
+  const sideEffect = v01StepSideEffectCapability(input.sideEffectClass);
+  const freshRuntime = input.runtime?.lifecycle === "NOT_STARTED" || input.runtime?.lifecycle === "READY";
+  const execute = input.isCurrentStage && input.hasPolicy && sideEffect.allowed && freshRuntime && !input.attempt;
+  const recoverableAttempt = input.attempt
+    && ["RUNNING", "UNCERTAIN", "RECOVERY_REQUIRED"].includes(input.attempt.lifecycle);
+  const reconcile = Boolean(input.hasReconcileTruth && recoverableAttempt && input.runtime?.lifecycle === "RUNNING");
   const verify = Boolean(
     input.attempt
     && input.runtime?.lifecycle === "VERIFYING"
@@ -168,32 +164,55 @@ function stepActions(input: {
     && input.attempt.terminalResult === "COMPLETED"
     && !input.verification,
   );
-  const review = Boolean(
-    input.runtime?.lifecycle === "REVIEWING"
-    && input.verification?.state === "PASS"
-    && !input.review,
-  );
+  const review = Boolean(input.runtime?.lifecycle === "REVIEWING" && input.verification?.state === "PASS" && !input.review);
+  const executeReason = !sideEffect.allowed
+    ? sideEffect.reason
+    : !input.hasPolicy
+      ? "Execute requires the Project current PolicyVersion."
+      : "Only a fresh NOT_STARTED/READY Step in the current Stage can start.";
   return {
-    execute: eligibility(execute, "Only a not-yet-executed Step in the current Stage can start."),
-    reconcile: eligibility(reconcile, "Reconcile is available only while the current Step execution is still executing or recoverable."),
+    execute: eligibility(execute, executeReason),
+    reconcile: eligibility(reconcile, "Reconcile requires persisted STEP_EXECUTION intent/attempt truth while the Step is RUNNING and recoverable."),
     verify: eligibility(verify, "Verify requires one terminal-successful ExecutionAttempt in VERIFYING with no verification Evidence yet."),
     review: eligibility(review, "Review requires PASS verification Evidence in REVIEWING and no immutable review decision yet."),
   };
 }
 
+function dependenciesPassed(input: {
+  document: AutomationDocument;
+  projectId: string;
+  plan: PlanVersion;
+  planHash: string | null;
+  stage: StageSpec;
+  stages: readonly StageSpec[];
+  issues: string[];
+}): boolean {
+  if ((input.stage.dependsOn ?? []).length === 0) return true;
+  if (!input.planHash) return false;
+  for (const reference of input.stage.dependsOn ?? []) {
+    const matches = input.stages.filter((candidate) => candidate.stageSpecId === reference || candidate.stageKey === reference);
+    if (matches.length !== 1) {
+      input.issues.push(`STAGE_DEPENDENCY_RESOLUTION_INVALID:${input.stage.stageSpecId}:${reference}`);
+      return false;
+    }
+    const gate = currentGate(input.document, input.projectId, input.plan, input.planHash, matches[0]!, input.issues);
+    if (gate?.state !== "PASS") return false;
+  }
+  return true;
+}
+
 function stageActions(input: {
   readonly isCurrent: boolean;
+  readonly dependenciesPassed: boolean;
   readonly gate: AutomationGovernanceEvidenceView | null;
   readonly steps: readonly AutomationGovernanceStepView[];
 }): AutomationGovernanceStageView["actions"] {
   const allStepsApproved = input.steps.length > 0 && input.steps.every((step) =>
-    step.review?.state === "APPROVE"
-    && step.runtime?.lifecycle === "TERMINAL"
-    && step.runtime.terminalResult === "COMPLETED");
-  const gate = input.isCurrent && !input.gate && allStepsApproved;
+    step.review?.state === "APPROVE" && step.runtime?.lifecycle === "TERMINAL" && step.runtime.terminalResult === "COMPLETED");
+  const gate = input.isCurrent && input.dependenciesPassed && !input.gate && allStepsApproved;
   const advance = input.isCurrent && input.gate?.state === "PASS";
   return {
-    gate: eligibility(gate, "Stage Gate requires the current Stage, all Steps terminal-approved, and no immutable Stage gate decision yet."),
+    gate: eligibility(gate, "Stage Gate requires the current Stage, all dependency Stages PASS, all Steps terminal-approved, and no immutable Stage gate decision yet."),
     advance: eligibility(advance, "Advance requires the current Stage to have exact PASS Stage Gate Evidence."),
   };
 }
@@ -287,10 +306,20 @@ export class AutomationGovernanceProjectionService {
           attempt,
           verification,
           review,
-          actions: stepActions({ isCurrentStage: isCurrent, runtime: runtimeView, attempt, verification, review }),
+          actions: stepActions({
+            isCurrentStage: isCurrent,
+            hasPolicy: Boolean(project.policyVersionId),
+            sideEffectClass: step.sideEffectClass,
+            hasReconcileTruth: Boolean(runtime?.currentAttemptId && hasReconcileTruth(document, runtime.currentAttemptId)),
+            runtime: runtimeView,
+            attempt,
+            verification,
+            review,
+          }),
         };
       });
       const gate = planHash ? currentGate(document, projectId, plan, planHash, stage, issues) : null;
+      const dependenciesArePassed = dependenciesPassed({ document, projectId, plan, planHash, stage, stages, issues });
       return {
         stageSpecId: stage.stageSpecId,
         stageKey: stage.stageKey,
@@ -302,7 +331,7 @@ export class AutomationGovernanceProjectionService {
         isCurrent,
         gate,
         steps: stepViews,
-        actions: stageActions({ isCurrent, gate, steps: stepViews }),
+        actions: stageActions({ isCurrent, dependenciesPassed: dependenciesArePassed, gate, steps: stepViews }),
       };
     });
     const allStagesPassed = stageViews.length > 0 && stageViews.every((stage) => stage.gate?.state === "PASS");
