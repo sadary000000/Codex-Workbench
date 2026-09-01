@@ -5,6 +5,7 @@ import type {
   StageDetailLevel,
   PlannerVerificationClass,
 } from "./types.ts";
+import { v01ExecutablePlanAdmissionIssues } from "./v01-plan-admission.ts";
 
 /**
  * K1-B is a pure boundary.  A PlanCandidate is an in-memory proposal and is
@@ -61,6 +62,7 @@ export type PlanValidationIssueCode =
   | "STAGE_DEPENDENCY_DUPLICATE"
   | "STAGE_DEPENDENCY_AMBIGUOUS"
   | "STAGE_DEPENDENCY_CYCLE"
+  | "STAGE_DEPENDENCY_NOT_PREVIOUS"
   | "STAGE_VERSION_INVALID"
   | "STAGE_PREDECESSOR_INVALID"
   | "STAGE_NOT_ACTIONABLE"
@@ -75,6 +77,9 @@ export type PlanValidationIssueCode =
   | "STEP_OBJECTIVE_REQUIRED"
   | "STEP_ACCEPTANCE_REQUIRED"
   | "STEP_VERIFICATION_PLAN_REQUIRED"
+  | "STEP_SIDE_EFFECT_UNSUPPORTED"
+  | "STEP_VERIFICATION_CLASS_UNSUPPORTED"
+  | "STEP_VERIFICATION_POLICY_INVALID"
   | "STEP_NOT_ACTIONABLE"
   | "REQUIREMENT_INPUT_REQUIRED"
   | "ASSUMPTIONS_PRESENT";
@@ -123,7 +128,7 @@ export interface PlanStepCandidate {
   readonly constraints: readonly string[];
   readonly riskClass: "LOW" | "MEDIUM" | "HIGH";
   readonly sideEffectClass: "PURE" | "IDEMPOTENT" | "RECONCILABLE" | "NON_REPEATABLE";
-  /** Optional immutable machine-verifier policy. Absence preserves legacy K1-B candidates but cannot later imply verifier PASS. */
+  /** Optional at parse/migration time; v0.1 executable Plan admission requires a supported descriptor. */
   readonly verificationClass?: PlannerVerificationClass;
   readonly verificationPlan?: readonly string[];
   readonly expectedArtifacts?: readonly string[];
@@ -532,8 +537,9 @@ function invalidResult(error: PlanCandidateValidationError): PlanValidationResul
 }
 
 /**
- * Validate a candidate against the exact active RequirementVersion and the
- * current PlanVersion context. This function is deliberately side-effect free.
+ * Validate a candidate against the exact active RequirementVersion, current
+ * PlanVersion context, and the executable v0.1 product capability contract.
+ * This function is deliberately side-effect free.
  */
 export function validatePlanCandidate(value: unknown, context: PlannerValidationContext): PlanValidationResult {
   let candidate: NormalizedPlanCandidate;
@@ -558,6 +564,7 @@ export function validatePlanCandidate(value: unknown, context: PlannerValidation
 
   issues.push(...validatePlanVersionTransition(context.currentPlanVersion ?? null, candidate));
   issues.push(...validateSpecLineage(candidate, context));
+  issues.push(...v01ExecutablePlanAdmissionIssues(candidate));
 
   const blockingQuestions = [...(candidate.ambiguity?.blockingQuestions ?? [])];
   const missingRequirementFields = [...(candidate.ambiguity?.missingRequirementFields ?? [])];
