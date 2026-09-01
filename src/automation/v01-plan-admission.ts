@@ -29,7 +29,7 @@ export function v01ExecutablePlanAdmissionIssues(candidate: NormalizedPlanCandid
       const capability = v01StageDependencyCapability(stage.ordinal, dependency.ordinal);
       if (!capability.allowed) {
         issues.push(blocking(
-          "STAGE_DEPENDENCY_AMBIGUOUS",
+          "STAGE_DEPENDENCY_NOT_PREVIOUS",
           `candidate.stages[${stage.stageKey}].dependsOn`,
           capability.reason,
         ));
@@ -40,7 +40,9 @@ export function v01ExecutablePlanAdmissionIssues(candidate: NormalizedPlanCandid
   for (const step of candidate.steps) {
     const path = `candidate.steps[${step.stepKey}]`;
     const sideEffect = v01StepSideEffectCapability(step.sideEffectClass);
-    if (!sideEffect.allowed) issues.push(blocking("INVALID_ENUM", `${path}.sideEffectClass`, sideEffect.reason));
+    if (!sideEffect.allowed) {
+      issues.push(blocking("STEP_SIDE_EFFECT_UNSUPPORTED", `${path}.sideEffectClass`, sideEffect.reason));
+    }
 
     if (!step.verificationClass || !step.verificationPlan || step.verificationPlan.length === 0) {
       issues.push(blocking(
@@ -53,13 +55,13 @@ export function v01ExecutablePlanAdmissionIssues(candidate: NormalizedPlanCandid
 
     const verifier = v01StepVerificationCapability(step.verificationClass);
     if (!verifier.allowed) {
-      issues.push(blocking("INVALID_ENUM", `${path}.verificationClass`, verifier.reason));
+      issues.push(blocking("STEP_VERIFICATION_CLASS_UNSUPPORTED", `${path}.verificationClass`, verifier.reason));
       continue;
     }
 
     if (step.verificationClass === "FILE_EXISTS" && (!step.expectedArtifacts || step.expectedArtifacts.length === 0)) {
       issues.push(blocking(
-        "STEP_VERIFICATION_PLAN_REQUIRED",
+        "STEP_VERIFICATION_POLICY_INVALID",
         `${path}.expectedArtifacts`,
         "FILE_EXISTS requires at least one bounded workspace-relative expectedArtifacts path.",
       ));
@@ -67,7 +69,7 @@ export function v01ExecutablePlanAdmissionIssues(candidate: NormalizedPlanCandid
     if (step.verificationClass === "HASH_MATCH"
       && (step.verificationPlan.length !== 1 || !HASH_MATCH_PLAN.test(step.verificationPlan[0]!))) {
       issues.push(blocking(
-        "STEP_VERIFICATION_PLAN_REQUIRED",
+        "STEP_VERIFICATION_POLICY_INVALID",
         `${path}.verificationPlan`,
         "HASH_MATCH requires exactly one result-sha256:<64 lowercase hex> instruction at Plan admission.",
       ));
