@@ -52,7 +52,7 @@ function errnoCode(error: unknown): string | null {
 
 function workspaceFileVerificationPort(nativeRuntimes: NativeRuntimeRegistryPort): WorkspaceFileVerificationPort {
   return Object.freeze({
-    async observeFile(input): Promise<WorkspaceFileObservation> {
+    async observeFile(input: { readonly providerTargetRef: string; readonly relativePath: string }): Promise<WorkspaceFileObservation> {
       const relativePath = boundedPath(input.relativePath);
       if (!relativePath) {
         return { status: "INVALID", relativePath: input.relativePath, reason: "FILE_EXISTS expectedArtifacts must contain bounded workspace-relative file paths." };
