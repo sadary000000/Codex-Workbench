@@ -6,6 +6,7 @@ import { ProviderAwareRequirementAutomationService } from "./provider-aware-requ
 import { AutomationProviderRegistry } from "./provider-registry.ts";
 import { NativeStepExecutionService } from "./step-execution-service.ts";
 import { AutomationStore } from "./store.ts";
+import { v01StepExecutionProviderCapability } from "./v01-effective-capability.ts";
 
 export interface AutomationProviderServices {
   readonly providerId: AutomationProviderId;
@@ -15,6 +16,14 @@ export interface AutomationProviderServices {
   readonly stepExecution: NativeStepExecutionService;
 }
 
+export class AutomationProviderRoleError extends Error {
+  readonly code = "AUTOMATION_PROVIDER_ROLE_UNSUPPORTED" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "AutomationProviderRoleError";
+  }
+}
+
 /**
  * Process-local service composition over the provider registry.
  *
@@ -22,9 +31,9 @@ export interface AutomationProviderServices {
  * resulting Requirement, Planner, and Step execution services share the exact
  * same port and process-owned InputRefRegistry. Missing Native (the registry
  * default) fails closed; this class never silently selects WebGPT as a
- * fallback. The Step service itself enforces the current Native-only execution
- * boundary so creating a WebGPT service set cannot accidentally make WebGPT an
- * Executor.
+ * fallback. Generic service composition remains provider-neutral for
+ * Requirement/Planner compatibility, while role-specific Step execution is
+ * admitted only through the v0.1 effective product capability contract.
  */
 export class AutomationProviderServiceRouter {
   readonly store: AutomationStore;
@@ -79,6 +88,9 @@ export class AutomationProviderServiceRouter {
   }
 
   stepExecution(providerId?: AutomationProviderId | null): NativeStepExecutionService {
-    return this.services(providerId).stepExecution;
+    const services = this.services(providerId);
+    const capability = v01StepExecutionProviderCapability(services.providerId);
+    if (!capability.allowed) throw new AutomationProviderRoleError(capability.reason);
+    return services.stepExecution;
   }
 }
