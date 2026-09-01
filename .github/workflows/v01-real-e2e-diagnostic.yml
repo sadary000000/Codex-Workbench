@@ -18,10 +18,10 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-      - name: Checkout frozen workspace-write product snapshot
+      - name: Checkout Planner verifier hotfix product snapshot
         uses: actions/checkout@v4
         with:
-          ref: 5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf
+          ref: 650168ba73aacf7226f86eeafcf73ea48eb4cc23
 
       - uses: actions/setup-node@v4
         with:
