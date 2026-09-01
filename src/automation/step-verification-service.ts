@@ -59,6 +59,25 @@ export interface StepVerificationResult {
   readonly reason: string | null;
 }
 
+export type WorkspaceFileObservationStatus = "EXISTS" | "MISSING" | "INVALID" | "UNAVAILABLE";
+
+export interface WorkspaceFileObservation {
+  readonly status: WorkspaceFileObservationStatus;
+  readonly relativePath: string;
+  readonly reason: string | null;
+}
+
+/**
+ * Read-only adapter owned by the process that already owns Native runtime/workspace truth.
+ * The verifier never executes shell text or starts a model turn through this port.
+ */
+export interface WorkspaceFileVerificationPort {
+  observeFile(input: {
+    readonly providerTargetRef: string;
+    readonly relativePath: string;
+  }): Promise<WorkspaceFileObservation>;
+}
+
 export class StepVerificationError extends Error {
   readonly code:
     | "STEP_VERIFICATION_PROJECT_NOT_FOUND"
@@ -229,17 +248,22 @@ function result(input: {
 /**
  * Deterministic workflow verifier over already-persisted truth only.
  *
- * It never opens a Native Turn, invokes a provider, executes shell text,
- * reads a transcript, or owns a sandbox. v1 auto-verifies HASH_MATCH by
- * comparing immutable Plan policy to the terminal-confirmed Step receipt hash.
- * Other verifier classes remain fail-closed in VERIFYING until a dedicated
- * evidence adapter exists.
+ * It never opens a Native Turn, invokes a provider, executes shell text, or
+ * owns a sandbox. v0.1 supports HASH_MATCH over terminal receipt truth and a
+ * bounded FILE_EXISTS adapter over the exact Native workspace. Every other
+ * verifier class remains fail-closed in VERIFYING until a dedicated adapter
+ * exists.
  */
 export class DeterministicStepVerificationService {
   readonly store: AutomationStore;
+  readonly workspaceFiles: WorkspaceFileVerificationPort | null;
 
-  constructor(options: { readonly store: AutomationStore }) {
+  constructor(options: {
+    readonly store: AutomationStore;
+    readonly workspaceFiles?: WorkspaceFileVerificationPort | null;
+  }) {
     this.store = options.store;
+    this.workspaceFiles = options.workspaceFiles ?? null;
   }
 
   async verify(input: VerifyStepInput): Promise<StepVerificationResult> {
@@ -325,6 +349,7 @@ export class DeterministicStepVerificationService {
       const outcome = existing.metadata.outcome;
       const expectedHash = typeof existing.metadata.expectedHash === "string" ? existing.metadata.expectedHash : null;
       const observedHash = typeof existing.metadata.observedHash === "string" ? existing.metadata.observedHash : null;
+      const existingReason = typeof existing.metadata.reason === "string" ? existing.metadata.reason : null;
       if (outcome === "PASS") {
         if (runtime.lifecycle === "VERIFYING") {
           await this.store.transitionStepRuntime(runtime.stepRuntimeId, "REVIEW", {
@@ -352,6 +377,7 @@ export class DeterministicStepVerificationService {
           verificationEvidenceId: existing.evidenceId,
           expectedHash,
           observedHash,
+          reason: existingReason,
         });
       }
       if (outcome === "FAIL") {
@@ -381,6 +407,7 @@ export class DeterministicStepVerificationService {
           verificationEvidenceId: existing.evidenceId,
           expectedHash,
           observedHash,
+          reason: existingReason,
         });
       }
       throw new StepVerificationError(
@@ -408,6 +435,22 @@ export class DeterministicStepVerificationService {
         reason: "ExecutionAttempt is not terminal-successful.",
       });
     }
+
+    if (policy.verificationClass === "FILE_EXISTS") {
+      return this.verifyFileExists({
+        document,
+        projectId: input.projectId,
+        stageSpecId: stage.stageSpecId,
+        stepSpecId: step.stepSpecId,
+        runtime,
+        executionAttemptId: attempt.attemptId,
+        planVersionId: plan.planVersionId,
+        planPayloadSha256,
+        policy,
+        fingerprint,
+      });
+    }
+
     if (policy.verificationClass !== "HASH_MATCH") {
       return result({
         status: "UNSUPPORTED_CLASS",
@@ -418,7 +461,7 @@ export class DeterministicStepVerificationService {
         executionAttemptId: attempt.attemptId,
         planVersionId: plan.planVersionId,
         verificationClass: policy.verificationClass,
-        reason: `Verifier class ${policy.verificationClass} has no side-effect-free v1 evidence adapter.`,
+        reason: `Verifier class ${policy.verificationClass} has no side-effect-free v0.1 evidence adapter.`,
       });
     }
     if (policy.verificationPlan.length !== 1) {
@@ -529,6 +572,165 @@ export class DeterministicStepVerificationService {
       verificationEvidenceId: evidence.evidenceId,
       expectedHash,
       observedHash,
+    });
+  }
+
+  private async verifyFileExists(input: {
+    readonly document: AutomationDocument;
+    readonly projectId: string;
+    readonly stageSpecId: string;
+    readonly stepSpecId: string;
+    readonly runtime: StepRuntime;
+    readonly executionAttemptId: string;
+    readonly planVersionId: string;
+    readonly planPayloadSha256: string;
+    readonly policy: VerificationPolicy;
+    readonly fingerprint: string;
+  }): Promise<StepVerificationResult> {
+    if (input.policy.expectedArtifacts.length === 0) {
+      return result({
+        status: "POLICY_INVALID",
+        projectId: input.projectId,
+        stageSpecId: input.stageSpecId,
+        stepSpecId: input.stepSpecId,
+        runtime: input.runtime,
+        executionAttemptId: input.executionAttemptId,
+        planVersionId: input.planVersionId,
+        verificationClass: "FILE_EXISTS",
+        reason: "FILE_EXISTS requires at least one workspace-relative expectedArtifacts path.",
+      });
+    }
+    if (!this.workspaceFiles) {
+      return result({
+        status: "NOT_READY",
+        projectId: input.projectId,
+        stageSpecId: input.stageSpecId,
+        stepSpecId: input.stepSpecId,
+        runtime: input.runtime,
+        executionAttemptId: input.executionAttemptId,
+        planVersionId: input.planVersionId,
+        verificationClass: "FILE_EXISTS",
+        reason: "The read-only workspace file verification adapter is unavailable.",
+      });
+    }
+
+    const intent = actionForAttempt(input.document, input.executionAttemptId);
+    if (!intent?.targetRef) {
+      return result({
+        status: "NOT_READY",
+        projectId: input.projectId,
+        stageSpecId: input.stageSpecId,
+        stepSpecId: input.stepSpecId,
+        runtime: input.runtime,
+        executionAttemptId: input.executionAttemptId,
+        planVersionId: input.planVersionId,
+        verificationClass: "FILE_EXISTS",
+        reason: "FILE_EXISTS requires the exact persisted STEP_EXECUTION targetRef.",
+      });
+    }
+
+    const observations = await Promise.all(input.policy.expectedArtifacts.map((relativePath) =>
+      this.workspaceFiles!.observeFile({ providerTargetRef: intent.targetRef!, relativePath })));
+    const invalid = observations.find((item) => item.status === "INVALID");
+    if (invalid) {
+      return result({
+        status: "POLICY_INVALID",
+        projectId: input.projectId,
+        stageSpecId: input.stageSpecId,
+        stepSpecId: input.stepSpecId,
+        runtime: input.runtime,
+        executionAttemptId: input.executionAttemptId,
+        planVersionId: input.planVersionId,
+        verificationClass: "FILE_EXISTS",
+        reason: invalid.reason ?? `Invalid expected artifact path: ${invalid.relativePath}`,
+      });
+    }
+    const unavailable = observations.find((item) => item.status === "UNAVAILABLE");
+    if (unavailable) {
+      return result({
+        status: "NOT_READY",
+        projectId: input.projectId,
+        stageSpecId: input.stageSpecId,
+        stepSpecId: input.stepSpecId,
+        runtime: input.runtime,
+        executionAttemptId: input.executionAttemptId,
+        planVersionId: input.planVersionId,
+        verificationClass: "FILE_EXISTS",
+        reason: unavailable.reason ?? `Workspace observation unavailable: ${unavailable.relativePath}`,
+      });
+    }
+
+    const outcome = observations.every((item) => item.status === "EXISTS") ? "PASS" as const : "FAIL" as const;
+    const missing = observations.filter((item) => item.status === "MISSING").map((item) => item.relativePath);
+    const observationDescriptor = canonicalize({
+      expectedArtifacts: [...input.policy.expectedArtifacts],
+      observations: observations.map((item) => ({ relativePath: item.relativePath, status: item.status })),
+      providerTargetRef: intent.targetRef,
+    }, "workspaceFileVerification");
+    const observedHash = sha256Hex(observationDescriptor);
+    const reason = outcome === "PASS"
+      ? `Verified ${observations.length} expected workspace file(s).`
+      : `Missing expected workspace file(s): ${missing.join(", ")}`;
+    const evidenceId = `step-verification:${sha256Hex(
+      `${STEP_VERIFIER_PROTOCOL}\u0000${input.executionAttemptId}\u0000${input.planPayloadSha256}\u0000${input.fingerprint}`,
+    )}`;
+    const actionAttempt = latestActionAttempt(input.document, intent.intentId);
+    const external = actionAttempt ? requestExternal(input.document, actionAttempt) : null;
+    const evidence = await this.store.createEvidence({
+      evidenceId,
+      projectId: input.projectId,
+      stageSpecId: input.stageSpecId,
+      stepSpecId: input.stepSpecId,
+      attemptId: input.executionAttemptId,
+      type: STEP_VERIFICATION_EVIDENCE,
+      source: STEP_VERIFICATION_SOURCE,
+      producer: STEP_VERIFIER_PROTOCOL,
+      exitCode: null,
+      sha256: observedHash,
+      artifactRefId: null,
+      metadata: {
+        expectedArtifactsJson: JSON.stringify(input.policy.expectedArtifacts),
+        observedArtifactsJson: JSON.stringify(observations.map((item) => ({ path: item.relativePath, status: item.status }))),
+        observedHash,
+        outcome,
+        planPayloadSha256: input.planPayloadSha256,
+        planVersionId: input.planVersionId,
+        policySha256: input.fingerprint,
+        reason,
+        verificationClass: "FILE_EXISTS",
+        verifierProtocol: STEP_VERIFIER_PROTOCOL,
+      },
+      correlation: {
+        workflowActionId: intent.intentId,
+        requestId: null,
+        nativeThreadId: null,
+        nativeTurnId: external?.kind === "NATIVE_TURN" && external.provider === "NATIVE" ? external.opaqueId : null,
+        resourceLeaseId: null,
+        artifactRefs: [],
+        evidenceRefs: [],
+      },
+    });
+
+    await this.store.transitionStepRuntime(input.runtime.stepRuntimeId, outcome === "PASS" ? "REVIEW" : "FAIL", {
+      actorType: "AUTOMATION",
+      actorRef: STEP_VERIFIER_PROTOCOL,
+      boundedPayload: { evidenceId: evidence.evidenceId, verificationClass: "FILE_EXISTS", outcome },
+      correlationId: input.executionAttemptId,
+      causationId: evidence.evidenceId,
+    });
+
+    return result({
+      status: outcome === "PASS" ? "REVIEWING" : "FAILED",
+      projectId: input.projectId,
+      stageSpecId: input.stageSpecId,
+      stepSpecId: input.stepSpecId,
+      runtime: input.runtime,
+      executionAttemptId: input.executionAttemptId,
+      planVersionId: input.planVersionId,
+      verificationClass: "FILE_EXISTS",
+      verificationEvidenceId: evidence.evidenceId,
+      observedHash,
+      reason,
     });
   }
 }
