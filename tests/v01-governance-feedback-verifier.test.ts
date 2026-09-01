@@ -21,7 +21,17 @@ function verificationFixture(observation: WorkspaceFileObservation) {
     expectedArtifacts: ["v01-smoke.txt"],
   };
   const canonicalPayload = canonicalize({ steps: [stepEntry] }, "testPlan");
-  const runtime = {
+  const runtime: {
+    stepRuntimeId: string;
+    stepSpecId: string;
+    lifecycle: string;
+    terminalResult: string | null;
+    waitReason: string;
+    currentAttemptId: string;
+    revision: number;
+    createdAt: string;
+    updatedAt: string;
+  } = {
     stepRuntimeId: "runtime-file",
     stepSpecId: "step-file",
     lifecycle: "VERIFYING",
