@@ -12,7 +12,7 @@ import { StageGateService, type GateStageInput } from "../automation/stage-gate-
 import { StageProgressionService, type AdvanceStageInput } from "../automation/stage-progression-service.ts";
 import type { ExecuteStepInput, ReconcileStepInput } from "../automation/step-execution-service.ts";
 import { StepReviewCompletionService, type ReviewStepInput } from "../automation/step-review-service.ts";
-import { DeterministicStepVerificationService, type VerifyStepInput } from "../automation/step-verification-service.ts";
+import { DeterministicStepVerificationService, type VerifyStepInput, type WorkspaceFileVerificationPort } from "../automation/step-verification-service.ts";
 import { AutomationStore } from "../automation/store.ts";
 import { createNativeThreadTargetRef } from "../codex/automation/native-provider-port.ts";
 
@@ -114,9 +114,6 @@ async function ensureProjectPolicyForNewRequirement(store: AutomationStore, proj
       supersedes: null,
     });
   } catch (error) {
-    // Concurrent first-work attempts are serialized by the Store. If another
-    // caller won the version-1 bootstrap race, accept only the exact durable
-    // project pointer it produced; otherwise preserve the original failure.
     const refreshed = await store.get("automationProjects", project.projectId);
     if (refreshed?.policyVersionId) {
       const policy = await store.get("policyVersions", refreshed.policyVersionId);
@@ -165,11 +162,18 @@ export class AutomationExecutionFacade {
   readonly stageProgression: StageProgressionService;
   readonly projectCompletion: ProjectCompletionService;
 
-  constructor(options: { store: AutomationStore; services: AutomationProviderServiceRouter }) {
+  constructor(options: {
+    readonly store: AutomationStore;
+    readonly services: AutomationProviderServiceRouter;
+    readonly workspaceFiles?: WorkspaceFileVerificationPort | null;
+  }) {
     this.store = options.store;
     this.services = options.services;
     this.requirementConfirmation = new RequirementAutomationService({ store: options.store });
-    this.stepVerification = new DeterministicStepVerificationService({ store: options.store });
+    this.stepVerification = new DeterministicStepVerificationService({
+      store: options.store,
+      workspaceFiles: options.workspaceFiles ?? null,
+    });
     this.stepReview = new StepReviewCompletionService({ store: options.store });
     this.stageGate = new StageGateService({ store: options.store });
     this.stageProgression = new StageProgressionService({ store: options.store });
@@ -219,8 +223,6 @@ export class AutomationExecutionFacade {
       || requirement.projectId !== project.projectId
       || project.activeRequirementVersionId !== requirement.requirementVersionId
       || !["CONFIRMED", "ACTIVE"].includes(requirement.status)) {
-      // Preserve the Planner integration's authoritative domain errors without
-      // advancing the Project lifecycle for work that never became eligible.
       return this.services.planner(provider).createPlanFromRequirement({
         ...input,
         providerTargetRef,
@@ -395,10 +397,6 @@ export class AutomationExecutionFacade {
     }
     let persisted = await persistedProviderIdForIntent(this.store, actionIntentId) as AutomationProviderId | null;
     if (!persisted) {
-      // Legacy compatibility only: old successful/accepted attempts predate the
-      // pre-dispatch attempt binding, but their provider request ExternalRef is
-      // authoritative enough to route a reconcile. Never infer from target
-      // string shape or current default provider.
       const snapshot = await this.store.snapshot();
       const attempts = snapshot.actionAttempts
         .filter((item) => item.intentId === actionIntentId)
