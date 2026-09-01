@@ -10,6 +10,11 @@ export interface AutomationGovernanceEvidenceView {
   verificationClass: string | null;
 }
 
+export interface AutomationGovernanceActionEligibility {
+  allowed: boolean;
+  reason: string;
+}
+
 export interface AutomationGovernanceAttemptView {
   attemptId: string;
   attemptNumber: number;
@@ -36,6 +41,12 @@ export interface AutomationGovernanceStepView {
   attempt: AutomationGovernanceAttemptView | null;
   verification: AutomationGovernanceEvidenceView | null;
   review: AutomationGovernanceEvidenceView | null;
+  actions: {
+    execute: AutomationGovernanceActionEligibility;
+    reconcile: AutomationGovernanceActionEligibility;
+    verify: AutomationGovernanceActionEligibility;
+    review: AutomationGovernanceActionEligibility;
+  };
 }
 
 export interface AutomationGovernanceStageView {
@@ -49,6 +60,10 @@ export interface AutomationGovernanceStageView {
   isCurrent: boolean;
   gate: AutomationGovernanceEvidenceView | null;
   steps: AutomationGovernanceStepView[];
+  actions: {
+    gate: AutomationGovernanceActionEligibility;
+    advance: AutomationGovernanceActionEligibility;
+  };
 }
 
 export interface AutomationGovernanceProjectView {
@@ -74,6 +89,9 @@ export interface AutomationGovernanceProjectView {
     createdAt: string | null;
   };
   stages: AutomationGovernanceStageView[];
+  actions: {
+    complete: AutomationGovernanceActionEligibility;
+  };
   integrity: {
     status: "OK" | "DEGRADED";
     issues: string[];
