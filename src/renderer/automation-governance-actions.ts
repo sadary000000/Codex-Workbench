@@ -1,4 +1,5 @@
 import type {
+  AutomationGovernanceActionEligibility,
   AutomationGovernanceProjectView,
   AutomationGovernanceStageView,
   AutomationGovernanceStepView,
@@ -141,10 +142,10 @@ function requireConfirmation(message: string): boolean {
   return window.confirm(message);
 }
 
-function setWorkflowEligibility(button: HTMLButtonElement, allowed: boolean, reason: string): void {
-  button.dataset.workflowDisabled = allowed ? "false" : "true";
-  button.disabled = !allowed;
-  button.title = allowed ? "" : reason;
+function setWorkflowEligibility(button: HTMLButtonElement, eligibility: AutomationGovernanceActionEligibility): void {
+  button.dataset.workflowDisabled = eligibility.allowed ? "false" : "true";
+  button.disabled = !eligibility.allowed;
+  button.title = eligibility.allowed ? "" : eligibility.reason;
 }
 
 function stateValue(label: string, value: string): HTMLElement {
@@ -373,7 +374,7 @@ function installAutomationGovernanceActions(): void {
     });
   };
 
-  const renderStep = (view: AutomationGovernanceProjectView, stage: AutomationGovernanceStageView, step: AutomationGovernanceStepView): HTMLElement => {
+  const renderStep = (view: AutomationGovernanceProjectView, step: AutomationGovernanceStepView): HTMLElement => {
     const card = document.createElement("section");
     card.className = "automation-governance-action-step";
     const heading = document.createElement("div");
@@ -400,7 +401,7 @@ function installAutomationGovernanceActions(): void {
       actions.className = "automation-governance-action-buttons";
       const execute = actionButton("Execute on selected Native Thread", "step-execute");
       execute.dataset.requiresSelectedTarget = "true";
-      setWorkflowEligibility(execute, stage.isCurrent, "只有当前 Stage 的未执行 Step 可以启动。 ");
+      setWorkflowEligibility(execute, step.actions.execute);
       execute.addEventListener("click", () => executeFreshStep(view, step, noticeKey));
       actions.append(execute);
       card.append(
@@ -422,21 +423,15 @@ function installAutomationGovernanceActions(): void {
     actions.className = "automation-governance-action-buttons";
 
     const reconcile = actionButton("Reconcile", "step-reconcile");
-    const canReconcile = step.runtime?.lifecycle === "EXECUTING";
-    setWorkflowEligibility(reconcile, canReconcile, "仅执行中/待恢复的 Step 需要对账；已进入验证或终态时无需再次对账。 ");
+    setWorkflowEligibility(reconcile, step.actions.reconcile);
     reconcile.addEventListener("click", () => void run("Reconcile Step", noticeKey, () => api.reconcileAutomationStep(view.project.projectId, attemptId)));
 
     const verify = actionButton("Verify", "step-verify");
-    const canVerify = step.runtime?.lifecycle === "VERIFYING"
-      && step.attempt.lifecycle === "COMPLETED"
-      && step.attempt.terminalResult === "COMPLETED"
-      && !step.verification;
-    setWorkflowEligibility(verify, canVerify, "验证仅在执行已终态成功、Runtime=VERIFYING 且尚无验证证据时可用。 ");
+    setWorkflowEligibility(verify, step.actions.verify);
     verify.addEventListener("click", () => void run("Verify Step", noticeKey, () => api.verifyAutomationStep(view.project.projectId, attemptId)));
 
-    const canReview = step.runtime?.lifecycle === "REVIEWING" && step.verification?.state === "PASS" && !step.review;
     const approve = actionButton("Review APPROVE", "step-review-approve");
-    setWorkflowEligibility(approve, canReview, "审核需要先得到 PASS 验证证据，并且该 Attempt 尚未记录不可变审核决定。 ");
+    setWorkflowEligibility(approve, step.actions.review);
     approve.addEventListener("click", () => {
       if (!requireConfirmation(`Approve Step ${step.stepKey}? Review evidence is immutable for this attempt.`)) return;
       void run("Review APPROVE", noticeKey, () => api.reviewAutomationStep(view.project.projectId, attemptId, "APPROVE"));
@@ -444,7 +439,7 @@ function installAutomationGovernanceActions(): void {
 
     const reject = actionButton("Review REJECT", "step-review-reject");
     reject.dataset.destructive = "true";
-    setWorkflowEligibility(reject, canReview, "拒绝同样要求 PASS 验证证据且尚未记录审核；REJECT 是不可变决定。 ");
+    setWorkflowEligibility(reject, step.actions.review);
     reject.addEventListener("click", () => {
       if (!requireConfirmation(`Reject Step ${step.stepKey}? This records immutable REJECT review evidence and cannot be changed to APPROVE for this attempt.`)) return;
       void run("Review REJECT", noticeKey, () => api.reviewAutomationStep(view.project.projectId, attemptId, "REJECT"));
@@ -475,30 +470,23 @@ function installAutomationGovernanceActions(): void {
     );
     card.append(stateGrid);
 
-    const allStepsApproved = stage.steps.length > 0 && stage.steps.every((step) =>
-      step.review?.state === "APPROVE"
-      && step.runtime?.lifecycle === "TERMINAL"
-      && step.runtime.terminalResult === "COMPLETED");
-    const canGate = stage.isCurrent && !stage.gate && allStepsApproved;
-    const canAdvance = stage.isCurrent && stage.gate?.state === "PASS";
-
     const actions = document.createElement("div");
     actions.className = "automation-governance-action-buttons";
     const pass = actionButton("Gate PASS", "stage-gate-pass");
-    setWorkflowEligibility(pass, canGate, "阶段门禁只有在当前 Stage 的全部 Step 已验证并审核通过后才可记录。 ");
+    setWorkflowEligibility(pass, stage.actions.gate);
     pass.addEventListener("click", () => {
       if (!requireConfirmation(`Record immutable PASS Stage Gate for ${stage.name || stage.stageKey}?`)) return;
       void run("Stage Gate PASS", stageNoticeKey, () => api.gateAutomationStage(view.project.projectId, stage.stageSpecId, "PASS"));
     });
     const reject = actionButton("Gate REJECT", "stage-gate-reject");
     reject.dataset.destructive = "true";
-    setWorkflowEligibility(reject, canGate, "阶段门禁只有在全部 Step 已审核通过且尚无门禁决定时才可记录；REJECT 是不可变决定。 ");
+    setWorkflowEligibility(reject, stage.actions.gate);
     reject.addEventListener("click", () => {
       if (!requireConfirmation(`Record immutable REJECT Stage Gate for ${stage.name || stage.stageKey}? This cannot later be changed to PASS for the same gate slot.`)) return;
       void run("Stage Gate REJECT", stageNoticeKey, () => api.gateAutomationStage(view.project.projectId, stage.stageSpecId, "REJECT"));
     });
     const advance = actionButton("Advance Stage", "stage-advance");
-    setWorkflowEligibility(advance, canAdvance, "推进阶段需要当前 Stage 已存在 PASS Stage Gate。 ");
+    setWorkflowEligibility(advance, stage.actions.advance);
     advance.addEventListener("click", () => void run("Advance Stage", stageNoticeKey, () => api.advanceAutomationStage(view.project.projectId, stage.stageSpecId)));
     actions.append(pass, reject, advance);
     card.append(actions);
@@ -507,7 +495,7 @@ function installAutomationGovernanceActions(): void {
 
     const steps = document.createElement("div");
     steps.className = "automation-governance-action-steps";
-    for (const step of stage.steps) steps.append(renderStep(view, stage, step));
+    for (const step of stage.steps) steps.append(renderStep(view, step));
     card.append(steps);
     return card;
   };
@@ -517,7 +505,7 @@ function installAutomationGovernanceActions(): void {
     body.append(element(
       "div",
       "automation-governance-command-note",
-      "按钮现在按最新 Governance Projection 提前禁用明显不合法的操作，并在对应 Project / Stage / Step 卡片内显示结果。后端仍是最终权威并会再次 fail-closed 校验 workflow truth。Fresh Execute 仍要求用户显式选择当前 Runtime Truth 中的 exact Native Thread。",
+      "按钮可用性来自后端 Governance Projection；Renderer 只展示投影并在对应 Project / Stage / Step 卡片内显示操作结果。后端执行命令时仍会重新校验 workflow truth。Fresh Execute 仍要求用户显式选择当前 Runtime Truth 中的 exact Native Thread。",
     ));
     body.append(renderTarget(view));
 
@@ -536,9 +524,7 @@ function installAutomationGovernanceActions(): void {
     const projectActions = document.createElement("div");
     projectActions.className = "automation-governance-action-buttons";
     const complete = actionButton("Complete Project", "project-complete");
-    const allStagesPassed = view.stages.length > 0 && view.stages.every((stage) => stage.gate?.state === "PASS");
-    const canComplete = allStagesPassed && view.runtimePosition?.currentStageSpecId === null;
-    setWorkflowEligibility(complete, canComplete, "完成 Project 需要所有 Stage PASS，且最终 Stage 已执行 Advance Stage 形成 PLAN_COMPLETE_READY checkpoint。 ");
+    setWorkflowEligibility(complete, view.actions.complete);
     complete.addEventListener("click", () => {
       if (!requireConfirmation(`Project ${view.project.name} completion will be projected only if final governance truth passes. Continue?`)) return;
       void run("Complete Project", `project:${view.project.projectId}`, () => api.completeAutomationProject(view.project.projectId));
