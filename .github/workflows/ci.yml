@@ -20,6 +20,7 @@ on:
 permissions:
   contents: read
 
+# Temporary branch validation hook; restore the release workflow before packaging.
 jobs:
   verify:
     runs-on: ubuntu-latest
