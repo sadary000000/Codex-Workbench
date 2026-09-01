@@ -67,13 +67,8 @@ function gateStatus(decision: StageGateDecision): StageGateStatus {
   return decision === "PASS" ? "PASSED" : "REJECTED";
 }
 
-function expectedGateEvidenceId(input: {
-  readonly stageSpecId: string;
-  readonly planPayloadSha256: string;
-}): string {
-  return `stage-gate:${sha256Hex(
-    `${STAGE_GATE_PROTOCOL}\u0000${input.stageSpecId}\u0000${input.planPayloadSha256}`,
-  )}`;
+function expectedGateEvidenceId(input: { readonly stageSpecId: string; readonly planPayloadSha256: string }): string {
+  return `stage-gate:${sha256Hex(`${STAGE_GATE_PROTOCOL}\u0000${input.stageSpecId}\u0000${input.planPayloadSha256}`)}`;
 }
 
 function gateDescriptor(input: {
@@ -163,6 +158,21 @@ function exactPassedDependencyGate(input: {
   return candidates[0]!;
 }
 
+function resolveDependencyStage(stages: readonly StageSpec[], planVersionId: string, reference: string): StageSpec {
+  const matches = stages.filter((item) =>
+    item.planVersionId === planVersionId
+    && item.status === "ACTIVE"
+    && (item.stageSpecId === reference || item.stageKey === reference)
+  );
+  if (matches.length !== 1) {
+    throw new StageGateError(
+      "STAGE_GATE_DEPENDENCY_NOT_PASSED",
+      `Stage dependency must resolve to exactly one active StageSpec in the same PlanVersion: ${reference}.`,
+    );
+  }
+  return matches[0]!;
+}
+
 /**
  * Stage-level completion gate.
  *
@@ -170,6 +180,9 @@ function exactPassedDependencyGate(input: {
  * immutable PlanVersion. It consumes exact Step review truth plus dependency
  * Stage gate truth, then records one immutable Stage decision in generic
  * Evidence. Runtime progression is intentionally a separate checkpoint step.
+ * Normalized Planner dependencies are StageSpec ids; legacy/manual fixtures may
+ * still carry stageKey, so dependency resolution accepts either identity but
+ * requires exactly one match.
  */
 export class StageGateService {
   readonly store: AutomationStore;
@@ -182,60 +195,26 @@ export class StageGateService {
     const gatekeeperRef = normalizeGatekeeperRef(input.gatekeeperRef);
     const document = await this.store.snapshot();
     const project = document.automationProjects.find((item) => item.projectId === input.projectId);
-    if (!project) {
-      throw new StageGateError(
-        "STAGE_GATE_PROJECT_NOT_FOUND",
-        `AutomationProject was not found: ${input.projectId}`,
-      );
-    }
+    if (!project) throw new StageGateError("STAGE_GATE_PROJECT_NOT_FOUND", `AutomationProject was not found: ${input.projectId}`);
 
     const stage = document.stageSpecs.find((item) => item.stageSpecId === input.stageSpecId);
-    if (!stage) {
-      throw new StageGateError(
-        "STAGE_GATE_STAGE_NOT_FOUND",
-        `StageSpec was not found: ${input.stageSpecId}`,
-      );
-    }
-    if (stage.status !== "ACTIVE") {
-      throw new StageGateError(
-        "STAGE_GATE_STAGE_NOT_ACTIVE",
-        `Stage gate refuses a non-active StageSpec: ${stage.stageSpecId}.`,
-      );
-    }
+    if (!stage) throw new StageGateError("STAGE_GATE_STAGE_NOT_FOUND", `StageSpec was not found: ${input.stageSpecId}`);
+    if (stage.status !== "ACTIVE") throw new StageGateError("STAGE_GATE_STAGE_NOT_ACTIVE", `Stage gate refuses a non-active StageSpec: ${stage.stageSpecId}.`);
     const plan = document.planVersions.find((item) => item.planVersionId === stage.planVersionId);
-    if (
-      !plan
-      || plan.projectId !== input.projectId
-      || plan.status !== "ACTIVE"
-      || project.activePlanVersionId !== plan.planVersionId
-      || !plan.payloadSha256
-    ) {
-      throw new StageGateError(
-        "STAGE_GATE_PLAN_NOT_ACTIVE",
-        "Stage gate requires the exact active structured PlanVersion and its payload hash.",
-      );
+    if (!plan || plan.projectId !== input.projectId || plan.status !== "ACTIVE" || project.activePlanVersionId !== plan.planVersionId || !plan.payloadSha256) {
+      throw new StageGateError("STAGE_GATE_PLAN_NOT_ACTIVE", "Stage gate requires the exact active structured PlanVersion and its payload hash.");
     }
     const planPayloadSha256 = plan.payloadSha256;
 
     const steps = document.stepSpecs
       .filter((item) => item.stageSpecId === stage.stageSpecId && item.specStatus === "ACTIVE")
       .sort((left, right) => (left.ordinal ?? Number.MAX_SAFE_INTEGER) - (right.ordinal ?? Number.MAX_SAFE_INTEGER) || left.stepSpecId.localeCompare(right.stepSpecId));
-    if (steps.length === 0) {
-      throw new StageGateError(
-        "STAGE_GATE_STEPS_REQUIRED",
-        "Stage gate cannot pass a Stage with no active StepSpecs.",
-      );
-    }
+    if (steps.length === 0) throw new StageGateError("STAGE_GATE_STEPS_REQUIRED", "Stage gate cannot pass a Stage with no active StepSpecs.");
 
     const stepReviewEvidenceIds: string[] = [];
     for (const step of steps) {
       const runtimes = document.stepRuntimes.filter((item) => item.stepSpecId === step.stepSpecId);
-      if (
-        runtimes.length !== 1
-        || runtimes[0]!.lifecycle !== "TERMINAL"
-        || runtimes[0]!.terminalResult !== "COMPLETED"
-        || !runtimes[0]!.currentAttemptId
-      ) {
+      if (runtimes.length !== 1 || runtimes[0]!.lifecycle !== "TERMINAL" || runtimes[0]!.terminalResult !== "COMPLETED" || !runtimes[0]!.currentAttemptId) {
         throw new StageGateError(
           "STAGE_GATE_STEP_NOT_APPROVED",
           `Stage gate requires Step ${step.stepSpecId} to be terminal COMPLETED with one current ExecutionAttempt.`,
@@ -254,32 +233,19 @@ export class StageGateService {
     }
 
     const dependencyGateEvidenceIds: string[] = [];
-    for (const dependencyKey of stage.dependsOn ?? []) {
-      const dependencyStages = document.stageSpecs.filter((item) =>
-        item.planVersionId === plan.planVersionId
-        && item.status === "ACTIVE"
-        && item.stageKey === dependencyKey
-      );
-      if (dependencyStages.length !== 1) {
-        throw new StageGateError(
-          "STAGE_GATE_DEPENDENCY_NOT_PASSED",
-          `Stage dependency must resolve to exactly one active StageSpec in the same PlanVersion: ${dependencyKey}.`,
-        );
-      }
+    for (const dependencyRef of stage.dependsOn ?? []) {
+      const dependencyStage = resolveDependencyStage(document.stageSpecs, plan.planVersionId, dependencyRef);
       const dependencyGate = exactPassedDependencyGate({
         evidences: document.evidences,
         projectId: input.projectId,
-        stage: dependencyStages[0]!,
+        stage: dependencyStage,
         planVersionId: plan.planVersionId,
         planPayloadSha256,
       });
       dependencyGateEvidenceIds.push(dependencyGate.evidenceId);
     }
 
-    const gateEvidenceId = expectedGateEvidenceId({
-      stageSpecId: stage.stageSpecId,
-      planPayloadSha256,
-    });
+    const gateEvidenceId = expectedGateEvidenceId({ stageSpecId: stage.stageSpecId, planPayloadSha256 });
     const descriptor = gateDescriptor({
       projectId: input.projectId,
       planVersionId: plan.planVersionId,
@@ -299,12 +265,7 @@ export class StageGateService {
       && item.type === STAGE_GATE_EVIDENCE
       && item.producer === STAGE_GATE_PROTOCOL
     );
-    if (existingGates.length > 1) {
-      throw new StageGateError(
-        "STAGE_GATE_CORRELATION_MISMATCH",
-        "Multiple Stage gate decisions exist for the same StageSpec.",
-      );
-    }
+    if (existingGates.length > 1) throw new StageGateError("STAGE_GATE_CORRELATION_MISMATCH", "Multiple Stage gate decisions exist for the same StageSpec.");
     const existing = existingGates[0] ?? null;
     if (existing) {
       if (
@@ -315,23 +276,12 @@ export class StageGateService {
         || existing.metadata.planPayloadSha256 !== planPayloadSha256
         || existing.metadata.stageSpecId !== stage.stageSpecId
       ) {
-        throw new StageGateError(
-          "STAGE_GATE_CORRELATION_MISMATCH",
-          "Existing Stage gate Evidence is not bound to the exact active Stage/Plan truth.",
-        );
+        throw new StageGateError("STAGE_GATE_CORRELATION_MISMATCH", "Existing Stage gate Evidence is not bound to the exact active Stage/Plan truth.");
       }
       if (existing.metadata.decision !== input.decision || (existing.metadata.gatekeeperRef ?? null) !== gatekeeperRef) {
-        throw new StageGateError(
-          "STAGE_GATE_DECISION_CONFLICT",
-          "A different immutable decision already occupies this Stage gate slot.",
-        );
+        throw new StageGateError("STAGE_GATE_DECISION_CONFLICT", "A different immutable decision already occupies this Stage gate slot.");
       }
-      if (existing.sha256 !== digest) {
-        throw new StageGateError(
-          "STAGE_GATE_CORRELATION_MISMATCH",
-          "Existing Stage gate Evidence digest does not match the current exact prerequisite truth.",
-        );
-      }
+      if (existing.sha256 !== digest) throw new StageGateError("STAGE_GATE_CORRELATION_MISMATCH", "Existing Stage gate Evidence digest does not match the current exact prerequisite truth.");
       return {
         status: gateStatus(input.decision),
         projectId: input.projectId,
