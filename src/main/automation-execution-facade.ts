@@ -14,6 +14,7 @@ import type { ExecuteStepInput, ReconcileStepInput } from "../automation/step-ex
 import { StepReviewCompletionService, type ReviewStepInput } from "../automation/step-review-service.ts";
 import { DeterministicStepVerificationService, type VerifyStepInput, type WorkspaceFileVerificationPort } from "../automation/step-verification-service.ts";
 import { AutomationStore } from "../automation/store.ts";
+import { preflightV01StepExecution } from "../automation/v01-step-execution-preflight.ts";
 import { createNativeThreadTargetRef } from "../codex/automation/native-provider-port.ts";
 
 export class AutomationExecutionRoutingError extends Error {
@@ -170,10 +171,7 @@ export class AutomationExecutionFacade {
     this.store = options.store;
     this.services = options.services;
     this.requirementConfirmation = new RequirementAutomationService({ store: options.store });
-    this.stepVerification = new DeterministicStepVerificationService({
-      store: options.store,
-      workspaceFiles: options.workspaceFiles ?? null,
-    });
+    this.stepVerification = new DeterministicStepVerificationService({ store: options.store, workspaceFiles: options.workspaceFiles ?? null });
     this.stepReview = new StepReviewCompletionService({ store: options.store });
     this.stageGate = new StageGateService({ store: options.store });
     this.stageProgression = new StageProgressionService({ store: options.store });
@@ -183,13 +181,8 @@ export class AutomationExecutionFacade {
   async startRequirement(input: RequirementStartInput, providerId?: AutomationProviderId | null) {
     const provider = normalizeProviderId(providerId) ?? this.services.providers.defaultProviderId;
     await ensureProjectPolicyForNewRequirement(this.store, input.projectId);
-    const providerTargetRef = input.providerTargetRef === undefined
-      ? undefined
-      : normalizeNewWorkProviderTarget(provider, input.providerTargetRef);
-    return this.services.requirement(provider).startAlignment({
-      ...input,
-      ...(providerTargetRef === undefined ? {} : { providerTargetRef }),
-    });
+    const providerTargetRef = input.providerTargetRef === undefined ? undefined : normalizeNewWorkProviderTarget(provider, input.providerTargetRef);
+    return this.services.requirement(provider).startAlignment({ ...input, ...(providerTargetRef === undefined ? {} : { providerTargetRef }) });
   }
 
   async requestRequirementDraft(input: RequirementDraftInput, providerId?: AutomationProviderId | null) {
@@ -215,33 +208,23 @@ export class AutomationExecutionFacade {
     const providerTargetRef = normalizeNewWorkProviderTarget(provider, input.providerTargetRef);
     const project = await this.store.get("automationProjects", input.projectId);
     const requirementVersionId = input.requirementVersionId ?? project?.activeRequirementVersionId ?? null;
-    const requirement = requirementVersionId
-      ? await this.store.get("requirementVersions", requirementVersionId)
-      : null;
+    const requirement = requirementVersionId ? await this.store.get("requirementVersions", requirementVersionId) : null;
     if (!project
       || !requirement
       || requirement.projectId !== project.projectId
       || project.activeRequirementVersionId !== requirement.requirementVersionId
       || !["CONFIRMED", "ACTIVE"].includes(requirement.status)) {
-      return this.services.planner(provider).createPlanFromRequirement({
-        ...input,
-        providerTargetRef,
-      });
+      return this.services.planner(provider).createPlanFromRequirement({ ...input, providerTargetRef });
     }
 
     await this.beginProjectPlanning(input.projectId);
     if (input.inputRefs && input.inputRefs.length > 0) {
-      const result = await this.services.planner(provider).createPlanFromRequirement({
-        ...input,
-        providerTargetRef,
-      });
+      const result = await this.services.planner(provider).createPlanFromRequirement({ ...input, providerTargetRef });
       await this.markProjectPlanReady(input.projectId, result.status);
       return result;
     }
 
-    const currentPlanVersion = project.activePlanVersionId
-      ? await this.store.get("planVersions", project.activePlanVersionId)
-      : null;
+    const currentPlanVersion = project.activePlanVersionId ? await this.store.get("planVersions", project.activePlanVersionId) : null;
     const prompt = buildPlannerProviderPrompt({
       projectId: project.projectId,
       requirement,
@@ -255,19 +238,13 @@ export class AutomationExecutionFacade {
     const registration = this.services.inputRefs.register({ kind: "OTHER", payload: prompt, ownerRef });
     let result: Awaited<ReturnType<PlannerProviderIntegrationService["createPlanFromRequirement"]>>;
     try {
-      result = await this.services.planner(provider).createPlanFromRequirement({
-        ...input,
-        providerTargetRef,
-        inputRefs: [registration.inputRef],
-      });
+      result = await this.services.planner(provider).createPlanFromRequirement({ ...input, providerTargetRef, inputRefs: [registration.inputRef] });
     } catch (error) {
       this.services.inputRefs.release(registration.inputRef, ownerRef);
       throw error;
     }
     await this.markProjectPlanReady(input.projectId, result.status);
-    if (plannerInputCanBeReleased(result.status)) {
-      this.services.inputRefs.release(registration.inputRef, ownerRef);
-    }
+    if (plannerInputCanBeReleased(result.status)) this.services.inputRefs.release(registration.inputRef, ownerRef);
     return result;
   }
 
@@ -276,27 +253,20 @@ export class AutomationExecutionFacade {
     const result = await this.services.planner(provider).reconcilePlannerRequest(input);
     await this.beginProjectPlanning(input.projectId);
     await this.markProjectPlanReady(input.projectId, result.status);
-    if (plannerInputCanBeReleased(result.status) && result.actionIntentId) {
-      await this.releasePlannerInputForIntent(result.actionIntentId);
-    }
+    if (plannerInputCanBeReleased(result.status) && result.actionIntentId) await this.releasePlannerInputForIntent(result.actionIntentId);
     return result;
   }
 
   async retryPlan(input: PlannerRetryInput, providerId?: AutomationProviderId | null) {
     const logicalId = input.actionIntentId ?? input.logicalPlannerRequestId;
     if (!logicalId) {
-      throw new AutomationExecutionRoutingError(
-        "AUTOMATION_PLANNER_INTENT_NOT_FOUND",
-        "Planner retry has no logical request identity.",
-      );
+      throw new AutomationExecutionRoutingError("AUTOMATION_PLANNER_INTENT_NOT_FOUND", "Planner retry has no logical request identity.");
     }
     const provider = await this.providerForPlannerIntent(logicalId, providerId);
     const result = await this.services.planner(provider).retryPlannerRequest(input);
     await this.beginProjectPlanning(input.projectId);
     await this.markProjectPlanReady(input.projectId, result.status);
-    if (plannerInputCanBeReleased(result.status)) {
-      await this.releasePlannerInputForIntent(logicalId);
-    }
+    if (plannerInputCanBeReleased(result.status)) await this.releasePlannerInputForIntent(logicalId);
     return result;
   }
 
@@ -312,6 +282,12 @@ export class AutomationExecutionFacade {
 
   async executeStep(input: ExecuteStepInput, providerId?: AutomationProviderId | null) {
     const provider = normalizeProviderId(providerId) ?? this.services.providers.defaultProviderId;
+    const providerTargetRef = normalizeNewWorkProviderTarget(provider, input.providerTargetRef);
+    const stepExecution = this.services.stepExecution(provider);
+    const command: ExecuteStepInput = { ...input, providerTargetRef };
+
+    await preflightV01StepExecution({ store: this.store, provider: stepExecution.provider, command });
+
     const project = await this.store.get("automationProjects", input.projectId);
     if (project?.lifecycle === "READY") {
       await this.store.transitionProject(project.projectId, "START", {
@@ -320,10 +296,7 @@ export class AutomationExecutionFacade {
         boundedPayload: { stepSpecId: input.stepSpecId },
       });
     }
-    return this.services.stepExecution(provider).execute({
-      ...input,
-      providerTargetRef: normalizeNewWorkProviderTarget(provider, input.providerTargetRef),
-    });
+    return stepExecution.execute(command);
   }
 
   async reconcileStep(input: ReconcileStepInput, providerId?: AutomationProviderId | null) {
@@ -351,16 +324,10 @@ export class AutomationExecutionFacade {
     return this.projectCompletion.complete(input);
   }
 
-  async providerForRequirementSession(
-    sessionId: string,
-    requestedProviderId?: AutomationProviderId | null,
-  ): Promise<AutomationProviderId> {
+  async providerForRequirementSession(sessionId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
     const session = await this.store.get("requirementAlignmentSessions", sessionId);
     if (!session) {
-      throw new AutomationExecutionRoutingError(
-        "AUTOMATION_REQUIREMENT_SESSION_NOT_FOUND",
-        `Requirement session was not found: ${sessionId}`,
-      );
+      throw new AutomationExecutionRoutingError("AUTOMATION_REQUIREMENT_SESSION_NOT_FOUND", `Requirement session was not found: ${sessionId}`);
     }
     let persisted: AutomationProviderId | null = null;
     if (session.webgptProjectRef) {
@@ -370,30 +337,18 @@ export class AutomationExecutionFacade {
     return this.resolveContinuationProvider(persisted, requestedProviderId, `Requirement session ${sessionId}`);
   }
 
-  async providerForPlannerAttempt(
-    actionAttemptId: string,
-    requestedProviderId?: AutomationProviderId | null,
-  ): Promise<AutomationProviderId> {
+  async providerForPlannerAttempt(actionAttemptId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
     const attempt = await this.store.get("actionAttempts", actionAttemptId);
     if (!attempt) {
-      throw new AutomationExecutionRoutingError(
-        "AUTOMATION_PLANNER_ATTEMPT_NOT_FOUND",
-        `Planner ActionAttempt was not found: ${actionAttemptId}`,
-      );
+      throw new AutomationExecutionRoutingError("AUTOMATION_PLANNER_ATTEMPT_NOT_FOUND", `Planner ActionAttempt was not found: ${actionAttemptId}`);
     }
     return this.providerForPlannerIntent(attempt.intentId, requestedProviderId);
   }
 
-  async providerForPlannerIntent(
-    actionIntentId: string,
-    requestedProviderId?: AutomationProviderId | null,
-  ): Promise<AutomationProviderId> {
+  async providerForPlannerIntent(actionIntentId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
     const intent = await this.store.get("actionIntents", actionIntentId);
     if (!intent) {
-      throw new AutomationExecutionRoutingError(
-        "AUTOMATION_PLANNER_INTENT_NOT_FOUND",
-        `Planner ActionIntent was not found: ${actionIntentId}`,
-      );
+      throw new AutomationExecutionRoutingError("AUTOMATION_PLANNER_INTENT_NOT_FOUND", `Planner ActionIntent was not found: ${actionIntentId}`);
     }
     let persisted = await persistedProviderIdForIntent(this.store, actionIntentId) as AutomationProviderId | null;
     if (!persisted) {
@@ -413,21 +368,13 @@ export class AutomationExecutionFacade {
     return this.resolveContinuationProvider(persisted, requestedProviderId, `Planner intent ${actionIntentId}`);
   }
 
-  async providerForStepExecutionAttempt(
-    executionAttemptId: string,
-    requestedProviderId?: AutomationProviderId | null,
-  ): Promise<AutomationProviderId> {
+  async providerForStepExecutionAttempt(executionAttemptId: string, requestedProviderId?: AutomationProviderId | null): Promise<AutomationProviderId> {
     const executionAttempt = await this.store.get("executionAttempts", executionAttemptId);
     if (!executionAttempt) {
-      throw new AutomationExecutionRoutingError(
-        "AUTOMATION_STEP_EXECUTION_ATTEMPT_NOT_FOUND",
-        `Step ExecutionAttempt was not found: ${executionAttemptId}`,
-      );
+      throw new AutomationExecutionRoutingError("AUTOMATION_STEP_EXECUTION_ATTEMPT_NOT_FOUND", `Step ExecutionAttempt was not found: ${executionAttemptId}`);
     }
     const snapshot = await this.store.snapshot();
-    const intent = snapshot.actionIntents.find(
-      (item) => item.actionType === "STEP_EXECUTION" && item.attemptId === executionAttempt.attemptId,
-    ) ?? null;
+    const intent = snapshot.actionIntents.find((item) => item.actionType === "STEP_EXECUTION" && item.attemptId === executionAttempt.attemptId) ?? null;
     if (!intent) {
       throw new AutomationExecutionRoutingError(
         "AUTOMATION_STEP_EXECUTION_INTENT_NOT_FOUND",
@@ -467,10 +414,7 @@ export class AutomationExecutionFacade {
   private async beginProjectPlanning(projectId: string): Promise<void> {
     const project = await this.store.get("automationProjects", projectId);
     if (project?.lifecycle !== "REQUIREMENTS_CONFIRMED") return;
-    await this.store.transitionProject(project.projectId, "START_PLANNING", {
-      actorType: "AUTOMATION",
-      actorRef: "automation-execution-facade",
-    });
+    await this.store.transitionProject(project.projectId, "START_PLANNING", { actorType: "AUTOMATION", actorRef: "automation-execution-facade" });
   }
 
   private async markProjectPlanReady(projectId: string, plannerStatus: string): Promise<void> {
