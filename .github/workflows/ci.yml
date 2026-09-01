@@ -11,6 +11,7 @@ on:
     branches:
       - codex/workbench-v1
       - workbench/next
+      - fix/v0.1-governance-feedback-verifier
   pull_request:
     branches:
       - codex/workbench-v1
