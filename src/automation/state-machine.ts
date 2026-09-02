@@ -171,6 +171,10 @@ export const stepRuntimeStateMachine = new StateMachine<StepRuntimeLifecycle, st
   { from: "REVIEWING", event: "FAIL", to: "TERMINAL" },
   { from: "READY", event: "CANCEL", to: "TERMINAL" },
   { from: "RUNNING", event: "CANCEL", to: "TERMINAL" },
+  // Recovery is an auditable transition in the existing StepRuntime machine.
+  // It is legal only after a definitively failed terminal attempt has been
+  // classified safe for a brand-new Attempt/ActionIntent.
+  { from: "TERMINAL", event: "RETRY", to: "READY" },
 ]);
 
 export const executionAttemptStateMachine = new StateMachine<ExecutionAttemptLifecycle, string>("ExecutionAttempt", [
