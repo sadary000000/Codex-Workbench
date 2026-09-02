@@ -51,6 +51,7 @@ import type {
   IsoTimestamp,
   PlanVersion,
   PlanVersionStatus,
+  PlannerVerificationClass,
   PolicyVersion,
   ReceiptStatus,
   RecoveryState,
@@ -78,6 +79,7 @@ import type {
 } from "./types.ts";
 import type { PlannerReadyPayload } from "./planner-contract.ts";
 import type { PlanCandidate } from "./planner-validator.ts";
+import { requireV01ExecutablePlanAdmission } from "./v01-plan-admission.ts";
 import {
   assertPolicyPin,
   pinProjectPolicy,
@@ -222,6 +224,9 @@ export interface StepSpecInput {
   goal?: string;
   riskClass: "LOW" | "MEDIUM" | "HIGH";
   sideEffectClass: SideEffectClass;
+  verificationClass?: PlannerVerificationClass;
+  verificationPlan?: string[];
+  expectedArtifacts?: string[];
   specStatus?: StepSpecStatus;
   supersedes?: string | null;
 }
@@ -627,7 +632,7 @@ export class AutomationTransaction {
       }
     }
     if (name === "stepSpecs") {
-      for (const key of ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "ordinal", "objective", "inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints", "goal", "riskClass", "sideEffectClass", "createdAt", "supersedes"]) {
+      for (const key of ["stepSpecId", "stageSpecId", "stepKey", "specVersion", "kind", "ordinal", "objective", "inputs", "expectedOutputs", "acceptanceCriteria", "assumptions", "constraints", "goal", "riskClass", "sideEffectClass", "verificationClass", "verificationPlan", "expectedArtifacts", "createdAt", "supersedes"]) {
         if (JSON.stringify(previous[key]) !== JSON.stringify((value as unknown as Record<string, unknown>)[key])) throw new AutomationStoreError("AUTOMATION_CONFLICT", "StepSpec immutable definition cannot be replaced.");
       }
     }
@@ -1020,6 +1025,7 @@ export class AutomationStore {
         return { planVersion: clone(existing), stageSpecs: clone(tx.table("stageSpecs").filter((item) => item.planVersionId === existing.planVersionId)), stepSpecs: clone(tx.table("stepSpecs").filter((step) => tx.table("stageSpecs").some((stage) => stage.planVersionId === existing.planVersionId && stage.stageSpecId === step.stageSpecId))) };
       }
       const c = input.candidate;
+      requireV01ExecutablePlanAdmission(c);
       const requirement = tx.require("requirementVersions", c.requirementVersionId);
       if (c.projectId !== project.projectId || requirement.projectId !== project.projectId || project.activeRequirementVersionId !== requirement.requirementVersionId || !["CONFIRMED", "ACTIVE"].includes(requirement.status) || c.requirementPayloadSha256 !== requirement.payloadSha256) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner candidate does not bind the exact active RequirementVersion.");
       if (tx.table("planVersions").some((item) => item.planVersionId === c.planVersionId)) throw new AutomationStoreError("AUTOMATION_CONFLICT", "Planner candidate PlanVersion identity already exists without matching promotion evidence.");
@@ -1033,7 +1039,7 @@ export class AutomationStore {
       tx.insert("planVersions", planVersion);
       const stageSpecs: StageSpec[] = c.stages.map((stage) => ({ stageSpecId: stage.stageSpecId, planVersionId: planVersion.planVersionId, stageKey: stage.stageKey, name: stage.name, objective: stage.objective, dependsOn: [...stage.dependsOn], acceptanceCriteria: [...stage.acceptanceCriteria], detailLevel: stage.detailLevel, assumptions: [...stage.assumptions], risks: [...stage.risks], specVersion: stage.specVersion, status: "ACTIVE", ordinal: stage.ordinal, goal: stage.objective, createdAt: timestamp, supersedes: stage.supersedes }));
       for (const stage of stageSpecs) tx.insert("stageSpecs", stage);
-      const stepSpecs: StepSpec[] = c.steps.map((step) => ({ stepSpecId: step.stepSpecId, stageSpecId: step.stageSpecId, stepKey: step.stepKey, specVersion: step.specVersion, kind: step.kind, ordinal: step.ordinal, objective: step.objective, inputs: [...step.inputs], expectedOutputs: [...step.expectedOutputs], acceptanceCriteria: [...step.acceptanceCriteria], assumptions: [...step.assumptions], constraints: [...step.constraints], goal: step.objective, riskClass: step.riskClass, sideEffectClass: step.sideEffectClass, specStatus: "ACTIVE", createdAt: timestamp, supersedes: step.supersedes }));
+      const stepSpecs: StepSpec[] = c.steps.map((step) => ({ stepSpecId: step.stepSpecId, stageSpecId: step.stageSpecId, stepKey: step.stepKey, specVersion: step.specVersion, kind: step.kind, ordinal: step.ordinal, objective: step.objective, inputs: [...step.inputs], expectedOutputs: [...step.expectedOutputs], acceptanceCriteria: [...step.acceptanceCriteria], assumptions: [...step.assumptions], constraints: [...step.constraints], goal: step.objective, riskClass: step.riskClass, sideEffectClass: step.sideEffectClass, verificationClass: step.verificationClass, verificationPlan: step.verificationPlan === undefined ? undefined : [...step.verificationPlan], expectedArtifacts: step.expectedArtifacts === undefined ? undefined : [...step.expectedArtifacts], specStatus: "ACTIVE", createdAt: timestamp, supersedes: step.supersedes }));
       for (const step of stepSpecs) { tx.insert("stepSpecs", step); tx.insert("stepRuntimes", { stepRuntimeId: `runtime:${step.stepSpecId}`, stepSpecId: step.stepSpecId, lifecycle: "NOT_STARTED", terminalResult: null, waitReason: "NONE", currentAttemptId: null, revision: 0, createdAt: timestamp, updatedAt: timestamp }); }
       tx.replace("automationProjects", { ...project, activePlanVersionId: planVersion.planVersionId, updatedAt: timestamp, revision: project.revision + 1 });
       tx.replace("actionIntents", { ...intent, state: "COMPLETED", plannerState: "PROMOTED", promotedPlanVersionId: planVersion.planVersionId });
@@ -1118,6 +1124,9 @@ export class AutomationStore {
         goal: objective,
         riskClass: input.riskClass,
         sideEffectClass: input.sideEffectClass,
+        verificationClass: input.verificationClass,
+        verificationPlan: input.verificationPlan === undefined ? undefined : boundedDefinitionList(input.verificationPlan, "step.verificationPlan"),
+        expectedArtifacts: input.expectedArtifacts === undefined ? undefined : boundedDefinitionList(input.expectedArtifacts, "step.expectedArtifacts"),
         specStatus: input.specStatus ?? "ACTIVE",
         createdAt: timestamp,
         supersedes,

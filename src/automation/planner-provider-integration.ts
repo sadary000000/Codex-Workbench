@@ -20,6 +20,7 @@ import {
   validatePlanCandidate,
   type PlanValidationResult,
 } from "./planner-validator.ts";
+import { v01ExecutablePlanAdmissionIssues } from "./v01-plan-admission.ts";
 import {
   type PlannerProviderOperation,
   type PlannerProviderRequest,
@@ -768,6 +769,13 @@ export class PlannerProviderIntegrationService {
         return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, validation, errorCode: "RETRY_CLASSIFICATION_PERSIST_FAILED", errorMessage: errorMessage(classificationError) });
       }
       return emptyResult({ status: "INVALID_PROVIDER_RESULT", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, validation, errorCode: "VALIDATOR_REJECTED", errorMessage: validation.errors.map((item) => `${item.code}:${item.path}`).join("; ").slice(0, 512) });
+    }
+    const admissionIssues = v01ExecutablePlanAdmissionIssues(validation.normalizedCandidate);
+    if (admissionIssues.length > 0) {
+      try { await this.store.markPlannerAttemptInvalidOutput(input.attempt.actionAttemptId); } catch (classificationError) {
+        return emptyResult({ status: "RECOVERY_REQUIRED", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, validation, errorCode: "ADMISSION_CLASSIFICATION_PERSIST_FAILED", errorMessage: errorMessage(classificationError) });
+      }
+      return emptyResult({ status: "INVALID_PROVIDER_RESULT", actionIntentId: input.intent.intentId, actionAttemptId: input.attempt.actionAttemptId, providerRequestRef: input.providerRequestRef, providerRequestExternalRef: input.requestExternal.externalRefId, providerObservationExternalRef: observationExternal.externalRefId, receiptId: receipt.receiptId, request: input.request, validation, errorCode: "V01_ADMISSION_REJECTED", errorMessage: admissionIssues.map((item) => `${item.code}:${item.path}`).join("; ").slice(0, 512) });
     }
     try {
       const validationStatus = validation.status === "VALID_WITH_ASSUMPTIONS" ? "VALID_WITH_ASSUMPTIONS" : "VALID";

@@ -118,7 +118,7 @@ test("K1-B accepts a complete bounded verifier descriptor but rejects partial or
   assert.equal(unknownClass.issues[0]?.code, "INVALID_ENUM");
 });
 
-test("Planner promotion persists the exact normalized verifier policy only in immutable PlanVersion truth", async () => {
+test("Planner promotion persists verifier policy into authoritative StepSpec and immutable PlanVersion provenance", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-verification-contract-"));
   const db = join(root, "automation.db");
   const store = new AutomationStore(db);
@@ -133,10 +133,10 @@ test("Planner promotion persists the exact normalized verifier policy only in im
       origin: { originType: "INITIAL", source: "SYSTEM", sourceRef: "test:verification-contract" },
       canonicalPayload: requirementPayload,
     });
+    const expectedResultSha256 = "d".repeat(64);
     const rawCandidate = candidate(requirement.payloadSha256, {
-      verificationClass: "FILE_EXISTS",
-      verificationPlan: ["dist/app.js"],
-      expectedArtifacts: ["dist/app.js"],
+      verificationClass: "HASH_MATCH",
+      verificationPlan: [`result-sha256:${expectedResultSha256}`],
     });
     const checked = validatePlanCandidate(rawCandidate, context(requirement.payloadSha256));
     assert.equal(checked.status, "VALID");
@@ -170,11 +170,12 @@ test("Planner promotion persists the exact normalized verifier policy only in im
     const snapshot = await store.snapshot();
     const persistedPlan = snapshot.planVersions.find((item) => item.planVersionId === promoted.planVersion.planVersionId)!;
     const persistedCandidate = JSON.parse(persistedPlan.canonicalPayload!) as PlanCandidate;
-    assert.equal(persistedCandidate.steps[0]!.verificationClass, "FILE_EXISTS");
-    assert.deepEqual(persistedCandidate.steps[0]!.verificationPlan, ["dist/app.js"]);
-    assert.deepEqual(persistedCandidate.steps[0]!.expectedArtifacts, ["dist/app.js"]);
-    assert.equal("verificationClass" in snapshot.stepSpecs[0]!, false, "StepSpec must not duplicate immutable verifier policy truth");
-    assert.equal("verificationPlan" in snapshot.stepSpecs[0]!, false, "StepSpec must not become a second verifier policy store");
+    assert.equal(persistedCandidate.steps[0]!.verificationClass, "HASH_MATCH");
+    assert.deepEqual(persistedCandidate.steps[0]!.verificationPlan, [`result-sha256:${expectedResultSha256}`]);
+    assert.equal(persistedCandidate.steps[0]!.expectedArtifacts, undefined);
+    assert.equal(snapshot.stepSpecs[0]!.verificationClass, "HASH_MATCH");
+    assert.deepEqual(snapshot.stepSpecs[0]!.verificationPlan, [`result-sha256:${expectedResultSha256}`]);
+    assert.equal(snapshot.stepSpecs[0]!.expectedArtifacts, undefined);
   } finally {
     await store.close();
   }
@@ -185,7 +186,10 @@ test("Planner promotion persists the exact normalized verifier policy only in im
     assert.equal(inspection.status, "valid", "structured PlanVersion with verifier policy must survive schema validation and restart");
     const restored = await reopened.get("planVersions", "verification-contract-plan");
     assert.ok(restored?.canonicalPayload);
-    assert.equal(JSON.parse(restored.canonicalPayload!).steps[0].verificationClass, "FILE_EXISTS");
+    assert.equal(JSON.parse(restored.canonicalPayload!).steps[0].verificationClass, "HASH_MATCH");
+    const restoredStep = await reopened.get("stepSpecs", "verification-contract-step");
+    assert.equal(restoredStep?.verificationClass, "HASH_MATCH");
+    assert.deepEqual(restoredStep?.verificationPlan, [`result-sha256:${"d".repeat(64)}`]);
   } finally {
     await reopened.close();
     await rm(root, { recursive: true, force: true });

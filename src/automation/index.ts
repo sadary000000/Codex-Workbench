@@ -31,6 +31,7 @@ export * from "./stable-identity.ts";
 export * from "./migration-contract.ts";
 export * from "./composition-root.ts";
 export * from "./planner-validator.ts";
+export * from "./v01-plan-admission.ts";
 export * from "./planner-provider-contract.ts";
 export * from "./planner-provider-integration.ts";
 export * from "./planner-provider-prompt.ts";

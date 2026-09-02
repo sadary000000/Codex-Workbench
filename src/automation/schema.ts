@@ -5,6 +5,7 @@ import {
   type AutomationProjectLifecycle,
   type BoundedMetadata,
   type ExternalRefKind,
+  type PlannerVerificationClass,
   type RequirementOriginSource,
   type RequirementOriginType,
   type ResourceClaimMode,
@@ -33,6 +34,7 @@ const PROJECT_LIFECYCLES = new Set<AutomationProjectLifecycle>([
 ]);
 const SIDE_EFFECT_CLASSES = new Set<SideEffectClass>(["PURE", "IDEMPOTENT", "RECONCILABLE", "NON_REPEATABLE"]);
 const STEP_KINDS = new Set<StepKind>(["PLANNER_STEP", "SYSTEM_STEP"]);
+const PLANNER_VERIFICATION_CLASSES = new Set<PlannerVerificationClass>(["BUILD", "TEST", "GIT_DIFF", "GIT_STATUS", "FILE_EXISTS", "HASH_MATCH", "JSON_SCHEMA", "CLI_SMOKE", "HARDWARE_SMOKE", "CUSTOM_APPROVED"]);
 const EXTERNAL_REF_KINDS = new Set<ExternalRefKind>([
   "NATIVE_THREAD",
   "NATIVE_TURN",
@@ -294,6 +296,19 @@ function validateVersions(document: Record<string, unknown>): void {
     }
     enumValue(item.riskClass, `stepSpecs[${index}].riskClass`, new Set(["LOW", "MEDIUM", "HIGH"]));
     enumValue(item.sideEffectClass, `stepSpecs[${index}].sideEffectClass`, new Set(["PURE", "IDEMPOTENT", "RECONCILABLE", "NON_REPEATABLE"]));
+    const hasVerifierDescriptor = item.verificationClass !== undefined || item.verificationPlan !== undefined || item.expectedArtifacts !== undefined;
+    if (hasVerifierDescriptor) {
+      if (item.verificationClass === undefined || item.verificationPlan === undefined) throw new AutomationSchemaError(`stepSpecs[${index}] verifier descriptor requires verificationClass and verificationPlan together.`);
+      enumValue(item.verificationClass, `stepSpecs[${index}].verificationClass`, PLANNER_VERIFICATION_CLASSES);
+      const verificationPlan = array(item.verificationPlan, `stepSpecs[${index}].verificationPlan`);
+      if (verificationPlan.length === 0 || verificationPlan.length > 64) throw new AutomationSchemaError(`stepSpecs[${index}].verificationPlan must contain 1 to 64 entries.`);
+      verificationPlan.forEach((entry, entryIndex) => string(entry, `stepSpecs[${index}].verificationPlan[${entryIndex}]`, MAX_GOAL));
+      if (item.expectedArtifacts !== undefined) {
+        const expectedArtifacts = array(item.expectedArtifacts, `stepSpecs[${index}].expectedArtifacts`);
+        if (expectedArtifacts.length > 64) throw new AutomationSchemaError(`stepSpecs[${index}].expectedArtifacts has too many entries.`);
+        expectedArtifacts.forEach((entry, entryIndex) => string(entry, `stepSpecs[${index}].expectedArtifacts[${entryIndex}]`, MAX_GOAL));
+      }
+    }
     enumValue(item.specStatus, `stepSpecs[${index}].specStatus`, new Set(["ACTIVE", "SUPERSEDED"]));
     timestamp(item.createdAt, `stepSpecs[${index}].createdAt`);
     optionalString(item.supersedes, `stepSpecs[${index}].supersedes`, 256);

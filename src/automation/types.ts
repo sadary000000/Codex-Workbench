@@ -378,6 +378,10 @@ export interface StepSpec {
   goal: string;
   riskClass: RiskClass;
   sideEffectClass: SideEffectClass;
+  /** Immutable verifier policy promoted from Planner output; legacy rows may omit these additive fields. */
+  verificationClass?: PlannerVerificationClass;
+  verificationPlan?: string[];
+  expectedArtifacts?: string[];
   specStatus: StepSpecStatus;
   createdAt: IsoTimestamp;
   supersedes: string | null;

@@ -97,14 +97,40 @@ function stringList(value: unknown): readonly string[] | null {
   return value as string[];
 }
 
-function readPolicy(plan: PlanVersion, step: StepSpec): PolicyRead {
-  if (!plan.canonicalPayload || !plan.payloadSha256) {
-    return { status: "MISSING", reason: "The active PlanVersion predates structured verifier policy truth." };
+function policyFromDescriptor(input: {
+  readonly verificationClass?: unknown;
+  readonly verificationPlan?: unknown;
+  readonly expectedArtifacts?: unknown;
+}, source: "StepSpec" | "PlanVersion"): PolicyRead {
+  const hasDescriptor = input.verificationClass !== undefined
+    || input.verificationPlan !== undefined
+    || input.expectedArtifacts !== undefined;
+  if (!hasDescriptor) return { status: "MISSING", reason: `${source} has no verifier descriptor.` };
+
+  const verificationClass = typeof input.verificationClass === "string"
+    && VERIFICATION_CLASSES.has(input.verificationClass as PlannerVerificationClass)
+    ? input.verificationClass as PlannerVerificationClass
+    : null;
+  const verificationPlan = stringList(input.verificationPlan);
+  const expectedArtifacts = input.expectedArtifacts === undefined ? [] : stringList(input.expectedArtifacts);
+  if (!verificationClass || !verificationPlan || verificationPlan.length === 0 || !expectedArtifacts) {
+    return { status: "INVALID", verificationClass, reason: `${source} verifier descriptor is incomplete or malformed.` };
   }
-  if (sha256Hex(plan.canonicalPayload) !== plan.payloadSha256) {
+  return { status: "OK", policy: { verificationClass, verificationPlan, expectedArtifacts } };
+}
+
+function readPolicy(plan: PlanVersion, step: StepSpec): PolicyRead {
+  const stepPolicy = policyFromDescriptor(step, "StepSpec");
+  if (stepPolicy.status !== "OK") return stepPolicy;
+
+  // StepSpec is the operational authority. Structured Plan truth, when
+  // present, is immutable provenance and must agree exactly; it is
+  // never used to fill a missing StepSpec policy.
+  if (!plan.canonicalPayload && !plan.payloadSha256) return stepPolicy;
+  if (!plan.canonicalPayload || !plan.payloadSha256 || sha256Hex(plan.canonicalPayload) !== plan.payloadSha256) {
     throw new StepVerificationError(
       "STEP_VERIFICATION_PLAN_TRUTH_INVALID",
-      "PlanVersion canonicalPayload hash does not match payloadSha256.",
+      "PlanVersion canonicalPayload integrity does not match payloadSha256.",
     );
   }
 
@@ -117,7 +143,6 @@ function readPolicy(plan: PlanVersion, step: StepSpec): PolicyRead {
       "PlanVersion canonicalPayload is not valid JSON.",
     );
   }
-
   const root = record(parsed);
   const steps = root && Array.isArray(root.steps) ? root.steps : null;
   if (!steps) {
@@ -126,37 +151,21 @@ function readPolicy(plan: PlanVersion, step: StepSpec): PolicyRead {
       "PlanVersion canonicalPayload has no Step candidates.",
     );
   }
-
   const entry = steps.map(record).find((item) => item?.stepSpecId === step.stepSpecId) ?? null;
   if (!entry || entry.stageSpecId !== step.stageSpecId || entry.stepKey !== step.stepKey || entry.specVersion !== step.specVersion) {
     throw new StepVerificationError(
       "STEP_VERIFICATION_PLAN_TRUTH_INVALID",
-      "Persisted verifier policy does not correlate to the exact StepSpec identity.",
+      "PlanVersion verifier provenance does not correlate to the exact StepSpec identity.",
     );
   }
-
-  const hasDescriptor = entry.verificationClass !== undefined
-    || entry.verificationPlan !== undefined
-    || entry.expectedArtifacts !== undefined;
-  if (!hasDescriptor) {
-    return { status: "MISSING", reason: "The exact Step has no persisted verifier descriptor." };
+  const planPolicy = policyFromDescriptor(entry, "PlanVersion");
+  if (planPolicy.status !== "OK" || policySha256(planPolicy.policy) !== policySha256(stepPolicy.policy)) {
+    throw new StepVerificationError(
+      "STEP_VERIFICATION_PLAN_TRUTH_INVALID",
+      "PlanVersion verifier provenance does not match the authoritative StepSpec policy.",
+    );
   }
-
-  const verificationClass = typeof entry.verificationClass === "string"
-    && VERIFICATION_CLASSES.has(entry.verificationClass as PlannerVerificationClass)
-    ? entry.verificationClass as PlannerVerificationClass
-    : null;
-  const verificationPlan = stringList(entry.verificationPlan);
-  const expectedArtifacts = entry.expectedArtifacts === undefined ? [] : stringList(entry.expectedArtifacts);
-  if (!verificationClass || !verificationPlan || verificationPlan.length === 0 || !expectedArtifacts) {
-    return {
-      status: "INVALID",
-      verificationClass,
-      reason: "The persisted verifier descriptor is incomplete or malformed.",
-    };
-  }
-
-  return { status: "OK", policy: { verificationClass, verificationPlan, expectedArtifacts } };
+  return stepPolicy;
 }
 
 function policySha256(policy: VerificationPolicy): string {

@@ -80,10 +80,11 @@ test("K1-A persists the complete Plan/Stage/Step domain and reopens it unchanged
       sideEffectClass: "PURE",
     });
 
+    const persistedStep = JSON.parse(JSON.stringify(step)) as typeof step;
     assert.equal((await value.store.getCurrentPlanVersion(project.projectId))?.planVersionId, plan.planVersionId);
     assert.equal((await value.store.get("planVersions", plan.planVersionId))?.requirementVersionId, requirement.requirementVersionId);
     assert.deepEqual(await value.store.get("stageSpecs", stage.stageSpecId), stage);
-    assert.deepEqual(await value.store.get("stepSpecs", step.stepSpecId), step);
+    assert.deepEqual(await value.store.get("stepSpecs", step.stepSpecId), persistedStep);
     assert.equal(step.ordinal, 1);
     const secondStep = await value.store.createStepSpec({
       stepSpecId: "step-k1-a:2",
@@ -106,7 +107,7 @@ test("K1-A persists the complete Plan/Stage/Step domain and reopens it unchanged
     await value.store.close();
     const reopened = new AutomationStore(join(value.root, "automation.db"));
     assert.deepEqual(await reopened.get("stageSpecs", stage.stageSpecId), stage);
-    assert.deepEqual(await reopened.get("stepSpecs", step.stepSpecId), step);
+    assert.deepEqual(await reopened.get("stepSpecs", step.stepSpecId), persistedStep);
     assert.equal((await reopened.getCurrentPlanVersion(project.projectId))?.planVersionId, plan.planVersionId);
     await reopened.close();
   } finally {
