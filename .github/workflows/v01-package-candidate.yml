@@ -16,9 +16,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     env:
-      PRODUCT_SNAPSHOT: 650168ba73aacf7226f86eeafcf73ea48eb4cc23
+      PRODUCT_SNAPSHOT: 83bfcd65c7913926cf65ef03b7cbca300ed47a31
     steps:
-      - name: Checkout exact Planner verifier hotfix product snapshot
+      - name: Checkout exact v0.1 admission authority product snapshot
         uses: actions/checkout@v4
         with:
           ref: ${{ env.PRODUCT_SNAPSHOT }}
@@ -265,7 +265,7 @@ jobs:
             'packagedPlannerRequestIdentityRecovery=PASS',
             'packagedPlannerQuotaSafeRecovery=PASS',
             'packagedAutomationUiContract=PASS',
-            'note=Planner verifier-list hotfix candidate; real Source and packaged E2E gates remain separately required.'
+            'note=v0.1 admission-authority candidate; real Source and packaged E2E gates remain separately required.'
           ) | Set-Content 'dist/package/CANDIDATE_PROVENANCE.txt' -Encoding utf8
           Get-Content 'dist/package/CANDIDATE_PROVENANCE.txt'
       - name: Upload Windows trial candidate
