@@ -2,21 +2,20 @@
 
 Current durable resume index:
 
-- durable checkpoint: `docs/workbench-map/V0_1_RELEASE_CANDIDATE_CHECKPOINT.md`
+- durable checkpoint: `docs/workbench-map/V0_1_RECOVERY_CLOSURE_CHECKPOINT.md`
 - scope contract: `docs/V0.1-MVP-SCOPE-FREEZE.md`
-- current release candidate: Draft PR #50, branch `release/v0.1-integration`
-- exact current product snapshot: `5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf`
-- frozen product snapshot branch: `test/v0.1-release-candidate-snapshot`
-- workspace-write integration: PASS, commit `5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf`
-- deterministic full gate: run `33365713285`, job `99405819227`, PASS
-- gate contents: `npm ci`, Typecheck, focused workspace-write regression, all repository tests, and Build
-- current Source Real E2E attempt: `ENVIRONMENT_BLOCKED`, run `33367529964`, job `99411188941`; `OPENAI_API_KEY` was empty and Codex was not logged in
-- Windows package static candidate: PASS, run `33367825291`, job `99412083132`, artifact `codex-workbench-v0.1-windows-5fdba2688cdf4b2c4488166ddf0ccb2577e17fcf`
-- immediate blocking gates: provide authenticated Codex credentials, rerun Source Real E2E, then Windows packaged Real E2E on the same snapshot, then final regression
-- scope-freeze origin: PR #49 `docs/v0.1-mvp-scope-freeze`
+- current workstream: **v0.1 Recovery Closure**
+- release integration base: `release/v0.1-integration` at `6897c29885bd9076f440ab20275f90b59348bde5`
+- recovery implementation branch: `fix/v01-recovery-closure`
+- exact current recovery product snapshot: `1e9d2ea15da176d3744c35bd833bfd4a29b56782`
+- recovery integration PR: Draft PR #55 -> `release/v0.1-integration`
+- CI carrier: Draft PR #56 -> `workbench/next`; CI carrier only, do not merge
+- branch delta from integration base: 12 commits ahead, 0 behind; 9 changed files; +1229 / -25
+- latest CI: run `33649460705` on exact snapshot `1e9d2ea15da176d3744c35bd833bfd4a29b56782`
+- CI truth: `npm ci` PASS, Typecheck PASS, Unit/integration tests FAIL, Build SKIPPED
+- release status: **NOT READY**; no Recovery-snapshot crash/restart E2E, Source Real E2E, Windows packaged E2E, or final regression PASS yet
+- immediate blocking task: fix the current unit/integration regression without weakening Recovery Closure invariants, then rerun deterministic CI on one exact snapshot
+- frozen continuation order after CI is green: crash/restart Recovery E2E -> authenticated Source Real E2E -> Windows packaged Real E2E -> final regression
+- previous release checkpoint: `docs/workbench-map/V0_1_RELEASE_CANDIDATE_CHECKPOINT.md` is historical context only, not the current resume point
 
-The ordinary PR workflow attached to the bot-created product commit reported `action_required` without starting jobs. This is not a test failure; the product tree was verified by the dedicated workspace-write runner before it created the commit.
-
-Historical Real Source and packaged E2E evidence applies only to older product commits and must not be used as the current release gate.
-
-Do not add v0.1 scope. Do not merge, delete branches, force-push, close PRs, or mark the Draft PR ready until the current Source Real E2E, Windows packaged E2E, and final regression all pass.
+Do not replan the project or expand v0.1 scope. Do not merge PR #55, mark it ready, or reuse older pre-Recovery E2E evidence as proof for the current Recovery product snapshot until the current validation sequence is green.
