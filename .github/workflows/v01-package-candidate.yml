@@ -16,7 +16,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     env:
-      PRODUCT_SNAPSHOT: 83bfcd65c7913926cf65ef03b7cbca300ed47a31
+      PRODUCT_SNAPSHOT: f886e7003c6ea91bb692e0e63c99f43c43e19496
     steps:
       - name: Checkout exact v0.1 admission authority product snapshot
         uses: actions/checkout@v4
