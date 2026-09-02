@@ -24,10 +24,10 @@
         "pullRequest": 17
       },
       "executionTarget": {
-        "branch": "feature/ab-native-parity-validation",
-        "commit": "7420b7c6ce93201641c7e79e33e05392602ebf01",
-        "pullRequest": 19,
-        "productBaselineCommit": "af911e71ca3370c143d504e2923b122f827cac6c"
+        "branch": "fix/windows-layout-contract-crlf",
+        "commit": "ea3c0ead934bacd90e17c40a0bcafef7eb6e1e86",
+        "pullRequest": 35,
+        "productBaselineCommit": "7c6603f9fd205dddc1ba62758000e0b85de36d00"
       },
       "protocol": {
         "source": "execution-target",
@@ -55,7 +55,7 @@
         "resultAppliesOnlyToExactExecutionTarget": true
       },
       "requiredBefore": "release-candidate",
-      "note": "The A/B harness is ready and pinned to an exact green execution target. Mainline may continue. Run this deferred test later using the protocol frozen from executionTarget.commit; a future validation of newer code must rebind a new exact execution target and must not reuse this target's eventual PASS."
+      "note": "Forward-validation target rebound after the published Windows repository-gate false failure. The exact target contains the existing A/B protocol plus a test-only CRLF normalization fix; productBaselineCommit records the unchanged PR #34 product tree. Run the deferred test from this exact target and do not reuse the prior failed run as a performance result."
     }
   ]
 }
