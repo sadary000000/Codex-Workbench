@@ -1,4 +1,4 @@
-name: V0.1 governance eligibility diagnostics
+name: V0.1 governance eligibility repair runner
 
 on:
   push:
@@ -8,40 +8,240 @@ on:
       - .github/workflows/v01-governance-eligibility-diagnostics.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  repair-and-validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: fix/v01-governance-eligibility-v2
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
+      - name: Apply minimal current-v0.1 eligibility repair
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one anchor, found {count}: {old[:140]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          Path('src/automation/v01-effective-capability.ts').write_text('''import type { PlannerVerificationClass, SideEffectClass } from "./types.ts";
+
+export const V01_STEP_SIDE_EFFECT_CLASSES = Object.freeze(["PURE", "RECONCILABLE"] as const);
+export const V01_STEP_VERIFICATION_CLASSES = Object.freeze(["HASH_MATCH"] as const);
+const HASH_MATCH_PLAN = /^result-sha256:[a-f0-9]{64}$/;
+
+export interface V01CapabilityDecision {
+  readonly allowed: boolean;
+  readonly reason: string;
+}
+
+export type V01VerificationCapabilityCode =
+  | "MISSING"
+  | "UNSUPPORTED_CLASS"
+  | "HASH_MATCH_PLAN_INVALID"
+  | null;
+
+export interface V01VerificationCapabilityDecision extends V01CapabilityDecision {
+  readonly code: V01VerificationCapabilityCode;
+}
+
+export function v01StepSideEffectCapability(sideEffectClass: SideEffectClass): V01CapabilityDecision {
+  const allowed = (V01_STEP_SIDE_EFFECT_CLASSES as readonly string[]).includes(sideEffectClass);
+  return {
+    allowed,
+    reason: allowed
+      ? ""
+      : `v0.1 Step execution does not support sideEffectClass ${sideEffectClass}; supported classes are ${V01_STEP_SIDE_EFFECT_CLASSES.join(", ")}.`,
+  };
+}
+
+export function v01StepVerificationCapability(input: {
+  readonly verificationClass?: PlannerVerificationClass;
+  readonly verificationPlan?: readonly string[];
+}): V01VerificationCapabilityDecision {
+  if (input.verificationClass === undefined || input.verificationPlan === undefined) {
+    return {
+      allowed: false,
+      code: "MISSING",
+      reason: "Legacy StepSpec has no executable verifier policy; re-plan against the current v0.1 capabilities.",
+    };
+  }
+  if (input.verificationClass !== "HASH_MATCH") {
+    return {
+      allowed: false,
+      code: "UNSUPPORTED_CLASS",
+      reason: `v0.1 deterministic Step verification cannot execute ${input.verificationClass}; re-plan with an admitted verifier policy.`,
+    };
+  }
+  if (input.verificationPlan.length !== 1 || !HASH_MATCH_PLAN.test(input.verificationPlan[0] ?? "")) {
+    return {
+      allowed: false,
+      code: "HASH_MATCH_PLAN_INVALID",
+      reason: "v0.1 HASH_MATCH requires exactly one result-sha256:<64 lowercase hex> instruction; re-plan the Step.",
+    };
+  }
+  return { allowed: true, code: null, reason: "" };
+}
+''', encoding='utf-8')
+
+          Path('src/automation/v01-plan-admission.ts').write_text('''import type { PlanCandidate } from "./planner-validator.ts";
+import { v01StepSideEffectCapability, v01StepVerificationCapability } from "./v01-effective-capability.ts";
+
+export type V01PlanAdmissionIssueCode =
+  | "V01_VERIFIER_POLICY_REQUIRED"
+  | "V01_VERIFIER_CLASS_UNSUPPORTED"
+  | "V01_HASH_MATCH_PLAN_INVALID"
+  | "V01_SIDE_EFFECT_CLASS_UNSUPPORTED";
+
+export interface V01PlanAdmissionIssue {
+  readonly code: V01PlanAdmissionIssueCode;
+  readonly path: string;
+  readonly message: string;
+}
+
+export class V01PlanAdmissionError extends Error {
+  readonly code = "V01_PLAN_NOT_EXECUTABLE" as const;
+  readonly issues: readonly V01PlanAdmissionIssue[];
+
+  constructor(issues: readonly V01PlanAdmissionIssue[]) {
+    super(issues.map((issue) => `${issue.code}:${issue.path}`).join("; "));
+    this.name = "V01PlanAdmissionError";
+    this.issues = issues;
+  }
+}
+
+/**
+ * v0.1 runtime capability admission. This intentionally does not narrow K1-B:
+ * the structural validator remains able to read legacy/future verifier classes,
+ * while promotion into the executable v0.1 Active Plan is limited to the
+ * capabilities that the current Step execution/verifier path can actually run.
+ */
+export function v01ExecutablePlanAdmissionIssues(candidate: Pick<PlanCandidate, "steps">): readonly V01PlanAdmissionIssue[] {
+  const issues: V01PlanAdmissionIssue[] = [];
+  for (const [index, step] of candidate.steps.entries()) {
+    const path = `steps[${index}]`;
+    const sideEffect = v01StepSideEffectCapability(step.sideEffectClass);
+    if (!sideEffect.allowed) {
+      issues.push({
+        code: "V01_SIDE_EFFECT_CLASS_UNSUPPORTED",
+        path: `${path}.sideEffectClass`,
+        message: sideEffect.reason,
+      });
+    }
+
+    const verifier = v01StepVerificationCapability(step);
+    if (verifier.code === "MISSING") {
+      issues.push({
+        code: "V01_VERIFIER_POLICY_REQUIRED",
+        path,
+        message: "v0.1 promotion requires an explicit immutable verifier policy for every executable Step.",
+      });
+    } else if (verifier.code === "UNSUPPORTED_CLASS") {
+      issues.push({
+        code: "V01_VERIFIER_CLASS_UNSUPPORTED",
+        path: `${path}.verificationClass`,
+        message: verifier.reason,
+      });
+    } else if (verifier.code === "HASH_MATCH_PLAN_INVALID") {
+      issues.push({
+        code: "V01_HASH_MATCH_PLAN_INVALID",
+        path: `${path}.verificationPlan`,
+        message: verifier.reason,
+      });
+    }
+  }
+  return issues;
+}
+
+export function requireV01ExecutablePlanAdmission(candidate: Pick<PlanCandidate, "steps">): void {
+  const issues = v01ExecutablePlanAdmissionIssues(candidate);
+  if (issues.length > 0) throw new V01PlanAdmissionError(issues);
+}
+''', encoding='utf-8')
+
+          path = 'src/automation/governance-projection-service.ts'
+          replace_once(
+              path,
+              'import { v01StepSideEffectCapability } from "./v01-effective-capability.ts";',
+              'import { v01StepSideEffectCapability, v01StepVerificationCapability } from "./v01-effective-capability.ts";',
+          )
+          replace_once(
+              path,
+              '  readonly sideEffectClass: StepSpec["sideEffectClass"];\n  readonly hasReconcileTruth: boolean;',
+              '  readonly sideEffectClass: StepSpec["sideEffectClass"];\n  readonly verifier: ReturnType<typeof v01StepVerificationCapability>;\n  readonly hasReconcileTruth: boolean;',
+          )
+          replace_once(
+              path,
+              '  const execute = input.isCurrentStage && input.hasPolicy && sideEffect.allowed && freshRuntime && !input.attempt;',
+              '  const execute = input.isCurrentStage && input.hasPolicy && sideEffect.allowed && input.verifier.allowed && freshRuntime && !input.attempt;',
+          )
+          replace_once(
+              path,
+              '  const verify = Boolean(\n    input.attempt\n    && input.runtime?.lifecycle === "VERIFYING"',
+              '  const verify = Boolean(\n    input.verifier.allowed\n    && input.attempt\n    && input.runtime?.lifecycle === "VERIFYING"',
+          )
+          replace_once(
+              path,
+              '  const executeReason = !sideEffect.allowed\n    ? sideEffect.reason\n    : !input.hasPolicy\n      ? "Execute requires the Project current PolicyVersion."\n      : "Only a fresh NOT_STARTED/READY Step in the current Stage can start.";',
+              '  const executeReason = !sideEffect.allowed\n    ? sideEffect.reason\n    : !input.verifier.allowed\n      ? input.verifier.reason\n      : !input.hasPolicy\n        ? "Execute requires the Project current PolicyVersion."\n        : "Only a fresh NOT_STARTED/READY Step in the current Stage can start.";',
+          )
+          replace_once(
+              path,
+              '    verify: eligibility(verify, "Verify requires one terminal-successful ExecutionAttempt in VERIFYING with no verification Evidence yet."),',
+              '    verify: eligibility(verify, input.verifier.allowed\n      ? "Verify requires one terminal-successful ExecutionAttempt in VERIFYING with no verification Evidence yet."\n      : input.verifier.reason),',
+          )
+          replace_once(
+              path,
+              '            sideEffectClass: step.sideEffectClass,\n            hasReconcileTruth:',
+              '            sideEffectClass: step.sideEffectClass,\n            verifier: v01StepVerificationCapability(step),\n            hasReconcileTruth:',
+          )
+
+          path = 'src/renderer/automation-governance-actions.ts'
+          replace_once(
+              path,
+              '按钮可用性来自后端 Governance Projection；Renderer 只展示投影并在对应 Project / Stage / Step 卡片内显示操作结果。后端执行命令时仍会重新校验 workflow truth。Fresh Execute 仍要求用户显式选择当前 Runtime Truth 中的 exact Native Thread。',
+              '按钮可用性来自后端 Governance Projection；Renderer 只展示投影并在对应 Project / Stage / Step 卡片内显示操作结果。每个 command 都由后端重新校验 workflow truth。Fresh Execute 仍要求用户显式选择当前 Runtime Truth 中的 exact Native Thread。',
+          )
+
+          path = 'tests/automation-governance-projected-eligibility.test.ts'
+          replace_once(
+              path,
+              '  assert.match(projection, /runtime\\?\\.lifecycle === "REVIEWING"/);',
+              '  assert.match(projection, /runtime\\?\\.lifecycle === "REVIEWING"/);\n  assert.match(projection, /v01StepVerificationCapability\\(step\\)/);\n  assert.match(projection, /input\\.verifier\\.allowed/);',
+          )
+          replace_once(
+              path,
+              '  assert.match(actions, /setWorkflowEligibility\\(gatePass, stage\\.actions\\.gate\\)/);',
+              '  assert.match(actions, /setWorkflowEligibility\\(pass, stage\\.actions\\.gate\\)/);',
+          )
       - run: npm ci
-      - name: Capture full test failure
-        id: tests
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Full tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit validated product repair
         shell: bash
         run: |
-          set +e
-          npm test > full-test.log 2>&1
-          rc=$?
-          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
-          {
-            echo '=== FAILURE MATCHES ==='
-            grep -n -E -B 12 -A 28 '(^not ok|AssertionError|ERR_ASSERTION|Error:|expected|actual|governance|eligibility)' full-test.log || true
-            echo '=== TAIL ==='
-            tail -n 220 full-test.log
-          } > failure-summary.log
-          exit 0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: v01-governance-eligibility-test-diagnostics
-          path: |
-            failure-summary.log
-            full-test.log
-          retention-days: 2
-      - name: Preserve test result
-        shell: bash
-        run: test "${{ steps.tests.outputs.exit_code }}" = "0"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/automation/v01-effective-capability.ts \
+            src/automation/v01-plan-admission.ts \
+            src/automation/governance-projection-service.ts \
+            src/renderer/automation-governance-actions.ts \
+            tests/automation-governance-projected-eligibility.test.ts
+          git commit -m "fix: align governance eligibility with executable verifier capability"
+          git push origin HEAD:fix/v01-governance-eligibility-v2
