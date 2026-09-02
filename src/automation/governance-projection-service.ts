@@ -1,6 +1,6 @@
 import { AutomationStore } from "./store.ts";
 import type { AutomationDocument, Evidence, PlanVersion, StageSpec, StepSpec } from "./types.ts";
-import { v01StepSideEffectCapability } from "./v01-effective-capability.ts";
+import { v01StepSideEffectCapability, v01StepVerificationCapability } from "./v01-effective-capability.ts";
 import type {
   AutomationGovernanceActionEligibility,
   AutomationGovernanceEvidenceView,
@@ -145,6 +145,7 @@ function stepActions(input: {
   readonly isCurrentStage: boolean;
   readonly hasPolicy: boolean;
   readonly sideEffectClass: StepSpec["sideEffectClass"];
+  readonly verifier: ReturnType<typeof v01StepVerificationCapability>;
   readonly hasReconcileTruth: boolean;
   readonly runtime: AutomationGovernanceStepView["runtime"];
   readonly attempt: AutomationGovernanceStepView["attempt"];
@@ -153,12 +154,13 @@ function stepActions(input: {
 }): AutomationGovernanceStepView["actions"] {
   const sideEffect = v01StepSideEffectCapability(input.sideEffectClass);
   const freshRuntime = input.runtime?.lifecycle === "NOT_STARTED" || input.runtime?.lifecycle === "READY";
-  const execute = input.isCurrentStage && input.hasPolicy && sideEffect.allowed && freshRuntime && !input.attempt;
+  const execute = input.isCurrentStage && input.hasPolicy && sideEffect.allowed && input.verifier.allowed && freshRuntime && !input.attempt;
   const recoverableAttempt = input.attempt
     && ["RUNNING", "UNCERTAIN", "RECOVERY_REQUIRED"].includes(input.attempt.lifecycle);
   const reconcile = Boolean(input.hasReconcileTruth && recoverableAttempt && input.runtime?.lifecycle === "RUNNING");
   const verify = Boolean(
-    input.attempt
+    input.verifier.allowed
+    && input.attempt
     && input.runtime?.lifecycle === "VERIFYING"
     && input.attempt.lifecycle === "COMPLETED"
     && input.attempt.terminalResult === "COMPLETED"
@@ -167,13 +169,17 @@ function stepActions(input: {
   const review = Boolean(input.runtime?.lifecycle === "REVIEWING" && input.verification?.state === "PASS" && !input.review);
   const executeReason = !sideEffect.allowed
     ? sideEffect.reason
-    : !input.hasPolicy
-      ? "Execute requires the Project current PolicyVersion."
-      : "Only a fresh NOT_STARTED/READY Step in the current Stage can start.";
+    : !input.verifier.allowed
+      ? input.verifier.reason
+      : !input.hasPolicy
+        ? "Execute requires the Project current PolicyVersion."
+        : "Only a fresh NOT_STARTED/READY Step in the current Stage can start.";
   return {
     execute: eligibility(execute, executeReason),
     reconcile: eligibility(reconcile, "Reconcile requires persisted STEP_EXECUTION intent/attempt truth while the Step is RUNNING and recoverable."),
-    verify: eligibility(verify, "Verify requires one terminal-successful ExecutionAttempt in VERIFYING with no verification Evidence yet."),
+    verify: eligibility(verify, input.verifier.allowed
+      ? "Verify requires one terminal-successful ExecutionAttempt in VERIFYING with no verification Evidence yet."
+      : input.verifier.reason),
     review: eligibility(review, "Review requires PASS verification Evidence in REVIEWING and no immutable review decision yet."),
   };
 }
@@ -310,6 +316,7 @@ export class AutomationGovernanceProjectionService {
             isCurrentStage: isCurrent,
             hasPolicy: Boolean(project.policyVersionId),
             sideEffectClass: step.sideEffectClass,
+            verifier: v01StepVerificationCapability(step),
             hasReconcileTruth: Boolean(runtime?.currentAttemptId && hasReconcileTruth(document, runtime.currentAttemptId)),
             runtime: runtimeView,
             attempt,

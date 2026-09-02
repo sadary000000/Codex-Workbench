@@ -505,7 +505,7 @@ function installAutomationGovernanceActions(): void {
     body.append(element(
       "div",
       "automation-governance-command-note",
-      "按钮可用性来自后端 Governance Projection；Renderer 只展示投影并在对应 Project / Stage / Step 卡片内显示操作结果。后端执行命令时仍会重新校验 workflow truth。Fresh Execute 仍要求用户显式选择当前 Runtime Truth 中的 exact Native Thread。",
+      "按钮可用性来自后端 Governance Projection；Renderer 只展示投影并在对应 Project / Stage / Step 卡片内显示操作结果。每个 command 都由后端重新校验 workflow truth。Fresh Execute 仍要求用户显式选择当前 Runtime Truth 中的 exact Native Thread。",
     ));
     body.append(renderTarget(view));
 
