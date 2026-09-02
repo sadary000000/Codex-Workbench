@@ -1,189 +1,134 @@
-# Workbench 当前交接 Checkpoint
+# Workbench 新对话交接入口
 
-新的会话如果只想最快恢复上下文，按以下顺序阅读：
+本文件是 **新 ChatGPT / Codex 会话进入 Workbench 项目的固定入口**。
 
-1. `README.md` — Map 的用途和证据规则；
-2. `ROADMAP.md` — 整个项目从起点到未来的完整节点；
-3. `ARCHITECTURE.md` — 当前冻结 ownership / truth boundary；
-4. `GIT_WORKFLOW.md` — branch / CI / merge discipline；
-5. R5/R6/R7 审计文件 — 当前迁移为何推进到 R7；
-6. 本文件 — 精确继续点。
+它不保存一整份容易过期的项目状态，也不取代 Git / CI / durable checkpoint。新会话应先用本文件找到当前权威入口，再从 `CURRENT_CHECKPOINT.md` 跟随到当前 durable checkpoint。
 
-## 1. Repository Checkpoint
+## 1. 新会话最短阅读顺序
 
-- Repository：`sadary000000/Codex-Workbench`
-- 正式稳定基线：`codex/workbench-v1`
-- 当前集成分支：`workbench/next`
-- 本轮“全项目 Map + 中文文档”重建前的 `workbench/next` code/docs checkpoint：`abd15c39e07aa736721c977c07de9b98eb6c6360`
-- 当前真实 branch head：**以远端 Git ref 为准**；本文件属于持续更新的 projection，不把自身 SHA 当 Git truth。
+只想最快恢复当前工作时，按以下顺序读取：
 
-## 2. 当前远端分支模型
+1. `docs/workbench-map/HANDOFF.md` — 本文件，确认恢复协议；
+2. `docs/workbench-map/CURRENT_CHECKPOINT.md` — 当前唯一 resume index；
+3. `CURRENT_CHECKPOINT.md` 指向的 durable checkpoint — 当前工作流、精确产品快照、CI truth、Immediate resume sequence；
+4. `docs/V0.1-MVP-SCOPE-FREEZE.md` — v0.1 冻结范围；
+5. `docs/workbench-map/ARCHITECTURE.md` — Native-first ownership / truth boundary；
+6. `docs/workbench-map/GIT_WORKFLOW.md` — branch / CI / merge discipline。
 
-清理后只保留：
+只有需要理解项目历史时，再读 `ROADMAP.md`、R5/R6/R7/R8 审计材料和历史 release checkpoint。**不要先从旧 Roadmap 阶段推断今天的继续点。**
 
-```text
-main
-codex/workbench-v1
-workbench/next
-feature/r7-map-entity-references
-```
+## 2. 当前工作主线
 
-说明：
+当前主线是：**v0.1 Recovery Closure**。
 
-- `main` 是遗留历史线，和当前 Workbench 主历史不是普通祖先/后继关系，暂不自动处理；
-- `codex/workbench-v1` 是稳定基线；
-- `workbench/next` 是当前集成线；
-- `feature/r7-map-entity-references` 是当前唯一短命 feature branch。
+当前 durable resume index 已指向：
 
-旧 `arch/**`、旧 `docs/workbench-handoff-map`、旧 `fix/**-exact-head-verify` 分支已经清理。
+`docs/workbench-map/V0_1_RECOVERY_CLOSURE_CHECKPOINT.md`
 
-## 3. PR 状态
+当前恢复实现线：
 
-- PR #2：Planner retry/source-integrity，已合入；
-- PR #3–#8：**已关闭、未 merge**；旧 branch 已删除；其 stacked commits 已经由 `workbench/next` 历史继承；
-- PR #9：**Draft / open / 未 merge**，R7 当前实现分支。
+- integration base: `release/v0.1-integration`
+- recovery branch: `fix/v01-recovery-closure`
+- Recovery integration PR: Draft PR #55 -> `release/v0.1-integration`
+- CI carrier: Draft PR #56 -> `workbench/next`，**只用于触发 CI，不得 merge**
 
-PR #9：
+Checkpoint 中记录的当前 Recovery 产品代码快照是：
 
-```text
-feature/r7-map-entity-references
-  -> workbench/next
-```
+`1e9d2ea15da176d3744c35bd833bfd4a29b56782`
 
-已验证 feature exact head：
+注意：文档更新会让 recovery branch HEAD 晚于这个产品代码快照。恢复工作时必须区分：
 
-```text
-efd27cc9cc8bd854be011cc87aba67453b4ffcce
-```
+- **branch HEAD**：可能包含后续 docs-only checkpoint/handoff commit；
+- **product snapshot**：真正接受当前验证结论的代码 SHA。
 
-该 tree 的标准 exact-head CI 已通过：typecheck、全量 tests、build PASS。
+任何新会话都必须重新查询 GitHub refs / PR / CI，不能把本文件缓存的 SHA 当实时 Git truth。
 
-> Stage/CI/Map 状态从来不自动授予 merge approval。
+## 3. 当前验证状态
 
-## 4. 已完成架构审计
+当前 checkpoint 记录的最新 Recovery 产品验证：
 
-### R5 — Native Runtime Dedup
+- `npm ci`: PASS
+- Typecheck: PASS
+- Unit/integration tests: **FAIL**
+- Build: SKIPPED
+- crash/restart Recovery E2E: 尚未完成
+- authenticated Source Real E2E: 尚未完成
+- Windows packaged Real E2E: 尚未完成
+- final regression: 尚未完成
 
-状态：`AUDIT_PASS`。
+因此当前状态是 **IN PROGRESS / NOT RELEASE READY**。
 
-结论：
+不要把旧的 pre-Recovery Windows artifact、旧 Source Real E2E 或历史 PASS 当作当前 Recovery snapshot 的发布证据。
 
-- Codex App Server 仍是 Thread/Turn/Item truth；
-- Workbench 没有 durable duplicate Native transcript；
-- 没有第二 agent/subagent/tool/sandbox runtime；
-- Map maintenance 是受限 Workbench 增量能力，执行仍是 Codex Native；
-- 没有证明需要 R5 production refactor。
+## 4. 当前 Recovery Closure 冻结边界
 
-证据：`R5_NATIVE_RUNTIME_AUDIT.md`。
+只处理已经确认的 v0.1 Recovery Closure：
 
-### R6 — Manual / Automation Decouple
+- 继续复用 `ActionIntent / ActionAttempt / ExecutionAttempt / RecoveryCandidate / SideEffectClass / Reconcile`；
+- Recovery 判断由后端唯一 Governance Projection 根据 durable truth 派生；
+- 安全 Retry 必须创建新的 Intent / Attempt，并保留旧历史；
+- provider / side effect 结果不确定时优先 Reconcile，禁止 blind resend；
+- deterministic catch-up 只能使用已经持久化的 durable truth / Evidence；
+- Repair/catch-up 不得伪造 Evidence；
+- Renderer 只消费 backend-projected Recovery eligibility；
+- 支持状态最终必须落入 Normal / Recoverable / Explicitly Blocked，禁止无出口死状态。
 
-状态：`AUDIT_PASS`。
+核心 invariant：
 
-结论：
+`NormalActions.anyAllowed || RecoveryActions.anyAllowed || Recovery.status === BLOCKED`
 
-- 普通 GUI startup 不初始化 Automation/WebGPT persistence；
-- Manual `native-runtime:*` 直接进入 Native Runtime；
-- Product `ProjectRecord` 属于 V1 persistence；
-- `AutomationProject` 属于独立 `automation.db`；
-- Requirement/Planner 需要真实 AutomationProject；
-- 没有自动 Product Project -> AutomationProject identity collapse。
+仍然明确不做：第二 Recovery runtime/state machine、force-skip validation、AI 猜 DB 修复、generic repair DSL、盲目重复 NON_REPEATABLE side effect、后台无限 retry、扩大 v0.1 Automation scope。
 
-证据：`R6_MANUAL_AUTOMATION_AUDIT.md`。
+## 5. 新会话 Resume Protocol
 
-## 5. 当前工程阶段：R7 Projection / Map
+新会话开始后直接执行，不重新规划整个项目：
 
-R7 当前已经证明 Map 的 ownership 基础是正确的：
+1. 从 GitHub 读取本文件和 `CURRENT_CHECKPOINT.md`；
+2. 按 `CURRENT_CHECKPOINT.md` 指针读取当前 durable checkpoint；
+3. 查询当前 recovery branch、integration branch、PR #55、CI carrier PR #56 和最新 workflow 状态，核对 exact SHA；
+4. 如果 Git truth 与 checkpoint 不同，先修正 checkpoint 认知，以 Git / CI 为准；
+5. 从 durable checkpoint 的 `Immediate resume sequence` 开始；
+6. 当前首要任务仍是最小修复现有 Unit/integration regression，不能通过削弱 Recovery invariant 让测试变绿；
+7. deterministic CI 全绿后，严格按既定顺序继续：
+   `crash/restart Recovery E2E -> authenticated Source Real E2E -> Windows packaged Real E2E -> final regression`；
+8. 所有门禁通过前，不 merge PR #55、不标 ready、不宣布 v0.1 可发布；
+9. 不重新规划 v0.1，不扩大已经冻结的 scope。
 
-- `MapStore` 是独立 JSON sidecar，只写 `MapDocument` projection；
-- Map mutation 没有写 Native/Automation/provider/resource truth 的接口；
-- `MapNode.sources` 使用 Native Thread/Turn/Item source trace，不复制 Native item body；
-- Project Map context read 有 project membership 和 request/turn/bytes 边界；
-- maintenance 使用真实 Codex Native Thread/Turn；
-- Map 不是第二 transcript / Agent Runtime。
-
-### PR #9 已实现的 R7 slice
-
-#### R7.1 — Typed Projection Reference
-
-Map node 可以保存 identity-only reference：
+## 6. 可直接复制到新对话的启动指令
 
 ```text
-domain / entityType / entityId
+继续 Codex Workbench 项目。
+
+请先从 GitHub 仓库 `sadary000000/Codex-Workbench` 的当前 Recovery 工作分支读取：
+
+1. `docs/workbench-map/HANDOFF.md`
+2. `docs/workbench-map/CURRENT_CHECKPOINT.md`
+3. `CURRENT_CHECKPOINT.md` 指向的 durable checkpoint
+
+然后核对当前 Git refs、PR #55 / PR #56、exact product snapshot 和最新 CI 状态，按 durable checkpoint 的 `Immediate resume sequence` 直接继续。
+
+当前主线是已经冻结的 v0.1 Recovery Closure。不要重新规划整个项目，不要扩大 v0.1 scope，不要新建第二套 Recovery/runtime/state machine，也不要用旧 E2E/Windows artifact 冒充当前 Recovery snapshot 的验证证据。
+
+如果 checkpoint 与当前 Git/CI 有差异，以当前 Git/CI truth 为准并先校正上下文。完成 deterministic CI 后，继续固定顺序：crash/restart Recovery E2E -> authenticated Source Real E2E -> Windows packaged Real E2E -> final regression。
 ```
 
-不复制外部 mutable state。
+## 7. 长期不变量
 
-#### R7.2 — Readonly UI Surface
+- Codex Native Thread / Turn / Item 仍是 Native execution truth；
+- Workbench 不复制第二 transcript / sandbox / Native tool executor / agent runtime；
+- RequirementVersion / PlanVersion / Automation governance 是 Workbench 增量 truth；
+- unknown external side effect -> reconcile before any repeat；
+- Evidence 必须来自真实执行/验证事实，不能为推进状态而生成；
+- Map / docs 是 projection 和 handoff surface，不是 Runtime Truth；
+- 文档与当前 Git / CI / source 冲突时，修正文档，不反向扭曲事实源。
 
-Renderer 只读显示 typed reference identity，不自动读取 Automation/GitHub/provider 状态，不伪造跳转。
+## 8. 维护规则
 
-#### R7.3 — Producer Safety Boundary
+以后不要再把 HANDOFF 写成某个阶段的大型状态副本。
 
-- legacy `add_node` 不再静默丢 typed reference；
-- maintenance prompt 明确禁止从名称、自然语言、URL 或同名 `projectId` 猜跨域 ID；
-- 只有 owner-confirmed stable identity 才能成为 reference。
+- `HANDOFF.md`：稳定的新会话入口、阅读顺序、继续规则、复制提示词；
+- `CURRENT_CHECKPOINT.md`：当前 resume index，只指向最新 durable checkpoint；
+- `V*_CHECKPOINT.md`：某次主线的 durable 状态、exact SHA、CI truth、Immediate resume sequence；
+- `ROADMAP.md`：长期历史路线，不充当实时 continue pointer。
 
-## 6. 已确认但尚未实现的 Product Association
-
-Product Project ↔ AutomationProject 语义已经冻结为：
-
-```text
-Product Project 1 : N AutomationProject
-```
-
-规则：
-
-1. **显式绑定**；
-2. 不通过名字、同名 `projectId`、上下文、Map 自动猜；
-3. unlink 只删除 association；
-4. **绝不因为 unlink 删除 AutomationProject**；
-5. association 由 **Workbench Product Shell** 拥有；
-6. association 只保存 identity，不复制 Automation lifecycle/status；
-7. Map 只投影 association，不成为 association truth；
-8. association 未实现前，不自动生成 RequirementVersion/PlanVersion 等跨域 Map producer。
-
-这是 `CURRENT_DECISION / WAITING_IMPLEMENTATION`。
-
-## 7. 下一步
-
-R7 不应继续为了“多接几个实体”而让模型猜 ID。
-
-安全继续顺序：
-
-1. review PR #9 最终 R7 typed-reference diff；
-2. 判断 R7 是否已经满足当前 projection foundation exit；
-3. association 如果要实现，先设计 Product-Shell-owned persistence + 显式 UI/command lifecycle，而不是把关系塞进 MapStore；
-4. association 不做时，也可以把 R7 以“foundation completed, producer gated”收口；
-5. 然后进入 **R8 — Migration / Dead Code** 只读审计；
-6. R8 只在 owner 证明后删除 legacy/duplicate path；
-7. R8 后执行 Direct Codex vs Workbench Native A/B。
-
-## 8. Resume Protocol
-
-新会话继续时：
-
-1. 查询 `workbench/next` 远端 exact SHA；
-2. 查询 PR #9 当前 head/state/CI，不能依赖本文档缓存状态；
-3. 先读 `ROADMAP.md`，不要只从 R7 开始而忘掉历史路线；
-4. 任何架构修改先对照 `ARCHITECTURE.md` 冻结不变量；
-5. Production change 前先证明具体 ownership violation 或 bounded product gap；
-6. feature branch 只用于 bounded slice；
-7. 不创建 exact-head validation helper branch；
-8. 新 branch/push 前声明 exact branch/base，并说明不会 merge；
-9. merge 与 branch deletion 分别需要明确授权；
-10. durable checkpoint 改变时同步 `ROADMAP.md` / `HANDOFF.md` / `roadmap.json`。
-
-## 9. 不可破坏的继续约束
-
-- Native Thread/Turn/Item 是 execution truth；
-- 不复制第二 transcript；
-- Manual V1 不依赖 Automation；
-- Product Project != AutomationProject；
-- Product Project ↔ AutomationProject = 1:N explicit association；unlink != delete；
-- RequirementVersion/PlanVersion 是 Workbench governance truth；
-- unknown provider side effect -> reconcile，禁止 blind resend；
-- Evidence/Audit 不拥有 resource lease；
-- Map 是 Projection / Governance increment，不是 duplicate native planning；
-- 不实现第二 sandbox / Native tool executor / subagent runtime；
-- 不让 optional Workbench feature 无必要污染普通 Native Codex context。
+当主线 durable checkpoint 改变时，优先更新 `CURRENT_CHECKPOINT.md`；只有恢复协议或主线性质发生变化时才需要改本文件。
