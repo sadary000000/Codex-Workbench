@@ -17,25 +17,27 @@ Still out of scope: a second recovery runtime/state machine, force-skip validati
 - release integration base: `release/v0.1-integration`
 - base commit: `6897c29885bd9076f440ab20275f90b59348bde5`
 - recovery implementation branch: `fix/v01-recovery-closure`
-- current recovery product snapshot: `1e9d2ea15da176d3744c35bd833bfd4a29b56782`
+- current recovery **product-code snapshot**: `1e9d2ea15da176d3744c35bd833bfd4a29b56782`
 - recovery integration PR: Draft PR #55 `Fix v0.1 recovery closure and crash catch-up`
 - PR #55 target: `release/v0.1-integration`
 - CI carrier: Draft PR #56 `CI only: validate v0.1 recovery closure`; do not merge this carrier into `workbench/next`
 
-Relative to `release/v0.1-integration`, `fix/v01-recovery-closure` is currently **12 commits ahead / 0 behind**, with **9 changed files, +1229 / -25**.
+At product snapshot `1e9d2ea15da176d3744c35bd833bfd4a29b56782`, the Recovery implementation is **12 commits ahead / 0 behind** relative to `release/v0.1-integration`, with **9 Recovery implementation/test files changed, +1229 / -25**.
+
+The live `fix/v01-recovery-closure` branch HEAD can be newer than that product-code snapshot because checkpoint/handoff documentation is intentionally committed afterward. New sessions must verify live refs and distinguish docs-only descendants from the exact code SHA that owns a validation result.
 
 ## 3. Implemented so far
 
-The branch currently contains the bounded Recovery Closure implementation work:
+The product snapshot contains the bounded Recovery Closure implementation work:
 
 1. **Recovery governance is derived from existing workflow truth.** Recovery remains an extension of Governance Projection rather than a second persisted recovery state machine.
 2. **Safe Retry creates new history instead of rewriting old history.** The recovery path creates a new attempt/intent lineage while preserving failed or uncertain prior attempts and respecting side-effect safety.
 3. **Reconcile remains first for uncertain provider outcomes.** Missing Native provider request identity can be recovered by correlation before reconcile; ambiguous or unsafe cases are not blindly re-dispatched.
 4. **Deterministic catch-up is local-only.** Runtime catch-up consumes already-persisted durable truth/evidence and does not call the model/provider or fabricate verification/review Evidence.
-5. **Governance/renderer recovery actions are exposed through the backend-projected contract.** The latest commit exposes Retry and Explicitly Blocked recovery handling in the governance UI rather than inventing eligibility in the renderer.
+5. **Governance/renderer recovery actions are exposed through the backend-projected contract.** The latest product-code commit exposes Retry and Explicitly Blocked recovery handling in the governance UI rather than inventing eligibility in the renderer.
 6. **Focused recovery coverage was added.** `tests/v01-step-recovery-closure.test.ts` covers the Recovery Closure path and crash/restart-oriented cases introduced by this work.
 
-Current Recovery Closure file delta versus the integration base:
+Recovery implementation/test file delta at the product snapshot:
 
 - `src/automation/deterministic-recovery-catch-up.ts` — added
 - `src/automation/recovering-governance-service.ts` — added
@@ -49,7 +51,7 @@ Current Recovery Closure file delta versus the integration base:
 
 ## 4. Current validation truth
 
-Latest CI validation is against the exact recovery snapshot `1e9d2ea15da176d3744c35bd833bfd4a29b56782` through CI carrier PR #56.
+Latest CI validation is against the exact recovery product snapshot `1e9d2ea15da176d3744c35bd833bfd4a29b56782` through CI carrier PR #56.
 
 GitHub Actions run: `33649460705`
 
@@ -59,7 +61,7 @@ GitHub Actions run: `33649460705`
 - Unit and integration tests: **FAIL**
 - Build: **SKIPPED because tests failed**
 
-Therefore this snapshot is **not** a releasable candidate and must not be represented as green.
+Therefore this product snapshot is **not** a releasable candidate and must not be represented as green.
 
 The current blocking category is the unit/integration regression after the latest recovery/UI exposure work. Until that suite is green, no claim should be made that Build, crash/restart E2E, Source Real E2E, Windows packaged E2E, or final regression has passed for this recovery snapshot.
 
@@ -83,11 +85,12 @@ When resuming work, do **not** replan the project or expand v0.1 scope.
 
 Resume exactly here:
 
-1. checkout/read `fix/v01-recovery-closure` at the current checkpoint head
-2. inspect CI run `33649460705`, especially the Unit and integration tests failure
-3. make the smallest bounded fix needed to restore the test contract without weakening Recovery Closure invariants
-4. rerun CI on the exact resulting commit
-5. once deterministic CI is green, continue the frozen order: crash/restart E2E -> Source Real E2E -> Windows packaged E2E -> final regression
+1. read `docs/workbench-map/HANDOFF.md` and `docs/workbench-map/CURRENT_CHECKPOINT.md`
+2. verify the live `fix/v01-recovery-closure` ref and separate docs-only commits from the exact product-code snapshot being validated
+3. inspect CI run `33649460705`, especially the Unit and integration tests failure on product snapshot `1e9d2ea15da176d3744c35bd833bfd4a29b56782`
+4. make the smallest bounded fix needed to restore the test contract without weakening Recovery Closure invariants
+5. rerun CI on the exact resulting product commit
+6. once deterministic CI is green, continue the frozen order: crash/restart E2E -> Source Real E2E -> Windows packaged E2E -> final regression
 
 The core invariant remains:
 
