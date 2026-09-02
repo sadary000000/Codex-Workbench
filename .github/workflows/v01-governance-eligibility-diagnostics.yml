@@ -1,0 +1,47 @@
+name: V0.1 governance eligibility diagnostics
+
+on:
+  push:
+    branches:
+      - fix/v01-governance-eligibility-v2
+    paths:
+      - .github/workflows/v01-governance-eligibility-diagnostics.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Capture full test failure
+        id: tests
+        shell: bash
+        run: |
+          set +e
+          npm test > full-test.log 2>&1
+          rc=$?
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          {
+            echo '=== FAILURE MATCHES ==='
+            grep -n -E -B 12 -A 28 '(^not ok|AssertionError|ERR_ASSERTION|Error:|expected|actual|governance|eligibility)' full-test.log || true
+            echo '=== TAIL ==='
+            tail -n 220 full-test.log
+          } > failure-summary.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v01-governance-eligibility-test-diagnostics
+          path: |
+            failure-summary.log
+            full-test.log
+          retention-days: 2
+      - name: Preserve test result
+        shell: bash
+        run: test "${{ steps.tests.outputs.exit_code }}" = "0"
