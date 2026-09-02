@@ -1,7 +1,5 @@
 import type { PlanCandidate } from "./planner-validator.ts";
-
-const HASH_MATCH_PLAN = /^result-sha256:[a-f0-9]{64}$/;
-const V01_EXECUTABLE_SIDE_EFFECT_CLASSES = new Set(["PURE", "RECONCILABLE"] as const);
+import { v01StepSideEffectCapability, v01StepVerificationCapability } from "./v01-effective-capability.ts";
 
 export type V01PlanAdmissionIssueCode =
   | "V01_VERIFIER_POLICY_REQUIRED"
@@ -36,37 +34,33 @@ export function v01ExecutablePlanAdmissionIssues(candidate: Pick<PlanCandidate, 
   const issues: V01PlanAdmissionIssue[] = [];
   for (const [index, step] of candidate.steps.entries()) {
     const path = `steps[${index}]`;
-    if (!V01_EXECUTABLE_SIDE_EFFECT_CLASSES.has(step.sideEffectClass as "PURE" | "RECONCILABLE")) {
+    const sideEffect = v01StepSideEffectCapability(step.sideEffectClass);
+    if (!sideEffect.allowed) {
       issues.push({
         code: "V01_SIDE_EFFECT_CLASS_UNSUPPORTED",
         path: `${path}.sideEffectClass`,
-        message: `v0.1 Step execution does not support sideEffectClass ${step.sideEffectClass}.`,
+        message: sideEffect.reason,
       });
     }
 
-    if (step.verificationClass === undefined || step.verificationPlan === undefined) {
+    const verifier = v01StepVerificationCapability(step);
+    if (verifier.code === "MISSING") {
       issues.push({
         code: "V01_VERIFIER_POLICY_REQUIRED",
         path,
         message: "v0.1 promotion requires an explicit immutable verifier policy for every executable Step.",
       });
-      continue;
-    }
-
-    if (step.verificationClass !== "HASH_MATCH") {
+    } else if (verifier.code === "UNSUPPORTED_CLASS") {
       issues.push({
         code: "V01_VERIFIER_CLASS_UNSUPPORTED",
         path: `${path}.verificationClass`,
-        message: `v0.1 deterministic Step verification cannot execute ${step.verificationClass}.`,
+        message: verifier.reason,
       });
-      continue;
-    }
-
-    if (step.verificationPlan.length !== 1 || !HASH_MATCH_PLAN.test(step.verificationPlan[0] ?? "")) {
+    } else if (verifier.code === "HASH_MATCH_PLAN_INVALID") {
       issues.push({
         code: "V01_HASH_MATCH_PLAN_INVALID",
         path: `${path}.verificationPlan`,
-        message: "v0.1 HASH_MATCH requires exactly one result-sha256:<64 lowercase hex> instruction.",
+        message: verifier.reason,
       });
     }
   }
