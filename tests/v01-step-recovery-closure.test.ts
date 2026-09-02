@@ -354,6 +354,7 @@ test("restart Governance deterministically catches up persisted verification and
     const attempt = await f.store.createExecutionAttempt({ projectId: PROJECT_ID, stageSpecId: STAGE_ID, stepSpecId: STEP_ID, attemptNumber: 1 });
     await f.store.transitionExecutionAttempt(attempt.attemptId, "START", { actorType: "TEST" });
     await f.store.transitionExecutionAttempt(attempt.attemptId, "COMPLETE", { actorType: "TEST" });
+    const planPayloadSha256 = f.plan.payloadSha256!;
     const policy = {
       expectedArtifacts: [] as string[],
       verificationClass: "HASH_MATCH" as const,
@@ -378,7 +379,7 @@ test("restart Governance deterministically catches up persisted verification and
         outcome: "PASS",
         verificationClass: "HASH_MATCH",
         policySha256,
-        planPayloadSha256: f.plan.payloadSha256,
+        planPayloadSha256,
         planVersionId: PLAN_ID,
         expectedHash: f.expectedHash,
         observedHash: f.expectedHash,
@@ -408,7 +409,7 @@ test("restart Governance deterministically catches up persisted verification and
     const reviewDescriptor = canonicalize({
       decision: "APPROVE",
       executionAttemptId: attempt.attemptId,
-      planPayloadSha256: f.plan.payloadSha256,
+      planPayloadSha256,
       planVersionId: PLAN_ID,
       projectId: PROJECT_ID,
       reviewerRef,
@@ -416,7 +417,7 @@ test("restart Governance deterministically catches up persisted verification and
       stepSpecId: STEP_ID,
       verificationEvidenceId,
     }, "stepReviewDecision");
-    const reviewEvidenceId = `step-review:${sha256Hex(`workbench-step-review-v1\u0000${attempt.attemptId}\u0000${verificationEvidenceId}\u0000${f.plan.payloadSha256}`)}`;
+    const reviewEvidenceId = `step-review:${sha256Hex(`workbench-step-review-v1\u0000${attempt.attemptId}\u0000${verificationEvidenceId}\u0000${planPayloadSha256}`)}`;
     await reopened.createEvidence({
       evidenceId: reviewEvidenceId,
       projectId: PROJECT_ID,
@@ -431,7 +432,7 @@ test("restart Governance deterministically catches up persisted verification and
       artifactRefId: null,
       metadata: {
         decision: "APPROVE",
-        planPayloadSha256: f.plan.payloadSha256,
+        planPayloadSha256,
         planVersionId: PLAN_ID,
         reviewProtocol: "workbench-step-review-v1",
         reviewerRef,
