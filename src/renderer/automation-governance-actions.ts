@@ -1,4 +1,5 @@
 import type {
+  AutomationGovernanceActionEligibility,
   AutomationGovernanceProjectView,
   AutomationGovernanceStageView,
   AutomationGovernanceStepView,
@@ -10,6 +11,9 @@ interface IpcEnvelope<T = unknown> {
   result?: T;
   error?: { code?: string; message?: string };
 }
+
+type NoticeKind = "idle" | "ok" | "error";
+interface LocalNotice { readonly message: string; readonly kind: NoticeKind }
 
 interface AutomationGovernanceActionApi {
   getState(): Promise<IpcEnvelope<RuntimeSnapshot>>;
@@ -36,6 +40,15 @@ interface AutomationGovernanceActionApi {
 const LAUNCHER_ID = "automation-governance-inspector-launcher";
 const ACTION_DIALOG_ID = "automation-governance-actions-dialog";
 const ACTION_STYLE_ID = "automation-governance-actions-style";
+const DOMAIN_ATTENTION_STATUSES = new Set([
+  "FAILED",
+  "POLICY_MISSING",
+  "POLICY_INVALID",
+  "UNSUPPORTED_CLASS",
+  "NOT_READY",
+  "RECOVERY_REQUIRED",
+  "REJECTED",
+]);
 
 function element(tag: keyof HTMLElementTagNameMap, className: string, text: string): HTMLElement {
   const node = document.createElement(tag);
@@ -60,21 +73,46 @@ function responseError(response: IpcEnvelope): string {
   return message || code || "Governance command failed.";
 }
 
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function responseNotice(label: string, response: IpcEnvelope): LocalNotice {
+  if (!response.ok) return { message: responseError(response), kind: "error" };
+  const result = objectRecord(response.result);
+  const operationStatus = typeof result?.status === "string" ? result.status : null;
+  const verificationClass = typeof result?.verificationClass === "string" ? result.verificationClass : null;
+  const reason = typeof result?.reason === "string" && result.reason.trim() ? result.reason.trim() : null;
+  const nextStageSpecId = typeof result?.nextStageSpecId === "string" ? result.nextStageSpecId : null;
+  const parts = [operationStatus, verificationClass ? `verification=${verificationClass}` : null, reason, nextStageSpecId ? `next=${nextStageSpecId}` : null]
+    .filter((item): item is string => Boolean(item));
+  const message = parts.length > 0 ? `${label}: ${parts.join(" · ")}` : `${label} 已完成；workflow truth 已刷新。`;
+  return {
+    message,
+    kind: operationStatus && DOMAIN_ATTENTION_STATUSES.has(operationStatus) ? "error" : "ok",
+  };
+}
+
 function installStyles(): void {
   if (document.getElementById(ACTION_STYLE_ID)) return;
   const style = document.createElement("style");
   style.id = ACTION_STYLE_ID;
   style.textContent = `
-    #${ACTION_DIALOG_ID} { width: min(860px, 92vw); max-height: 86vh; border: 1px solid var(--border); border-radius: 10px; background: #202020; color: #ececec; }
+    #${ACTION_DIALOG_ID} { width: min(900px, 94vw); max-height: 88vh; border: 1px solid var(--border); border-radius: 10px; background: #202020; color: #ececec; }
     #${ACTION_DIALOG_ID}::backdrop { background: #0009; }
     #${ACTION_DIALOG_ID} .automation-governance-actions-shell { display: grid; gap: 12px; min-width: 0; }
     #${ACTION_DIALOG_ID} .automation-governance-actions-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: sticky; top: 0; padding-bottom: 10px; border-bottom: 1px solid var(--border); background: #202020; z-index: 1; }
     #${ACTION_DIALOG_ID} .automation-governance-actions-header h2 { margin: 0; font-size: 16px; }
     #${ACTION_DIALOG_ID} .automation-governance-actions-body { display: grid; gap: 10px; min-width: 0; overflow: auto; }
     #${ACTION_DIALOG_ID} .automation-governance-command-note { padding: 9px; border: 1px solid #444; border-radius: 7px; color: #bcbcbc; font-size: 11px; line-height: 1.5; }
-    #${ACTION_DIALOG_ID} .automation-governance-command-status { min-height: 18px; font-size: 11px; }
+    #${ACTION_DIALOG_ID} .automation-governance-command-status { min-height: 18px; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
     #${ACTION_DIALOG_ID} .automation-governance-command-status.is-error { color: var(--danger); }
     #${ACTION_DIALOG_ID} .automation-governance-command-status.is-ok { color: #9de3c4; }
+    #${ACTION_DIALOG_ID} .automation-governance-local-status { padding: 7px 9px; border: 1px solid #3b3b3b; border-radius: 6px; background: #1b1b1b; }
+    #${ACTION_DIALOG_ID} .automation-governance-local-status.is-error { border-color: #74433f; }
+    #${ACTION_DIALOG_ID} .automation-governance-local-status.is-ok { border-color: #355b4a; }
     #${ACTION_DIALOG_ID} .automation-governance-action-project,
     #${ACTION_DIALOG_ID} .automation-governance-action-target,
     #${ACTION_DIALOG_ID} .automation-governance-action-stage,
@@ -85,18 +123,36 @@ function installStyles(): void {
     #${ACTION_DIALOG_ID} .automation-governance-action-title code { color: #9fbeb1; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #${ACTION_DIALOG_ID} .automation-governance-action-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
     #${ACTION_DIALOG_ID} .automation-governance-action-button[data-destructive="true"] { color: var(--danger); }
+    #${ACTION_DIALOG_ID} .automation-governance-action-button:disabled { opacity: .48; cursor: not-allowed; }
     #${ACTION_DIALOG_ID} .automation-governance-action-steps { display: grid; gap: 7px; }
     #${ACTION_DIALOG_ID} .automation-governance-action-missing { color: #777; font-size: 11px; }
-    #${ACTION_DIALOG_ID} .automation-governance-target-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 7px; }
-    #${ACTION_DIALOG_ID} .automation-governance-target-value { display: grid; gap: 3px; padding: 7px; border-radius: 6px; background: #1c1c1c; min-width: 0; }
-    #${ACTION_DIALOG_ID} .automation-governance-target-value span { color: #777; font-size: 10px; }
-    #${ACTION_DIALOG_ID} .automation-governance-target-value code { color: #c5d8d0; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #${ACTION_DIALOG_ID} .automation-governance-target-grid,
+    #${ACTION_DIALOG_ID} .automation-governance-state-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 7px; }
+    #${ACTION_DIALOG_ID} .automation-governance-target-value,
+    #${ACTION_DIALOG_ID} .automation-governance-state-value { display: grid; gap: 3px; padding: 7px; border-radius: 6px; background: #1c1c1c; min-width: 0; }
+    #${ACTION_DIALOG_ID} .automation-governance-target-value span,
+    #${ACTION_DIALOG_ID} .automation-governance-state-value span { color: #777; font-size: 10px; }
+    #${ACTION_DIALOG_ID} .automation-governance-target-value code,
+    #${ACTION_DIALOG_ID} .automation-governance-state-value code { color: #c5d8d0; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   `;
   document.head.append(style);
 }
 
 function requireConfirmation(message: string): boolean {
   return window.confirm(message);
+}
+
+function setWorkflowEligibility(button: HTMLButtonElement, eligibility: AutomationGovernanceActionEligibility): void {
+  button.dataset.workflowDisabled = eligibility.allowed ? "false" : "true";
+  button.disabled = !eligibility.allowed;
+  button.title = eligibility.allowed ? "" : eligibility.reason;
+}
+
+function stateValue(label: string, value: string): HTMLElement {
+  const node = document.createElement("div");
+  node.className = "automation-governance-state-value";
+  node.append(element("span", "", label), element("code", "", value));
+  return node;
 }
 
 function installAutomationGovernanceActions(): void {
@@ -134,12 +190,17 @@ function installAutomationGovernanceActions(): void {
   let runtimeTargetSnapshot: RuntimeSnapshot | null = null;
   let selectedExecutorTargetRef: string | null = null;
   let busy = false;
+  const localNotices = new Map<string, LocalNotice>();
 
   const setBusy = (value: boolean): void => {
     busy = value;
     for (const button of dialog.querySelectorAll<HTMLButtonElement>("button[data-governance-action]")) {
       if (button.dataset.governanceAction === "close") continue;
       if (value) {
+        button.disabled = true;
+        continue;
+      }
+      if (button.dataset.workflowDisabled === "true") {
         button.disabled = true;
         continue;
       }
@@ -156,11 +217,20 @@ function installAutomationGovernanceActions(): void {
     openActionsButton.disabled = value || !projectSelect.value.trim();
   };
 
-  const setStatus = (message: string, kind: "idle" | "ok" | "error" = "idle"): void => {
+  const setStatus = (message: string, kind: NoticeKind = "idle"): void => {
     status.textContent = message;
     status.className = "automation-governance-command-status";
     if (kind === "ok") status.classList.add("is-ok");
     if (kind === "error") status.classList.add("is-error");
+  };
+
+  const localStatus = (key: string): HTMLElement | null => {
+    const notice = localNotices.get(key);
+    if (!notice) return null;
+    const node = element("div", "automation-governance-command-status automation-governance-local-status", notice.message);
+    if (notice.kind === "ok") node.classList.add("is-ok");
+    if (notice.kind === "error") node.classList.add("is-error");
+    return node;
   };
 
   const readRuntimeTarget = async (): Promise<IpcEnvelope<RuntimeSnapshot>> => {
@@ -180,20 +250,22 @@ function installAutomationGovernanceActions(): void {
     renderActions(response.result);
   };
 
-  const run = async (label: string, command: () => Promise<IpcEnvelope>): Promise<void> => {
+  const run = async (label: string, noticeKey: string, command: () => Promise<IpcEnvelope>): Promise<void> => {
     if (busy) return;
     setBusy(true);
-    setStatus(`${label}…`);
+    const pending = { message: `${label}…`, kind: "idle" as const };
+    localNotices.set(noticeKey, pending);
+    setStatus(pending.message);
     try {
       const response = await command();
-      if (!response.ok) {
-        setStatus(responseError(response), "error");
-      } else {
-        setStatus(`${label} 已提交；已重新读取 workflow truth。`, "ok");
-      }
+      const notice = responseNotice(label, response);
+      localNotices.set(noticeKey, notice);
+      setStatus(notice.message, notice.kind);
       await refresh();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : `${label} failed.`, "error");
+      const notice: LocalNotice = { message: error instanceof Error ? error.message : `${label} failed.`, kind: "error" };
+      localNotices.set(noticeKey, notice);
+      setStatus(notice.message, notice.kind);
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -273,10 +345,12 @@ function installAutomationGovernanceActions(): void {
     return card;
   };
 
-  const executeFreshStep = (view: AutomationGovernanceProjectView, step: AutomationGovernanceStepView): void => {
+  const executeFreshStep = (view: AutomationGovernanceProjectView, step: AutomationGovernanceStepView, noticeKey: string): void => {
     const selectedTarget = selectedExecutorTargetRef;
     if (!selectedTarget) {
-      setStatus("请先显式选择一个当前已附着的 Native Thread 作为 Executor Target。", "error");
+      const notice: LocalNotice = { message: "请先显式选择一个当前已附着的 Native Thread 作为 Executor Target。", kind: "error" };
+      localNotices.set(noticeKey, notice);
+      setStatus(notice.message, notice.kind);
       return;
     }
     const workspaceWrite = step.sideEffectClass === "RECONCILABLE";
@@ -284,7 +358,7 @@ function installAutomationGovernanceActions(): void {
       ? `Execute Step ${step.stepKey} with workspace-write access limited to the current workspace on exact Native Thread ${selectedTarget}?`
       : `Execute Step ${step.stepKey} on exact Native Thread ${selectedTarget}?`;
     if (!requireConfirmation(confirmation)) return;
-    void run("Execute Step", async () => {
+    void run("Execute Step", noticeKey, async () => {
       const preflight = await readRuntimeTarget();
       if (!preflight.ok || !preflight.result) return preflight;
       if (preflight.result.nativeThreadId !== selectedTarget) {
@@ -307,13 +381,28 @@ function installAutomationGovernanceActions(): void {
     heading.className = "automation-governance-action-title";
     heading.append(element("strong", "", step.stepKey), element("code", "", step.stepSpecId));
     card.append(heading);
+    const noticeKey = step.attempt ? `step:${step.attempt.attemptId}` : `step:${step.stepSpecId}`;
+
+    const stateGrid = document.createElement("div");
+    stateGrid.className = "automation-governance-state-grid";
+    stateGrid.append(
+      stateValue("Runtime", step.runtime ? `${step.runtime.lifecycle}${step.runtime.terminalResult ? ` / ${step.runtime.terminalResult}` : ""}` : "—"),
+      stateValue("ExecutionAttempt", step.attempt ? `${step.attempt.lifecycle}${step.attempt.terminalResult ? ` / ${step.attempt.terminalResult}` : ""}` : "—"),
+      stateValue("Verification", step.verification?.state ?? "—"),
+      stateValue("Review", step.review?.state ?? "—"),
+    );
+    card.append(stateGrid);
+    if (step.runtime?.waitReason && step.runtime.waitReason !== "NONE") {
+      card.append(element("span", "automation-governance-action-missing", `wait: ${step.runtime.waitReason}`));
+    }
 
     if (!step.attempt) {
       const actions = document.createElement("div");
       actions.className = "automation-governance-action-buttons";
       const execute = actionButton("Execute on selected Native Thread", "step-execute");
       execute.dataset.requiresSelectedTarget = "true";
-      execute.addEventListener("click", () => executeFreshStep(view, step));
+      setWorkflowEligibility(execute, step.actions.execute);
+      execute.addEventListener("click", () => executeFreshStep(view, step, noticeKey));
       actions.append(execute);
       card.append(
         element(
@@ -323,6 +412,8 @@ function installAutomationGovernanceActions(): void {
         ),
         actions,
       );
+      const notice = localStatus(noticeKey);
+      if (notice) card.append(notice);
       return card;
     }
 
@@ -332,26 +423,32 @@ function installAutomationGovernanceActions(): void {
     actions.className = "automation-governance-action-buttons";
 
     const reconcile = actionButton("Reconcile", "step-reconcile");
-    reconcile.addEventListener("click", () => void run("Reconcile Step", () => api.reconcileAutomationStep(view.project.projectId, attemptId)));
+    setWorkflowEligibility(reconcile, step.actions.reconcile);
+    reconcile.addEventListener("click", () => void run("Reconcile Step", noticeKey, () => api.reconcileAutomationStep(view.project.projectId, attemptId)));
 
     const verify = actionButton("Verify", "step-verify");
-    verify.addEventListener("click", () => void run("Verify Step", () => api.verifyAutomationStep(view.project.projectId, attemptId)));
+    setWorkflowEligibility(verify, step.actions.verify);
+    verify.addEventListener("click", () => void run("Verify Step", noticeKey, () => api.verifyAutomationStep(view.project.projectId, attemptId)));
 
     const approve = actionButton("Review APPROVE", "step-review-approve");
+    setWorkflowEligibility(approve, step.actions.review);
     approve.addEventListener("click", () => {
       if (!requireConfirmation(`Approve Step ${step.stepKey}? Review evidence is immutable for this attempt.`)) return;
-      void run("Review APPROVE", () => api.reviewAutomationStep(view.project.projectId, attemptId, "APPROVE"));
+      void run("Review APPROVE", noticeKey, () => api.reviewAutomationStep(view.project.projectId, attemptId, "APPROVE"));
     });
 
     const reject = actionButton("Review REJECT", "step-review-reject");
     reject.dataset.destructive = "true";
+    setWorkflowEligibility(reject, step.actions.review);
     reject.addEventListener("click", () => {
-      if (!requireConfirmation(`Reject Step ${step.stepKey}? This records immutable REJECT review evidence.`)) return;
-      void run("Review REJECT", () => api.reviewAutomationStep(view.project.projectId, attemptId, "REJECT"));
+      if (!requireConfirmation(`Reject Step ${step.stepKey}? This records immutable REJECT review evidence and cannot be changed to APPROVE for this attempt.`)) return;
+      void run("Review REJECT", noticeKey, () => api.reviewAutomationStep(view.project.projectId, attemptId, "REJECT"));
     });
 
     actions.append(reconcile, verify, approve, reject);
     card.append(actions);
+    const notice = localStatus(noticeKey);
+    if (notice) card.append(notice);
     return card;
   };
 
@@ -362,24 +459,39 @@ function installAutomationGovernanceActions(): void {
     heading.className = "automation-governance-action-title";
     heading.append(element("strong", "", `${stage.ordinal + 1}. ${stage.name || stage.stageKey}`), element("code", "", stage.stageSpecId));
     card.append(heading);
+    const stageNoticeKey = `stage:${stage.stageSpecId}`;
+
+    const stateGrid = document.createElement("div");
+    stateGrid.className = "automation-governance-state-grid";
+    stateGrid.append(
+      stateValue("Current Stage", stage.isCurrent ? "YES" : "NO"),
+      stateValue("Stage Gate", stage.gate?.state ?? "—"),
+      stateValue("Approved Steps", `${stage.steps.filter((step) => step.review?.state === "APPROVE").length}/${stage.steps.length}`),
+    );
+    card.append(stateGrid);
 
     const actions = document.createElement("div");
     actions.className = "automation-governance-action-buttons";
     const pass = actionButton("Gate PASS", "stage-gate-pass");
+    setWorkflowEligibility(pass, stage.actions.gate);
     pass.addEventListener("click", () => {
-      if (!requireConfirmation(`Record PASS Stage Gate for ${stage.name || stage.stageKey}?`)) return;
-      void run("Stage Gate PASS", () => api.gateAutomationStage(view.project.projectId, stage.stageSpecId, "PASS"));
+      if (!requireConfirmation(`Record immutable PASS Stage Gate for ${stage.name || stage.stageKey}?`)) return;
+      void run("Stage Gate PASS", stageNoticeKey, () => api.gateAutomationStage(view.project.projectId, stage.stageSpecId, "PASS"));
     });
     const reject = actionButton("Gate REJECT", "stage-gate-reject");
     reject.dataset.destructive = "true";
+    setWorkflowEligibility(reject, stage.actions.gate);
     reject.addEventListener("click", () => {
-      if (!requireConfirmation(`Record REJECT Stage Gate for ${stage.name || stage.stageKey}?`)) return;
-      void run("Stage Gate REJECT", () => api.gateAutomationStage(view.project.projectId, stage.stageSpecId, "REJECT"));
+      if (!requireConfirmation(`Record immutable REJECT Stage Gate for ${stage.name || stage.stageKey}? This cannot later be changed to PASS for the same gate slot.`)) return;
+      void run("Stage Gate REJECT", stageNoticeKey, () => api.gateAutomationStage(view.project.projectId, stage.stageSpecId, "REJECT"));
     });
     const advance = actionButton("Advance Stage", "stage-advance");
-    advance.addEventListener("click", () => void run("Advance Stage", () => api.advanceAutomationStage(view.project.projectId, stage.stageSpecId)));
+    setWorkflowEligibility(advance, stage.actions.advance);
+    advance.addEventListener("click", () => void run("Advance Stage", stageNoticeKey, () => api.advanceAutomationStage(view.project.projectId, stage.stageSpecId)));
     actions.append(pass, reject, advance);
     card.append(actions);
+    const stageNotice = localStatus(stageNoticeKey);
+    if (stageNotice) card.append(stageNotice);
 
     const steps = document.createElement("div");
     steps.className = "automation-governance-action-steps";
@@ -393,7 +505,7 @@ function installAutomationGovernanceActions(): void {
     body.append(element(
       "div",
       "automation-governance-command-note",
-      "这些按钮只是已有 main-process governance commands 的薄入口。UI 不判断合法状态；每个 command 都由后端重新校验 workflow truth，并在成功或失败后重新读取 projection。Fresh Execute 还要求用户显式选择当前 Runtime Truth 中的 exact Native Thread。",
+      "按钮可用性来自后端 Governance Projection；Renderer 只展示投影并在对应 Project / Stage / Step 卡片内显示操作结果。每个 command 都由后端重新校验 workflow truth。Fresh Execute 仍要求用户显式选择当前 Runtime Truth 中的 exact Native Thread。",
     ));
     body.append(renderTarget(view));
 
@@ -402,15 +514,25 @@ function installAutomationGovernanceActions(): void {
     const projectHeading = document.createElement("div");
     projectHeading.className = "automation-governance-action-title";
     projectHeading.append(element("strong", "", view.project.name), element("code", "", view.project.projectId));
+    const projectState = document.createElement("div");
+    projectState.className = "automation-governance-state-grid";
+    projectState.append(
+      stateValue("Project", view.project.lifecycle),
+      stateValue("Current Stage", view.runtimePosition?.currentStageSpecId ?? "—"),
+      stateValue("Integrity", view.integrity.status),
+    );
     const projectActions = document.createElement("div");
     projectActions.className = "automation-governance-action-buttons";
     const complete = actionButton("Complete Project", "project-complete");
+    setWorkflowEligibility(complete, view.actions.complete);
     complete.addEventListener("click", () => {
       if (!requireConfirmation(`Project ${view.project.name} completion will be projected only if final governance truth passes. Continue?`)) return;
-      void run("Complete Project", () => api.completeAutomationProject(view.project.projectId));
+      void run("Complete Project", `project:${view.project.projectId}`, () => api.completeAutomationProject(view.project.projectId));
     });
     projectActions.append(complete);
-    project.append(projectHeading, projectActions);
+    project.append(projectHeading, projectState, projectActions);
+    const projectNotice = localStatus(`project:${view.project.projectId}`);
+    if (projectNotice) project.append(projectNotice);
     body.append(project);
 
     for (const stage of view.stages) body.append(renderStage(view, stage));
@@ -423,6 +545,7 @@ function installAutomationGovernanceActions(): void {
     if (currentProjectId !== projectId) {
       selectedExecutorTargetRef = null;
       runtimeTargetSnapshot = null;
+      localNotices.clear();
     }
     currentProjectId = projectId;
     body.replaceChildren(element("p", "automation-governance-command-note", "正在读取最新 Governance Projection 与 Runtime Truth…"));
