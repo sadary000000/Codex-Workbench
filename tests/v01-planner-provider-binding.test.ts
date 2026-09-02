@@ -81,6 +81,8 @@ function candidate(requirementVersionId: string, requirementPayloadSha256: strin
         constraints: ["Do not mutate workspace state."],
         riskClass: "LOW",
         sideEffectClass: "PURE",
+        verificationClass: "HASH_MATCH",
+        verificationPlan: [`result-sha256:${"e".repeat(64)}`],
         supersedes: null,
       },
     ],

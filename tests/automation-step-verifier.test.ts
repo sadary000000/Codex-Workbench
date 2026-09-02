@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { canonicalize } from "../src/automation/canonical.ts";
 import { policyVersionPayload } from "../src/automation/effective-policy.ts";
 import { InputRefRegistry } from "../src/automation/input-ref.ts";
 import { validatePlanCandidate, type PlanCandidate, type PlannerValidationContext } from "../src/automation/planner-validator.ts";
@@ -142,7 +143,7 @@ function validationContext(requirementPayloadSha256: string): PlannerValidationC
   };
 }
 
-async function fixture(stepOverrides: Record<string, unknown> = {}) {
+async function fixture(stepOverrides: Record<string, unknown> = {}, options: { directPlan?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "codex-workbench-step-verifier-"));
   const store = new ProviderWorkflowAutomationStore(join(root, "automation.db"));
   const inputRefs = new InputRefRegistry();
@@ -176,25 +177,18 @@ async function fixture(stepOverrides: Record<string, unknown> = {}) {
   const checked = validatePlanCandidate(candidate(requirement.payloadSha256, stepOverrides), validationContext(requirement.payloadSha256));
   assert.equal(checked.valid, true);
   assert.ok(checked.normalizedCandidate);
-  const plannerIntent = await store.createActionIntent({
-    projectId: PROJECT_ID,
-    actionType: "PLANNER_REQUEST",
-    targetRef: "test:planner",
-    sideEffectClass: "PURE",
-    idempotencyRef: `step-verifier-plan:${sha256(JSON.stringify(stepOverrides))}`,
-  });
-  await store.markActionIntentDispatchEligible(plannerIntent.intentId, { actorType: "TEST" });
-  const plannerAttempt = await store.createActionAttempt({ intentId: plannerIntent.intentId });
-  await store.persistValidatedPlannerCandidate({
-    projectId: PROJECT_ID,
-    candidate: checked.normalizedCandidate,
-    actionIntentId: plannerIntent.intentId,
-    actionAttemptId: plannerAttempt.actionAttemptId,
-    provider: "TEST_PLANNER",
-    providerRequestRef: "test-planner-request",
-    providerObservationRef: "test-planner-observation",
-    validationStatus: "VALID",
-  });
+  if (options.directPlan) {
+    await store.createPlanVersion({ planVersionId: PLAN_ID, projectId: PROJECT_ID, requirementVersionId: REQUIREMENT_ID, requirementPayloadSha256: requirement.payloadSha256, version: 1, status: "ACTIVE", canonicalPayload: canonicalize(checked.normalizedCandidate, "step-verifier-plan") });
+    const stageCandidate = checked.normalizedCandidate.stages[0]!;
+    await store.createStageSpec({ stageSpecId: STAGE_ID, planVersionId: PLAN_ID, stageKey: stageCandidate.stageKey, name: stageCandidate.name, objective: stageCandidate.objective, dependsOn: [...stageCandidate.dependsOn], acceptanceCriteria: [...stageCandidate.acceptanceCriteria], detailLevel: stageCandidate.detailLevel, assumptions: [...stageCandidate.assumptions], risks: [...stageCandidate.risks], specVersion: 1, status: "ACTIVE", ordinal: 0, supersedes: null });
+    const stepCandidate = checked.normalizedCandidate.steps[0]!;
+    await store.createStepSpec({ stepSpecId: STEP_ID, stageSpecId: STAGE_ID, stepKey: stepCandidate.stepKey, specVersion: stepCandidate.specVersion, kind: stepCandidate.kind, ordinal: stepCandidate.ordinal, objective: stepCandidate.objective, inputs: [...stepCandidate.inputs], expectedOutputs: [...stepCandidate.expectedOutputs], acceptanceCriteria: [...stepCandidate.acceptanceCriteria], assumptions: [...stepCandidate.assumptions], constraints: [...stepCandidate.constraints], riskClass: stepCandidate.riskClass, sideEffectClass: stepCandidate.sideEffectClass, verificationClass: stepCandidate.verificationClass, verificationPlan: stepCandidate.verificationPlan === undefined ? undefined : [...stepCandidate.verificationPlan], expectedArtifacts: stepCandidate.expectedArtifacts === undefined ? undefined : [...stepCandidate.expectedArtifacts], supersedes: null });
+  } else {
+    const plannerIntent = await store.createActionIntent({ projectId: PROJECT_ID, actionType: "PLANNER_REQUEST", targetRef: "test:planner", sideEffectClass: "PURE", idempotencyRef: `step-verifier-plan:${sha256(JSON.stringify(stepOverrides))}` });
+    await store.markActionIntentDispatchEligible(plannerIntent.intentId, { actorType: "TEST" });
+    const plannerAttempt = await store.createActionAttempt({ intentId: plannerIntent.intentId });
+    await store.persistValidatedPlannerCandidate({ projectId: PROJECT_ID, candidate: checked.normalizedCandidate, actionIntentId: plannerIntent.intentId, actionAttemptId: plannerAttempt.actionAttemptId, provider: "TEST_PLANNER", providerRequestRef: "test-planner-request", providerObservationRef: "test-planner-observation", validationStatus: "VALID" });
+  }
   const composition = createAutomationProviderComposition({ store, inputRefs, nativeRuntime: runtime });
   const facade = new AutomationExecutionFacade({ store, services: composition.services });
   const providerTargetRef = createNativeThreadTargetRef(NATIVE_THREAD_ID);
@@ -219,6 +213,12 @@ test("HASH_MATCH verifies persisted receipt truth, writes bounded Evidence, and 
   const expected = sha256(RAW_RESPONSE);
   const f = await fixture({ verificationClass: "HASH_MATCH", verificationPlan: [`result-sha256:${expected}`] });
   try {
+    const promoted = await f.store.snapshot();
+    const promotedStep = promoted.stepSpecs.find((item) => item.stepSpecId === STEP_ID)!;
+    assert.equal(promotedStep.verificationClass, "HASH_MATCH");
+    assert.deepEqual(promotedStep.verificationPlan, [`result-sha256:${expected}`]);
+    assert.deepEqual(promotedStep.expectedArtifacts, undefined);
+
     const execution = await execute(f);
     assert.equal(execution.status, "VERIFYING");
     assert.equal(f.runtime.starts, 1);
@@ -280,7 +280,7 @@ test("missing or unsupported verifier policy fails closed and leaves the Step in
     [{}, "POLICY_MISSING"],
     [{ verificationClass: "FILE_EXISTS", verificationPlan: ["dist/app.js"], expectedArtifacts: ["dist/app.js"] }, "UNSUPPORTED_CLASS"],
   ] as const) {
-    const f = await fixture({ ...overrides });
+    const f = await fixture({ ...overrides }, { directPlan: true });
     try {
       const execution = await execute(f);
       const verified = await f.facade.verifyStep({ projectId: PROJECT_ID, executionAttemptId: execution.executionAttemptId });
@@ -296,7 +296,7 @@ test("missing or unsupported verifier policy fails closed and leaves the Step in
 });
 
 test("malformed HASH_MATCH policy is not interpreted as executable text and remains VERIFYING", async () => {
-  const f = await fixture({ verificationClass: "HASH_MATCH", verificationPlan: ["npm test && compare output"] });
+  const f = await fixture({ verificationClass: "HASH_MATCH", verificationPlan: ["npm test && compare output"] }, { directPlan: true });
   try {
     const execution = await execute(f);
     const verified = await f.facade.verifyStep({ projectId: PROJECT_ID, executionAttemptId: execution.executionAttemptId });

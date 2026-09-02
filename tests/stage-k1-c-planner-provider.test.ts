@@ -77,6 +77,8 @@ function candidate(overrides: Partial<PlanCandidate> = {}): PlanCandidate {
         constraints: ["Do not execute a step during planning."],
         riskClass: "LOW",
         sideEffectClass: "PURE",
+        verificationClass: "HASH_MATCH",
+        verificationPlan: [`result-sha256:${"c".repeat(64)}`],
         supersedes: null,
       },
     ],
