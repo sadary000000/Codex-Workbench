@@ -1,11 +1,9 @@
 # TODO-RC-001
 
-Status: `READY`
+Status: `BLOCKED`
+Assignee: `待接取`
 Priority: `P0`
-Claim: `UNCLAIMED`
-Claim ID: `null`
-Claimed at: `null`
-Claim base SHA: `null`
+Latest report: `none`
 
 ## Goal
 
@@ -14,11 +12,11 @@ Identify the exact reproducible Unit/integration regression on Recovery product 
 ## Repository context
 
 - repository: `sadary000000/Codex-Workbench`
-- active branch/ref: verify live `fix/v01-recovery-closure`; latest Project Lead observed branch HEAD was docs-only `d9f68e17e814733e3528eb0852a1f0ba676cf608`
+- active branch/ref: verify live `fix/v01-recovery-closure`
 - integration/base: `release/v0.1-integration` at `6897c29885bd9076f440ab20275f90b59348bde5`
 - product snapshot: `1e9d2ea15da176d3744c35bd833bfd4a29b56782`
-- product PR: Draft PR #55, open and not merged at latest Project Lead review
-- known CI: run `33649460705`; attempt 1 job `100312467323` FAIL; attempt 2 job `100525705853` FAIL; both fail at Unit/integration tests after Typecheck PASS, with Build skipped
+- product PR: Draft PR #55, open and not merged at last Project Lead review
+- known CI: run `33649460705`; jobs `100312467323` and `100525705853` both failed at Unit/integration after Typecheck PASS; Build skipped
 
 ## Dependencies
 
@@ -26,116 +24,97 @@ Identify the exact reproducible Unit/integration regression on Recovery product 
 
 ## Allowed scope
 
-- Read GitHub Actions job/check-run/log evidence for run `33649460705`, prioritizing latest job `100525705853`.
-- If GitHub log surfaces do not expose the assertion, reproduce the exact unit/integration suite from a clean checkout of product snapshot `1e9d2ea15da176d3744c35bd833bfd4a29b56782` in an environment that can show raw test output.
-- Inspect only the source/tests needed to explain the observed failure and identify the narrow correction target.
-- Compare the evidence against the existing Recovery invariants and the previously noted stale-StepRuntime-`terminalResult` debugging lead, but treat that lead as unverified until the failure evidence proves or rejects it.
+- Read GitHub Actions job/check/log evidence for run `33649460705`, prioritizing job `100525705853`.
+- If that log surface cannot expose the assertion, reproduce the exact unit/integration suite from product SHA `1e9d2ea15da176d3744c35bd833bfd4a29b56782` in an environment that can show raw test output.
+- Inspect only source/tests needed to explain the observed failure and identify the narrow correction target.
+- Compare evidence against Recovery invariants and the previously noted stale-StepRuntime-`terminalResult` lead, but keep that lead unverified until direct failure evidence confirms or rejects it.
 
 ## Forbidden scope
 
 - no product/source/test/workflow modifications
 - no speculative fix or refactor
-- no weakening Recovery invariants or validation expectations
+- no weakening Recovery invariants or validation
 - no unrelated cleanup or scope expansion
 - no merge / Draft->Ready / branch deletion
 - no helper/backup/CI branch
-- no reuse of historical pre-Recovery E2E evidence as proof for this snapshot
-- no claim that stale `terminalResult` is the root cause without direct evidence
+- no use of old pre-Recovery evidence as proof for this snapshot
 
 ## Write ownership
 
 - product/source/workflow files: `READ_ONLY`
-- coordination writes allowed only to:
-  - `docs/workbench-coordination/todolist/TODO-RC-001.md` for claim/status metadata and preserved attempt history
-  - `docs/workbench-coordination/reports/REPORT-RC-001.md` for the durable investigation report; preserve prior-attempt evidence when updating it
+- coordination writes allowed only to this Todo and `docs/workbench-coordination/reports/REPORT-RC-001.md`
 
 ## Execution requirements
 
-- required capabilities: **at least one evidence route must be proven usable before claim**:
-  1. raw GitHub Actions job-log access that returns non-empty stdout/stderr for job `100525705853` (or the same run/attempt) and can expose Node test-runner failure text; or
-  2. exact repository checkout of SHA `1e9d2ea15da176d3744c35bd833bfd4a29b56782` plus Node 22 / npm, dependency-install access (or an equivalent clean dependency state), and the ability to run `npm test` and capture raw output.
-- pre-claim checks:
-  - Route 1: perform a safe read-only log probe and confirm the returned content includes actual command/test stdout rather than only job metadata or an empty payload; or
-  - Route 2: prove the exact SHA can be checked out/read locally, confirm Node 22-compatible execution, and prove dependency/test execution is realistically available before claiming.
-- if neither pre-claim check succeeds, **do not claim this Todo**; skip it and return `NO_EXECUTABLE_READY_TASK` if no other eligible Todo exists.
+At least one evidence route must be actually usable before a Worker claims this BLOCKED task:
+
+1. raw GitHub Actions log access that returns non-empty test stdout/stderr for job `100525705853` or equivalent; or
+2. exact repository checkout of SHA `1e9d2ea15da176d3744c35bd833bfd4a29b56782` plus Node/npm/dependency access and the ability to run `npm test` with raw output.
+
+A Worker that cannot satisfy either route must leave `Assignee: 待接取` and skip the task.
 
 ## Fallback routes
 
-1. Obtain the raw failing assertion from existing GitHub Actions run `33649460705`, prioritizing rerun job `100525705853`.
-2. If the raw log route is unavailable but Route 2 capability was preflighted successfully, reproduce the exact suite on SHA `1e9d2ea15da176d3744c35bd833bfd4a29b56782` with the repository's CI-equivalent command path (`npm ci`, `npm run typecheck` as context, then `npm test`) and capture the failing test/assertion output.
-3. Do not invent a third speculative route. If every preflighted in-scope route unexpectedly becomes unavailable after claim, record the exact failure and follow the Worker blocker protocol.
+1. Obtain the raw failing assertion from existing GitHub Actions evidence.
+2. Otherwise reproduce `npm test` from the exact product SHA in a usable repository workspace.
+3. Do not invent a speculative third route.
 
 ## Acceptance criteria
 
-- Identify every failing test needed to explain the Unit/integration job failure, with exact test name/file where available.
+- Identify the failing test/file needed to explain the Unit/integration job failure.
 - Record the failing assertion or equivalent failure condition, including expected and actual values/messages.
-- Record the exact evidence source: GitHub run/job/log/check annotation or exact local command on SHA `1e9d2ea...`.
-- Provide an evidence-backed explanation of the failing lifecycle/path and the smallest likely correction area; distinguish proven facts from hypotheses.
-- Explicitly classify the stale-StepRuntime-`terminalResult` lead as `CONFIRMED`, `REJECTED`, or `UNRELATED/INSUFFICIENT_EVIDENCE`, with rationale.
+- Record the exact evidence source.
+- Provide an evidence-backed explanation of the failing lifecycle/path and smallest likely correction area.
+- Classify the stale-StepRuntime-`terminalResult` lead as `CONFIRMED`, `REJECTED`, or `UNRELATED/INSUFFICIENT_EVIDENCE` with rationale.
 - Make zero product/source/test/workflow changes.
 
 ## Required validation
 
-- Verify the reproduced/read source snapshot is exactly `1e9d2ea15da176d3744c35bd833bfd4a29b56782` before drawing conclusions.
-- Preserve the exact test command or GitHub job/run identifiers used to obtain the failure.
-- Capture enough raw failure detail in the report for another Worker to implement a bounded correction without guessing.
-- Verify there is no product-code diff produced by this task.
+- Verify the evidence/source snapshot is exactly `1e9d2ea15da176d3744c35bd833bfd4a29b56782`.
+- Preserve exact commands or GitHub run/job identifiers used.
+- Capture enough raw failure detail for a later product-fix Worker to act without guessing.
+- Verify no product-code diff is produced by this task.
 
 ## Required durable output
 
-- no product commit is expected or authorized
-- update `docs/workbench-coordination/reports/REPORT-RC-001.md`; preserve the first blocked attempt and add the new attempt/result rather than erasing prior evidence
-- update this Todo to `WAITING_REVIEW` only after the report durably satisfies the acceptance criteria
-- if a verified blocker still prevents completion after all safe available in-scope routes are exhausted, record the structured blocker data required by Worker protocol and set/leave the task `BLOCKED`
+- no product commit expected or authorized
+- `docs/workbench-coordination/reports/REPORT-RC-001.md`
+- Worker that completes the investigation must set `Latest report` to that path, keep its Assignee name, and leave `Status: TODO` for Project Lead review
+- only the Project Lead may set `Status: DONE`
+
+## Blocker
+
+The previous ChatGPT Worker environment could not obtain the raw failing assertion from the available GitHub log surface and could not perform exact-SHA local reproduction because repository retrieval failed in that environment.
+
+## Unblock condition
+
+A Worker environment can actually execute either:
+
+- non-empty raw Actions stdout/stderr retrieval for the failing job; or
+- exact-SHA checkout + dependency/test execution for `npm test`.
+
+This read-only investigation is safe to retry in another capable Worker environment.
 
 ## Attempt history
 
-- Attempt 1 — Claim ID `RC-001-20260903T185700+0800`, Claim base SHA `4886b3068013606f440268f6dd5ee14dc4659533`, report `docs/workbench-coordination/reports/REPORT-RC-001.md`.
-  - Worker result: `BLOCKED`.
-  - Project Lead classification: `ENVIRONMENT_MISMATCH`.
-  - Route attempted: available GitHub job/check/log surfaces confirmed the Unit/integration failure but did not expose raw failing assertion / expected / actual values; Project Lead re-probe of run logs returned an empty content payload.
-  - Route attempted: exact-SHA local reproduction could not be established in that Worker environment because repository retrieval was blocked by its GitHub network/DNS environment.
-  - Evidence preserved: product SHA `1e9d2ea15da176d3744c35bd833bfd4a29b56782`; CI run `33649460705`; jobs `100312467323` and `100525705853`; Recovery test surface inspection; no product/source/test/workflow changes.
-  - Stale `StepRuntime.terminalResult` lead: `UNRELATED/INSUFFICIENT_EVIDENCE` until raw failure evidence proves otherwise.
-  - Same-goal retry is side-effect safe because this Todo is read-only investigation and authorizes no product or external side-effect execution.
-
-## Blocker / retry policy
-
-- safe same-goal requeue: `yes`
-- prior blocker classification: `ENVIRONMENT_MISMATCH`
-- requeue rationale: the Goal and Acceptance criteria remain correct; the prior failure was capability/environment-specific, not a product-side external dependency or unsafe side effect; another Worker may legitimately succeed if it proves one required evidence route before claim.
-- unblock condition: a Worker environment proves either non-empty raw Actions stdout/stderr access for the failing job or exact-SHA checkout + dependency/test execution capability, then obtains the exact failing assertion evidence.
-- routes that should not be repeated unchanged: do not claim based only on generic GitHub metadata/check access; do not claim in an environment that cannot retrieve the exact source snapshot or run the suite.
-- exact first next action: a new Worker performs the pre-claim capability checks above; only a Worker that passes at least one may claim and continue the investigation.
-
-## Historical Worker blocker
+### Attempt 1 — `worker` / prior claim `RC-001-20260903T185700+0800`
 
 - Durable report: `docs/workbench-coordination/reports/REPORT-RC-001.md`
-- Exact product SHA and reproducible CI failure were verified, but the first Worker environment could not obtain raw assertion evidence.
-- No product/source/test/workflow change was made.
+- Result: BLOCKED by execution environment.
+- Verified product SHA: `1e9d2ea15da176d3744c35bd833bfd4a29b56782`.
+- Verified CI: run `33649460705`; jobs `100312467323` and `100525705853` failed at Unit/integration.
+- Raw assertion/expected/actual remained unavailable.
+- Exact-SHA local reproduction was unavailable in that Worker environment because repository retrieval/network DNS failed.
+- No product/source/test/workflow changes were made.
+- Stale `StepRuntime.terminalResult` lead remained `UNRELATED/INSUFFICIENT_EVIDENCE`.
 
-## Project Lead review — 2026-09-03
+### Project Lead review
 
-Original verdict: **BLOCKED CONFIRMED / NOT ACCEPTED**.
-
-Independent review findings:
-
-- The exact Recovery product snapshot remained `1e9d2ea15da176d3744c35bd833bfd4a29b56782`; CI run `33649460705` failed at Unit/integration on both job `100312467323` and rerun job `100525705853`, with Typecheck PASS and Build SKIPPED.
-- `REPORT-RC-001.md` is durable. The Worker did not modify product/source/test/workflow files.
-- The task's core Acceptance Criteria were not satisfied: exact failing test/assertion plus expected/actual values were unavailable, so no evidence-backed product correction target could be accepted.
-- The stale-StepRuntime-`terminalResult` lead remained `UNRELATED/INSUFFICIENT_EVIDENCE`; it was not authorized as a root-cause claim.
-
-## Project Lead blocker routing — 2026-09-03 21:06 +08:00
-
-Route: **Requeue the same Todo**.
-
-- Classification: `ENVIRONMENT_MISMATCH`.
-- Live PR #55 remained Draft/Open with head `d9f68e17e814733e3528eb0852a1f0ba676cf608` and base `release/v0.1-integration` at `6897c29885bd9076f440ab20275f90b59348bde5`.
-- Live CI run `33649460705` remained failed on exact product SHA `1e9d2ea15da176d3744c35bd833bfd4a29b56782`; rerun job `100525705853` still showed Typecheck PASS, Unit/integration FAIL, Build SKIPPED.
-- Project Lead re-probed the run logs endpoint and received an empty content payload, independently confirming the current GitHub tool surface does not provide the raw assertion.
-- Because the investigation is read-only and the Goal/Acceptance criteria are unchanged, retrying in a Worker environment with the required evidence capability is safe.
-- No product-fix Todo is created yet; doing so before the exact assertion is known would be speculative.
+- Prior attempt was not accepted because the core evidence criterion was not met.
+- The task Goal remains valid.
+- The task is intentionally kept in the TodoList as `BLOCKED + 待接取`, not converted into another state or separate queue.
+- A capable future Worker may claim it by replacing `待接取` with its Worker/conversation identifier and then executing the documented unblock route.
 
 ## Notes
 
-Do not run or advance crash/restart Recovery E2E, Source Real E2E, Windows packaged E2E, or final regression in this task. After Project Lead accepts this investigation, it will create the smallest product-fix Todo based on the proven failure evidence.
+Do not run or advance crash/restart Recovery E2E, Source Real E2E, Windows packaged E2E, or final regression in this task. A product-fix Todo must not be created until the exact failing evidence is obtained.
