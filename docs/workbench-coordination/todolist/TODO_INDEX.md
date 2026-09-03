@@ -1,6 +1,6 @@
 # Workbench Todo Index
 
-Updated: 2026-09-03
+Updated: 2026-09-04
 
 This file is a discovery projection. Re-read the individual Todo before claiming or reviewing it.
 
@@ -17,9 +17,7 @@ None.
 
 ## BLOCKED
 
-| ID | Status | Assignee | Priority | Goal |
-| --- | --- | --- | --- | --- |
-| `RC-001` | `BLOCKED` | `待接取` | P0 | Obtain the exact failing Unit/integration test/assertion evidence for Recovery product snapshot `1e9d2ea...` without modifying product code. |
+None.
 
 ## DONE
 
@@ -27,8 +25,4 @@ None.
 
 ## Current queue rationale
 
-`RC-001` is still unfinished, so it remains in the TodoList. It is marked `BLOCKED` because the previous Worker environment could neither obtain non-empty raw Actions test output nor perform exact-SHA local reproduction.
-
-It is `待接取` because no Worker currently owns it. A future Worker may claim it only if its environment can satisfy the concrete Unblock condition documented in `TODO-RC-001.md`.
-
-No product-fix Todo is queued until the exact failing assertion/expected/actual evidence exists.
+The TodoList is intentionally empty so the next testing cycle can start from current live repository and CI truth without inheriting a prior investigation attempt.
