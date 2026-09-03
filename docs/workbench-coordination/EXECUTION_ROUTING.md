@@ -1,67 +1,51 @@
-# Workbench Worker Execution Routing
+# Workbench Execution Requirements
 
-This file defines the small set of execution profiles used by the Project Lead and Worker Skills. The owner should route a conversation to an appropriate environment, but should not copy the Todo's technical instructions into chat.
+Execution routing is advisory task metadata, not a task-state system.
 
-## Profiles
+Task state remains only:
 
-- `ANY` — no special environment beyond the normal connected GitHub/task tools required by the Todo.
-- `GITHUB_EVIDENCE` — requires GitHub evidence access beyond metadata, such as usable raw Actions stdout/stderr or equivalent exact CI evidence.
-- `CODE_WORKSPACE` — requires a real repository workspace with exact-SHA checkout plus shell/dependency/test execution. Prefer Codex or an equivalent code workspace when available.
-- `WINDOWS_WORKSPACE` — requires Windows-native build/package/runtime execution.
-- `AUTHENTICATED_PROVIDER` — requires an authenticated provider/source session or credentials that the Todo explicitly needs.
-- `OWNER_ACTION` — cannot be completed autonomously by a Worker; requires an owner decision, approval, credential provision, or other explicit human action.
+- `TODO`
+- `BLOCKED`
+- `DONE`
 
-A Todo may list one preferred profile and one or more compatible alternate profiles. Capabilities, not labels, are authoritative: a Worker must prove the required operation is actually usable before claiming.
+Worker ownership remains only:
 
-## Todo routing fields
+- `Assignee: 待接取`
+- `Assignee: <worker-name>`
 
-For new or requeued work, the Project Lead should include:
+## Concrete requirements
 
-```markdown
-## Execution routing
-- preferred profile: `ANY | GITHUB_EVIDENCE | CODE_WORKSPACE | WINDOWS_WORKSPACE | AUTHENTICATED_PROVIDER | OWNER_ACTION`
-- compatible profiles: `<list or none>`
-- required capabilities: `<concrete operations>`
-- pre-claim proof: `<safe checks that prove capability>`
-- owner routing hint: `<one short environment hint; never a technical task prompt>`
-```
-
-Keep detailed commands, exact SHAs, job IDs, acceptance evidence, fallback routes, and safety constraints in the Todo itself.
-
-## Project Lead routing rules
-
-- `ENVIRONMENT_MISMATCH`: if the same goal remains correct and retry is safe, preserve attempt history, refine Execution routing, clear the active claim, and requeue the same Todo as `READY + UNCLAIMED`.
-- If the Todo requires repository checkout plus commands/tests, prefer `CODE_WORKSPACE` rather than repeatedly dispatching ordinary GitHub-only Worker conversations.
-- If Windows-native packaging/execution is required, route to `WINDOWS_WORKSPACE`.
-- If live authenticated provider access is required, use `AUTHENTICATED_PROVIDER` and keep the task blocked until such an environment actually exists.
-- If explicit owner authority/input is required, use `OWNER_ACTION`; keep the Todo blocked and ask the owner one concise action/decision question.
-- `EXTERNAL_DEPENDENCY`, unsafe uncertain side effects, or no plausible capable environment remain `BLOCKED`; do not churn Workers.
-
-When reporting READY work, the Project Lead may show compact routing such as:
-
-`RC-001 -> CODE_WORKSPACE`
-
-The owner then opens that environment and still uses the same generic Worker command:
-
-`去 Workbench TodoList 认领一个任务并执行。`
-
-## Worker routing rules
-
-Before claim:
-
-1. Read the Todo's Execution routing, Execution requirements, Fallback routes, and Attempt history.
-2. Determine the current environment's usable capabilities by safe preflight; do not infer capability from product/tool names alone.
-3. Claim only when at least one compatible route can actually be executed.
-4. If the environment is incompatible, skip the Todo without modifying it.
-5. If no READY Todo is executable, return `NO_EXECUTABLE_READY_TASK` plus only the required profile and a short routing hint.
+When a Todo needs special capability, describe the concrete operation directly instead of introducing more status/profile enums.
 
 Examples:
 
-- `NO_EXECUTABLE_READY_TASK — RC-001 requires CODE_WORKSPACE. Open Codex or an equivalent repository workspace and use the same Worker command.`
-- `NO_EXECUTABLE_READY_TASK — current READY work requires WINDOWS_WORKSPACE.`
+- needs usable raw GitHub Actions stdout/stderr;
+- needs exact checkout of a specified SHA;
+- needs shell + dependency installation + `npm test`;
+- needs Windows-native package/runtime execution;
+- needs authenticated provider/source access;
+- needs owner approval or credentials;
+- needs write access to specified branch/files.
 
-Do not produce a long replacement prompt. The Todo is the prompt.
+## Pre-claim rule
 
-## Safety
+Before claiming, a Worker may perform safe read-only checks to confirm it can realistically execute the Todo.
 
-Execution routing never changes project scope or authority. It must not be used to bypass merge/release approval, authentication boundaries, side-effect reconciliation, validation gates, write ownership, or the Todo's Allowed/Forbidden scope.
+- For a normal `TODO`, claim only when the required execution path is usable.
+- For a `BLOCKED` task, claim only when the Worker can realistically address the documented `Unblock condition`.
+- If capability is missing, skip without modifying the Todo.
+
+Do not create a long replacement prompt. The Todo itself carries exact SHAs, commands, acceptance details, evidence pointers, fallback routes, and safety constraints.
+
+## Project Lead rule
+
+When reviewing a blocked attempt:
+
+- keep `Status: BLOCKED` while the blocker remains;
+- record one concrete Unblock condition;
+- preserve Attempt history;
+- if another Worker may safely retry, release ownership with `Assignee: 待接取`;
+- if the blocker is cleared, the executing Worker may return the task to `Status: TODO` and continue;
+- if only owner/external action can unblock it, ask only for that concise action.
+
+Execution requirements never change project scope, validation gates, side-effect safety, branch authority, or release authority.
