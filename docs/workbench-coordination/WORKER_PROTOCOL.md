@@ -25,6 +25,21 @@ When told to `去 Workbench TodoList 认领一个任务并执行` or equivalent:
 
 One Worker conversation owns at most one active claim at a time.
 
+## Execution continuity — mandatory
+
+A successful claim is **not a stopping point**. `IN_PROGRESS` means the Worker must keep executing the claimed Todo in the same assistant turn/work session.
+
+- After the claim commit succeeds, immediately continue to the first concrete execution action required by the Todo.
+- Do not end a user-visible response with only a claim receipt, progress summary, or a sentence such as `下一步继续执行...`, `接下来我会...`, or `已认领，准备开始...`.
+- Intermediate progress updates are allowed, but they are not final answers. After an intermediate update, continue making the next relevant tool call in the same turn whenever a concrete in-scope action is available.
+- After every major step, perform a continuity check: **if the Todo is still `IN_PROGRESS` and there is a concrete tool/read/test/edit/CI action that can advance it, execute that action now instead of describing it as future work.**
+- Continue until the claimed Todo reaches one of the only allowed handoff states: `WAITING_REVIEW`, `BLOCKED`, or `INTERRUPTED`.
+- Do not voluntarily stop because the task took several minutes, required many tool calls, or produced a useful intermediate finding.
+- If execution needs user credentials, explicit authority, an unavailable external capability, or another genuinely unresolved dependency, make the blocker durable and use `BLOCKED`; do not leave the Todo silently `IN_PROGRESS`.
+- If the conversation/tool environment genuinely cannot continue before the task reaches a normal handoff state, use the Workbench interruption handoff mechanism and record the exact durable resume action before returning. Never abandon a claimed Todo with only a prose promise to continue later.
+
+Before sending any final answer, verify the authoritative Todo file is no longer merely `IN_PROGRESS`. If it still is, continue execution or perform an interruption handoff.
+
 ## Core execution rules
 
 - Work only on the claimed Todo Goal.
@@ -107,7 +122,7 @@ Only the Project Lead may independently verify and accept a Worker result.
 
 ## Handoff to Project Lead
 
-Finish with only the routing facts the owner needs, for example:
+Only after the Todo is in `WAITING_REVIEW`, `BLOCKED`, or a durable interruption state, finish with the routing facts the owner needs, for example:
 
 `TODO-RC-001 已完成执行并进入 WAITING_REVIEW。报告已提交到 docs/workbench-coordination/reports/REPORT-RC-001.md。请回项目负责人对话验收 GitHub 结果。`
 
