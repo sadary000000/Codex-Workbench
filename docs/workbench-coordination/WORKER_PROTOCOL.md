@@ -2,108 +2,113 @@
 
 ## Identity
 
-A Worker is a temporary execution conversation for exactly one Workbench Task.
+A Worker is a temporary execution conversation for exactly one claimed Workbench Todo.
 
-There are no permanent Worker roles in this coordination model. Your role, scope, permissions, and acceptance criteria come from the assigned `tasks/TASK-*.md` file.
+There are no permanent Worker roles. Scope, permissions, dependencies, acceptance criteria, validation, and write ownership come from the claimed `todolist/TODO-<ID>.md` file.
 
-## Startup sequence
+A Worker does not plan the Workbench mainline and never accepts its own result.
 
-When told to execute a Workbench Task:
+## Startup and claim sequence
+
+When told to `去 Workbench TodoList 认领一个任务并执行` or equivalent:
 
 1. Read `docs/workbench-coordination/README.md`.
 2. Read this file.
-3. Read the exact assigned `tasks/TASK-<id>.md`.
-4. Read only the Workbench checkpoint/scope/source files referenced by that Task or required to verify current Git truth.
-5. Query live GitHub state specified by the Task before making changes.
-6. If the Task's base/ref assumptions are stale, do not guess. Record the mismatch and either safely reconcile within the Task rules or report `BLOCKED`.
-7. Execute the Task directly. Do not replan the whole Workbench project.
+3. Read `docs/workbench-coordination/todolist/README.md`.
+4. Read `docs/workbench-coordination/todolist/TODO_INDEX.md` only as a discovery projection.
+5. Find eligible candidates in priority order `P0 > P1 > P2 > P3`.
+6. A candidate is eligible only when its authoritative individual Todo file is `Status: READY`, `Claim: UNCLAIMED`, and all declared dependencies are `ACCEPTED`.
+7. Re-read the individual Todo immediately before claim and verify live Git/ref/source/PR context required by it.
+8. Claim exactly one Todo by updating that same file from `READY + UNCLAIMED` to `IN_PROGRESS + CLAIMED` using the current GitHub blob SHA.
+9. Record a stable Claim ID, claimed timestamp, and Claim base SHA; commit the claim before product execution.
+10. If the claim update conflicts because the blob SHA moved, **do not overwrite**. Re-read the Todo. If another Worker owns it, select the next eligible Todo.
 
-## Core rules
+One Worker conversation owns at most one active claim at a time.
 
-- Work only on the assigned Task.
-- Do not broaden the goal, frozen v0.1 scope, or architecture contract.
-- Do not redefine acceptance criteria to make the Task pass.
+## Core execution rules
+
+- Work only on the claimed Todo Goal.
+- Obey Allowed scope, Forbidden scope, Dependencies, Write ownership, Acceptance criteria, Required validation, and Required durable output exactly.
+- Do not broaden frozen v0.1 scope or architecture contracts.
+- Do not redefine acceptance criteria to make the task pass.
 - Do not perform unrelated cleanup or opportunistic refactors.
-- Treat Git/source/CI/provider truth as stronger than cached prose.
+- Treat live Git/source/CI/provider truth as stronger than cached prose.
 - Mark unknowns and hypotheses explicitly.
-- Never turn `NOT RUN`, `UNKNOWN`, `BLOCKED`, or partial success into `PASS`.
-- Do not merge PRs, delete branches, change Draft/Ready state, or advance a release unless the Task explicitly contains valid authorization consistent with project rules.
+- Never turn `NOT RUN`, `UNKNOWN`, `BLOCKED`, partial success, or old validation from another SHA into `PASS`.
+- Do not merge PRs, delete branches, change Draft/Ready state, advance a release, or create helper/backup/CI branches unless explicit valid authorization exists in the current project workflow.
 
 ## Write and concurrency discipline
 
-The Task must state write ownership.
+The Todo must state write ownership.
 
-- If the Task is read-only, do not modify product code.
-- If the Task authorizes product writes, modify only the allowed area/ref.
-- Do not create extra branches unless the Task/current Git workflow requires and permits it.
-- If another active Task appears to overlap your write area or branch, stop and report the collision rather than racing it.
-- Preserve old failed/history evidence instead of rewriting history to make the current attempt look clean.
+- For `READ_ONLY`, do not modify product code.
+- For product-writing work, modify only the authorized ref/files/areas.
+- If another active Todo/Worker overlaps the same write ownership, stop and report the collision rather than racing it.
+- Preserve failed/history evidence instead of rewriting history to make a new attempt look clean.
+- For uncertain external side effects, Reconcile before any repeat; never authorize blind resend.
 
 ## Validation discipline
 
-Run exactly the validation required by the Task plus any minimal checks necessary to prove your change did not break the touched contract.
+Run the Required validation from the Todo plus only minimal checks necessary to prove the touched contract.
 
-Record:
+Record exact outcomes:
 
-- exact product-code commit SHA
-- commands/checks actually run
-- PASS/FAIL/NOT RUN for each required gate
-- GitHub Actions run/job IDs when applicable
-- environment/authentication blockers separately from product failures
+- product-code commit SHA;
+- commands/checks actually run;
+- `PASS / FAIL / NOT RUN / BLOCKED` for each required gate;
+- GitHub Actions run/job IDs when applicable;
+- environment/authentication blockers separately from product failures.
 
-Old validation on an older product SHA is context, not proof for the new SHA.
+Old evidence on another product SHA is context, not proof for the new result.
 
-## Durable result protocol
+## Durable report
 
-Every Task must produce a matching report:
+Every claimed Todo must produce:
 
-```text
-docs/workbench-coordination/reports/REPORT-<same-task-id>.md
-```
+`docs/workbench-coordination/reports/REPORT-<ID>.md`
 
-Use `reports/REPORT_TEMPLATE.md` unless the Task specifies a stricter format.
+Use `reports/REPORT_TEMPLATE.md` when compatible and include at least:
 
-For product-writing Tasks, prefer this ordering:
+- Worker status;
+- Todo ID;
+- Claim ID and Claim base SHA;
+- exact product-code SHA;
+- actual changed files;
+- checks and outcomes;
+- CI run/job IDs when applicable;
+- confirmed findings;
+- unverified hypotheses;
+- remaining work/blockers;
+- non-durable work, if any;
+- exact next action.
 
-1. make and validate the bounded product change
-2. create the product-code commit
-3. record that exact product commit SHA in the report
-4. publish the report as a separate docs-only commit if needed
+For product-writing work, prefer:
 
-This keeps the tested product snapshot distinguishable from later coordination documentation commits.
+1. implement and validate the bounded change;
+2. create the product-code commit;
+3. record that exact product SHA in the report;
+4. publish the report as a later docs-only commit if needed.
 
-Do not claim that the report commit itself is the validated product snapshot unless it actually contains the tested product tree and the evidence applies to it.
+Never confuse the report/Todo docs commit with the product snapshot that was actually tested.
 
-## Completion states
+## Finish state
 
-Report one of:
+After the report is durable:
 
-- `COMPLETED` — Task acceptance evidence is satisfied
-- `BLOCKED` — an external/authority/dependency condition prevents completion
-- `FAILED` — attempted result does not satisfy acceptance and no safe in-scope fix remains in this Worker run
-- `INTERRUPTED` — conversation/tool execution must stop before the Task is complete
+- if the Worker believes all Todo acceptance evidence is satisfied, set the Todo to `WAITING_REVIEW` and preserve claim metadata;
+- if an external/dependency/authority/environment blocker prevents completion, set/keep `BLOCKED` and record the exact blocker;
+- if execution is interrupted before completion, preserve durable state and use the Workbench interruption handoff mechanism when possible.
 
-A Worker does not mark its own Task `ACCEPTED`; only the Project Lead does that after independent verification.
+Best-effort refresh `TODO_INDEX.md`, but the individual Todo remains authoritative.
 
-## Interruption
+A Worker must **never** set its own task to `ACCEPTED`.
 
-If execution must stop before completion, preserve the current durable state before losing the conversation when possible. Record:
+Only the Project Lead may independently verify and accept a Worker result.
 
-- last durable commit/ref
-- completed steps
-- failing/in-progress step
-- confirmed facts versus hypotheses
-- non-durable work, if any
-- exact first resume action
+## Handoff to Project Lead
 
-Use the project's interruption handoff mechanism when available. Never reconstruct unsaved code from memory and pretend it is durable.
+Finish with only the routing facts the owner needs, for example:
 
-## Handoff to the Project Lead
+`TODO-RC-001 已完成执行并进入 WAITING_REVIEW。报告已提交到 docs/workbench-coordination/reports/REPORT-RC-001.md。请回项目负责人对话验收 GitHub 结果。`
 
-After publishing the report, tell the user only what is needed to route the result back to the mainline, for example:
-
-```text
-TASK-RC-001 report is published. Tell the Project Lead that TASK-RC-001 is ready for review.
-```
-
-The Project Lead is responsible for independently verifying and accepting/rejecting the result.
+The Project Lead will independently verify the Todo, report, product diff, and validation evidence.
