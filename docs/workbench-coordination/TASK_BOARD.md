@@ -1,8 +1,10 @@
 # Workbench Task Board
 
-This is the current delegation index for the Project Lead. It is a coordination projection, not the Workbench product/workflow truth.
+This legacy board remains as a compatibility pointer. The active task queue is now:
 
-Current project state must be restored from `docs/workbench-map/CURRENT_CHECKPOINT.md`, its durable checkpoint, and live GitHub truth.
+`docs/workbench-coordination/todolist/`
+
+Individual `todolist/TODO-*.md` files are authoritative for claim/status; `todolist/TODO_INDEX.md` is the discovery projection. Product/runtime/validation truth still comes from live Git/source/CI plus the current durable checkpoint.
 
 ## Project Lead
 
@@ -12,15 +14,13 @@ Fixed role definition: `docs/workbench-coordination/PROJECT_LEAD.md`
 
 ## Current mainline
 
-Workstream: follow `docs/workbench-map/CURRENT_CHECKPOINT.md`.
-
-Do not duplicate fast-changing branch SHA / CI state here unless a delegated Task specifically depends on it. The Project Lead must verify live GitHub state before dispatch.
+Frozen workstream: **v0.1 Recovery Closure**. Follow `docs/workbench-map/CURRENT_CHECKPOINT.md` and live Git/CI.
 
 ## READY
 
-No delegated tasks yet.
+- `RC-001` — P0 — read-only investigation to identify the exact reproducible Unit/integration failure on product snapshot `1e9d2ea15da176d3744c35bd833bfd4a29b56782`.
 
-## ASSIGNED / IN_PROGRESS
+## IN_PROGRESS
 
 None.
 
@@ -32,20 +32,13 @@ None.
 
 None.
 
-## ACCEPTED
-
-None.
-
-## REJECTED / FOLLOW_UP_REQUIRED
+## ACCEPTED / FOLLOW_UP_REQUIRED
 
 None.
 
 ## Board rules
 
-- The Project Lead owns board status changes.
-- Each active item must point to exactly one `tasks/TASK-*.md` file.
-- A Task ID is never reused for a different goal.
+- Use the TodoList for all new claim/review/dispatch state.
 - Worker reports live under `reports/REPORT-<same-id>.md`.
-- `COMPLETED` in a Worker report means ready for Project Lead review; it does not mean `ACCEPTED`.
-- Keep detailed technical evidence in the Task/Report/GitHub, not in this board.
-- Remove no historical accepted/rejected item merely to make the board shorter; archive later only under an explicit coordination maintenance change.
+- Worker completion never implies Project Lead acceptance.
+- Do not duplicate volatile branch/CI truth here beyond what a queued task needs.
