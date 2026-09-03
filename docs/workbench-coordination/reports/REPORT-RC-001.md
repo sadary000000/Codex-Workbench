@@ -19,7 +19,7 @@ Because the Todo explicitly requires exact failing test/assertion evidence befor
 - Active branch: `fix/v01-recovery-closure`
 - Claim base SHA: `4886b3068013606f440268f6dd5ee14dc4659533`
 - Product PR: Draft PR #55, open and not merged during investigation
-- Integration base: `release/v0.1-integration` at `6897c29885bd9076f440268f6dd5ee14dc4659533` was **not** assumed; authoritative Todo/checkpoint base is `6897c29885bd9076f440ab20275f90b59348bde5`
+- Integration base: `release/v0.1-integration` at `6897c29885bd9076f440ab20275f90b59348bde5`
 - Exact product-code snapshot under investigation: `1e9d2ea15da176d3744c35bd833bfd4a29b56782`
 - Exact product tree: `317c892b784ea636427f800f562ca43ab965f21b`
 - CI run: `33649460705`
