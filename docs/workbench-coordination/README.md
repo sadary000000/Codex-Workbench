@@ -1,86 +1,84 @@
 # Workbench Coordination
 
-This directory is the coordination surface for running Codex Workbench with one long-lived **Project Lead conversation** and multiple short-lived **Worker conversations**.
+This directory is the coordination surface for running Codex Workbench with one replaceable **Project Lead conversation** and multiple short-lived **Worker conversations**.
 
-It is deliberately small. The only fixed role is the Project Lead. Workers are temporary executors defined by a specific task, not permanent sub-roles.
+The only fixed role is the Project Lead. Workers are temporary executors that claim one bounded Todo at a time.
 
 ## What this directory owns
 
 This directory owns coordination records only:
 
-- Project Lead responsibilities and operating protocol
-- the current delegated task board
-- bounded task definitions
-- worker result reports
+- Project Lead operating protocol;
+- GitHub-backed Todo queue;
+- Worker claim/execution protocol;
+- Worker result reports;
+- fixed new-conversation bootstrap prompt for replacing the Project Lead chat.
 
 It does **not** own product/runtime truth, workflow truth, Git truth, CI truth, release truth, or the v0.1 scope contract.
 
-When coordination records disagree with current Git refs, CI, source, or the durable Workbench checkpoint, correct the coordination records. Do not mutate product truth merely to make this directory look consistent.
+When coordination records disagree with current Git refs, CI, source, or the durable Workbench checkpoint, correct the coordination projection. Do not mutate product truth merely to make coordination records look consistent.
 
-## Fixed role
+## Current coordination files
 
-There is exactly one fixed role:
+- `PROJECT_LEAD.md` — Project Lead startup, dispatch, review, dependency unlock, authority and rollover rules.
+- `PROJECT_LEAD_NEW_CONVERSATION_PROMPT.md` — fixed bootstrap text for a replacement Project Lead conversation after context rollover.
+- `WORKER_PROTOCOL.md` — rules every temporary Worker must follow.
+- `todolist/README.md` — queue and atomic-claim protocol.
+- `todolist/TODO_INDEX.md` — compact discovery projection.
+- `todolist/TODO-<ID>.md` — authoritative coordination state for one bounded task.
+- `reports/REPORT-<ID>.md` — durable Worker execution/result report.
 
-- `PROJECT_LEAD.md` — the mainline planner/coordinator/reviewer
-
-All other conversations are dynamic Workers governed by:
-
-- `WORKER_PROTOCOL.md`
-- one concrete file under `tasks/`
-
-Do not create permanent Backend/Tester/Architect/Release roles unless repeated real usage later proves a stable role is necessary.
-
-## Coordination files
-
-- `PROJECT_LEAD.md` — Project Lead duties, startup sequence, delegation and review rules
-- `WORKER_PROTOCOL.md` — rules every temporary Worker must follow
-- `TASK_BOARD.md` — current coordination index; it is not a substitute for the durable project checkpoint
-- `tasks/TASK_TEMPLATE.md` — template for a bounded delegated task
-- `reports/REPORT_TEMPLATE.md` — template for a Worker result report
-
-Concrete work uses matching IDs, for example:
-
-```text
-tasks/TASK-RC-001.md
-reports/REPORT-RC-001.md
-```
+`TASK_BOARD.md` and `tasks/TASK_TEMPLATE.md` are legacy compatibility material from the previous explicit Task-ID dispatch model. Do not create new work there.
 
 ## Source-of-truth order
 
-For current project state, use this order:
+For current project state, use:
 
-1. current Git refs / source / GitHub Actions and other live external truth
-2. `docs/workbench-map/CURRENT_CHECKPOINT.md`
-3. the durable checkpoint referenced by `CURRENT_CHECKPOINT.md`
-4. frozen scope/architecture contracts referenced by those documents
-5. this coordination directory
-6. conversation memory
+1. current Git refs / source / GitHub Actions / external provider truth;
+2. `docs/workbench-map/CURRENT_CHECKPOINT.md`;
+3. the durable checkpoint and scope/architecture contracts it references;
+4. individual `todolist/TODO-*.md` files for coordination state;
+5. matching Worker reports and `TODO_INDEX.md` projections;
+6. conversation memory.
 
-A Task may narrow work but may never silently broaden or override the frozen project scope.
+A Todo may narrow execution but may never silently broaden or override frozen project scope.
 
 ## Normal flow
 
 1. Project Lead restores current state from the Workbench handoff/checkpoint chain and live GitHub truth.
-2. Project Lead decides whether the next work should stay on the mainline conversation or be delegated.
-3. For delegated work, Project Lead creates one bounded `TASK-*.md` and registers it in `TASK_BOARD.md`.
-4. User opens a Worker conversation and tells it to execute that Task ID.
-5. Worker reads `WORKER_PROTOCOL.md`, the exact Task, and only the referenced project materials needed for the task.
-6. Worker executes the task and makes durable GitHub changes when the Task authorizes writes.
-7. Worker writes `reports/REPORT-<same-id>.md` with exact commits/tests/CI and remaining uncertainty.
-8. User tells the Project Lead that the Task is finished or blocked.
-9. Project Lead independently verifies the report against GitHub and marks the Task accepted, rejected, blocked, or needing follow-up.
-10. Project Lead decides the next task from verified project state.
+2. Project Lead reviews every relevant `WAITING_REVIEW` Todo against its Worker report, product commit/diff, and exact validation evidence.
+3. Project Lead marks verified results `ACCEPTED`, records bounded follow-up when needed, and unlocks only dependencies that are now satisfied.
+4. Project Lead writes the next smallest justified work items under `todolist/` as `READY` or `BLOCKED`.
+5. User opens a normal new conversation and says: `去 Workbench TodoList 认领一个任务并执行。`
+6. Worker reads the queue, atomically claims one eligible `READY + UNCLAIMED` Todo using its current blob SHA, and changes it to `IN_PROGRESS`.
+7. Worker executes only that Todo, makes durable product changes/validation when authorized, writes `reports/REPORT-<ID>.md`, and changes the Todo to `WAITING_REVIEW` or `BLOCKED`.
+8. Project Lead later re-reads GitHub and independently accepts/rejects/follows up the result.
 
-The user is only the dispatcher between conversations. Do not require the user to copy the full technical result back when GitHub contains the durable result.
+The user is only the dispatcher between conversations. Do not require the user to paste full technical results when GitHub contains them.
 
 ## Concurrency rule
 
-Parallelize read-only investigation freely when useful. Parallel write tasks require explicit non-overlapping ownership or an approved branch strategy. Never let two Workers unknowingly mutate the same product branch/files at the same time.
+Parallelize independent read-only investigation freely when useful. Parallel product writes require explicit non-overlapping write ownership. Never let two Workers knowingly mutate the same branch/files concurrently.
 
-Do not create validation/helper branches merely to store evidence. Follow the repository's current Git workflow and the active checkpoint.
+The individual Todo file is the lightweight coordination lock. `TODO_INDEX.md` is discovery only and may lag.
+
+Do not create validation/helper/backup branches merely to store evidence or enable concurrency.
+
+## Project Lead conversation rollover
+
+The Project Lead chat is intentionally replaceable. When its context becomes too long:
+
+1. make current state durable through the normal checkpoint/handoff mechanism when needed;
+2. open a new conversation;
+3. paste the fixed prompt from `PROJECT_LEAD_NEW_CONVERSATION_PROMPT.md`;
+4. let the new Project Lead restore GitHub/checkpoint/Todo truth and continue.
+
+Do not ask the owner to reconstruct project history from memory.
 
 ## Git discipline
 
-A Worker code commit and a later report/checkpoint documentation commit are different things. Always preserve the exact **product-code snapshot** that was actually tested. A docs-only coordination commit must never be represented as a newly validated product snapshot.
+A Worker product commit and a later report/Todo/checkpoint documentation commit are different things. Always preserve the exact **product-code snapshot** that was actually tested.
 
-Merge, branch deletion, Draft -> Ready, release advancement, and other authority-sensitive operations require the same authorization rules as the main project workflow; Task completion does not grant those permissions.
+A docs-only coordination commit must never be represented as a newly validated product snapshot.
+
+Merge, branch deletion, Draft -> Ready, release advancement, scope changes, and other authority-sensitive operations require the normal project/owner authorization; Todo completion does not grant those permissions.
