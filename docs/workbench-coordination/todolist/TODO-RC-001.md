@@ -1,6 +1,6 @@
 # TODO-RC-001
 
-Status: `IN_PROGRESS`
+Status: `BLOCKED`
 Priority: `P0`
 Claim: `CLAIMED`
 Claim ID: `RC-001-20260903T185700+0800`
@@ -75,3 +75,11 @@ Identify the exact reproducible Unit/integration regression on Recovery product 
 ## Notes
 
 Do not run or advance crash/restart Recovery E2E, Source Real E2E, Windows packaged E2E, or final regression in this task. After Project Lead accepts this investigation, it will create the smallest product-fix Todo based on the proven failure evidence.
+
+## Worker blocker
+
+- Durable report: `docs/workbench-coordination/reports/REPORT-RC-001.md`
+- Exact product SHA and reproducible CI failure are verified, but available GitHub log/check surfaces did not expose the raw failing assertion, expected value, or actual value from job `100525705853`.
+- Exact-SHA local reproduction could not be established because the Worker execution environment could not retrieve GitHub source due its network/DNS restriction.
+- No product/source/test/workflow change was made.
+- The stale-StepRuntime-`terminalResult` lead remains `UNRELATED/INSUFFICIENT_EVIDENCE` for defining the CI root cause until raw failing-test evidence is available.
