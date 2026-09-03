@@ -83,3 +83,22 @@ Do not run or advance crash/restart Recovery E2E, Source Real E2E, Windows packa
 - Exact-SHA local reproduction could not be established because the Worker execution environment could not retrieve GitHub source due its network/DNS restriction.
 - No product/source/test/workflow change was made.
 - The stale-StepRuntime-`terminalResult` lead remains `UNRELATED/INSUFFICIENT_EVIDENCE` for defining the CI root cause until raw failing-test evidence is available.
+
+## Project Lead review — 2026-09-03
+
+Verdict: **BLOCKED CONFIRMED / NOT ACCEPTED**.
+
+Independent review findings:
+
+- The exact Recovery product snapshot remains `1e9d2ea15da176d3744c35bd833bfd4a29b56782`; CI run `33649460705` failed at Unit/integration on both job `100312467323` and rerun job `100525705853`, with Typecheck PASS and Build SKIPPED.
+- `REPORT-RC-001.md` is durable. Its report commit only adds the report; the final Worker BLOCKED commit only updates this Todo. No product/source/test/workflow change was made by RC-001.
+- The task's core Acceptance Criteria are not satisfied: exact failing test/assertion plus expected/actual values are still unavailable, so no evidence-backed product correction target can be accepted.
+- Project Lead independently attempted the available GitHub job-log route during review and did not obtain usable raw assertion evidence from the current tool surface. This is consistent with the Worker blocker rather than evidence of an abandoned investigation.
+- The stale-StepRuntime-`terminalResult` lead remains `UNRELATED/INSUFFICIENT_EVIDENCE`; it is not authorized as a root-cause claim.
+
+Unblock condition:
+
+- obtain raw `npm test` failure output for job `100525705853`, or
+- reproduce `npm test` from an exact checkout of `1e9d2ea15da176d3744c35bd833bfd4a29b56782` in an environment with working repository/dependency access.
+
+No follow-up/product-fix Todo is created at this review because an identical Worker environment would hit the same evidence-access blocker and a product-fix Todo before the exact assertion is known would be speculative.
