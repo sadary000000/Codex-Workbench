@@ -1,11 +1,11 @@
 # TODO-RC-001
 
-Status: `READY`
+Status: `IN_PROGRESS`
 Priority: `P0`
-Claim: `UNCLAIMED`
-Claim ID: `null`
-Claimed at: `null`
-Claim base SHA: `null`
+Claim: `CLAIMED`
+Claim ID: `RC-001-20260903T185700+0800`
+Claimed at: `2026-09-03T18:57:00+08:00`
+Claim base SHA: `4886b3068013606f440268f6dd5ee14dc4659533`
 
 ## Goal
 
