@@ -4,34 +4,31 @@ Updated: 2026-09-03
 
 This file is a discovery projection. Re-read the individual Todo before claiming or reviewing it.
 
-## READY
+Task status has only three values: `TODO`, `BLOCKED`, `DONE`.
 
-| ID | Priority | Goal | Execution requirement |
-| --- | --- | --- | --- |
-| `RC-001` | P0 | Identify the exact reproducible Unit/integration regression on Recovery product snapshot `1e9d2ea...` without changing product code. | Before claim, prove either non-empty raw GitHub Actions stdout/stderr access for the failing job or exact-SHA checkout + Node/dependency/`npm test` execution capability. |
+`Assignee` is separate from task status:
 
-## IN_PROGRESS
+- `待接取` — no Worker currently owns the task
+- `<worker-name>` — that Worker conversation owns or most recently submitted the current attempt
 
-None.
-
-## WAITING_REVIEW
+## TODO
 
 None.
 
 ## BLOCKED
 
-None.
+| ID | Status | Assignee | Priority | Goal |
+| --- | --- | --- | --- | --- |
+| `RC-001` | `BLOCKED` | `待接取` | P0 | Obtain the exact failing Unit/integration test/assertion evidence for Recovery product snapshot `1e9d2ea...` without modifying product code. |
 
-## ACCEPTED / FOLLOW_UP_REQUIRED
+## DONE
 
 None.
 
 ## Current queue rationale
 
-The active v0.1 Recovery Closure is still blocked at the product level by a reproducible Unit/integration failure on exact product snapshot `1e9d2ea15da176d3744c35bd833bfd4a29b56782`, but the coordination Todo is now safely requeued after Project Lead triage classified the first Worker attempt as `ENVIRONMENT_MISMATCH`.
+`RC-001` is still unfinished, so it remains in the TodoList. It is marked `BLOCKED` because the previous Worker environment could neither obtain non-empty raw Actions test output nor perform exact-SHA local reproduction.
 
-Attempt 1 remains durable in `TODO-RC-001.md` and `REPORT-RC-001.md`. The first Worker and Project Lead both confirmed that the available GitHub metadata/log surface did not expose the raw assertion; the Project Lead's latest run-log probe returned an empty payload, while exact local reproduction was unavailable in that Worker environment.
+It is `待接取` because no Worker currently owns it. A future Worker may claim it only if its environment can satisfy the concrete Unblock condition documented in `TODO-RC-001.md`.
 
-`RC-001` is therefore `READY + UNCLAIMED` only for a Worker that passes the explicit pre-claim capability checks encoded in the Todo. A Worker that cannot prove either raw log access or exact-SHA local reproduction capability must skip it without claiming.
-
-No product-fix Todo is queued yet. The exact failing assertion, expected value, and actual value must be obtained first; creating a fix task before that evidence exists would be speculative and would violate the current Recovery checkpoint.
+No product-fix Todo is queued until the exact failing assertion/expected/actual evidence exists.
