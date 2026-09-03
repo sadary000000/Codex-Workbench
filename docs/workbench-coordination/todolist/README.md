@@ -1,130 +1,97 @@
 # Workbench TodoList
 
-This directory is the durable task queue used by the Workbench Project Lead and temporary Worker conversations.
+This directory is the durable task queue for the Workbench Project Lead and temporary Worker conversations.
 
 ## Authority
 
-- Each `TODO-*.md` file is authoritative for that task's status, claim, execution requirements, and blocker routing.
-- `TODO_INDEX.md` is a discovery projection and may briefly lag individual Todo files.
+- Each `TODO-*.md` file is authoritative for that task.
+- `TODO_INDEX.md` is only a discovery projection and may briefly lag.
 - Worker reports live at `docs/workbench-coordination/reports/REPORT-<ID>.md`.
-- Git/source/CI and the active Workbench checkpoint remain authoritative for product and validation truth; Todo files only coordinate bounded work.
+- Git/source/CI plus the active durable checkpoint remain authoritative for product and validation truth.
 
-## Status flow
+## Simple task state
 
-Normal flow:
+Use exactly three task statuses:
 
-`READY -> IN_PROGRESS -> WAITING_REVIEW -> ACCEPTED`
+- `TODO` — not accepted yet and still needs work.
+- `BLOCKED` — not accepted yet; a concrete blocker currently prevents completion.
+- `DONE` — independently accepted by the Project Lead.
 
-Other states:
+Do not introduce `READY`, `IN_PROGRESS`, `WAITING_REVIEW`, `ACCEPTED`, `FOLLOW_UP_REQUIRED`, or `INTERRUPTED` as task statuses.
 
-- `BLOCKED` — execution cannot currently continue because of a verified dependency, environment/capability mismatch, authority requirement, write collision, external condition, or missing evidence.
-- `FOLLOW_UP_REQUIRED` — Project Lead review found that a different bounded goal is required; create a new Todo ID rather than silently changing the old goal.
+## Assignee
 
-Only the Project Lead may mark a Worker result `ACCEPTED` or requeue a previously blocked attempt.
+Ownership is separate from task status:
 
-## Claim protocol
+- `Assignee: 待接取` — no Worker currently owns the task.
+- `Assignee: <worker-name>` — that Worker conversation owns the current attempt or most recently submitted it for review.
 
-A Worker must atomically claim one `READY` + `UNCLAIMED` Todo using the live file/blob state before doing execution work. Never silently steal or reset an `IN_PROGRESS` claim.
+The Worker claims a task by atomically replacing `待接取` with its Worker/conversation identifier using the current GitHub blob SHA. Claiming does not change `Status`.
 
-Before claiming, the Worker must also satisfy the Todo's declared **Execution requirements**. Capability checks may use safe read-only probes. If the current environment does not satisfy a task's required capability, skip that task without claiming it and try another eligible Todo.
+If ChatGPT does not expose the real UI conversation title, the Worker must not pretend it can read it. Use a stable short Worker label for that conversation instead.
 
-## Execution requirements
+## Required header
 
-Every Todo must state the capabilities needed to execute it safely. Use capability language rather than assuming a named product/environment.
+Every Todo begins with:
 
-Examples:
+```markdown
+# TODO-<ID>
 
-- read-only GitHub API access;
-- raw GitHub Actions job-log access that exposes test stdout/stderr;
-- exact Git checkout of a specific SHA;
-- ability to install dependencies and run `npm test`;
-- authenticated provider access;
-- Windows packaging environment;
-- write access to a specific branch/files.
+Status: `TODO | BLOCKED | DONE`
+Assignee: `待接取 | <worker-name>`
+Priority: `P0 | P1 | P2 | P3`
+Latest report: `<none | docs/workbench-coordination/reports/REPORT-<ID>.md>`
+```
 
-For simple tasks, write `none beyond normal GitHub coordination access`.
+Keep Goal, Repository context, Dependencies, Allowed scope, Forbidden scope, Write ownership, Execution requirements, Acceptance criteria, Required validation, Blocker/Unblock condition, and Attempt history below the header as needed.
 
-## Fallback routes
+## Normal flow
 
-A Todo should list ordered safe fallback routes when one execution path can legitimately fail without making the goal impossible.
+1. Project Lead creates a Todo with `Status: TODO`, `Assignee: 待接取`.
+2. Worker atomically claims it by setting `Assignee: <worker-name>`.
+3. Worker executes continuously and publishes the matching report.
+4. Worker sets `Latest report` to the durable report path but does **not** set `DONE`.
+5. Project Lead independently reviews the report and Git/CI evidence.
+6. If accepted, Project Lead sets `Status: DONE` and preserves the completing Worker name.
+7. If more work is required, Project Lead keeps/sets `Status: TODO`, records the prior attempt, and releases it with `Assignee: 待接取`.
 
-A Worker must exhaust all in-scope fallback routes that its environment can execute before declaring the task blocked. Do not invent out-of-scope workarounds.
+No extra review state is needed.
 
-Example:
+## Blocked flow
 
-1. obtain the raw assertion from the existing GitHub Actions job log;
-2. if the log surface cannot expose it, reproduce `npm test` from the exact product SHA in an environment with checkout/dependency execution access.
+A blocked task stays in this same TodoList.
 
-## Blocker classification
+- Worker that hits a verified blocker sets `Status: BLOCKED`, keeps its Worker name, publishes a report, and records one exact `Unblock condition`.
+- Project Lead reviews the blocker.
+- If another Worker may safely retry, Project Lead preserves the attempt history and releases it with `Assignee: 待接取` while keeping `Status: BLOCKED` until the blocker is actually cleared.
+- A future Worker may claim a BLOCKED task only when its environment can realistically satisfy the documented Unblock condition / execution requirements.
+- When that Worker actually clears the blocker, it may change the task back to `Status: TODO` while continuing toward completion.
+- If only owner/external action can unblock it, leave it `BLOCKED` and ask only for the concise required action.
 
-A blocked Worker report and Todo must classify the blocker as one of:
+## Candidate selection
 
-- `ENVIRONMENT_MISMATCH` — the task goal is still valid, but this Worker environment lacks a required capability;
-- `EXTERNAL_DEPENDENCY` — progress waits on an external system/event/input that another Worker cannot currently solve;
-- `OWNER_DECISION_REQUIRED` — explicit product/scope/authority choice is required from the owner;
-- `WRITE_COLLISION` — another active Worker owns overlapping write scope;
-- `TASK_DEFINITION_GAP` — the current Todo cannot be completed without changing its goal/scope/acceptance contract;
-- `INTERRUPTED` — execution stopped unexpectedly but durable resume state exists;
-- `OTHER_VERIFIED_BLOCKER` — only when none of the above fits; explain precisely.
+A Worker may consider a task only when:
 
-Do not classify a mere hypothesis as a blocker.
+- `Status` is `TODO` or `BLOCKED`;
+- `Assignee` is `待接取`;
+- declared dependency tasks are `DONE`;
+- the Worker environment can execute the task requirements; for BLOCKED tasks it must also be able to address the documented Unblock condition.
 
-## Blocked-attempt record
+Never claim `DONE`.
 
-Before a claimed Todo becomes `BLOCKED`, preserve in the Todo/report:
+## Index
 
-- blocker classification;
-- claim ID and report path;
-- routes actually attempted and their outcomes;
-- exact missing capability/dependency/authority;
-- evidence already obtained;
-- exact unblock condition;
-- whether retrying the **same goal** in another environment is side-effect safe;
-- recommended execution requirements for a safe retry.
+`TODO_INDEX.md` must contain exactly three sections: `TODO`, `BLOCKED`, `DONE`.
 
-Keep prior attempt history durable. Never erase a failed/blocked claim to make a retry look like a first attempt.
+Use a compact table with:
 
-## Project Lead blocker routing
+`ID | Status | Assignee | Priority | Goal`
 
-After independently verifying a blocked result, the Project Lead chooses exactly one route:
-
-1. **Requeue same Todo** — only when the goal/acceptance contract is unchanged, the blocker is environment/capability-specific or an interruption, and retry is side-effect safe. Append the prior attempt to `Attempt history`, add/refine `Execution requirements` and `Fallback routes`, clear the active claim fields, then set `READY + UNCLAIMED`.
-2. **Keep BLOCKED** — for unresolved external dependencies, authority/owner decisions, unsafe uncertain side effects, or conditions another Worker cannot solve yet. Record the exact unblock condition.
-3. **FOLLOW_UP_REQUIRED** — when a different bounded goal is needed. Create a new Todo with a new ID; do not mutate the original goal into a different task.
-4. **ACCEPTED + next Todo** — when an investigation actually satisfied its acceptance criteria and the discovered product fix is a distinct next task.
-
-For uncertain external side effects, never requeue blind execution. Reconcile first.
-
-When a blocked Todo is safely requeued, the owner should not need a custom prompt. A suitable new Worker should still be started with only:
-
-`去 Workbench TodoList 认领一个任务并执行。`
-
-The requeued Todo itself must contain everything the Worker needs.
-
-## Required Todo sections
-
-New or requeued Todo items should include:
-
-- Goal
-- Repository context
-- Dependencies
-- Allowed scope
-- Forbidden scope
-- Write ownership
-- Execution requirements
-- Fallback routes
-- Acceptance criteria
-- Required validation
-- Required durable output
-- Attempt history
-- Blocker / retry policy when relevant
-
-## Queue discipline
+## Discipline
 
 - One bounded outcome per Todo.
-- Dependencies must be accepted before a dependent Todo becomes `READY`.
-- Product-writing tasks must have explicit non-overlapping ownership.
-- A Worker must not claim a Todo whose execution requirements its current environment cannot satisfy.
-- A Project Lead may requeue a blocked Todo only after verifying the blocker and preserving the previous attempt history.
+- Product-writing tasks require explicit non-overlapping ownership.
+- Preserve prior attempts and evidence; do not erase a failed/blocked attempt.
 - Do not create helper/backup/CI branches merely for task execution.
-- Do not broaden frozen v0.1 scope, weaken validation, merge PRs, mark Draft PRs Ready, delete active branches, or announce release readiness without explicit authority.
+- Do not broaden frozen scope, weaken validation, merge PRs, mark Draft PRs Ready, delete active branches, or announce release readiness without explicit authority.
+- For uncertain external side effects, Reconcile before any repeat.
