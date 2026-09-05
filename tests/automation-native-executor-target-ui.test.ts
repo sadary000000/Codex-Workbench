@@ -25,12 +25,19 @@ test("fresh Execute target comes from current Runtime Truth and requires explici
   assert.doesNotMatch(actions, /project-automation-summary/);
 });
 
+test("Execute and Retry confirmations preserve exact target safety semantics", () => {
+  assert.match(actions, /const retrying = step\.recovery\?\.command === "RETRY"/);
+  assert.match(actions, /const verb = retrying \? "Retry" : "Execute"/);
+  assert.match(actions, /A new Attempt will be created and the failed Attempt will remain in history/);
+  assert.match(actions, /exact Native Thread \$\{selectedTarget\}/);
+  assert.match(actions, /if \(!requireConfirmation\(confirmation\)\) return/);
+});
+
 test("fresh Execute rechecks exact Native identity immediately before dispatch", () => {
   assert.match(actions, /const preflight = await readRuntimeTarget\(\)/);
   assert.match(actions, /preflight\.result\.nativeThreadId !== selectedTarget/);
   assert.match(actions, /NATIVE_EXECUTOR_TARGET_CHANGED/);
   assert.match(actions, /api\.executeAutomationStep\(view\.project\.projectId, step\.stepSpecId, selectedTarget, workspaceWrite\)/);
-  assert.match(actions, /Execute Step \$\{step\.stepKey\} on exact Native Thread \$\{selectedTarget\}/);
 });
 
 test("executor target selection is an identity prerequisite, not a renderer workflow state machine", () => {
