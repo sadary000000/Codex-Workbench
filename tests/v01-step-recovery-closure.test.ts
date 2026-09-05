@@ -167,7 +167,7 @@ async function createWorkflow(input: {
     version: 1,
     status: "ACTIVE",
     canonicalPayload: planPayload,
-    currentStageId: STAGE_ID,
+    currentStageId: null,
   });
   const stage = await store.createStageSpec({
     stageSpecId: STAGE_ID,
@@ -386,7 +386,7 @@ test("restart Governance deterministically catches up persisted verification and
       },
       correlation: {
         workflowActionId: null,
-        requestId: null,
+        requestId: "v01-step-recovery-verification-crash-boundary",
         nativeThreadId: null,
         nativeTurnId: null,
         resourceLeaseId: null,
