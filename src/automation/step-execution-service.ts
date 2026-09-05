@@ -8,6 +8,7 @@ import type {
 } from "./adapters.ts";
 import { InputRefRegistry } from "./input-ref.ts";
 import { providerReferenceOpaqueId } from "./provider-reference.ts";
+import { classifyStepExecutionRecovery } from "./step-recovery-policy.ts";
 import { AutomationStore, AutomationStoreError } from "./store.ts";
 import { V01_SIDE_EFFECT_APPROVAL } from "./v01-workspace-write-contract.ts";
 import type {
@@ -34,7 +35,7 @@ export interface ExecuteStepInput {
   readonly stepSpecId: string;
   readonly providerTargetRef: string;
   readonly timeoutMs?: number;
-  /** Required only for a fresh RECONCILABLE workspace-write Step. */
+  /** Required for every RECONCILABLE workspace-write dispatch, including a recovery retry. */
   readonly userConfirmedSideEffect?: boolean;
 }
 
@@ -71,6 +72,7 @@ export class StepExecutionError extends Error {
     | "STEP_EXECUTION_POLICY_REQUIRED"
     | "STEP_EXECUTION_TARGET_UNAVAILABLE"
     | "STEP_EXECUTION_NOT_READY"
+    | "STEP_EXECUTION_RETRY_UNSAFE"
     | "STEP_EXECUTION_PROMPT_TOO_LARGE"
     | "STEP_EXECUTION_CORRELATION_MISMATCH"
     | "STEP_EXECUTION_RESULT_UNAVAILABLE"
@@ -237,7 +239,6 @@ function resultFromDocument(document: AutomationDocument, attempt: ExecutionAtte
 
 /**
  * Executes one PURE/read-only or explicitly user-confirmed RECONCILABLE workspace Step through the already-composed provider port.
- *
  * This service owns workflow orchestration only. It never creates a Native
  * runtime, thread, sandbox, tool executor, or transcript store. The provider
  * request identity is the authoritative Native Turn id and is persisted via
@@ -257,16 +258,30 @@ export class NativeStepExecutionService {
   async execute(input: ExecuteStepInput): Promise<StepExecutionResult> {
     this.assertNativeProvider();
     const context = await this.executionContext(input.projectId, input.stepSpecId);
+    let retrying = false;
 
     if (context.runtime.currentAttemptId) {
       const existing = context.document.executionAttempts.find((item) => item.attemptId === context.runtime.currentAttemptId);
       if (!existing) throw new StepExecutionError("STEP_EXECUTION_CORRELATION_MISMATCH", "StepRuntime points to a missing ExecutionAttempt.");
-      return resultFromDocument(context.document, existing);
+      const recovery = classifyStepExecutionRecovery({ document: context.document, step: context.step, attempt: existing });
+      if (recovery.mode !== "RETRY") return resultFromDocument(context.document, existing);
+      if (context.runtime.lifecycle !== "TERMINAL" || existing.lifecycle !== "FAILED") {
+        throw new StepExecutionError("STEP_EXECUTION_RETRY_UNSAFE", "Recovery retry requires the exact failed terminal ExecutionAttempt.");
+      }
+      if (!recovery.providerTargetRef || recovery.providerTargetRef !== input.providerTargetRef) {
+        throw new StepExecutionError("STEP_EXECUTION_CORRELATION_MISMATCH", "Recovery retry must reuse the exact persisted Native executor target from the failed ActionIntent.");
+      }
+      if (recovery.requiresSideEffectConfirmation && input.userConfirmedSideEffect !== true) {
+        throw new StepExecutionError("STEP_EXECUTION_SIDE_EFFECT_APPROVAL_REQUIRED", "Retrying a definitively-not-dispatched workspace-write Step requires fresh user confirmation.");
+      }
+      retrying = true;
     }
     if (context.step.sideEffectClass === "RECONCILABLE" && input.userConfirmedSideEffect !== true) {
-      throw new StepExecutionError("STEP_EXECUTION_SIDE_EFFECT_APPROVAL_REQUIRED", "A fresh workspace-write Step requires the user's explicit confirmation before any execution record or Native dispatch is created.");
+      throw new StepExecutionError("STEP_EXECUTION_SIDE_EFFECT_APPROVAL_REQUIRED", retrying
+        ? "A workspace-write recovery retry requires fresh user confirmation before a new ExecutionAttempt is created."
+        : "A fresh workspace-write Step requires the user's explicit confirmation before any execution record or Native dispatch is created.");
     }
-    if (!["NOT_STARTED", "READY"].includes(context.runtime.lifecycle)) {
+    if (!retrying && !["NOT_STARTED", "READY"].includes(context.runtime.lifecycle)) {
       throw new StepExecutionError("STEP_EXECUTION_NOT_READY", `StepRuntime is not eligible for a fresh execution: ${context.runtime.lifecycle}.`);
     }
 
@@ -305,11 +320,11 @@ export class NativeStepExecutionService {
         payloadRef: registered.inputRef,
         payloadHash: registered.sha256,
         executionOptions: {
-stepSpecVersion: context.step.specVersion,
-attemptNumber,
-readOnly: context.step.sideEffectClass === "PURE",
-workspaceWrite: context.step.sideEffectClass === "RECONCILABLE",
-sideEffectApproval: context.step.sideEffectClass === "RECONCILABLE" ? V01_SIDE_EFFECT_APPROVAL : "NOT_REQUIRED",
+          stepSpecVersion: context.step.specVersion,
+          attemptNumber,
+          readOnly: context.step.sideEffectClass === "PURE",
+          workspaceWrite: context.step.sideEffectClass === "RECONCILABLE",
+          sideEffectApproval: context.step.sideEffectClass === "RECONCILABLE" ? V01_SIDE_EFFECT_APPROVAL : "NOT_REQUIRED",
         },
         idempotencyRef: `native-step-v1:${key}`,
         expectedOutcomeRef: `native-step-result-v1:${key}`,
@@ -400,7 +415,7 @@ sideEffectApproval: context.step.sideEffectClass === "RECONCILABLE" ? V01_SIDE_E
 
   async reconcile(input: ReconcileStepInput): Promise<StepExecutionResult> {
     this.assertNativeProvider();
-    const document = await this.store.snapshot();
+    let document = await this.store.snapshot();
     const executionAttempt = document.executionAttempts.find((item) => item.attemptId === input.executionAttemptId && item.projectId === input.projectId);
     if (!executionAttempt) throw new StepExecutionError("STEP_EXECUTION_ATTEMPT_NOT_FOUND", "The Step ExecutionAttempt was not found in the requested project.");
     if (["COMPLETED", "FAILED", "BLOCKED", "CANCELLED"].includes(executionAttempt.lifecycle)) {
@@ -410,21 +425,80 @@ sideEffectApproval: context.step.sideEffectClass === "RECONCILABLE" ? V01_SIDE_E
     if (!intent) throw new StepExecutionError("STEP_EXECUTION_ACTION_NOT_FOUND", "The ExecutionAttempt has no persisted STEP_EXECUTION ActionIntent; recovery cannot guess an execution backend.");
     const actionAttempt = latestActionAttempt(document, intent.intentId);
     if (!actionAttempt) throw new StepExecutionError("STEP_EXECUTION_ACTION_NOT_FOUND", "The STEP_EXECUTION ActionIntent has no ActionAttempt to reconcile.");
-    const requestExternal = externalFor(document, actionAttempt.providerRequestRef);
-    const providerRequestRef = requestOpaque(requestExternal);
+    const correlation = this.correlation(intent, actionAttempt, intent.targetRef ?? "", actionAttempt.providerSemanticSha256 ?? null);
+
+    let requestExternal = externalFor(document, actionAttempt.providerRequestRef);
+    let providerRequestRef = requestOpaque(requestExternal);
+    if (!requestExternal || requestExternal.provider !== "NATIVE" || !providerRequestRef) {
+      if (!this.provider.resolveRequestByCorrelation || !intent.idempotencyRef || !intent.targetRef) {
+        return resultFromDocument(document, executionAttempt);
+      }
+      const excluded = document.actionAttempts
+        .filter((item) => item.actionAttemptId !== actionAttempt.actionAttemptId)
+        .map((item) => requestOpaque(externalFor(document, item.providerRequestRef)))
+        .filter((item): item is string => Boolean(item));
+      let recoveredProviderRequestRef: string | null = null;
+      try {
+        recoveredProviderRequestRef = await this.provider.resolveRequestByCorrelation({
+          idempotencyRef: intent.idempotencyRef,
+          correlation,
+          inputRef: intent.payloadRef ?? null,
+          excludeProviderRequestRefs: excluded,
+        });
+      } catch {
+        return resultFromDocument(document, executionAttempt);
+      }
+      if (!recoveredProviderRequestRef) return resultFromDocument(document, executionAttempt);
+      try {
+        requestExternal = (await this.store.persistActionAttemptProviderRequest({
+          projectId: input.projectId,
+          actionAttemptId: actionAttempt.actionAttemptId,
+          provider: "NATIVE",
+          providerRequestRef: recoveredProviderRequestRef,
+          providerSemanticSha256: actionAttempt.providerSemanticSha256 ?? null,
+        })).externalRef;
+        providerRequestRef = recoveredProviderRequestRef;
+        if (intent.state === "DISPATCHING") {
+          await this.store.transitionActionIntent(intent.intentId, "DISPATCHED", {
+            actorType: "AUTOMATION",
+            actorRef: "native-step-recovery",
+            boundedPayload: { recovery: "REATTACHED_PROVIDER_REQUEST" },
+            correlationId: intent.intentId,
+          });
+        }
+        document = await this.store.snapshot();
+      } catch {
+        return resultFromDocument(await this.store.snapshot(), executionAttempt);
+      }
+    }
     if (!requestExternal || requestExternal.provider !== "NATIVE" || !providerRequestRef) {
       return resultFromDocument(document, executionAttempt);
     }
-    const correlation = this.correlation(intent, actionAttempt, intent.targetRef ?? "", actionAttempt.providerSemanticSha256 ?? null);
 
+    const refreshedActionAttempt = document.actionAttempts.find((item) => item.actionAttemptId === actionAttempt.actionAttemptId) ?? actionAttempt;
+    const refreshedIntent = document.actionIntents.find((item) => item.intentId === intent.intentId) ?? intent;
+    const refreshedCorrelation = this.correlation(
+      refreshedIntent,
+      refreshedActionAttempt,
+      refreshedIntent.targetRef ?? "",
+      refreshedActionAttempt.providerSemanticSha256 ?? null,
+    );
     let observation: ProviderObservation;
     try {
-      observation = await this.provider.reconcile({ providerRequestRef, correlation });
+      observation = await this.provider.reconcile({ providerRequestRef, correlation: refreshedCorrelation });
     } catch (error) {
-      await this.ensureUnknownReceipt(actionAttempt, requestExternal, `RECONCILE_UNAVAILABLE:${errorCode(error)}`);
+      await this.ensureUnknownReceipt(refreshedActionAttempt, requestExternal, `RECONCILE_UNAVAILABLE:${errorCode(error)}`);
       return resultFromDocument(await this.store.snapshot(), executionAttempt);
     }
-    return this.settleObservation({ executionAttempt, intent, actionAttempt, correlation, requestExternal, providerRequestRef, observation });
+    return this.settleObservation({
+      executionAttempt,
+      intent: refreshedIntent,
+      actionAttempt: refreshedActionAttempt,
+      correlation: refreshedCorrelation,
+      requestExternal,
+      providerRequestRef,
+      observation,
+    });
   }
 
   private assertNativeProvider(): void {

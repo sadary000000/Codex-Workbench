@@ -1,189 +1,64 @@
-# Workbench 当前交接 Checkpoint
+# Workbench 新对话交接入口
 
-新的会话如果只想最快恢复上下文，按以下顺序阅读：
+本文件是新 ChatGPT / Codex 会话进入 Workbench 项目的固定入口。它只保存恢复协议；实时状态以 Git / PR / CI 和 `CURRENT_CHECKPOINT.md` 指向的 durable checkpoint 为准。
 
-1. `README.md` — Map 的用途和证据规则；
-2. `ROADMAP.md` — 整个项目从起点到未来的完整节点；
-3. `ARCHITECTURE.md` — 当前冻结 ownership / truth boundary；
-4. `GIT_WORKFLOW.md` — branch / CI / merge discipline；
-5. R5/R6/R7 审计文件 — 当前迁移为何推进到 R7；
-6. 本文件 — 精确继续点。
+## 最短恢复顺序
 
-## 1. Repository Checkpoint
+1. 读取 `docs/workbench-map/HANDOFF.md`；
+2. 读取 `docs/workbench-map/CURRENT_CHECKPOINT.md`；
+3. 读取 `CURRENT_CHECKPOINT.md` 指向的 primary durable checkpoint；
+4. 核对 live Git refs、PR、exact product SHA 和最新 CI；
+5. 从 durable checkpoint 的 `Immediate resume sequence` 直接继续。
 
-- Repository：`sadary000000/Codex-Workbench`
-- 正式稳定基线：`codex/workbench-v1`
-- 当前集成分支：`workbench/next`
-- 本轮“全项目 Map + 中文文档”重建前的 `workbench/next` code/docs checkpoint：`abd15c39e07aa736721c977c07de9b98eb6c6360`
-- 当前真实 branch head：**以远端 Git ref 为准**；本文件属于持续更新的 projection，不把自身 SHA 当 Git truth。
+只有需要长期约束时再读取：
 
-## 2. 当前远端分支模型
+- `docs/V0.1-MVP-SCOPE-FREEZE.md`
+- `docs/workbench-map/ARCHITECTURE.md`
+- `docs/workbench-map/GIT_WORKFLOW.md`
 
-清理后只保留：
+不要先从旧 Roadmap 或历史测试结果推断今天的继续点。
 
-```text
-main
-codex/workbench-v1
-workbench/next
-feature/r7-map-entity-references
-```
+## 当前主线提示
 
-说明：
+当前工作流仍是冻结的 **v0.1 Recovery Closure**：
 
-- `main` 是遗留历史线，和当前 Workbench 主历史不是普通祖先/后继关系，暂不自动处理；
-- `codex/workbench-v1` 是稳定基线；
-- `workbench/next` 是当前集成线；
-- `feature/r7-map-entity-references` 是当前唯一短命 feature branch。
+- product branch: `fix/v01-recovery-closure`
+- integration base: `release/v0.1-integration`
+- product PR: Draft PR #55 -> `release/v0.1-integration`
+- exact product snapshot currently under validation: `1e9d2ea15da176d3744c35bd833bfd4a29b56782`
 
-旧 `arch/**`、旧 `docs/workbench-handoff-map`、旧 `fix/**-exact-head-verify` 分支已经清理。
+注意区分：
 
-## 3. PR 状态
+- **branch HEAD**：可能继续包含 docs-only checkpoint / coordination / maintenance commits；
+- **product snapshot**：真正接受某一轮产品验证结论的代码 SHA。
 
-- PR #2：Planner retry/source-integrity，已合入；
-- PR #3–#8：**已关闭、未 merge**；旧 branch 已删除；其 stacked commits 已经由 `workbench/next` 历史继承；
-- PR #9：**Draft / open / 未 merge**，R7 当前实现分支。
+任何新会话都必须重新查询 live Git/PR/CI，不能把本文件中的 SHA 当永久事实。
 
-PR #9：
+旧 CI carrier PR #56 已关闭且未合并，`ci/v01-recovery-closure` 分支已不存在。Exact-SHA CI 使用 `.github/workflows/ci.yml` 的 `workflow_dispatch` + `ref`；不要重建 CI helper branch。
 
-```text
-feature/r7-map-entity-references
-  -> workbench/next
-```
+## 当前验证提示
 
-已验证 feature exact head：
+最近已知的 Recovery 验证仍未通过：同一 exact product SHA `1e9d2ea...` 的 CI run `33649460705` 在 Unit/integration tests 阶段连续两次失败；第二次 rerun job 为 `100525705853`，Build 因此 skipped。
 
-```text
-efd27cc9cc8bd854be011cc87aba67453b4ffcce
-```
+所以当前状态仍是 **IN PROGRESS / NOT RELEASE READY**。不要把旧 Source Real E2E、旧 Windows artifact 或 pre-Recovery PASS 当作当前 Recovery snapshot 的发布证据。
 
-该 tree 的标准 exact-head CI 已通过：typecheck、全量 tests、build PASS。
+## Resume Protocol
 
-> Stage/CI/Map 状态从来不自动授予 merge approval。
+新会话恢复后：
 
-## 4. 已完成架构审计
+1. 先以 Git / PR / CI 修正任何过时文档认知；
+2. 不重新规划整个项目，不扩大已经冻结的 v0.1 scope；
+3. 当前首要任务是拿到/复现 Unit/integration 的 exact failing assertion，再做最小修复；
+4. stale StepRuntime `terminalResult` 目前只是未验证 debugging lead，不得直接当根因；
+5. deterministic CI 全绿后，固定继续顺序：`crash/restart Recovery E2E -> authenticated Source Real E2E -> Windows packaged Real E2E -> final regression`；
+6. 所有门禁通过前，不 merge PR #55、不标 Ready、不宣布 release ready。
 
-### R5 — Native Runtime Dedup
+长期不变量保持不变：Native Thread/Turn/Item 是 Native execution truth；Workbench 不复制第二 transcript/sandbox/runtime；uncertain external side effect 必须 Reconcile before repeat；Evidence 必须来自真实执行/验证事实。
 
-状态：`AUDIT_PASS`。
-
-结论：
-
-- Codex App Server 仍是 Thread/Turn/Item truth；
-- Workbench 没有 durable duplicate Native transcript；
-- 没有第二 agent/subagent/tool/sandbox runtime；
-- Map maintenance 是受限 Workbench 增量能力，执行仍是 Codex Native；
-- 没有证明需要 R5 production refactor。
-
-证据：`R5_NATIVE_RUNTIME_AUDIT.md`。
-
-### R6 — Manual / Automation Decouple
-
-状态：`AUDIT_PASS`。
-
-结论：
-
-- 普通 GUI startup 不初始化 Automation/WebGPT persistence；
-- Manual `native-runtime:*` 直接进入 Native Runtime；
-- Product `ProjectRecord` 属于 V1 persistence；
-- `AutomationProject` 属于独立 `automation.db`；
-- Requirement/Planner 需要真实 AutomationProject；
-- 没有自动 Product Project -> AutomationProject identity collapse。
-
-证据：`R6_MANUAL_AUTOMATION_AUDIT.md`。
-
-## 5. 当前工程阶段：R7 Projection / Map
-
-R7 当前已经证明 Map 的 ownership 基础是正确的：
-
-- `MapStore` 是独立 JSON sidecar，只写 `MapDocument` projection；
-- Map mutation 没有写 Native/Automation/provider/resource truth 的接口；
-- `MapNode.sources` 使用 Native Thread/Turn/Item source trace，不复制 Native item body；
-- Project Map context read 有 project membership 和 request/turn/bytes 边界；
-- maintenance 使用真实 Codex Native Thread/Turn；
-- Map 不是第二 transcript / Agent Runtime。
-
-### PR #9 已实现的 R7 slice
-
-#### R7.1 — Typed Projection Reference
-
-Map node 可以保存 identity-only reference：
+## 新对话启动指令
 
 ```text
-domain / entityType / entityId
+继续 Workbench
 ```
 
-不复制外部 mutable state。
-
-#### R7.2 — Readonly UI Surface
-
-Renderer 只读显示 typed reference identity，不自动读取 Automation/GitHub/provider 状态，不伪造跳转。
-
-#### R7.3 — Producer Safety Boundary
-
-- legacy `add_node` 不再静默丢 typed reference；
-- maintenance prompt 明确禁止从名称、自然语言、URL 或同名 `projectId` 猜跨域 ID；
-- 只有 owner-confirmed stable identity 才能成为 reference。
-
-## 6. 已确认但尚未实现的 Product Association
-
-Product Project ↔ AutomationProject 语义已经冻结为：
-
-```text
-Product Project 1 : N AutomationProject
-```
-
-规则：
-
-1. **显式绑定**；
-2. 不通过名字、同名 `projectId`、上下文、Map 自动猜；
-3. unlink 只删除 association；
-4. **绝不因为 unlink 删除 AutomationProject**；
-5. association 由 **Workbench Product Shell** 拥有；
-6. association 只保存 identity，不复制 Automation lifecycle/status；
-7. Map 只投影 association，不成为 association truth；
-8. association 未实现前，不自动生成 RequirementVersion/PlanVersion 等跨域 Map producer。
-
-这是 `CURRENT_DECISION / WAITING_IMPLEMENTATION`。
-
-## 7. 下一步
-
-R7 不应继续为了“多接几个实体”而让模型猜 ID。
-
-安全继续顺序：
-
-1. review PR #9 最终 R7 typed-reference diff；
-2. 判断 R7 是否已经满足当前 projection foundation exit；
-3. association 如果要实现，先设计 Product-Shell-owned persistence + 显式 UI/command lifecycle，而不是把关系塞进 MapStore；
-4. association 不做时，也可以把 R7 以“foundation completed, producer gated”收口；
-5. 然后进入 **R8 — Migration / Dead Code** 只读审计；
-6. R8 只在 owner 证明后删除 legacy/duplicate path；
-7. R8 后执行 Direct Codex vs Workbench Native A/B。
-
-## 8. Resume Protocol
-
-新会话继续时：
-
-1. 查询 `workbench/next` 远端 exact SHA；
-2. 查询 PR #9 当前 head/state/CI，不能依赖本文档缓存状态；
-3. 先读 `ROADMAP.md`，不要只从 R7 开始而忘掉历史路线；
-4. 任何架构修改先对照 `ARCHITECTURE.md` 冻结不变量；
-5. Production change 前先证明具体 ownership violation 或 bounded product gap；
-6. feature branch 只用于 bounded slice；
-7. 不创建 exact-head validation helper branch；
-8. 新 branch/push 前声明 exact branch/base，并说明不会 merge；
-9. merge 与 branch deletion 分别需要明确授权；
-10. durable checkpoint 改变时同步 `ROADMAP.md` / `HANDOFF.md` / `roadmap.json`。
-
-## 9. 不可破坏的继续约束
-
-- Native Thread/Turn/Item 是 execution truth；
-- 不复制第二 transcript；
-- Manual V1 不依赖 Automation；
-- Product Project != AutomationProject；
-- Product Project ↔ AutomationProject = 1:N explicit association；unlink != delete；
-- RequirementVersion/PlanVersion 是 Workbench governance truth；
-- unknown provider side effect -> reconcile，禁止 blind resend；
-- Evidence/Audit 不拥有 resource lease；
-- Map 是 Projection / Governance increment，不是 duplicate native planning；
-- 不实现第二 sandbox / Native tool executor / subagent runtime；
-- 不让 optional Workbench feature 无必要污染普通 Native Codex context。
+收到该指令后，按本文件 -> `CURRENT_CHECKPOINT.md` -> primary durable checkpoint -> live Git/PR/CI 的顺序恢复，并直接执行 `Immediate resume sequence`。

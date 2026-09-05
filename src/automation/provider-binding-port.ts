@@ -81,7 +81,12 @@ export class PersistedProviderBindingPort implements AutomationProviderPort {
     return this.delegate.reconcile(input);
   }
 
-  async resolveRequestByCorrelation(input: { idempotencyRef: string; correlation: ProviderCorrelation }): Promise<ProviderRequestRef | null> {
+  async resolveRequestByCorrelation(input: {
+    idempotencyRef: string;
+    correlation: ProviderCorrelation;
+    inputRef?: string | null;
+    excludeProviderRequestRefs?: readonly ProviderRequestRef[];
+  }): Promise<ProviderRequestRef | null> {
     await this.assertBinding(input.correlation);
     return this.delegate.resolveRequestByCorrelation
       ? this.delegate.resolveRequestByCorrelation(input)

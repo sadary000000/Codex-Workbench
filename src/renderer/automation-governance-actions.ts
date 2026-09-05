@@ -113,6 +113,10 @@ function installStyles(): void {
     #${ACTION_DIALOG_ID} .automation-governance-local-status { padding: 7px 9px; border: 1px solid #3b3b3b; border-radius: 6px; background: #1b1b1b; }
     #${ACTION_DIALOG_ID} .automation-governance-local-status.is-error { border-color: #74433f; }
     #${ACTION_DIALOG_ID} .automation-governance-local-status.is-ok { border-color: #355b4a; }
+    #${ACTION_DIALOG_ID} .automation-governance-recovery { display: grid; gap: 4px; padding: 8px 9px; border: 1px solid #555; border-radius: 7px; background: #1b1b1b; font-size: 11px; line-height: 1.45; }
+    #${ACTION_DIALOG_ID} .automation-governance-recovery.is-recoverable { border-color: #4d705f; }
+    #${ACTION_DIALOG_ID} .automation-governance-recovery.is-blocked { border-color: #74433f; }
+    #${ACTION_DIALOG_ID} .automation-governance-recovery code { color: #929292; font-size: 10px; }
     #${ACTION_DIALOG_ID} .automation-governance-action-project,
     #${ACTION_DIALOG_ID} .automation-governance-action-target,
     #${ACTION_DIALOG_ID} .automation-governance-action-stage,
@@ -353,12 +357,14 @@ function installAutomationGovernanceActions(): void {
       setStatus(notice.message, notice.kind);
       return;
     }
+    const retrying = step.recovery?.command === "RETRY";
     const workspaceWrite = step.sideEffectClass === "RECONCILABLE";
+    const verb = retrying ? "Retry" : "Execute";
     const confirmation = workspaceWrite
-      ? `Execute Step ${step.stepKey} with workspace-write access limited to the current workspace on exact Native Thread ${selectedTarget}?`
-      : `Execute Step ${step.stepKey} on exact Native Thread ${selectedTarget}?`;
+      ? `${verb} Step ${step.stepKey} with workspace-write access limited to the current workspace on exact Native Thread ${selectedTarget}?${retrying ? " A new Attempt will be created and the failed Attempt will remain in history." : ""}`
+      : `${verb} Step ${step.stepKey} on exact Native Thread ${selectedTarget}?${retrying ? " A new Attempt will be created and the failed Attempt will remain in history." : ""}`;
     if (!requireConfirmation(confirmation)) return;
-    void run("Execute Step", noticeKey, async () => {
+    void run(`${verb} Step`, noticeKey, async () => {
       const preflight = await readRuntimeTarget();
       if (!preflight.ok || !preflight.result) return preflight;
       if (preflight.result.nativeThreadId !== selectedTarget) {
@@ -395,6 +401,16 @@ function installAutomationGovernanceActions(): void {
     if (step.runtime?.waitReason && step.runtime.waitReason !== "NONE") {
       card.append(element("span", "automation-governance-action-missing", `wait: ${step.runtime.waitReason}`));
     }
+    if (step.recovery && step.recovery.status !== "NONE") {
+      const recovery = document.createElement("div");
+      recovery.className = `automation-governance-recovery ${step.recovery.status === "RECOVERABLE" ? "is-recoverable" : "is-blocked"}`;
+      recovery.append(
+        element("strong", "", step.recovery.status === "RECOVERABLE" ? "需要恢复" : "恢复被阻塞"),
+        element("span", "", step.recovery.description),
+      );
+      if (step.recovery.reasonCode) recovery.append(element("code", "", step.recovery.reasonCode));
+      card.append(recovery);
+    }
 
     if (!step.attempt) {
       const actions = document.createElement("div");
@@ -421,6 +437,14 @@ function installAutomationGovernanceActions(): void {
     card.append(element("code", "automation-governance-action-missing", `attempt: ${attemptId}`));
     const actions = document.createElement("div");
     actions.className = "automation-governance-action-buttons";
+
+    if (step.recovery?.command === "RETRY") {
+      const retry = actionButton("Retry / New Attempt", "step-retry");
+      retry.dataset.requiresSelectedTarget = "true";
+      setWorkflowEligibility(retry, step.recovery.actions.retry);
+      retry.addEventListener("click", () => executeFreshStep(view, step, noticeKey));
+      actions.append(retry);
+    }
 
     const reconcile = actionButton("Reconcile", "step-reconcile");
     setWorkflowEligibility(reconcile, step.actions.reconcile);
@@ -505,7 +529,7 @@ function installAutomationGovernanceActions(): void {
     body.append(element(
       "div",
       "automation-governance-command-note",
-      "按钮可用性来自后端 Governance Projection；Renderer 只展示投影并在对应 Project / Stage / Step 卡片内显示操作结果。每个 command 都由后端重新校验 workflow truth。Fresh Execute 仍要求用户显式选择当前 Runtime Truth 中的 exact Native Thread。",
+      "按钮可用性与恢复判定来自后端 Governance Projection；Renderer 只展示投影并在对应 Project / Stage / Step 卡片内显示操作结果。每个 command 都由后端重新校验 workflow truth。Execute/Retry 仍要求用户显式选择当前 Runtime Truth 中的 exact Native Thread。",
     ));
     body.append(renderTarget(view));
 
