@@ -3,7 +3,7 @@
 Status: `TODO`
 Assignee: `worker-904a`
 Priority: `P0`
-Latest report: `none`
+Latest report: `docs/workbench-coordination/reports/REPORT-RC-005.md`
 
 ## Goal
 
