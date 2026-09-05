@@ -1,7 +1,7 @@
 # TODO-RC-004
 
 Status: `TODO`
-Assignee: `待接取`
+Assignee: `worker-v6`
 Priority: `P0`
 Latest report: `none`
 
